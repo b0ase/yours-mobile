@@ -135,20 +135,20 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/BsvWallet.tsx': [
     [
       "import { getPlatform } from '../platform';",
-      "import { getPlatform } from '../platform';\nimport { MintButton } from '../mobile/mint/MintButton';\nimport { SectionBoundary } from '../mobile/wallet/SectionBoundary';",
+      "import { getPlatform } from '../platform';\nimport { MintButton } from '../mobile/mint/MintButton';\nimport { WalletLockButton } from '../mobile/wallet/WalletLockButton';\nimport { SectionBoundary } from '../mobile/wallet/SectionBoundary';",
     ],
     [
       '            Send\n          </motion.button>\n        </motion.div>',
-      '            Send\n          </motion.button>\n<SectionBoundary name="Mint"><MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>',
+      '            Send\n          </motion.button>\n<SectionBoundary name="Mint"><MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n<SectionBoundary name="Lock"><WalletLockButton /></SectionBoundary>\n        </motion.div>',
     ],
-    // Button order: Send · Receive · Mint (flex order; upstream renders Receive first).
+    // Button order, 2×2: Send · Receive, then Mint · Lock (grid order; upstream renders Receive first).
     [
       "onClick={() => setPageState('receive')}\n            className=\"flex flex-1",
       "onClick={() => setPageState('receive')}\n            className=\"order-2 flex flex-1",
     ],
     [
       "onClick={() => setPageState('asset-picker')}\n            className=\"flex flex-1",
-      "onClick={() => setPageState('asset-picker')}\n            className=\"order-1 flex flex-1",
+      "onClick={() => setPageState('asset-picker')}\n            className=\"bw-act-send order-1 flex flex-1",
     ],
     // Credits row under the action buttons: balance, Top up, history (src/mobile/credits).
     [
@@ -450,7 +450,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       'items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer"',
       'items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer bw-pill bw-pill-gold"',
     ],
-    ['className="flex items-center gap-4 mt-6 w-[88%]"', 'className="bw-sendrow flex items-center gap-3 mt-3 w-[90%]"'],
+    ['className="flex items-center gap-4 mt-6 w-[88%]"', 'className="bw-sendrow grid grid-cols-2 gap-3 mt-3 w-[90%]"'],
     // Section label.
     [
       '              Assets\n            </span>\n            <div className="flex-1 ml-3 h-px opacity-20" style={{ backgroundColor: theme.color.global.gray }} />',
@@ -484,8 +484,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { getPlatform } from '../platform';\nimport { WalletIndexing } from '../mobile/tokens/WalletIndexing';",
     ],
     [
-      '<MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>',
-      '<MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
+      '<WalletLockButton /></SectionBoundary>\n        </motion.div>',
+      '<WalletLockButton /></SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
     ],
   ],
   // UnlockWallet's mark is src/mobile/ui/UnlockMark (bare gold b, no tile).

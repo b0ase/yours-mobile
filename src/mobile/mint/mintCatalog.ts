@@ -47,6 +47,7 @@ export type MintIconId =
   | 'coin'
   | 'ticket'
   | 'at'
+  | 'avatar'
   | 'sign'
   | 'chart'
   | 'app'
@@ -523,6 +524,23 @@ export const MINT_CARDS: MintCard[] = [
       ]
     : []),
   {
+    // Owner, 9 Nov 2026: in the Mint menu, not the accounts menu. Opens bavatar/BavatarMintSheet (bmint/BmintPage.tsx).
+    id: 'bavatar',
+    icon: 'avatar',
+    title: 'Your bAvatar',
+    sub: 'Your art and $name',
+    tint: '#241b06',
+    pitch: 'Your account’s art, your $name and your signup number, minted as a 1-sat ordinal you keep in your wallet.',
+    cta: { go: '/m/bmint/mint/bavatar' },
+    ctaLabel: 'Mint my bAvatar',
+    why: [
+      'One of a kind, made from your account',
+      'Numbered in the order people joined',
+      'It’s yours, held in your wallet',
+    ],
+    facts: { who: 'Public, so anyone can see it’s yours.', cost: 'Shown before you pay.', where: 'Your wallet.' },
+  },
+  {
     id: 'name',
     brands: [brand('OpNS')],
     icon: 'at',
@@ -755,7 +773,7 @@ export const MINT_SECTIONS: { id: string; title: string; cards: string[]; brand?
     title: 'Make something new',
     cards: ['picture', 'card', 'art', 'music', 'videos', 'movies', '3d', 'books', 'website'],
   },
-  { id: 'money', title: 'Money & identity', cards: ['currency', 'token', 'tickets', 'name'] },
+  { id: 'money', title: 'Money & identity', cards: ['bavatar', 'currency', 'token', 'tickets', 'name'] },
   // Every card in these two is bWalletX only, so a store build drops the headings too.
   ...(!STORE_BUILD
     ? [

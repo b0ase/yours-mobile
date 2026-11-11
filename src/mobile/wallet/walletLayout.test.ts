@@ -24,6 +24,7 @@ describe('wallet layout', () => {
     const cfg = read('vite.config.mobile.ts');
     for (const tag of [
       '<MintButton',
+      '<WalletLockButton />',
       '<HandleOnboarding />',
       '<WalletKindSwitch />',
       '<MediaSection />',

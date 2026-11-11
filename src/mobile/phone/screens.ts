@@ -1,4 +1,5 @@
 import { MARKET_ENABLED, PEOPLE_LABEL, STORE_BUILD, screensFor } from '../storeBuild';
+import { AGENT_ROUTE } from '../tabs/agentEntry';
 
 /**
  * Phone layout swipe screens (docs/PHONE-LAYOUT-PLAN.md §3, §14). Pure: no React, so it is unit-tested.
@@ -41,13 +42,24 @@ export const SCREENS: readonly Screen[] = [
 
 export const HOME: ScreenId = 'home';
 
-/** Where a cold start / unlock lands in the phone layout (owner, 5.1.84): the Wallet, not Home. */
+/** The Wallet route: where unlock lands without the phone layout, and where a store build always lands. */
+export const WALLET_ROUTE = '/bsv-wallet';
+
+/**
+ * Where the start route (onboarding/Start.tsx) sends an unlocked wallet. Owner, 9 Nov 2026: bWalletX's phone layout
+ * opens on the b. Only the first start after launch: `landed` is set once a start has landed (PhoneShell), so a later
+ * unlock or an account switch shows the Wallet, and any other route (deep link, notification) keeps its target. The
+ * store edition always opens on the Wallet (its listing's front door).
+ */
+export const startRoute = (phone: boolean, landed: boolean, store: boolean = STORE_BUILD): string =>
+  phone && !landed && !store ? AGENT_ROUTE : WALLET_ROUTE;
+
+/** Which strip page an opening onto a strip page settles on in the phone layout: the Wallet (5.1.84). */
 export const LANDING: ScreenId = 'wallet';
 
 /**
- * Unlock opens the Wallet route (onboarding/Start.tsx). The screen a cold start should move on to from the screen it
- * opened on, or null to stay: only that unlock route is redirected, so deep links and notification taps keep their
- * target.
+ * The screen a start should move on to from the strip page it opened on, or null to stay, so deep links and
+ * notification taps keep their target.
  */
 export const coldStartRedirect = (openedOn: ScreenId | null, landing: ScreenId = LANDING): ScreenId | null =>
   openedOn === 'wallet' && landing !== 'wallet' ? landing : null;

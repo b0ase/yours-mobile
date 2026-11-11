@@ -17,7 +17,7 @@ describe('HOME', () => {
     }
   });
 
-  test('dock b: tap = Home, hold = the agent page; top bar is bAvatar menu · Calls · Airdrops · Media · Lock BSV', () => {
+  test('dock b: tap = Home, hold = the agent page; top bar is bAvatar menu · Calls · Airdrops · Media · Apps', () => {
     const dock = readFileSync(join(import.meta.dir, 'Dock.tsx'), 'utf8');
     // Hold-to-talk lives in one shared hook (agent/useHoldToTalk + holdToTalk), used by the Dock and Ask b.
     const hook = readFileSync(join(import.meta.dir, '../agent/useHoldToTalk.ts'), 'utf8');
@@ -36,7 +36,7 @@ describe('HOME', () => {
       'aria-label="Calls"',
       '<AirdropsNavButton',
       'aria-label="Media"',
-      'aria-label="Lock BSV"',
+      'aria-label="Apps"',
     ].map((l) => row.indexOf(l));
     expect(order.every((i) => i > 0)).toBe(true);
     expect([...order].sort((x, y) => x - y)).toEqual(order);

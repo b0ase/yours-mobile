@@ -15,9 +15,9 @@ import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  BadgeCheck,
   Bot,
   ChevronRight,
+  LayoutGrid,
   Lock,
   LogOut,
   Phone,
@@ -32,6 +32,7 @@ import {
 import { agentMenuTarget, showAgentInMenu } from './agentEntry';
 import { phoneLayoutOn, usePhoneLayout } from '../phone/flag';
 import { BappAppButton } from '../phone/BappBar';
+import { appIndexForPath, appScreenRoute } from '../phone/screens';
 import { topBarBappForPath } from '../phone/bappBarModel';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
@@ -60,7 +61,6 @@ import { CALLS_ROUTE } from '../calls/route';
 import { DrawerHandle } from '../names/DrawerHandle';
 import { HandleFlow } from '../names/HandleFlow';
 
-const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MenuAvatarButton } from './MenuAvatarButton';
 import { WIDE_ON, WW_OPEN, type WwOpen } from '../wide/flag';
@@ -113,7 +113,8 @@ const TopNavBar = () => {
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
   const onMedia = pathname.startsWith('/m/media');
-  const onLock = pathname.startsWith('/m/lock');
+  // Any app screen (Home, /m/screen/n, /browser, games): the count only caps the index, so 1 is enough here.
+  const onApps = appIndexForPath(pathname, 1) !== null;
   const [drawer, setDrawer] = useState(false);
   const [handleOpen, setHandleOpen] = useState(false);
   // bPhone Calls opens in the content area (/m/calls, owner 9 Oct 2026, as bMail); tapping the button again leaves.
@@ -121,7 +122,6 @@ const TopNavBar = () => {
   /** In a bApp (phone layout): its icon sits after the bPhone button and opens the app's sections. bPhone stays put. */
   const bapp = phone ? topBarBappForPath(pathname) : null;
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [mintOpen, setMintOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
   // Phone: ☰ "Scan to connect a website" opens the one Scan sheet (pay codes, people, pairing).
   // Extension keeps the paste-first pairing screen (a desktop can't scan its own screen).
@@ -353,14 +353,14 @@ const TopNavBar = () => {
         // Portalled to <body> so a page drag (phone/pager.tsx) never moves the bar.
         createPortal(
           // Phone layout (test switch, owner round 3): one row, evenly spaced, icons only:
-          // Accounts · Calls · Airdrops · Media · Lock. No account strip above it.
+          // Accounts · Calls · Airdrops · Media · Apps. No account strip above it.
           <div
             className="bw-topnav grid items-center justify-items-center fixed top-0 w-full z-10 px-2 h-14 overflow-hidden"
             style={{
               backgroundColor: BAR_BG ?? theme.color.global.walletBackground,
               top: 'var(--wallet-inset-top)',
               // One row always: five slots, six when a bApp's own button is in (bMail…). A fixed 5-column grid
-              // wrapped the sixth (Lock BSV) onto a second row over the page's back button (18 Oct 2026).
+              // wrapped the sixth (then Lock BSV) onto a second row over the page's back button (18 Oct 2026).
               gridTemplateColumns: `repeat(${bapp ? 6 : 5}, minmax(0, 1fr))`,
             }}
           >
@@ -396,30 +396,16 @@ const TopNavBar = () => {
             >
               <Play size={16} color={ACCENT} fill={ACCENT} />
             </button>
-            {/* Owner, 7 Oct 2026: this is Lock BSV (time-locks, /m/lock). Locking the app moved to the Accounts menu. */}
+            {/* Owner, 9 Nov 2026: the apps page here; Lock BSV moved to the wallet's action buttons and bApps. */}
             <button
               type="button"
-              aria-label="Lock BSV"
-              onClick={() => (onLock ? navigate(-1) : navigate('/m/lock'))}
-              aria-pressed={onLock}
-              className="relative w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
+              aria-label="Apps"
+              onClick={() => (onApps ? navigate(-1) : navigate(appScreenRoute(0)))}
+              aria-pressed={onApps}
+              className="bw-topnav-apps w-9 h-9 rounded-full flex items-center justify-center bg-transparent cursor-pointer"
               style={{ border: RING }}
             >
-              {/* Owner, 15 Oct 2026: a clear padlock like its neighbours (the coin badge read as a smudge on light
-                  themes); the coin is now a small corner dot that leaves the shape alone. */}
-              <Lock size={16} color={ACCENT} strokeWidth={2.25} />
-              <span
-                aria-hidden
-                className="absolute rounded-full"
-                style={{
-                  top: 3,
-                  right: 3,
-                  width: 7,
-                  height: 7,
-                  background: ACCENT,
-                  boxShadow: '0 0 0 1.5px var(--bw-pack-bg, #010101)',
-                }}
-              />
+              <LayoutGrid size={16} color={ACCENT} />
             </button>
           </div>,
           document.body,
@@ -550,11 +536,6 @@ const TopNavBar = () => {
               <div className="shrink-0 border-t border-white/5 px-2 pt-2 pb-2">
                 {/* Owner, 9 Oct 2026: Add account, Add agent account, Connect CLI & MCP, then Settings. */}
                 {action(<Plus size={16} color="#fff" />, 'Add account', () => go('restore-account'))}
-                {/* bAvatar mint (owner, 11 Oct 2026): this account's art, $name and signup number as a 1-sat ordinal. */}
-                {action(<BadgeCheck size={16} color="#fff" />, 'Mint my bAvatar', () => {
-                  setDrawer(false);
-                  setMintOpen(true);
-                })}
                 {X_MARK &&
                   action(<Bot size={16} color="#fff" />, 'Add agent account', () => {
                     startAgentCreate();
@@ -726,11 +707,6 @@ const TopNavBar = () => {
               : undefined
           }
         />
-      )}
-      {mintOpen && (
-        <Suspense fallback={null}>
-          <BavatarMintSheet onClose={() => setMintOpen(false)} />
-        </Suspense>
       )}
       {toolsOpen && (
         <AgentToolsSheet

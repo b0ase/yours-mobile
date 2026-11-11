@@ -73,7 +73,7 @@ const HomeScreen = lazy(() => import('../phone/HomeScreen'));
 const PeopleScreen = lazy(() => import('../phone/PeopleScreen'));
 const BrowserPage = lazy(() => import('../BrowserPage'));
 const BappLinkPage = lazy(() => import('../bappFrame/BappLinkPage'));
-// The phone top bar's Lock BSV button (locks/, docs/TIME-LOCK-PLAN.md).
+// Lock BSV: the wallet's Lock button and the bApps tile (locks/, docs/TIME-LOCK-PLAN.md).
 const LockScreen = lazy(() => import('../locks/LockScreen'));
 // Desktop sidebar › Tickets / Credits (wide/WalletKindPages.tsx).
 const TicketsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.TicketsPage })));

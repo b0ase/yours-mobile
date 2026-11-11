@@ -180,7 +180,7 @@ export const HandleOnboarding = () => {
   const tokenCard =
     id && synced && hasName && PAID_FEATURES_ENABLED && !hasRoom ? (
       <div
-        className="flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
+        className="bw-handle-card flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
         style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
         onClick={() => setLaunching(true)}
         role="button"
@@ -232,7 +232,7 @@ export const HandleOnboarding = () => {
   return (
     <>
       <div
-        className="relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
+        className="bw-handle-card relative flex items-center gap-3 w-[92%] mt-4 rounded-2xl px-4 py-3 cursor-pointer"
         style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
         onClick={() => (hasName ? void openNameRoom() : setOpen(true))}
         role="button"

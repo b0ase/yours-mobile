@@ -7,6 +7,7 @@ import {
   screenById,
   screenForPath,
   screenForSelected,
+  startRoute,
   stripFor,
 } from './screens';
 
@@ -24,6 +25,16 @@ describe('phone layout screens', () => {
     expect(coldStartRedirect(null)).toBeNull();
     // The old behaviour, if the landing were Home again.
     expect(coldStartRedirect('wallet', 'home')).toBe('home');
+  });
+
+  test('bWalletX phone layout opens on Ask b, once; the store edition and later starts open on the Wallet', () => {
+    expect(startRoute(true, false, false)).toBe('/m/ask-b');
+    // A later unlock or an account switch.
+    expect(startRoute(true, true, false)).toBe('/bsv-wallet');
+    // The store edition.
+    expect(startRoute(true, false, true)).toBe('/bsv-wallet');
+    // Classic / wide layout.
+    expect(startRoute(false, false, false)).toBe('/bsv-wallet');
   });
 
   test('strip order: Wallet · Exchange · HOME · Apps · Games · People · Feed · Chat', () => {

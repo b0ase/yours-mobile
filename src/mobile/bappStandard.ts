@@ -346,7 +346,7 @@ export const standardReport = (): { name: string; tier: string; missing: Standar
 ];
 
 /** Visible entries for an edition: no privateOnly / adult entries in a store build. Adult tiles stay locked until the
- * 18+ confirmation (BappsStore). */
+ * 18+ confirmation (BrowserPage, AdultGate.tsx). */
 export const visibleApps = (apps: StoreApp[], store: boolean): StoreApp[] =>
   apps.filter((a) => !(store && (a.privateOnly || a.adult)));
 

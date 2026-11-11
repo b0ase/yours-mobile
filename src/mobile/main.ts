@@ -30,6 +30,7 @@ import '@fontsource/space-grotesk/700.css';
 // bDojoX theme headings (bdojox.com's nav/wordmark face); the woff2 only loads when that theme is on.
 import '@fontsource/chakra-petch/latin-700';
 import './mobile.css';
+import './look/chamfer.css';
 import { applyBootAccent } from './theme/accent';
 
 // App accent (Theme → App colours) before the first paint, so a non-gold accent never flashes gold.

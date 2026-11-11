@@ -49,6 +49,7 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 import { getPageEl, hasLanded, prewarmPages, setLanded } from './pageEl';
 import { PageDots } from './PageDots';
 import { backGoesHome, setPhoneBack } from './phoneBack';
+import { AGENT_ROUTE } from '../tabs/agentEntry';
 import {
   appIndexForPath,
   coldStartRedirect,
@@ -164,9 +165,10 @@ const Shell = () => {
     goScreen(0);
   };
 
-  // A cold start lands on the Wallet (LANDING), where unlock already put it.
+  // A cold start has landed once it reaches a strip page, an app screen or Ask b (screens.ts startRoute).
+  const onAskB = pathname.startsWith(AGENT_ROUTE);
   useEffect(() => {
-    if (hasLanded() || (!current && curIdx === null)) return;
+    if (hasLanded() || (!current && curIdx === null && !onAskB)) return;
     setLanded();
     try {
       sessionStorage.removeItem('bwallet:apps-page');
@@ -184,7 +186,7 @@ const Shell = () => {
     }, 2500);
     void t;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id, curIdx]);
+  }, [current?.id, curIdx, onAskB]);
 
   // Android Back: off HOME → HOME.
   useEffect(() => {
@@ -550,7 +552,10 @@ const Shell = () => {
               pending && indexingEnabled() ? walletBadgeLabel(LABELS.wallet ?? 'Wallet', pending) : undefined,
           }}
           onOpen={open}
-          onHome={goHome}
+          // Owner, 9 Nov 2026: the b opens Ask b; the apps are one swipe up from there (look/AppsButton.tsx).
+          onHome={() => {
+            if (!pathname.startsWith('/m/ask-b')) navigate('/m/ask-b');
+          }}
           onAgent={() => navigate('/m/ask-b')}
           onChange={(next) => {
             // An app leaving the dock goes to the first free slot on the app screens (never lost). Page tiles
