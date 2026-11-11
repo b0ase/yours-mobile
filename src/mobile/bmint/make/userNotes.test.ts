@@ -7,6 +7,7 @@ import {
   normHandle,
   NOT_OPEN,
   registerNote,
+  REGISTER_WAITS_MS,
   renderBody,
   renderNote,
   SIGN_IN,
@@ -152,5 +153,31 @@ describe('API client', () => {
     expect(seen.url).toContain('/api/bmint/notes?issuer=me');
     await listNotes({ origin: `${TXID}_0` }, fake(200, { notes: [] }, seen));
     expect(seen.url).toContain(`/api/bmint/notes?origin=${TXID}_0`);
+  });
+});
+
+describe('registerNote retry', () => {
+  const origin = `${'a'.repeat(64)}_0`;
+  const reply = (status: number, body: unknown) =>
+    Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
+  test('retries 503 retry:true until registered', async () => {
+    let n = 0;
+    const f = (() =>
+      ++n < 3 ? reply(503, { error: 'Not on chain yet', retry: true }) : reply(200, { ok: true })) as typeof fetch;
+    expect(await registerNote(origin, 't', f, async () => {})).toEqual({ ok: true, value: true });
+    expect(n).toBe(3);
+  });
+  test('gives up after the waits', async () => {
+    let n = 0;
+    const f = (() => (n++, reply(503, { error: 'Not on chain yet', retry: true }))) as typeof fetch;
+    const r = await registerNote(origin, 't', f, async () => {});
+    expect(r.ok).toBe(false);
+    expect(n).toBe(REGISTER_WAITS_MS.length + 1);
+  });
+  test('does not retry other errors', async () => {
+    let n = 0;
+    const f = (() => (n++, reply(400, { error: 'Bad signature' }))) as typeof fetch;
+    expect((await registerNote(origin, 't', f, async () => {})).ok).toBe(false);
+    expect(n).toBe(1);
   });
 });
