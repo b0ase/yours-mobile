@@ -13,6 +13,17 @@ const OFFICIAL: Record<string, Official> = {
   [norm(PNEE_TOKEN_ID)]: { icon: PNEE_ICON, issuer: 'bWalletX' },
 };
 
+/**
+ * Picture only, for our own tokens whose wallet record or deploy carries no icon. Exact id, as above; this vouches for
+ * nothing (no issuer badge). Every MoneyButton deploy shares the one real logo.
+ */
+const MONEYBUTTON_ART = `${ONESAT_MAINNET_CONTENT_URL}/cd1b6edcbed303d09978c31decee2b8b03d8403329fde00452abaa224ba3a213_0`;
+const KNOWN_ART: Record<string, string> = {
+  [norm('936a9effd2fc85c47ab205cab1ae94a5d1888f8349429ac1e2c769e1e0ba5572_0')]: MONEYBUTTON_ART,
+  [norm('52bc729cd8ee3d42066c259251577b5ad1547edf082afbd1bd6cb79f4eafbfc1_1')]: MONEYBUTTON_ART,
+  [norm('2ccf7aa34cb78a393bb948630d3749b945f832480c04c1a6e8f7fea31cb67b5b_0')]: MONEYBUTTON_ART,
+};
+
 export const officialToken = (tokenId: string | null | undefined): Official | null =>
   tokenId ? (OFFICIAL[norm(tokenId)] ?? null) : null;
 
@@ -42,6 +53,9 @@ export const placeholderTokenIcon = (symbol: string | null | undefined): string 
 export const onchainIconUrl = (icon: string | null | undefined): string =>
   !icon ? '' : isUri(icon) ? icon : `${ONESAT_MAINNET_CONTENT_URL}/${icon}`;
 
-/** The icon to show for a token: official art (exact id only), else its on-chain icon, else the placeholder. */
+/** The icon to show for a token: official art (exact id only), its on-chain icon, our known art, else the placeholder. */
 export const tokenIconUrl = (tokenId: string | null | undefined, symbol: string, icon: string | null | undefined) =>
-  officialToken(tokenId)?.icon || onchainIconUrl(icon) || placeholderTokenIcon(symbol);
+  officialToken(tokenId)?.icon ||
+  onchainIconUrl(icon) ||
+  (tokenId ? KNOWN_ART[norm(tokenId)] : '') ||
+  placeholderTokenIcon(symbol);
