@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { canonPaymail, hasPaid, loadPaid, lookalikeOf, payeeNote, recordPaid, shape } from './payee';
+import { canonPaymail, hasPaid, loadPaid, lookalikeOf, payeeNote, recordPaid, SELF_PAY_NOTE, shape } from './payee';
 
 const mem = () => {
   const m = new Map<string, string>();
@@ -72,5 +72,60 @@ describe('paid store + payeeNote', () => {
   });
   test('plain address with no name: no note', () => {
     expect(payeeNote('acct', '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa', undefined, mem(), [])).toBeUndefined();
+  });
+});
+
+describe('payment to self (P0, 11 Nov 2026: 1¢ to own boase@bwalletx.com)', () => {
+  const OWN = '03' + 'cd'.repeat(32);
+  test('a name that resolves to this wallet\'s own identity key says "This is you", nothing else', () => {
+    const s = mem();
+    const n = payeeNote('acct', 'boase@bwalletx.com', { label: '$boase', pubkey: OWN.toUpperCase() }, s, [], OWN);
+    expect(n?.self).toBe(true);
+    expect(n?.firstTime).toBeUndefined();
+    expect(n?.lookalike).toBeUndefined();
+    expect(SELF_PAY_NOTE).toBe('This is you. Only the network fee will be spent.');
+  });
+  test('someone else, an unresolved name, or no own key: no self note', () => {
+    const s = mem();
+    expect(payeeNote('acct', 'alice@bwalletx.com', { label: '$alice', pubkey: KEY }, s, [], OWN)?.self).toBeUndefined();
+    expect(payeeNote('acct', 'boase@bwalletx.com', { label: '$boase' }, s, [], OWN)?.self).toBeUndefined();
+    expect(payeeNote('acct', 'boase@bwalletx.com', { label: '$boase', pubkey: OWN }, s, [])?.self).toBeUndefined();
+  });
+  test('the confirm sheet shows the note and still offers Send (informational, never blocks)', async () => {
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { createElement } = await import('react');
+    const { SendConfirmation } = await import('../../../components/SendConfirmation');
+    const { theme } = await import('../../../theme');
+    const html = (self: boolean) =>
+      renderToStaticMarkup(
+        createElement(SendConfirmation, {
+          show: true,
+          theme,
+          usdPerBsv: 50,
+          lineItems: [
+            {
+              address: 'boase@bwalletx.com',
+              amount: '0.00061088 BSV',
+              sats: 61_088,
+              payee: payeeNote(
+                'acct',
+                'boase@bwalletx.com',
+                { label: '$boase', pubkey: self ? OWN : KEY },
+                mem(),
+                [],
+                OWN,
+              ),
+            },
+          ],
+          totalSats: 61_088,
+          onConfirm: () => undefined,
+          onCancel: () => undefined,
+        }),
+      );
+    const mine = html(true);
+    expect(mine).toContain(SELF_PAY_NOTE);
+    expect(mine).not.toContain('First payment to');
+    expect(mine).toMatch(/>Send</); // the Send button is there as always
+    expect(html(false)).not.toContain(SELF_PAY_NOTE);
   });
 });

@@ -6,7 +6,7 @@
 import type { LocalInfo, RawTx } from './txHistory';
 import { trailingP2pkh } from './historyEvents';
 import { pubkeyFromScriptSig } from '../airdrops/sender';
-import { actionNetSats, type ActionLike } from '../../utils/actionNet';
+import { actionNetSats, isSelfPay, SELF_PAY_QUERY, type ActionLike } from '../../utils/actionNet';
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 const PACE_MS = 350;
@@ -140,6 +140,7 @@ export const fetchDailyRates = async (fromSec: number, toSec: number, apiKey?: s
 type ListActions = (args: {
   labels: string[];
   includeLabels?: boolean;
+  includeInputs?: boolean;
   includeOutputs?: boolean;
   limit?: number;
   offset?: number;
@@ -148,27 +149,41 @@ type ListActions = (args: {
   actions: ({ txid: string; description?: string; labels?: string[]; status?: string } & ActionLike)[];
 }>;
 
+const PAGE = 1000;
+
 /** Every action the wallet logged (description + labels), by txid. Never throws. */
 export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
   const m = new Map<string, LocalInfo>();
   if (!listActions) return m;
   try {
-    for (let offset = 0; offset < 100_000; offset += 1000) {
-      // Outputs too: a payment to self is netted out of `satoshis` (utils/actionNet.ts; P0, 11 Nov 2026).
-      const r = await listActions({ labels: [], includeLabels: true, includeOutputs: true, limit: 1000, offset });
-      for (const a of r.actions) {
-        const satoshis = actionNetSats(a);
+    for (let offset = 0; offset < 100_000; offset += PAGE) {
+      const r = await listActions({ labels: [], includeLabels: true, limit: PAGE, offset });
+      for (const a of r.actions)
         m.set(a.txid, {
           description: a.description,
           labels: a.labels,
-          ...(typeof satoshis === 'number' ? { satoshis } : {}),
+          ...(typeof a.satoshis === 'number' ? { satoshis: a.satoshis } : {}),
           ...(a.status ? { status: a.status } : {}),
         });
-      }
-      if (r.actions.length < 1000 || offset + 1000 >= r.totalActions) break;
+      if (r.actions.length < PAGE || offset + PAGE >= r.totalActions) break;
     }
   } catch {
     /* labels are a nice-to-have */
+  }
+  // Payments to self (utils/actionNet.ts; P0, 11 Nov 2026): only the 'paymail'-labelled actions, with their inputs and
+  // outputs, in a second query of their own. The full list above stays without outputs.
+  try {
+    for (let offset = 0; offset < 100_000; offset += PAGE) {
+      const r = await listActions({ ...SELF_PAY_QUERY, limit: PAGE, offset });
+      for (const a of r.actions) {
+        const had = m.get(a.txid);
+        const satoshis = actionNetSats(a);
+        if (had && isSelfPay(a) && typeof satoshis === 'number') m.set(a.txid, { ...had, satoshis });
+      }
+      if (r.actions.length < PAGE || offset + PAGE >= r.totalActions) break;
+    }
+  } catch {
+    /* the reported figures stand */
   }
   return m;
 };

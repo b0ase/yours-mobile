@@ -21,7 +21,7 @@ import { Monitor, StorageIdb, StorageProvider, Wallet, WalletStorageManager } fr
 import { internalizeBeef, sendBsv as upstreamSendBsv } from '@1sat/actions';
 import { DEPOSIT_BASKET } from '@1sat/types';
 import { balanceSplit } from '../services/depositBalance';
-import { actionNetSats } from '../utils/actionNet';
+import { actionNetSats, isSelfPay, SELF_PAY_QUERY } from '../utils/actionNet';
 import { fetchBsvHistory } from '../utils/coinHistory';
 import { fetchLocalInfo } from '../mobile/wallet/txHistoryFetch';
 import { classify, type RawTx } from '../mobile/wallet/txHistory';
@@ -209,10 +209,16 @@ describe('1¢ to own paymail, then the inbox collect (owner, iPhone, 11 Nov 2026
   });
 
   test('the toolbox leaves the action at −(1¢ + fee): the History bug', async () => {
-    const { actions } = await w.wallet.listActions({ labels: [], includeOutputs: true, limit: 10 });
+    const { actions } = await w.wallet.listActions({ ...SELF_PAY_QUERY, limit: 10 });
     const a = actions.find((x) => x.txid === sent.txid)!;
     expect(a.satoshis).toBe(-(PENNY + sent.fee)); // what History used to show
+    expect(isSelfPay(a)).toBe(true); // the inbox's 'paymail' label + this wallet's own coins as inputs
+    expect(a.inputs?.reduce((s, i) => s + i.sourceSatoshis, 0)).toBe(FUND);
     expect(actionNetSats(a)).toBe(-sent.fee); // what the balance did
+    // The funding payment (paymail from outside: no inputs of ours) is not a payment to self.
+    const funding = actions.find((x) => x.txid !== sent.txid)!;
+    expect(isSelfPay(funding)).toBe(false);
+    expect(actionNetSats(funding)).toBe(FUND);
   });
 
   test('History (mobile): the self-send nets −fee, and its row is "self", 0 sent, the fee paid', async () => {
@@ -274,8 +280,15 @@ describe('1¢ to own receive (deposit) address, then the address sync', () => {
       const dep = (await ww.wallet.listOutputs({ basket: DEPOSIT_BASKET, limit: 10 })).outputs;
       expect(dep.map((o) => o.satoshis)).toEqual([PENNY]);
       expect(await balance(ww)).toBe(start - s.fee);
-      // A deposit-basket output of an outgoing action is left as reported (only 'default' is netted).
-      const { actions } = await ww.wallet.listActions({ labels: [], includeOutputs: true, limit: 10 });
+      // Not taken in by the paymail inbox: History reports it as listActions does (−1¢ − fee here, and the deposit
+      // sweep that follows shows the 1¢ coming back).
+      const { actions } = await ww.wallet.listActions({
+        labels: [],
+        includeLabels: true,
+        includeInputs: true,
+        includeOutputs: true,
+        limit: 10,
+      });
       const a = actions.find((x) => x.txid === s.txid)!;
       expect(actionNetSats(a)).toBe(a.satoshis);
     },
