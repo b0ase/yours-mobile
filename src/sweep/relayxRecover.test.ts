@@ -14,7 +14,7 @@ import {
   type Found,
 } from './relayxRecover';
 import type { NpgMap } from './runIdentify';
-import { P2PKH, Transaction } from '@bsv/sdk';
+import { P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
 import { LISTING_HEX, MINT_TXID } from './relayxListing.fixtures';
 
 const WORDS = Mnemonic.fromRandom().toString();
@@ -68,6 +68,8 @@ describe('scan', () => {
     const acct = relayxAccount(WORDS);
     const nft = keyAt(acct, 2, 0);
     const pay = keyAt(acct, 0, 0);
+    // The address taken from the HD node's public key is the private key's own address.
+    expect(PrivateKey.fromWif(nft.wif).toAddress()).toBe(nft.address);
     const mint = 'c'.repeat(64);
     const maps: NpgMap[] = [
       {

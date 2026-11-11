@@ -1,5 +1,5 @@
 import { HD, Utils } from '@bsv/sdk';
-import { GAP, addressAt, type HdAddress } from './hd';
+import { GAP, addressOnChain, type HdAddress } from './hd';
 
 /**
  * Money Button (moneybutton.com, Yours Inc, 2018 to 2022): the import side of "Sweep from another wallet".
@@ -169,11 +169,12 @@ export function findOwnedSfp(
   const where = new Map<string, { a: number; chain: 0 | 1; i: number }>();
   const end = accounts.map((acc) => [lastOn(acc.used, acc.path, 0) + GAP, lastOn(acc.used, acc.path, 1) + GAP]);
   const done = accounts.map(() => [-1, -1]);
+  const chains = accounts.map((acc) => [acc.key.deriveChild(0), acc.key.deriveChild(1)]);
   for (;;) {
     accounts.forEach((acc, a) =>
       ([0, 1] as const).forEach((chain) => {
         for (let i = done[a][chain] + 1; i <= end[a][chain]; i++)
-          where.set(addressHash(addressAt(acc.key, acc.path, chain, i).address), { a, chain, i });
+          where.set(addressHash(addressOnChain(chains[a][chain], acc.path, chain, i).address), { a, chain, i });
         done[a][chain] = end[a][chain];
       }),
     );

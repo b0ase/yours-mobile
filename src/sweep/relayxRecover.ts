@@ -58,10 +58,17 @@ const accountOf = (src: RelayxSource): HD => (typeof src === 'string' ? relayxAc
 
 /** The key at chain/i. From an xpub there is no private key: `wif` is '' and melting needs the words or password. */
 export function keyAt(account: HD, chain: number, i: number): RelayxKey {
-  const node = account.deriveChild(chain).deriveChild(i);
+  return keyIn(account.deriveChild(chain), chain, i);
+}
+
+/**
+ * The key at i on an already-derived chain node. The address comes from the node's public key, which HD has
+ * already computed: privKey.toAddress() would redo the EC multiplication (~60 ms each in pure JS), same address.
+ */
+function keyIn(chainNode: HD, chain: number, i: number): RelayxKey {
+  const node = chainNode.deriveChild(i);
   const path = `${RELAYX_ACCOUNT}/${chain}/${i}`;
-  if (!node.privKey) return { path, address: node.pubKey.toAddress(), wif: '' };
-  return { path, address: node.privKey.toAddress(), wif: node.privKey.toWif() };
+  return { path, address: node.pubKey.toAddress(), wif: node.privKey ? node.privKey.toWif() : '' };
 }
 
 /**
@@ -83,8 +90,9 @@ export type ScanResult = { nfts: Found[]; otherSats: number; otherOutputs: numbe
 async function walkChain(account: HD, chain: number, reader: ChainReader, onChecked: () => void) {
   const hits: RelayxKey[] = [];
   let misses = 0;
+  const chainNode = account.deriveChild(chain);
   for (let i = 0; i < MAX_PER_CHAIN && misses < GAP; i += GAP) {
-    const window = Array.from({ length: GAP }, (_, k) => keyAt(account, chain, i + k));
+    const window = Array.from({ length: GAP }, (_, k) => keyIn(chainNode, chain, i + k));
     const held = await reader.holding(window.map((w) => w.address));
     for (const w of window) {
       onChecked();
