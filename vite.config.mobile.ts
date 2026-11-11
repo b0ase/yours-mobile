@@ -261,7 +261,9 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "      markHandlePrompt(keys.identityAddress, 'create');",
       "      markHandlePrompt(keys.identityAddress, 'create');\n      if (newWallet) if (!password.startsWith('pk1.')) void saveWalletPassword(accountName, password);",
     ],
-    // "Link your X (Twitter)" is back beside Account name / Add a photo (owner, 24 Oct 2026, reversing the 18 Oct
+    // Owner, 30 Oct 2026: the Link buttons left this screen for the welcome screen (SignupLinkPanel); only the card
+    // for an account linked there shows here (buttons={false}), still filling the name + photo.
+    // Was: "Link your X (Twitter)" is back beside Account name / Add a photo (owner, 24 Oct 2026, reversing the 18 Oct
     // password-only screen). Optional, never a sign-in: fills the editable name + photo, and "Claim your name"
     // then offers $handle if handle@bwalletx.com is free (social/xHandle.ts). Off in store builds (socialLoginEnabled).
     // Owner, 26 Oct 2026: Google is back beside X ("Link X" / "Link Google", SocialSignIn `create`); Google fills the
@@ -272,7 +274,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        <AccountNameField\n          theme={theme}',
-      "        <SocialSignIn create onProfile={(p) => { if (p.name) setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? '' : v))} onRestore={newWallet ? () => navigate('/restore-wallet') : undefined} />\n        <AccountNameField\n          theme={theme}",
+      "        <SocialSignIn create buttons={false} onProfile={(p) => { if (p.name) setAccountName(p.name); if (p.avatar) setIconURL(p.avatar); }} onClear={(a) => setIconURL((v) => (a && v === a ? '' : v))} onRestore={newWallet ? () => navigate('/restore-wallet') : undefined} />\n        <AccountNameField\n          theme={theme}",
     ],
     // Recovery phrase "Next": don't wait on the background wallet switch (a new wallet's first
     // storage connection can hang), so the button never silently does nothing.
