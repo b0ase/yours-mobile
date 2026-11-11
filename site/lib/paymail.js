@@ -772,15 +772,48 @@ function makeHandlers({
   };
   // A name held for an X account (lib/xHolds.js), or null. A store without holds (or before the migration) has none.
   // Any other read error throws: register / names-add then fail closed rather than hand out a held name.
+  // A hold never expires while its name has a row (security review, 11 Nov 2026), and a claimed-mark that was lost
+  // is put back when the row's key proves the hold's X account.
+  const holdLive = async (h) => {
+    if (!h || h.released_at) return false;
+    const row = h.claimed_at ? null : await store.getAlias(h.alias);
+    if (row) await backfillClaimed(h, row);
+    return xHolds.holdActive(h, now(), { registered: !!row });
+  };
   const liveXHold = async (alias) => {
     if (!store.getXHold || !ALIAS_RE.test(alias)) return null;
     const h = await store.getXHold(alias);
-    return xHolds.holdActive(h, now()) ? h : null;
+    return (await holdLive(h)) ? h : null;
   };
-  const markHeldClaimed = (hold, alias, key) =>
-    hold && store.markXHoldClaimed
-      ? store.markXHoldClaimed(alias, key, new Date(now()).toISOString()).catch(() => {})
-      : null;
+  // The hold that governs `alias`: its own, or (security review: look-alikes) a live hold it reads as
+  // (lib/xHolds.js nearHold). { hold, near } or null. Read errors throw: callers fail closed.
+  const governingHold = async (alias) => {
+    const exact = await liveXHold(alias);
+    if (exact) return { hold: exact, near: false };
+    if (!store.listXHolds || !ALIAS_RE.test(alias)) return null;
+    for (const h of await store.listXHolds())
+      if (h.alias !== alias && xHolds.nearHold(alias, h.alias) && (await holdLive(h))) return { hold: h, near: true };
+    return null;
+  };
+  const holdRefusal = (gate) => (gate.near ? xHolds.nearMessage(gate.hold) : xHolds.holdMessage(gate.hold));
+  // Record the first claim under a hold. A failure is logged and retried; holdLive also keeps the hold alive while the
+  // name has a row and re-marks it from there, so a lost mark can never let the hold lapse under its holder.
+  const markHeldClaimed = async (hold, alias, key) => {
+    if (!hold || !store.markXHoldClaimed) return;
+    for (let i = 0; i < 3; i++) {
+      try {
+        await store.markXHoldClaimed(alias, key, new Date(now()).toISOString());
+        hold.claimed_at = hold.claimed_at || new Date(now()).toISOString();
+        return;
+      } catch (e) {
+        console.error('x-hold claimed-mark failed', alias, i + 1, String(e && e.message ? e.message : e).slice(0, 120));
+      }
+    }
+  };
+  const backfillClaimed = async (h, row) => {
+    if (h.claimed_at || !row || !(await xHolds.keyHoldsIt(h, row.identity_key, store))) return;
+    await markHeldClaimed(h, h.alias, String(row.identity_key).toLowerCase());
+  };
   const publicAlias = async (handle) => {
     const p = parseHandleParts(handle, env);
     if (!p || TOMB_RE.test(p.alias)) return [404, { error: 'not-found' }];
@@ -1571,18 +1604,20 @@ function makeHandlers({
       if (fwd && fwd.identity_key !== identityKey) return [409, { error: 'That name is taken' }];
       // A name held for an X account (owner, 11 Nov 2026; lib/xHolds.js): only a wallet that proves that X account
       // (by its numeric id: a verified X link on this key, or a fresh X sign-in ticket) takes it, free.
-      const xHold = ownsIt ? null : await liveXHold(alias);
-      if (xHold) {
+      // A name that reads as a held one (kurtt, kurtjr…) needs the same proof, at the normal price.
+      const gate = ownsIt ? null : await governingHold(alias);
+      if (gate) {
         const proved = await xHolds.proveHold({
-          hold: xHold,
+          hold: gate.hold,
           identityKey,
           social: body.social,
           store,
           env,
           now: now(),
         });
-        if (!proved.ok) return [403, { error: proved.error, reason: 'x-hold' }];
+        if (!proved.ok) return [403, { error: holdRefusal(gate), reason: 'x-hold' }];
       }
+      const xHold = gate && !gate.near ? gate.hold : null;
       // Verified social names sit beside the plain name (one of each kind per wallet): b0asex.x is
       // added, boase stays. A plain name still renames, keeping the inbox.
       const kind = SOCIAL_RE.test(alias) ? suffixOf(alias) : 'plain';
@@ -1787,17 +1822,14 @@ function makeHandlers({
       if (taken) return out('taken', null, { available: false, reason: 'taken' });
       // Held for an X account (lib/xHolds.js): free to the wallet whose key has that X account linked, reserved to
       // everyone else. (A fresh X ticket can't ride on a GET; register still accepts one.)
-      const xHold = await liveXHold(alias);
-      if (xHold) {
-        const xHandle = xHolds.publicHold(alias, xHold, now()).xHandle;
-        if (!(PUBKEY_RE.test(key) && (await xHolds.keyHoldsIt(xHold, key, store))))
-          return out('held-x', null, {
-            available: false,
-            reason: 'reserved',
-            message: xHolds.holdMessage(xHold),
-            xHandle,
-          });
-        return out('free', 0, { available: true, reason: null, message: xHolds.holderMessage(xHold), xHandle });
+      const gate = await governingHold(alias);
+      if (gate) {
+        const xHandle = xHolds.publicHold(gate.hold.alias, gate.hold, now()).xHandle;
+        if (!(PUBKEY_RE.test(key) && (await xHolds.keyHoldsIt(gate.hold, key, store))))
+          return out('held-x', null, { available: false, reason: 'reserved', message: holdRefusal(gate), xHandle });
+        // The holder: the held name itself is free; a near variant costs what any name of its length costs.
+        if (!gate.near)
+          return out('free', 0, { available: true, reason: null, message: xHolds.holderMessage(gate.hold), xHandle });
       }
       // A live forward (rename / removed extra name) is taken to everyone but the key it belongs to. That key sees
       // it as its own forward and may claim it back as a name (names-add / register drop the forward).
@@ -1836,9 +1868,12 @@ function makeHandlers({
         .toLowerCase();
       if (!ALIAS_RE.test(alias)) return [400, { error: 'invalid alias' }];
       const hold = store.getXHold ? await store.getXHold(alias) : null;
+      const row = hold && !hold.released_at && !hold.claimed_at ? await store.getAlias(alias) : null;
+      // A registered name whose claimed-mark was lost: re-marked here when its key proves the hold.
+      if (row) await backfillClaimed(hold, row);
       const out = xHolds.publicHold(alias, hold, now());
-      // Held but already registered (by the holder, or before the hold): say claimed only if the holder took it.
-      if (out.status === 'held' && (await store.getAlias(alias))) return [200, { ...out, status: 'taken' }];
+      // Registered, but not (provably) by the holder: say taken, never "claimed".
+      if (row && !hold.claimed_at && out.status !== 'none') return [200, { ...out, status: 'taken', expiresAt: null }];
       return [200, out];
     },
     // Admin only (x-admin-secret = PAYMAIL_ADMIN_SECRET): hold a FREE plain name for an X account by its numeric id.
@@ -2032,18 +2067,19 @@ function makeHandlers({
       const fwd = await liveForward(alias);
       if (fwd && fwd.identity_key !== key) return [409, { error: 'That name is taken' }];
       // A name held for an X account (lib/xHolds.js): the same proof as register.
-      const xHold = await liveXHold(alias);
-      if (xHold) {
+      const gate = await governingHold(alias);
+      if (gate) {
         const proved = await xHolds.proveHold({
-          hold: xHold,
+          hold: gate.hold,
           identityKey: key,
           social: body.social,
           store,
           env,
           now: now(),
         });
-        if (!proved.ok) return [403, { error: proved.error, reason: 'x-hold' }];
+        if (!proved.ok) return [403, { error: holdRefusal(gate), reason: 'x-hold' }];
       }
+      const xHold = gate && !gate.near ? gate.hold : null;
       const ipHash = hashIp(ctx.ip, env);
       if (ipHash && store.countIpClaims) {
         const max = Number(env.PAYMAIL_NAMES_PER_IP_DAY) || NAME_IP_DAILY;

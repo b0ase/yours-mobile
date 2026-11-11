@@ -30,6 +30,8 @@ function supabaseStore(env = process.env, f = fetch) {
   const aliasTaken = (e) =>
     e && e.status === 409 && /bwallet_paymail_aliases_pkey|Key \(alias\)/i.test(String(e.body || ''));
   const one = async (path) => (await req(path))?.[0] ?? null;
+  // PostgREST's answer for a table it doesn't have (the x-holds migration not run yet), by its error code only.
+  const holdsTableMissing = (e) => !!e && /"code"\s*:\s*"(PGRST205|42P01)"/.test(String(e.body || ''));
   return {
     getAlias: (alias) => one(`bwallet_paymail_aliases?alias=eq.${q(alias)}&limit=1`),
     // A wallet's plain name first; a verified social name (kind x / gmail) only if it has no plain one.
@@ -210,11 +212,22 @@ function supabaseStore(env = process.env, f = fetch) {
       )) ?? [],
     // Names held for an X account (migrations/20261111_paymail_x_holds.sql). Before the migration runs the table is
     // missing: reads answer null (no hold), so names follow the normal rules; the admin write fails loudly.
+    // Only PostgREST's "no such table" (PGRST205 / 42P01) means "no holds yet"; any other failure, a bare 404
+    // included, throws so register / names-add fail closed (security review, 11 Nov 2026).
     getXHold: async (alias) => {
       try {
         return await one(`bwallet_paymail_x_holds?alias=eq.${q(alias)}&limit=1`);
       } catch (e) {
-        if (e && (e.status === 404 || /PGRST205|42P01/.test(String(e.body || '')))) return null;
+        if (holdsTableMissing(e)) return null;
+        throw e;
+      }
+    },
+    // Every hold not released (the near-variant check reads them all; the table is a handful of rows).
+    listXHolds: async () => {
+      try {
+        return (await req('bwallet_paymail_x_holds?released_at=is.null&select=*&limit=1000')) ?? [];
+      } catch (e) {
+        if (holdsTableMissing(e)) return [];
         throw e;
       }
     },

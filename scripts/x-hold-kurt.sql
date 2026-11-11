@@ -1,6 +1,10 @@
 -- NOT RUN. Hold kurt@bwalletx.com for Kurt Wuckert Jr's X account (owner, 11 Nov 2026). Run AFTER
 -- migrations/20261111_paymail_x_holds.sql and after the paymail server with site/lib/xHolds.js is deployed.
 --
+-- ⚠ ORDER MATTERS. Deploy, run the migration, run THIS, and check the x-hold read below says "held" BEFORE the claim
+-- link (bchatx.com/claim/name/kurt) or its share card goes to anyone. Until the hold exists, `kurt` is an ordinary
+-- 4-letter name: anyone who pays the $10 short-name fee can register it, and the hold never takes a name back.
+--
 -- X numeric user id 304746564 = @kurtwuckertjr (also the x_user_id on bChatX's syndicated_x_accounts row and in his
 -- X banner URL). The @name below is for the claim page's words only; the id decides.
 --

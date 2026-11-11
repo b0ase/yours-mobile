@@ -5,13 +5,22 @@
 //   - link:   the wallet's identity key has a verified X link (Link your accounts, lib/socialLinks.js): the row's
 //             `account` is sha256('x:' + X user id), written only after an X sign-in ticket opened AND the
 //             identity key signed the link; or
-//   - ticket: the register request carries a fresh Continue with X ticket + secret (lib/social.js) for that id.
+//   - ticket: the register request carries a fresh Continue with X ticket + secret (lib/social.js) for that id,
+//             started with proof_key = THIS wallet's identity key (security review, 11 Nov 2026: a ticket is a bearer
+//             proof for 10 minutes; bound to one key, a copied ticket can't claim the name for any other wallet).
+//             A ticket without proof_key never proves a hold.
+//
+// Near variants (security review, 11 Nov 2026): while a hold of 4+ characters is live, names that read as it are
+// held too (nearHold): the same name after brandGuard's look-alike fold (ku-rt, ku_rt, 0→o, 1→l/i, rn→m…),
+// the name with up to 3 characters added before or after it (kurtt, kurtjr, kurtw, kurt0, thekurt, kurt99), or with
+// one letter doubled (kuurt, kurrt). The holder may take them; everyone else is refused with a plain message.
 // ⚠ NEVER the @name. X @names change hands; the numeric id does not. x_handle is kept for words on a page only.
 //
 // Pure rules + one async proof check over an injected store, so it is unit-testable (test/xHolds.test.js).
 'use strict';
 const crypto = require('crypto');
 const social = require('./social');
+const { lookalikes } = require('./brandGuard');
 
 const X_ID_RE = /^[0-9]{1,25}$/;
 const X_HANDLE_RE = /^[a-z0-9_]{1,15}$/;
@@ -23,18 +32,49 @@ const MAX_HOLD_DAYS = 365;
 /** The `account` a verified X link stores for this X user id (same as lib/socialLinks.js). */
 const xAccountHash = (xUserId) => crypto.createHash('sha256').update(`x:${xUserId}`, 'utf8').digest('hex');
 
-/** Live: not released, and either claimed (the name is then registered anyway) or not past its expiry. */
-function holdActive(hold, nowMs = Date.now()) {
+/**
+ * Live: not released, and claimed, or its alias is registered right now (`registered`: a hold never expires while
+ * its name has a row, so a lost claimed-mark can't let it lapse under its holder), or not past its expiry.
+ */
+function holdActive(hold, nowMs = Date.now(), { registered = false } = {}) {
   if (!hold || !X_ID_RE.test(String(hold.x_user_id || ''))) return false;
   if (hold.released_at) return false;
-  if (hold.claimed_at) return true;
+  if (hold.claimed_at || registered) return true;
   return !hold.expires_at || Date.parse(hold.expires_at) > nowMs;
+}
+
+/** Held names shorter than this protect only themselves (3-letter affixes on `joe` would take joey, joel, joes…). */
+const NEAR_MIN_LEN = 4;
+const AFFIX_MAX = 3;
+/** One run of a letter doubled: kuurt / kurrt → kurt. */
+const undoubleOnce = (s) => {
+  const out = new Set();
+  for (let i = 1; i < s.length; i++) if (s[i] === s[i - 1]) out.add(s.slice(0, i) + s.slice(i + 1));
+  return out;
+};
+/** Does `alias` read as the held name `held` (and is not it)? See "Near variants" above. */
+function nearHold(alias, held) {
+  const a = String(alias || '').toLowerCase();
+  const h = String(held || '').toLowerCase();
+  if (!a || !h || a === h || h.length < NEAR_MIN_LEN) return false;
+  const hf = lookalikes(h);
+  for (const f of lookalikes(a)) {
+    for (const x of hf) {
+      if (f === x) return true;
+      if (f.length > x.length && f.length - x.length <= AFFIX_MAX && (f.startsWith(x) || f.endsWith(x))) return true;
+      if (f.length === x.length + 1 && undoubleOnce(f).has(x)) return true;
+    }
+  }
+  return false;
 }
 
 const at = (h) => (X_HANDLE_RE.test(String(h || '')) ? `@${h}` : 'someone on X');
 /** The plain refusal everybody else gets. */
 const holdMessage = (hold) =>
   `This name is held for ${at(hold && hold.x_handle)}. Only that X account can claim it: sign in with X in bWalletX (Settings › Link your accounts) first.`;
+/** The refusal for a name that reads as a held one. */
+const nearMessage = (hold) =>
+  `This name is too close to a name held for ${at(hold && hold.x_handle)}, so only that X account can claim it. Please choose another.`;
 /** What the holder sees before claiming. */
 const holderMessage = (hold) => `Held for you (${at(hold && hold.x_handle)} on X). Free to claim.`;
 
@@ -48,7 +88,9 @@ async function proveHold({ hold, identityKey, social: proof, store, env = proces
   if (!X_ID_RE.test(want) || !PUBKEY_RE.test(key)) return { ok: false, error: holdMessage(hold) };
   if (proof && proof.ticket && proof.secret) {
     const p = social.openTicket(proof.ticket, proof.secret, env, now);
-    if (p && p.provider === 'x' && String(p.id || '') === want) return { ok: true, via: 'ticket' };
+    // Bound to this wallet's key (proof_key sealed into the ticket at sign-in start), never a bare bearer ticket.
+    if (p && p.provider === 'x' && String(p.id || '') === want && String(p.proof_key || '').toLowerCase() === key)
+      return { ok: true, via: 'ticket' };
   }
   if (store && store.listSocialLinks) {
     const links = await store.listSocialLinks(key).catch(() => []);
@@ -123,6 +165,8 @@ module.exports = {
   holdActive,
   holdMessage,
   holderMessage,
+  nearMessage,
+  nearHold,
   proveHold,
   keyHoldsIt,
   holdRow,

@@ -7,6 +7,7 @@ import pm from '../lib/paymail.js';
 import nameFee from '../lib/nameFee.js';
 import social from '../lib/social.js';
 import xHolds from '../lib/xHolds.js';
+import { supabaseStore } from '../lib/paymailStore.js';
 import { aliasWrites } from './fixtures/aliasWrites.js';
 
 // Test-only values (not real credentials).
@@ -47,6 +48,7 @@ const store = () => {
     ...aliasWrites(aliases, { forwards }),
     listSocialLinks: async (k) => links.filter((l) => l.identity_key === k),
     getXHold: async (a) => holds.get(a) ?? null,
+    listXHolds: async () => [...holds.values()].filter((r) => !r.released_at),
     insertXHold: async (r) => {
       if (holds.has(r.alias)) {
         const e = new Error('supabase 409');
@@ -95,8 +97,9 @@ const user = () => {
 const linkX = (s, u, xId, handle = 'someone') =>
   s.links.push({ provider: 'x', account: sha(`x:${xId}`), handle, identity_key: u.identityKey });
 /** A Continue with X ticket + the secret that opens it. */
-const xTicket = (id, name = 'kurtwuckertjr', secret = 'device-secret-1', e = Date.now() + 60_000) => ({
-  ticket: social.seal({ p: 'x', id, name, vh: social.sha256Hex(secret), e }, ENV),
+/** A Continue with X ticket + its secret; `pk` = the wallet key it was started for (proof_key), if any. */
+const xTicket = (id, name = 'kurtwuckertjr', secret = 'device-secret-1', e = Date.now() + 60_000, pk = undefined) => ({
+  ticket: social.seal({ p: 'x', id, name, vh: social.sha256Hex(secret), e, ...(pk ? { pk } : {}) }, ENV),
   secret,
 });
 
@@ -174,7 +177,7 @@ describe('register under a hold', () => {
     linkX(s, imposter, '999999', 'kurtwuckertjr');
     const body = {
       ...(await imposter.sign('register', { alias: 'kurt' })),
-      social: xTicket('999999', 'kurtwuckertjr'),
+      social: xTicket('999999', 'kurtwuckertjr', undefined, undefined, imposter.identityKey),
     };
     expect((await h.register({}, body))[0]).toBe(403);
     expect(s.aliases.has('kurt')).toBe(false);
@@ -188,7 +191,7 @@ describe('register under a hold', () => {
     const other = user();
     linkX(s, kurt, KURT_ID);
     expect((await h.register({}, await other.sign('register', { alias: 'kurt' })))[0]).toBe(403);
-    const t = xTicket(KURT_ID);
+    const t = xTicket(KURT_ID, undefined, undefined, undefined, other.identityKey);
     const wrongSecret = {
       ...(await other.sign('register', { alias: 'kurt' })),
       social: { ticket: t.ticket, secret: 'guess' },
@@ -196,7 +199,7 @@ describe('register under a hold', () => {
     expect((await h.register({}, wrongSecret))[0]).toBe(403);
     const expired = {
       ...(await other.sign('register', { alias: 'kurt' })),
-      social: xTicket(KURT_ID, 'k', 's', Date.now() - 1),
+      social: xTicket(KURT_ID, 'k', 's', Date.now() - 1, other.identityKey),
     };
     expect((await h.register({}, expired))[0]).toBe(403);
     expect(s.aliases.has('kurt')).toBe(false);
@@ -223,9 +226,37 @@ describe('register under a hold', () => {
     const h = pm.makeHandlers({ store: s, env: ENV });
     await holdKurt(h);
     const kurt = user();
-    const body = { ...(await kurt.sign('register', { alias: 'kurt' })), social: xTicket(KURT_ID, 'whatever-name-now') };
+    const body = {
+      ...(await kurt.sign('register', { alias: 'kurt' })),
+      social: xTicket(KURT_ID, 'whatever-name-now', undefined, undefined, kurt.identityKey),
+    };
     expect((await h.register({}, body))[0]).toBe(200);
     expect(s.aliases.get('kurt').identity_key).toBe(kurt.identityKey);
+  });
+
+  test("a ticket is bound to one wallet: a copied ticket, or one with no proof_key, can't claim the name", async () => {
+    const s = store();
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await holdKurt(h);
+    const kurt = user();
+    const thief = user();
+    // Kurt's real ticket (for Kurt's key), copied with its secret by somebody else.
+    const kurts = xTicket(KURT_ID, 'kurtwuckertjr', 'device-secret-1', undefined, kurt.identityKey);
+    expect((await h.register({}, { ...(await thief.sign('register', { alias: 'kurt' })), social: kurts }))[0]).toBe(
+      403,
+    );
+    // A ticket with no key in it (an older client) proves nothing for a held name, even for the right wallet.
+    const bare = xTicket(KURT_ID);
+    expect((await h.register({}, { ...(await kurt.sign('register', { alias: 'kurt' })), social: bare }))[0]).toBe(403);
+    expect(s.aliases.has('kurt')).toBe(false);
+    // The X sign-in carries the wallet key into the ticket (start → state → ticket → openTicket).
+    const [st, out] = social.start(
+      { provider: 'x', verifier_hash: social.sha256Hex('v'), proof_key: kurt.identityKey },
+      { ...ENV, X_CLIENT_ID: 'id', X_CLIENT_SECRET: 'secret' },
+    );
+    expect(st).toBe(200);
+    const state = social.open(new URL(out.authorizeUrl).searchParams.get('state'), ENV);
+    expect(state.pk).toBe(kurt.identityKey);
   });
 
   test('double claim: a second wallet, even one proving the same X account, is refused; the first claim stands', async () => {
@@ -236,7 +267,10 @@ describe('register under a hold', () => {
     const b = user();
     linkX(s, a, KURT_ID);
     expect((await h.register({}, await a.sign('register', { alias: 'kurt' })))[0]).toBe(200);
-    const body = { ...(await b.sign('register', { alias: 'kurt' })), social: xTicket(KURT_ID) };
+    const body = {
+      ...(await b.sign('register', { alias: 'kurt' })),
+      social: xTicket(KURT_ID, undefined, undefined, undefined, b.identityKey),
+    };
     expect((await h.register({}, body))[0]).toBe(409);
     expect(s.aliases.get('kurt').identity_key).toBe(a.identityKey);
     expect(s.holds.get('kurt').claimed_key).toBe(a.identityKey);
@@ -359,6 +393,103 @@ describe('available + x-hold (read)', () => {
     delete s.getXHold;
     const h = pm.makeHandlers({ store: s, env: ENV });
     expect((await h.register({}, await user().sign('register', { alias: 'kurt' })))[0]).toBe(200);
+  });
+});
+
+describe('near variants (security review, 11 Nov 2026)', () => {
+  test('names that read as a held one are refused to others; the holder may take them (normal price)', async () => {
+    const s = store();
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await holdKurt(h);
+    for (const alias of ['kurtt', 'kurtjr', 'kurtw', 'kurt0', 'kurt-1', 'ku-rt', 'kuurt', 'thekurt', 'kurt99']) {
+      const [st, out] = await h.register({}, await user().sign('register', { alias }));
+      expect([alias, st]).toEqual([alias, 403]);
+      expect(out.error).toContain('too close to a name held for @kurtwuckertjr');
+      expect((await h.available({ alias }))[1].status).toBe('held-x');
+    }
+    // Not near: different names that merely share letters.
+    for (const alias of ['curt', 'hurt', 'burt', 'kurtwuckertjr'])
+      expect([alias, (await h.register({}, await user().sign('register', { alias })))[0]]).toEqual([alias, 200]);
+    const kurt = user();
+    linkX(s, kurt, KURT_ID);
+    expect((await h.register({}, await kurt.sign('register', { alias: 'kurtjr' })))[0]).toBe(200);
+    // A near variant never marks the hold claimed.
+    expect(s.holds.get('kurt').claimed_at).toBeNull();
+    // names-add takes the same rule.
+    const other = user();
+    expect((await h.register({}, await other.sign('register', { alias: 'otherone' })))[0]).toBe(200);
+    expect((await h['names-add']({}, await other.sign('names-add', { alias: 'kurtw' })))[0]).toBe(403);
+  });
+
+  test('released or expired holds stop guarding their variants', async () => {
+    const s = store();
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await holdKurt(h);
+    s.holds.get('kurt').expires_at = new Date(Date.now() - 1).toISOString();
+    expect((await h.register({}, await user().sign('register', { alias: 'kurtt' })))[0]).toBe(200);
+  });
+});
+
+describe('the claimed-mark (security review, 11 Nov 2026)', () => {
+  test('a failed mark is retried; a hold never expires while its name has a row; the mark is put back', async () => {
+    const s = store();
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await holdKurt(h);
+    const kurt = user();
+    linkX(s, kurt, KURT_ID);
+    let fails = 3; // every attempt in the register call fails
+    const mark = s.markXHoldClaimed;
+    s.markXHoldClaimed = async (...a) => {
+      if (fails-- > 0) throw new Error('supabase 500');
+      return mark(...a);
+    };
+    const errs = [];
+    const orig = console.error;
+    console.error = (...a) => errs.push(a.join(' '));
+    try {
+      expect((await h.register({}, await kurt.sign('register', { alias: 'kurt' })))[0]).toBe(200);
+    } finally {
+      console.error = orig;
+    }
+    expect(errs.filter((e) => e.includes('x-hold claimed-mark failed')).length).toBe(3);
+    expect(s.holds.get('kurt').claimed_at).toBeNull();
+    // Past its expiry, the hold stays live while kurt@ has a row, and the next read re-marks it from that row.
+    s.holds.get('kurt').expires_at = new Date(Date.now() - DAY).toISOString();
+    const read = (await h['x-hold']({ alias: 'kurt' }))[1];
+    expect(read.status).toBe('claimed');
+    expect(s.holds.get('kurt').claimed_key).toBe(kurt.identityKey);
+    // So when the name is later let go, only that X account can take it back.
+    s.aliases.delete('kurt');
+    expect((await h.register({}, await user().sign('register', { alias: 'kurt' })))[0]).toBe(403);
+  });
+
+  test("a row whose key doesn't prove the hold is never recorded as the claim", async () => {
+    const s = store();
+    const h = pm.makeHandlers({ store: s, env: ENV });
+    await holdKurt(h);
+    // e.g. the hold lapsed and somebody else took the name legitimately.
+    s.holds.get('kurt').expires_at = new Date(Date.now() - DAY).toISOString();
+    const other = user();
+    expect((await h.register({}, await other.sign('register', { alias: 'kurt' })))[0]).toBe(200);
+    expect((await h['x-hold']({ alias: 'kurt' }))[1].status).toBe('taken');
+    expect(s.holds.get('kurt').claimed_at).toBeNull();
+    // Its owner still updates it freely.
+    expect((await h.register({}, await other.sign('register', { alias: 'kurt', name: 'Other' })))[0]).toBe(200);
+  });
+});
+
+describe('store: only "no such table" means no holds (security review, 11 Nov 2026)', () => {
+  const answer = (status, body) => async () => new Response(body, { status });
+  const sEnv = { SUPABASE_URL: 'https://db.test', SUPABASE_SERVICE_ROLE_KEY: 'test-key-not-real' };
+  test('PGRST205 / 42P01: no hold; a bare 404 or any other error throws (fail closed)', async () => {
+    const missing = JSON.stringify({ code: 'PGRST205', message: 'Could not find the table' });
+    expect(await supabaseStore(sEnv, answer(404, missing)).getXHold('kurt')).toBeNull();
+    expect(await supabaseStore(sEnv, answer(404, JSON.stringify({ code: '42P01' }))).listXHolds()).toEqual([]);
+    await expect(supabaseStore(sEnv, answer(404, '<html>Not Found</html>')).getXHold('kurt')).rejects.toThrow();
+    await expect(
+      supabaseStore(sEnv, answer(404, JSON.stringify({ code: 'PGRST116' }))).getXHold('kurt'),
+    ).rejects.toThrow();
+    await expect(supabaseStore(sEnv, answer(500, missing.replace('PGRST205', 'XX000'))).listXHolds()).rejects.toThrow();
   });
 });
 

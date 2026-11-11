@@ -4,8 +4,10 @@
 -- bwallet_paymail_x_holds: a plain paymail alias kept for ONE X account, named by X's numeric user id (never the
 -- @name: @names change hands). While a hold is live, register / names-add refuse the alias to every wallet except
 -- one that proves that X account: its identity key has a verified X link (bwallet_social_links, account =
--- sha256('x:' || x_user_id)), or the register request carries a fresh Continue with X ticket for that id. The
--- holder claims it free (no name fee).
+-- sha256('x:' || x_user_id)), or the register request carries a fresh Continue with X ticket for that id, bound to
+-- that wallet's key (proof_key). The holder claims it free (no name fee). Names that read as a live hold of 4+
+-- characters (kurtt, kurtjr, kurt0…: site/lib/xHolds.js nearHold) are held too. A hold never expires while its
+-- name has a row.
 --
 --   x_handle     the @name when the hold was made, for the claim page's words only. Never used to decide anything.
 --   expires_at   an unclaimed hold lapses here and the name follows the normal rules again. NULL = no end.
