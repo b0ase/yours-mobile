@@ -138,7 +138,7 @@ export const fetchDailyRates = async (fromSec: number, toSec: number, apiKey?: s
 
 type ListActions = (args: { labels: string[]; includeLabels?: boolean; limit?: number; offset?: number }) => Promise<{
   totalActions: number;
-  actions: { txid: string; description?: string; labels?: string[]; satoshis?: number }[];
+  actions: { txid: string; description?: string; labels?: string[]; satoshis?: number; status?: string }[];
 }>;
 
 /** Every action the wallet logged (description + labels), by txid. Never throws. */
@@ -153,6 +153,7 @@ export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
           description: a.description,
           labels: a.labels,
           ...(typeof a.satoshis === 'number' ? { satoshis: a.satoshis } : {}),
+          ...(a.status ? { status: a.status } : {}),
         });
       if (r.actions.length < 1000 || offset + 1000 >= r.totalActions) break;
     }

@@ -7,6 +7,7 @@ import {
   newestFirst,
   stampUnconfirmed,
   ownOutputs,
+  unsentHeld,
   ratesByDay,
   withRates,
   type HistoryRow,
@@ -34,12 +35,15 @@ export const loadHistoryRows = async ({
   identityAddress,
   apiContext,
   onProgress,
+  onUnsent,
   now = Date.now(),
 }: {
   addresses: string[];
   identityAddress?: string;
   apiContext: OneSatContext;
   onProgress: (p: Progress) => void;
+  /** Signed-but-never-sent payments the wallet holds (not on chain, so not rows), for the History banner. */
+  onUnsent?: (u: { count: number; sats: number }) => void;
   now?: number;
 }): Promise<HistoryRow[]> => {
   const setProgress = onProgress;
@@ -49,6 +53,7 @@ export const loadHistoryRows = async ({
     fetchLocalInfo(apiContext.wallet?.listActions?.bind(apiContext.wallet) as Parameters<typeof fetchLocalInfo>[0]),
     loadConnectionLog(),
   ]);
+  onUnsent?.(unsentHeld(local as Map<string, LocalInfo>));
   // The wallet's own action log adds txs the address index can miss (inscription outputs).
   const txs = await fetchAccountTxs(addresses, key, setProgress, local.keys());
   // Pots and agent accounts: unlabelled outgoing payments are pot payments / agent spend.

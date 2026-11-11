@@ -219,3 +219,24 @@ describe('Connections on the phone (in-wallet apps)', () => {
     });
   });
 });
+
+describe('History banner and unsent payments (incident 10 Nov 2026)', () => {
+  test("two unsent Store payments explain the gap between the chain's closing balance and the wallet's", async () => {
+    const { unsentHeld } = await import('./txHistory');
+    const local = new Map([
+      ['a'.repeat(64), { status: 'nosend', satoshis: -5_902_900 }],
+      ['b'.repeat(64), { status: 'nosend', satoshis: -5_902_910 }],
+      ['c'.repeat(64), { status: 'completed', satoshis: -1_000 }],
+      ['d'.repeat(64), { status: 'nosend' }],
+    ]);
+    const u = unsentHeld(local);
+    expect(u).toEqual({ count: 2, sats: 11_805_810 });
+    const sum = { inSats: 20_000_000, outSats: 0, feeSats: 0, count: 3 };
+    const closing = 20_000_000;
+    const wallet = closing - u.sats;
+    // The owner's banner: the chain says 0.2, the wallet 0.08 (two payments held, not on chain): "incomplete".
+    expect(historyLooksIncomplete(sum, closing, wallet)).toBe(true);
+    // Less what the unsent payments hold, they match: the screen says so instead.
+    expect(historyLooksIncomplete(sum, closing - u.sats, wallet)).toBe(false);
+  });
+});

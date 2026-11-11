@@ -301,7 +301,10 @@ export async function backupBeforeSend(d: {
       timeout,
     ]);
     if (r.ok && r.pushed) return { ok: true, how: 'pushed' };
-    return { ok: false, error: r.ok ? 'the backup was not updated' : r.error };
+    const error = r.ok ? 'the backup was not updated' : r.error;
+    // The one line in the background console that says why a Store payment was not sent (incident 10 Nov 2026).
+    log(`[deviceSync] Store payment backup failed: ${error}`);
+    return { ok: false, error };
   } finally {
     if (timer) clearTimeout(timer);
   }
