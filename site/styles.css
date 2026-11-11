@@ -287,6 +287,10 @@ section {
 .showcase {
   overflow: hidden;
 }
+/* The feature glow (.feature-visual::before) bleeds past the edge on phones; clip it sideways only. */
+.feature {
+  overflow-x: clip;
+}
 .film {
   position: relative;
   margin-top: 40px;
