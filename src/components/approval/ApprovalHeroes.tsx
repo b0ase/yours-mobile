@@ -62,13 +62,23 @@ const Panel = (p: { glow: number; children: ReactNode; red?: boolean; column?: b
   </div>
 );
 
-const GoldRing = ({ px, children, glow = 0.45 }: { px: number; children: ReactNode; glow?: number }) => (
+const GoldRing = ({
+  px,
+  children,
+  glow = 0.45,
+  radius,
+}: {
+  px: number;
+  children: ReactNode;
+  glow?: number;
+  radius?: number;
+}) => (
   <div
     className="relative"
     style={{
       width: art(px),
       height: art(px),
-      borderRadius: '50%',
+      borderRadius: radius ?? '50%',
       padding: 7,
       boxSizing: 'border-box',
       background: `linear-gradient(145deg, ${CARD.goldHi} 0%, ${CARD.gold} 45%, ${CARD.goldLo} 100%)`,
@@ -77,7 +87,7 @@ const GoldRing = ({ px, children, glow = 0.45 }: { px: number; children: ReactNo
   >
     <div
       className="w-full h-full flex items-center justify-center overflow-hidden"
-      style={{ borderRadius: '50%', background: CARD.bg }}
+      style={{ borderRadius: radius ? radius - 7 : '50%', background: CARD.bg }}
     >
       {children}
     </div>
@@ -187,16 +197,19 @@ export const MintHero = ({
   alt,
   number,
   badge = 'MINT',
+  whole = false,
 }: {
   image?: string;
   alt: string;
   number?: string;
   badge?: string;
+  /** Show a square picture complete and centred, in a rounded frame instead of the ring's circular crop. */
+  whole?: boolean;
 }) => (
   <Panel glow={0.34}>
-    <GoldRing px={190} glow={0.5}>
+    <GoldRing px={whole ? 220 : 190} glow={0.5} radius={whole ? 26 : undefined}>
       {image ? (
-        <img src={image} alt={alt} className="w-full h-full" style={{ objectFit: 'cover' }} />
+        <img src={image} alt={alt} className="w-full h-full" style={{ objectFit: whole ? 'contain' : 'cover' }} />
       ) : (
         <svg role="img" aria-label={alt} width="100%" height="100%" viewBox="0 0 176 176">
           <g fill="none" strokeLinecap="round">

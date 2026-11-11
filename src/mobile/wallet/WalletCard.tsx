@@ -63,6 +63,7 @@ import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
 import { AccountAvatar } from '../names/AccountAvatar';
+import { bavatarVariant, onAvatarChange } from '../names/avatar';
 import { useAvatar } from '../names/useAvatar';
 import { HandleFlow } from '../names/HandleFlow';
 import { useAccountNames } from '../names/accountNames';
@@ -258,10 +259,18 @@ const WalletCardInner = ({
 
   // The front's art: the account's bAvatar (bWalletX only; bWallet keeps its yellow card). Cached per key.
   const accentId = useAccentId();
+  // The minted design: redraw as soon as a mint changes it.
+  const identityPubKey = account?.pubKeys?.identityPubKey ?? '';
+  const [artVariant, setArtVariant] = useState(() => bavatarVariant(identityPubKey));
+  useEffect(() => {
+    const read = () => setArtVariant(bavatarVariant(identityPubKey));
+    read();
+    return onAvatarChange(read);
+  }, [identityPubKey]);
   const bavatarArt = useMemo(
     () => cardFrontArtUri(account?.pubKeys?.identityPubKey, YELLOW_CARD),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the art is tinted to the current accent
-    [account?.pubKeys?.identityPubKey, accentId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the art is tinted to the current accent and shows the minted design
+    [account?.pubKeys?.identityPubKey, accentId, artVariant],
   );
   // How the art sits: the account's own adjustment, else bright art dimmed and its core moved top-right.
   const artKey = account?.pubKeys?.identityPubKey ?? '';

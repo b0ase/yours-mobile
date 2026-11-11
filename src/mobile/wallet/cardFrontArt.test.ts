@@ -34,6 +34,18 @@ describe('cardFrontArtUri', () => {
     expect(cardFrontArtUri(A, false)).not.toBe(cardFrontArtUri(B, false));
     expect(cardFrontArtUri(A.toUpperCase(), false)).toBe(cardFrontArtUri(A, false));
   });
+  test('shows the design this account minted, not the original', () => {
+    const original = cardFrontArtUri(A, false);
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => (k === `bwx.bavatar.variant.${A}` ? '7' : null),
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    };
+    const minted = cardFrontArtUri(A, false);
+    expect(decodeURIComponent(minted.split(',')[1])).toBe(bavatarSvg(A, { size: 512, label: '', variant: 7 }));
+    expect(minted).not.toBe(original);
+    expect(cardFrontArtUri(B, false)).toBe(cardFrontArtUri(B, false));
+  });
   test('bWallet edition keeps the yellow card', () => {
     expect(cardFrontArtUri(A, true)).toBe('');
   });
