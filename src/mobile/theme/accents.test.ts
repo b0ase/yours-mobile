@@ -140,7 +140,7 @@ describe('paper packs (Pink, Blue, Yellow)', () => {
 });
 
 describe('artist editions', () => {
-  test('VexVoid, NPG, NPGX and Scammers Cartel: dark, credited, no gold, AA ink on paper', () => {
+  test('VexVoid, NPG, NPGX, Scammers Cartel and bDojoX: dark, credited, no gold, AA ink on paper', () => {
     expect(EDITION_PACKS.map((a) => a.id)).toEqual([
       'vexvoid',
       'npg',
@@ -149,6 +149,7 @@ describe('artist editions', () => {
       'leannethedark',
       'tokenblaster',
       'terrornode',
+      'bdojox',
       ...EMOJI_PACK_IDS,
     ]);
     const credits = {
@@ -159,6 +160,7 @@ describe('artist editions', () => {
       leannethedark: 'Leanne The Dark edition',
       tokenblaster: 'TokenBlaster edition',
       terrornode: 'TokenBlaster edition',
+      bdojox: 'bDojoX edition',
     };
     // TokenBlaster's packs keep the near-black page from their own theme files (tokenblaster.lol/.well-known).
     const ownBg: Record<string, string> = { tokenblaster: '#0A0A0C', terrornode: '#05090F', leannethedark: '#050102' };
