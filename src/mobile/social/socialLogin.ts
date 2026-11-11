@@ -22,7 +22,7 @@ import { bindUnfinished, markUnfinished, pendingExpired } from './pendingLink';
  *    picks, with a live availability check. Existing <name>.x / <name>.gmail names keep receiving.
  */
 
-export type SocialProvider = 'x' | 'google' | 'github' | 'linkedin' | 'ebay';
+export type SocialProvider = 'x' | 'google' | 'github' | 'linkedin' | 'ebay' | 'handcash';
 type Pending = {
   provider: SocialProvider;
   secret: string;

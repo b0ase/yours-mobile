@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, BadgeCheck, Check, Circle, Github, Linkedin, Loader2 } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, Check, Circle, Loader2 } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { BWALLET_PAYMAIL_DOMAIN } from '../names/config';
 import { listPaymails, proveName, toAlias } from '../names/paymail';
@@ -24,31 +24,17 @@ import {
 } from './links';
 import { clearSocial, onSocialChange, socialError, socialProof, startSocial, type SocialProvider } from './socialLogin';
 import { useHandCashHandle } from './useHandCashHandle';
+import { BrandMark } from './BrandMark';
 import { onUnfinishedChange, unfinishedLinks } from './pendingLink';
 import { forgetLinkedHandle, rememberLinkedHandle } from './linkedHandles';
 
 const GRAY = '#98A2B3';
-const XMark = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-    <path d="M18.9 2H22l-6.8 7.8L23 22h-6.2l-4.8-6.3L6.4 22H3.3l7.3-8.3L1 2h6.3l4.4 5.8L18.9 2Zm-1.1 18h1.7L6.3 3.9H4.5L17.8 20Z" />
-  </svg>
-);
-const GMark = () => (
-  <span aria-hidden className="text-[15px] font-bold" style={{ color: '#fff' }}>
-    G
-  </span>
-);
-const ICON: Record<SocialProvider, JSX.Element> = {
-  x: <XMark />,
-  google: <GMark />,
-  github: <Github size={16} />,
-  linkedin: <Linkedin size={16} />,
-  ebay: (
-    <span aria-hidden className="text-[15px] font-bold" style={{ color: '#fff' }}>
-      e
-    </span>
-  ),
-};
+const ICON = Object.fromEntries(
+  (['x', 'google', 'github', 'linkedin', 'ebay', 'handcash'] as const).map((p) => [
+    p,
+    <BrandMark provider={p} size={16} />,
+  ]),
+) as Record<SocialProvider, JSX.Element>;
 /** BSV social networks (owner, 27 Oct 2026). Twetch links through Settings › Twetch; the others have no
  * verification path yet (the Feed only reads them), so they show as coming soon. */
 type BsvNetwork = 'twetch' | 'treechat' | 'peck' | 'fwetch';

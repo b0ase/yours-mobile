@@ -162,12 +162,21 @@ async function publishLink(link: AccountLink, proof: Proof): Promise<boolean> {
   }
 }
 
-export type ProviderState = Record<'x' | 'google' | 'github' | 'linkedin' | 'ebay', boolean>;
+export type ProviderState = Record<'x' | 'google' | 'github' | 'linkedin' | 'ebay' | 'handcash', boolean>;
 /**
  * X and Google have run since 4 Oct; GitHub / LinkedIn only once the server says their OAuth apps are set up; eBay
- * only once bMarketX's wallet-mode eBay route answers (ebayLink.ts).
+ * only once bMarketX's wallet-mode eBay route answers (ebayLink.ts). HandCash (owner, 31 Oct 2026: "just another OAuth
+ * provider" in Link an account) only once the paymail server's /api/social/providers reports `handcash: true`, i.e.
+ * site/lib/social.js has a HandCash start/callback; until then its tile stays hidden like GitHub / LinkedIn.
  */
-export const DEFAULT_PROVIDERS: ProviderState = { x: true, google: true, github: false, linkedin: false, ebay: false };
+export const DEFAULT_PROVIDERS: ProviderState = {
+  x: true,
+  google: true,
+  github: false,
+  linkedin: false,
+  ebay: false,
+  handcash: false,
+};
 export async function fetchProviders(f: typeof fetch = fetch): Promise<ProviderState> {
   // Store builds: the onboarding panel calls this even though it renders nothing there (LINK_ACCOUNTS_ENABLED), so
   // return before the fetch and Rollup drops the providers URL from the bundle.
@@ -183,6 +192,7 @@ export async function fetchProviders(f: typeof fetch = fetch): Promise<ProviderS
       google: j.google !== false,
       github: j.github === true,
       linkedin: j.linkedin === true,
+      handcash: j.handcash === true,
       ebay: await ebay,
     };
   } catch {
