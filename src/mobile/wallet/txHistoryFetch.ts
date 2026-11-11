@@ -6,6 +6,7 @@
 import type { LocalInfo, RawTx } from './txHistory';
 import { trailingP2pkh } from './historyEvents';
 import { pubkeyFromScriptSig } from '../airdrops/sender';
+import { actionNetSats, type ActionLike } from '../../utils/actionNet';
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 const PACE_MS = 350;
@@ -136,9 +137,15 @@ export const fetchDailyRates = async (fromSec: number, toSec: number, apiKey?: s
   return out;
 };
 
-type ListActions = (args: { labels: string[]; includeLabels?: boolean; limit?: number; offset?: number }) => Promise<{
+type ListActions = (args: {
+  labels: string[];
+  includeLabels?: boolean;
+  includeOutputs?: boolean;
+  limit?: number;
+  offset?: number;
+}) => Promise<{
   totalActions: number;
-  actions: { txid: string; description?: string; labels?: string[]; satoshis?: number; status?: string }[];
+  actions: ({ txid: string; description?: string; labels?: string[]; status?: string } & ActionLike)[];
 }>;
 
 /** Every action the wallet logged (description + labels), by txid. Never throws. */
@@ -147,14 +154,17 @@ export const fetchLocalInfo = async (listActions: ListActions | undefined) => {
   if (!listActions) return m;
   try {
     for (let offset = 0; offset < 100_000; offset += 1000) {
-      const r = await listActions({ labels: [], includeLabels: true, limit: 1000, offset });
-      for (const a of r.actions)
+      // Outputs too: a payment to self is netted out of `satoshis` (utils/actionNet.ts; P0, 11 Nov 2026).
+      const r = await listActions({ labels: [], includeLabels: true, includeOutputs: true, limit: 1000, offset });
+      for (const a of r.actions) {
+        const satoshis = actionNetSats(a);
         m.set(a.txid, {
           description: a.description,
           labels: a.labels,
-          ...(typeof a.satoshis === 'number' ? { satoshis: a.satoshis } : {}),
+          ...(typeof satoshis === 'number' ? { satoshis } : {}),
           ...(a.status ? { status: a.status } : {}),
         });
+      }
       if (r.actions.length < 1000 || offset + 1000 >= r.totalActions) break;
     }
   } catch {

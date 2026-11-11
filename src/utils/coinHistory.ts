@@ -11,6 +11,7 @@
 import { getMneeHistory, type OneSatContext } from '@1sat/actions';
 import { buildTokenLabel } from '@1sat/types';
 import type { WalletAction } from '@bsv/sdk';
+import { actionNetSats } from './actionNet';
 import { BSV_DECIMAL_CONVERSION } from './constants';
 import { formatNumberWithCommasAndDecimals, showAmount, truncate } from './format';
 
@@ -108,10 +109,12 @@ export const fetchBsvHistory = async (ctx: OneSatContext, opts: FetchHistoryOpts
     .reverse()
     .filter((a) => !isNonBsvAction(a))
     .map((a) => {
-      const direction = directionFromAction(a);
-      const signedSats = a.satoshis; // positive = received, negative = sent (approx.)
+      // A payment to self (own paymail): the payment came back, only the fee left (utils/actionNet.ts, P0 11 Nov 2026).
+      const signedSats = actionNetSats(a) ?? a.satoshis; // positive = received, negative = sent
+      const toSelf = signedSats !== a.satoshis;
+      const direction: CoinTxDirection = toSelf ? 'transfer' : directionFromAction(a);
       const absSats = Math.abs(signedSats);
-      const sign = direction === 'sent' ? '-' : direction === 'received' ? '+' : '';
+      const sign = direction === 'sent' || toSelf ? '-' : direction === 'received' ? '+' : '';
       return {
         txid: a.txid,
         direction,
