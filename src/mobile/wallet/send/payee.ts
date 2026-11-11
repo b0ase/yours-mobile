@@ -117,7 +117,19 @@ export type PayeeNote = {
   firstTime?: boolean;
   /** A different, known name with the same shape. */
   lookalike?: { name: string; avatar?: string };
+  /** The name resolves to this wallet's own identity key (SELF_PAY_NOTE). Informational: the payment is not blocked. */
+  self?: boolean;
 };
+
+/**
+ * Shown when the payee is this wallet itself (owner, 11 Nov 2026: 1¢ to his own boase@bwalletx.com read as the wallet
+ * paying itself a penny). The payment comes straight back; only the fee leaves.
+ */
+export const SELF_PAY_NOTE = 'This is you. Only the network fee will be spent.';
+
+/** Same compressed public key (hex, any case). */
+export const sameKey = (a: string | undefined, b: string | undefined): boolean =>
+  !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export const payeeNote = (
   acct: string,
@@ -125,10 +137,13 @@ export const payeeNote = (
   meta: { label?: string; avatar?: string; pubkey?: string } | undefined,
   s: Store | null = storage(),
   contacts: KnownPayee[] = contactPayees,
+  /** This wallet's identity key (getPublicKey({ identityKey: true })), to say when the payee is the wallet itself. */
+  ownKey?: string,
 ): PayeeNote | undefined => {
   const isPaymail = !!canonPaymail(target);
   const fingerprint = keyFingerprint(meta?.pubkey) || undefined;
   if (!isPaymail && !meta) return undefined;
+  if (sameKey(meta?.pubkey, ownKey)) return { name: meta?.label, avatar: meta?.avatar, fingerprint, self: true };
   const paid = loadPaid(acct, s);
   const look = isPaymail ? lookalikeOf(target, [...paid, ...contacts]) : null;
   return {

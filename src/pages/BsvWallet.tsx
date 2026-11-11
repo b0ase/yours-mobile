@@ -1210,12 +1210,19 @@ export const BsvWallet = () => {
       consolidated.set(addr, (consolidated.get(addr) ?? 0) + r.satoshis);
       if (!addressOrder.includes(addr)) addressOrder.push(addr);
     }
+    // This wallet's identity key, so the sheet can say "This is you" for a name that resolves to it (P0, 11 Nov 2026).
+    // Bounded: the sheet never waits on a busy wallet; without the key the note is just left out.
+    const ownKey = await withTimeout(
+      apiContext.wallet.getPublicKey({ identityKey: true }).then((r) => r.publicKey),
+      1500,
+      'Identity key',
+    ).catch(() => undefined);
     const lineItems: SendLineItem[] = addressOrder.map((addr) => ({
       address: addr,
       amount: `${formatNumberWithCommasAndDecimals(consolidated.get(addr)! / BSV_DECIMAL_CONVERSION, 8)} BSV`,
       sats: consolidated.get(addr)!,
-      // Payee safety (15 Oct 2026): name, bAvatar, key fingerprint, first payment, look-alike warning.
-      payee: payeeNote(identityAddress, addr, pendingMeta(addr)),
+      // Payee safety (15 Oct 2026): name, bAvatar, key fingerprint, first payment, look-alike warning, "this is you".
+      payee: payeeNote(identityAddress, addr, pendingMeta(addr), undefined, undefined, ownKey),
     }));
 
     // A re-tap must not pay twice (third reviews 17c/17d): an earlier send to the same recipient, as typed, whose outcome

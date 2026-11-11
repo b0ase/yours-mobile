@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, Send } from 'lucide-react';
-import type { PayeeNote } from '../mobile/wallet/send/payee';
+import { SELF_PAY_NOTE, type PayeeNote } from '../mobile/wallet/send/payee';
 import { Theme } from '../theme.types';
 import { Button } from './Button';
 import { Show } from './Show';
@@ -257,6 +257,11 @@ export const SendConfirmation = (props: SendConfirmationProps) => {
                             different person. Check before you send.
                           </span>
                         </div>
+                      )}
+                      {item.payee?.self && (
+                        <span role="note" className="text-xs font-semibold" style={{ color: contrast }}>
+                          {SELF_PAY_NOTE}
+                        </span>
                       )}
                       {item.payee?.firstTime && (
                         <span className="text-xs" style={{ color: gray }}>

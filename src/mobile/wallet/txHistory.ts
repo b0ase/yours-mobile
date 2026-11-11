@@ -125,7 +125,7 @@ export const labelFor = (direction: Direction, local: LocalInfo | undefined, tx?
     [/listing|\bbuy\b|purchase|\bsale\b/, 'market'],
     [/ordinal|inscri|\bnft\b|1sat ord/, 'NFT'],
     [/bsv-?21|bsv-?20|token/, 'token transfer'],
-    [/paymail/, direction === 'in' ? 'receive' : 'send'],
+    [/paymail/, direction === 'in' ? 'receive' : direction === 'self' ? 'self' : 'send'],
   ];
   for (const [re, l] of rules) if (re.test(text)) return l;
   if (tx) {
@@ -198,15 +198,16 @@ export const classify = (
     }
     const net = local.satoshis;
     const walletFee = net < 0 && known ? Math.max(0, Math.min(-net, inSum - totalOut)) : 0;
-    direction = net >= 0 ? 'in' : 'out';
     amountSats = net + walletFee;
+    // Only the fee left the wallet: a payment to its own paymail (utils/actionNet.ts, P0 11 Nov 2026).
+    direction = net >= 0 ? 'in' : amountSats === 0 ? 'self' : 'out';
     return {
       txid: tx.txid,
       time: tx.time ? tx.time * 1000 : now,
       direction,
       amountSats,
       feeSats: walletFee,
-      counterparty: net < 0 ? counterparty : '',
+      counterparty: direction === 'out' ? counterparty : '',
       label: labelFor(direction, local, tx),
       note: local.description ?? '',
       blockHeight: tx.blockHeight,
