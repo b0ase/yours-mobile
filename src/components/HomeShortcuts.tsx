@@ -7,12 +7,15 @@ import { useTheme } from '../hooks/useTheme';
 import { useRecoveryTools } from '../hooks/useRecoveryTools';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import { VersionLabel } from './VersionLabel';
+import { needsLookSummary, syncFailureText, type RefreshStepKey } from './refreshWalletText';
 
 type SyncAnswer = { success?: boolean; error?: string };
 type StepState = 'waiting' | 'running' | 'ok' | 'failed';
-type Step = { key: string; title: string; state: StepState; text: string };
+/** raw: the technical error behind a failed row (shown under Details); found: the rescan found coins to add back. */
+type Step = { key: RefreshStepKey; title: string; state: StepState; text: string; raw?: string; found?: boolean };
+type StepResult = { ok: boolean; text: string; raw?: string; found?: boolean };
 
-const STEPS: { key: string; title: string }[] = [
+const STEPS: { key: RefreshStepKey; title: string }[] = [
   { key: 'sync', title: 'Sync with my other devices' },
   { key: 'resync', title: 'Resync coins' },
   { key: 'missing', title: 'Rescan the chain' },
@@ -36,30 +39,34 @@ export const HomeShortcuts = () => {
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [scan, setScan] = useState<ScanAnswer['data'] | null>(null);
+  const [details, setDetails] = useState<RefreshStepKey | null>(null);
 
-  const set = (key: string, state: StepState, text = '') =>
-    setSteps((p) => (p ?? []).map((s) => (s.key === key ? { ...s, state, text } : s)));
+  const set = (key: RefreshStepKey, state: StepState, r: Omit<StepResult, 'ok'> = { text: '' }) =>
+    setSteps((p) => (p ?? []).map((s) => (s.key === key ? { ...s, state, ...r } : s)));
 
   const run = async () => {
     if (running) return;
     setRunning(true);
     setScan(null);
+    setDetails(null);
     setSteps(STEPS.map((s) => ({ ...s, state: 'waiting', text: '' })));
-    const attempt = async (key: string, fn: () => Promise<{ ok: boolean; text: string }>) => {
+    const attempt = async (key: RefreshStepKey, fn: () => Promise<StepResult>) => {
       set(key, 'running');
       try {
-        const r = await fn();
-        set(key, r.ok ? 'ok' : 'failed', r.text);
+        const { ok, ...r } = await fn();
+        set(key, ok ? 'ok' : 'failed', r);
       } catch (e) {
-        set(key, 'failed', e instanceof Error ? e.message : 'Failed');
+        const raw = e instanceof Error ? e.message : 'Failed';
+        set(key, 'failed', { text: key === 'sync' ? syncFailureText(raw) : raw, raw });
       }
     };
     // Same message as the Remote backup screen's "Sync with my other devices": pull, then push (services/deviceSync.ts).
     await attempt('sync', async () => {
       const r = await sendMessageAsync<SyncAnswer>({ action: 'STORAGE_SYNC_BACKUPS' });
-      return r?.success
-        ? { ok: true, text: 'Synced with your other devices · just now' }
-        : { ok: false, text: r?.error ?? 'Sync failed' };
+      if (r?.success) return { ok: true, text: 'Synced with your other devices · just now' };
+      // Plain words on the row; the raw error behind Details (owner, 11 Nov 2026: "An internal error has occurred").
+      const raw = r?.error ?? 'Sync failed';
+      return { ok: false, text: syncFailureText(raw), raw };
     });
     await attempt('resync', () => t.handleResyncCoins());
     // Scan only (read only); any restore waits for the user's "Add it back" below.
@@ -69,14 +76,15 @@ export const HomeShortcuts = () => {
       setScan(r.data);
       const n = r.data.report.found.length;
       return n
-        ? { ok: false, text: `${r.data.headline} Check below to add it back.` }
+        ? { ok: false, text: `${r.data.headline} Check below to add it back.`, found: true }
         : { ok: true, text: [r.data.headline, r.data.note].filter(Boolean).join(' ') };
     });
     setRunning(false);
   };
 
   const done = steps && !running;
-  const needLook = steps?.filter((s) => s.state === 'failed').length ?? 0;
+  // Every row that needs a look is named with its next step (owner, 11 Nov 2026: "1 thing needs a look", but which?).
+  const look = needsLookSummary((steps ?? []).filter((s) => s.state === 'failed'));
 
   return (
     <div className="bw-home-shortcuts w-[92%] space-y-3" data-testid="home-shortcuts">
@@ -123,16 +131,44 @@ export const HomeShortcuts = () => {
                       {s.state === 'running' ? 'Checking…' : s.text}
                     </p>
                   )}
+                  {s.state === 'failed' && s.raw && s.raw !== s.text && (
+                    <>
+                      <button
+                        type="button"
+                        className="text-[10px] underline"
+                        style={{ color: '#D0D5DD' }}
+                        aria-expanded={details === s.key}
+                        data-testid={`refresh-details-${s.key}`}
+                        onClick={() => setDetails((d) => (d === s.key ? null : s.key))}
+                      >
+                        {details === s.key ? 'Hide details' : 'Details'}
+                      </button>
+                      {details === s.key && (
+                        <p className="text-[10px] leading-snug break-words font-mono" style={{ color: '#98A2B3' }}>
+                          {s.raw}
+                        </p>
+                      )}
+                    </>
+                  )}
                 </div>
               </li>
             ))}
           </ol>
           {done && (
-            <p role="status" className="text-sm font-semibold pt-1" style={{ color: '#F2F4F7' }}>
-              {needLook === 0
-                ? 'All checked. Your coins are safe.'
-                : `${needLook} ${needLook === 1 ? 'thing needs' : 'things need'} a look`}
-            </p>
+            <div role="status" className="pt-1 space-y-1" data-testid="refresh-needs-look">
+              <p className="text-sm font-semibold" style={{ color: '#F2F4F7' }}>
+                {look.heading}
+              </p>
+              {look.lines.length > 0 && (
+                <ul className="space-y-1">
+                  {look.lines.map((line) => (
+                    <li key={line} className="text-[11px] leading-snug break-words" style={{ color: '#D0D5DD' }}>
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
       )}
