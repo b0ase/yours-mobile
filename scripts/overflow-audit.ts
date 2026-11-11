@@ -290,7 +290,7 @@ try {
       await clickByText(page, tab);
       await acceptTerms(page);
     });
-  for (const aria of ['Calls', 'Agent b', 'Media', 'Lock BSV', 'Accounts menu'])
+  for (const aria of ['Calls', 'Agent b', 'Media', 'Apps', 'Accounts menu'])
     await step(`top ${aria}`, async () => {
       await clickAria(page, aria);
     });
@@ -307,13 +307,13 @@ try {
     });
     for (const r of list) await step(`${section} › ${r}`, async () => (await open(), await clickByText(page, r)));
   }
-  // Time locks (top bar Lock BSV, /m/lock; on feat/time-locks builds only).
+  // Time locks: the wallet's Lock button beside Mint (wallet/WalletLockButton, /m/lock); the top bar has Apps now.
   await step('Lock BSV › New lock', async () => {
-    await clickAria(page, 'Lock BSV');
+    await clickByText(page, 'Lock');
     await clickByText(page, 'New lock');
   });
   await step('Lock BSV › New lock (preview filled in)', async () => {
-    await clickAria(page, 'Lock BSV');
+    await clickByText(page, 'Lock');
     await clickByText(page, 'New lock');
     const inputs = await page.$$('input[placeholder^="e.g."]');
     for (const [i, el] of inputs.entries()) await el.type(i === 0 ? '10' : '30');

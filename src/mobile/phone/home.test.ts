@@ -17,7 +17,7 @@ describe('HOME', () => {
     }
   });
 
-  test('dock b: tap = Home, hold = the agent page; top bar is bAvatar menu · Calls · Airdrops · Media · Apps', () => {
+  test('dock b: tap = Ask b, hold = talk to b; top bar is bAvatar menu · Calls · Airdrops · Media · Apps', () => {
     const dock = readFileSync(join(import.meta.dir, 'Dock.tsx'), 'utf8');
     // Hold-to-talk lives in one shared hook (agent/useHoldToTalk + holdToTalk), used by the Dock and Ask b.
     const hook = readFileSync(join(import.meta.dir, '../agent/useHoldToTalk.ts'), 'utf8');
