@@ -1,0 +1,30 @@
+bWalletX
+Copyright (c) 2026 The Bitcoin Corporation Ltd
+
+Licensing in this repository
+
+1. Code written by The Bitcoin Corporation Ltd and bWalletX contributors is
+   licensed under the Open BSV License Version 6 (file LICENSE). In short, it
+   may only be used with the Bitcoin SV (BSV) blockchain. Read LICENSE for the
+   actual terms.
+
+2. bWalletX is a fork of Yours Wallet (https://github.com/yours-org/yours-wallet),
+   copyright (c) 2024 Daniel Wagner, David Case. Code that comes from Yours
+   Wallet, including upstream changes merged later, stays under the MIT
+   licence (file LICENSE-MIT). The fork point is upstream v5.1.0 (commit
+   e77a7ed8); `git log --author` shows which later commits came from upstream.
+
+3. Versions of bWalletX released before this change were published under MIT
+   and remain available under MIT. The Open BSV License applies from the
+   release that includes this NOTICE.
+
+4. Third-party code and assets keep their own licences (for example the SIL
+   Open Font License fonts listed in src/mobile/bmint/NOTICE, and everything
+   under node_modules / Pods / Gradle dependencies).
+
+5. Written specifications in docs/ that are marked as specs are licensed under
+   Creative Commons Attribution 4.0 (CC BY 4.0,
+   https://creativecommons.org/licenses/by/4.0/).
+
+The bWalletX, bWallet and Bitcoin Corporation names and logos are trademarks
+and are not licensed by any of the above.
