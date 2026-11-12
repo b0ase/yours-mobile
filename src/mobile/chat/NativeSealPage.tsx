@@ -473,6 +473,8 @@ export const NativeSealPage = () => {
     try {
       const out = await nativeSignAndSeal({
         documentId: doc.documentId,
+        // The bytes on screen: the record the wallet signs must name exactly these (sealCheck.ts).
+        documentHtml: doc.html,
         fieldIds: mine.map((f) => f.id),
         svg,
         api,

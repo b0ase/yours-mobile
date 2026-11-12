@@ -8,6 +8,7 @@ import {
 } from '../../utils/sendErrors';
 import { browserWakeClock, waitForCoinCheck, type WakeClock } from './coinWait';
 import { WALL_TIMEOUT, withinWallClock } from '../../services/wallClock';
+import { SEAL_MISMATCH_MESSAGE, SEAL_PREPARE_MISMATCH_MESSAGE, checkComposed, checkPrepared } from './sealCheck';
 
 /**
  * NATIVE sign + seal of a bChatX room document, inside bWalletX (CTO / owner, 3 Nov 2026: "chat should be IN the
@@ -19,6 +20,8 @@ import { WALL_TIMEOUT, withinWallClock } from '../../services/wallClock';
  *   POST /api/bitsign/nds/seal/prepare {documentId, fieldIds}           → nonce, identityKey, estFeeSats…
  *   POST /api/bitsign/nds/seal/compose {nonce, svg}                     → signing {protocolID,keyID,counterparty},
  *                                                                          recordCanonical, lockingScriptHex
+ *   CHECK compose's answer (chat/sealCheck.ts): the wallet rebuilds the record and the output from the document on
+ *     screen, the drawn signature, its own identity key and prepare's nonce, and signs / pays only for its own copy
  *   wallet.createSignature(recordCanonical bytes)                       → attestation (hex)
  *   wallet.createAction(one 0-sat OP_RETURN output, acceptDelayedBroadcast:false) → txid + AtomicBEEF
  *   SAVE {nonce, txid, beefHex, attestation} locally (the money has moved)
@@ -491,6 +494,8 @@ async function call(api: SealApi, path: Parameters<SealApi>[0], body: Record<str
  */
 export async function nativeSignAndSeal(input: {
   documentId: string;
+  /** The document exactly as shown to the signer: what the signed record must name (chat/sealCheck.ts). */
+  documentHtml: string;
   fieldIds: string[];
   svg: string;
   api: SealApi;
@@ -613,6 +618,15 @@ async function afterPrepare(
   paymentMayHaveGoneOut: () => void,
 ): Promise<NativeSealOutcome> {
   const step = (s: SealStep) => input.onStep?.(s);
+  // ⚠ THE WALLET DECIDES WHAT IT SIGNS (sealCheck.ts): prepare must be for this document and this wallet.
+  const preparedWrong = checkPrepared(prepared, {
+    documentHtml: input.documentHtml,
+    identityKey: input.identityKey ?? '',
+  });
+  if (preparedWrong) {
+    console.warn('[nativeSeal] prepare refused:', preparedWrong);
+    throw new NativeSealError(SEAL_PREPARE_MISMATCH_MESSAGE, 'refused');
+  }
   step('approving');
   if (!(await input.approve(prepared)))
     throw new NativeSealError('Not sealed: you cancelled. Nothing was signed or paid.', 'cancelled');
@@ -629,10 +643,24 @@ async function afterPrepare(
   }
 
   step('composing');
-  const composed = await call(input.api, 'compose', { nonce: prepared.nonce, svg: input.svg.trim() });
-  const signing = composed.signing as { protocolID: [0 | 1 | 2, string]; keyID: string; counterparty: string };
-  const recordCanonical = String(composed.recordCanonical);
-  const lockingScriptHex = String(composed.lockingScriptHex);
+  const svg = input.svg.trim();
+  const composed = await call(input.api, 'compose', { nonce: prepared.nonce, svg });
+  // ⚠ NOTHING FROM COMPOSE IS SIGNED OR PAID FOR AS SENT: the protocol, key id and counterparty are fixed, the record is
+  // rebuilt from this document and must match byte for byte, and the output is the wallet's own copy (sealCheck.ts).
+  const checked = checkComposed(composed, {
+    documentId: input.documentId,
+    documentHtml: input.documentHtml,
+    svg,
+    fieldIds: input.fieldIds,
+    identityKey: input.identityKey ?? '',
+    nonce: prepared.nonce,
+    ...(typeof (prepared as { ts?: unknown }).ts === 'string' ? { ts: (prepared as { ts?: string }).ts } : {}),
+  });
+  if (!checked.ok) {
+    console.warn('[nativeSeal] compose refused:', checked.why);
+    throw new NativeSealError(SEAL_MISMATCH_MESSAGE, 'refused');
+  }
+  const { signing, recordCanonical, lockingScriptHex } = checked;
 
   step('signing');
   const { signature } = await input.keys.createSignature({
