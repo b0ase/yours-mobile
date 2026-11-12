@@ -24,7 +24,18 @@
  */
 import { PrivateKey, PublicKey } from '@bsv/sdk';
 import { inOrder } from '../../pair/in-order';
-import { b64url, fromB64url, newChannel, relaySocketUrl, DEFAULT_RELAY, PAIR_HOST } from '../../pair/protocol';
+import {
+  b64url,
+  claimDigestSync,
+  fromB64url,
+  newChannel,
+  newClaim,
+  relaySocketUrl,
+  sessionWalletClaim,
+  walletClaimFor,
+  DEFAULT_RELAY,
+  PAIR_HOST,
+} from '../../pair/protocol';
 
 export const OPEN_VERSION = '2';
 export const OPEN_INFO = 'bwalletx-open-v2';
@@ -171,6 +182,17 @@ export async function openOpen(key: CryptoKey, channel: string, f: OpenFrame, no
 const relayHost = () => (import.meta.env.VITE_PAIR_RELAY as string | undefined) || DEFAULT_RELAY;
 
 /**
+ * Relay role claims, as phone pairing sends them (relay.mjs; the relay refuses claimless sockets after its compatibility
+ * window, 30 Nov 2026). The computer opens the channel with its own site claim and `wc`, the digest of the wallet claim
+ * the QR gives; the phone joins with that QR claim plus `nc`, the digest of its session claim (wallet claim v2), so once
+ * it has joined nobody else who saw the QR can take or knock out its socket. Both are single-use: no reconnects.
+ */
+export const openSiteSocketUrl = (r: string, c: string, k: string, e: number) =>
+  relaySocketUrl(r, c, 'site', e, newClaim(), claimDigestSync(walletClaimFor(c, k)));
+export const openWalletSocketUrl = (r: string, c: string, k: string, me: PrivateKey) =>
+  relaySocketUrl(r, c, 'wallet', undefined, walletClaimFor(c, k), claimDigestSync(sessionWalletClaim(me, k, c)));
+
+/**
  * Computer side. Shows the QR, waits for the phone to join (onJoined: ask for the code shown on the phone), sends one
  * proof of that code (submitCode; one try), takes one wallet, closes. onExpired after 2 minutes.
  */
@@ -188,7 +210,7 @@ export function startOpenSession(cb: {
   let keys: { key: CryptoKey; macKey: CryptoKey } | null = null;
   let proved = false;
   let done = false;
-  const ws = new WebSocket(relaySocketUrl(r, channel, 'site', e));
+  const ws = new WebSocket(openSiteSocketUrl(r, channel, link.k, e));
   const timer = setTimeout(() => {
     if (!done) {
       done = true;
@@ -269,7 +291,7 @@ export function beginOpenHere(
   const P = PrivateKey.fromRandom();
   const code = newOpenCode();
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(relaySocketUrl(link.r, link.c, 'wallet'));
+    const ws = new WebSocket(openWalletSocketUrl(link.r, link.c, link.k, P));
     let settled = false;
     let keys: { key: CryptoKey; macKey: CryptoKey } | null = null;
     let state: 'waiting' | 'ok' | 'dead' = 'waiting';
@@ -364,7 +386,7 @@ export function parsePing(search: string, nowS = Math.floor(Date.now() / 1000)):
 
 /** Phone: remember the ping channel from /restore?passkey=1&r&c&k&e and join it at once (it must join before the
  * QR lapses; once joined the relay keeps the channel). */
-let pingSocket: { ws: WebSocket; p: PingParams; origin: Promise<string | null> } | null = null;
+let pingSocket: { ws: WebSocket; p: PingParams; me: PrivateKey; origin: Promise<string | null> } | null = null;
 /** True while this tab was opened from a computer's "Put this wallet on your phone" code that has not lapsed. */
 export function restoringFromComputer(nowS = Math.floor(Date.now() / 1000)): boolean {
   try {
@@ -383,7 +405,9 @@ export function armRestorePing(search = typeof location === 'undefined' ? '' : l
   } catch {
     /* fine */
   }
-  const ws = new WebSocket(relaySocketUrl(p.r, p.c, 'wallet'));
+  // The ping's key is made here: the relay join already carries its session claim digest.
+  const me = PrivateKey.fromRandom();
+  const ws = new WebSocket(openWalletSocketUrl(p.r, p.c, p.k, me));
   const origin = new Promise<string | null>((res) => {
     ws.onmessage = (ev: MessageEvent) => {
       try {
@@ -396,7 +420,7 @@ export function armRestorePing(search = typeof location === 'undefined' ? '' : l
     ws.onerror = () => res(null);
     setTimeout(() => res(null), 15_000);
   });
-  pingSocket = { ws, p, origin };
+  pingSocket = { ws, p, me, origin };
   return true;
 }
 
@@ -408,7 +432,7 @@ export async function sendRestoredPing(words: string, allowLocal = false): Promi
   try {
     const origin = await s.origin;
     if (!origin || !isWalletOrigin(origin, allowLocal)) return false;
-    const me = PrivateKey.fromRandom();
+    const { me } = s;
     s.ws.send(JSON.stringify({ t: 'hello', k: me.toPublicKey().toString() }));
     const { key } = await deriveOpen(me, s.p.k, s.p.c, RESTORED_INFO);
     const n = crypto.getRandomValues(new Uint8Array(12));
@@ -450,7 +474,7 @@ export function listenForRestore(
       k: me.toPublicKey().toString(),
       e: Math.floor(Date.now() / 1000) + RESTORED_LIFETIME_S,
     };
-    const ws = new WebSocket(relaySocketUrl(p.r, p.c, 'site', p.e));
+    const ws = new WebSocket(openSiteSocketUrl(p.r, p.c, p.k, p.e));
     let key: CryptoKey | null = null;
     let joined = false;
     ws.onmessage = inOrder(async (ev: MessageEvent) => {
