@@ -28,7 +28,6 @@ describe('wallet layout', () => {
       '<WalletKindSwitch />',
       '<MediaSection />',
       '<TicketsSection />',
-      '<CreditsRow />',
       '<WalletCard ',
     ]) {
       const inserts = cfg.split(tag).slice(1);

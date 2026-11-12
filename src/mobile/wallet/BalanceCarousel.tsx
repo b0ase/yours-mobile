@@ -12,7 +12,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { BookUser, CalendarDays, PenLine, X } from 'lucide-react';
-import { BCREDITS_ENABLED, BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
+import { BUY_CRYPTO_ENABLED, PLACEMENT_ENABLED, STORE_BUILD } from '../storeBuild';
 import { PNEE_ICON, PNEE_TOKEN_ID } from '../notes/pnee';
 import { requestWalletAction } from '../phone/walletAction';
 import { MNEE_ICON_URL } from '../../utils/constants';
@@ -30,7 +30,6 @@ import { useCardBalance } from './balanceStore';
 import {
   EMPTY_VALUE,
   cardValueText,
-  creditsUsd,
   formatTokenAmount,
   hasNoPrice,
   sumHoldings,
@@ -41,7 +40,7 @@ import {
 } from './cardValue';
 import { CardUnitSwitch } from './CardUnitSwitch';
 import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
-import { latestUsdPerGbp, type Fx } from '../../utils/displayCurrency';
+import { type Fx } from '../../utils/displayCurrency';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { tokenTrades } from '../exchange/exchangeData';
@@ -49,7 +48,6 @@ import { useCardThemed } from './cardLook';
 import { skinFor } from './cardSkins';
 import { publishBalance } from './balanceStore';
 import { useBshares } from '../placement/useBshares';
-import { requestCreditsSheet } from '../credits/creditsNav';
 import { BuyBsvSheet } from './BuyBsv';
 import { holdersRoomsEnabled, openHoldersRoom, type HoldersCoin } from './holdersRoom';
 import { routeFor } from '../tabs/tabs';
@@ -63,8 +61,8 @@ import './balanceCards.css';
  * Balance cards: the wallet card as a swipe carousel, one card per kind of balance, always shown with its REAL
  * balance (0.00 included, from balanceStore, published by the screens that already read it). Every card but BSV
  * (which is the real WalletCard with its own pen) has the pen flip icon: the back says what the balance is and its
- * buttons open real screens (Send/Receive, Credits Top up/History, the bShares register, Tickets, Tokens, Buy BSV
- * where allowed). bCredits has "View contract" with the decided terms. No mock money: nothing here signs or spends.
+ * buttons open real screens (Send/Receive, the bShares register, Tickets, Tokens, Buy BSV where allowed). No mock
+ * money: nothing here signs or spends.
  * Long-press opens All cards.
  */
 
@@ -95,8 +93,6 @@ type CardDef = {
   backLines: string[];
   /** Back buttons: each opens a real screen. */
   backButtons: BackButton[];
-  /** "View contract" sheet (bCredits only, the decided terms). */
-  agreement?: Agreement;
   /** A tapped token's card: its real balance, already formatted (instead of balanceStore). */
   amount?: string;
   /** A tapped token's card: its value (whole units at the last sale), for the fiat/BSV line. */
@@ -115,20 +111,19 @@ const UNIT_NAMES: Record<string, string> = {
   tokens: 'tokens',
   btickets: 'tickets',
   bshares: 'shares',
-  bcredits: 'bCredits',
   mnee: 'MNEE',
   pnee: 'PNEEs',
 };
 
 /** Cards whose front is a balance (all but Top up): they show a fiat/BSV value and the shared switch. */
-const VALUED = new Set(['tokens', 'btickets', 'bshares', 'bcredits', 'mnee', 'pnee']);
+const VALUED = new Set(['tokens', 'btickets', 'bshares', 'mnee', 'pnee']);
 
 /** What the card fronts need to price a balance: BSV price, display currency, the Tokens card's sum. */
 type ValueCtx = { rate: number; fx: Fx; tokens: CardValue | null };
 const CardValueContext = createContext<ValueCtx>({ rate: 0, fx: { currency: 'USD', usdPerUnit: 1 }, tokens: null });
 
 /**
- * A card's value from its real balance (balanceStore): MNEE and PNEEs are dollars, a bCredit is 1p, Tokens is the
+ * A card's value from its real balance (balanceStore): MNEE and PNEEs are dollars, Tokens is the
  * sum of each held token at its last sale. Tickets and bShares have no price here, so they count as unpriced.
  */
 const valueFor = (id: string, amount: number, tokens: CardValue | null): CardValue => {
@@ -136,10 +131,6 @@ const valueFor = (id: string, amount: number, tokens: CardValue | null): CardVal
     case 'mnee':
     case 'pnee':
       return { ...EMPTY_VALUE, usd: Math.max(0, amount) };
-    case 'bcredits': {
-      const usd = creditsUsd(amount, latestUsdPerGbp()?.rate ?? null);
-      return usd === null ? { ...EMPTY_VALUE, unpriced: 1 } : { ...EMPTY_VALUE, usd };
-    }
     case 'tokens':
       return tokens ?? EMPTY_VALUE;
     case 'btickets':
@@ -294,7 +285,6 @@ const CardFront = ({ c, live = true, onFlip }: { c: CardDef; live?: boolean; onF
 const FlipCard = ({ c }: { c: CardDef }) => {
   const [flipped, setFlipped] = useState(false);
   const [turning, setTurning] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
   const themed = useCardThemed(c.id);
   const timers = useRef<number[]>([]);
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
@@ -332,20 +322,7 @@ const FlipCard = ({ c }: { c: CardDef }) => {
               {b.label}
             </button>
           ))}
-          {c.agreement && (
-            <button
-              type="button"
-              className="bw-bc-contact"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSheetOpen(true);
-              }}
-            >
-              View contract
-            </button>
-          )}
         </span>
-        {sheetOpen && c.agreement && <AgreementSheet a={c.agreement} onClose={() => setSheetOpen(false)} />}
       </div>
     );
   return (
@@ -371,99 +348,6 @@ const StaticCard = ({ c, live }: { c: CardDef; live: boolean }) => {
       <CardFront c={c} live={live} onFlip={() => undefined} />
     </div>
   );
-};
-
-/** The bCredits contract: the decided terms, as a one-page NDS instrument (bit-sign's signable HTML). */
-type Agreement = { title: string; ref: string; file: string; issuer: string; clauses: [string, string][] };
-
-const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-const ndsHtml = (a: Agreement) => {
-  const manifest = {
-    nds: '1.0',
-    documentTitle: a.title,
-    documentRef: a.ref,
-    canonical: { algo: 'sha-256', over: 'rendered-pdf' },
-    resolution: 'dom-anchor',
-    signatureFields: [
-      { id: 'issuer', role: 'Issuer', name: a.issuer, party: 'issuer', required: true, order: 1 },
-      { id: 'holder', role: 'Customer', name: 'You', party: 'customer', required: true, order: 2 },
-    ],
-  };
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(a.title)}</title>
-<script type="application/npg-sig-manifest+json">
-${JSON.stringify(manifest, null, 2)}
-</script>
-<style>
-body{margin:0;background:#0b0b0d;font-family:'Times New Roman',serif;font-size:16px;line-height:1.5;color:#111}
-.sheet{background:#fff;margin:12px;padding:20px 18px;border-radius:6px;border-top:4px solid #ffd24d}
-h1{font-size:21px;margin:0 0 4px}.ref{font-size:12px;color:#555;font-family:ui-monospace,Menlo,monospace}
-.parties{border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:8px 0;margin:10px 0}
-ol{padding-left:22px}li{margin-bottom:8px}
-.execution{display:flex;flex-direction:column;gap:18px;margin-top:18px}
-.sig-line{border-bottom:1px solid #000;min-height:56px}.sig-caption{font-size:13px;color:#333}
-.note{font-size:12px;color:#555;margin-top:14px}
-</style></head><body><div class="sheet">
-<h1>${esc(a.title)}</h1><div class="ref">${esc(a.ref)}</div>
-<div class="parties"><b>Between</b> ${esc(a.issuer)} (the issuer)<br><b>and</b> you, the holder of this wallet</div>
-<ol>${a.clauses.map(([h, t]) => `<li><b>${esc(h)}.</b> ${esc(t)}</li>`).join('')}</ol>
-<div class="execution">
-<div class="sig-block"><div class="sig-line" data-sig-anchor="issuer"></div><div class="sig-caption">${esc(a.issuer)}</div></div>
-<div class="sig-block"><div class="sig-line" data-sig-anchor="holder"></div><div class="sig-caption">You</div></div>
-</div>
-<div class="note">Unsigned. You accept these terms when you top up; the signature lines are for bit-sign.</div>
-</div></body></html>`;
-};
-
-const AgreementSheet = ({ a, onClose }: { a: Agreement; onClose: () => void }) => {
-  const html = ndsHtml(a);
-  const save = () => {
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = a.file;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 5_000);
-  };
-  return (
-    <Layer onClose={onClose}>
-      <div className="bw-ag" onClick={(e) => e.stopPropagation()}>
-        <iframe className="bw-ag-doc" title={a.title} sandbox="" srcDoc={html} />
-        <div className="bw-ag-btns">
-          <button type="button" onClick={save}>
-            Save contract (.nds.html)
-          </button>
-          <button type="button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      </div>
-    </Layer>
-  );
-};
-
-/** The bCredits terms as decided (matches bit-sign creditsTerms() and CREDITS_TERMS_FALLBACK). */
-const BCREDITS_AGREEMENT: Agreement = {
-  title: 'bCredits contract',
-  ref: 'BCORP-BCREDITS-1',
-  file: 'bcredits-contract.nds.html',
-  issuer: 'The Bitcoin Corporation Ltd',
-  clauses: [
-    ['Issuer', 'bCredits are issued by The Bitcoin Corporation Ltd.'],
-    ['Price', '1 bCredit = 1p. You pay in BSV at the BSV/GBP rate when you top up.'],
-    [
-      'What they pay for',
-      'bCredits are spent only on b, the bWalletX agent. Each b reply costs what it costs to run × 1.35, rounded up to whole bCredits. b never runs you into debt.',
-    ],
-    ['Today', 'Ask b does not use bCredits.'],
-    ['Top-ups', 'Each top-up is up to £20.'],
-    ['Expiry', 'bCredits do not expire.'],
-    ['Refunds', 'bCredits are non-refundable except where the law requires.'],
-    ['Transfers', 'bCredits cannot be cashed out, sent to anyone or spent anywhere else.'],
-  ],
 };
 
 const Layer = ({ onClose, children, sheet = false }: { onClose: () => void; children: ReactNode; sheet?: boolean }) => {
@@ -780,37 +664,6 @@ export const BalanceCarousel = ({ bsvCard }: { bsvCard: ReactNode }) => {
             'You are not on a register yet.',
           ],
       backButtons: shares.me ? [{ label: 'Open register', run: () => navigate('/m/bshares'), primary: true }] : [],
-    });
-  if (BCREDITS_ENABLED)
-    cards.push({
-      id: 'bcredits',
-      title: 'Credits',
-      sub: '0.00 bCredits',
-      issuer: 'bCredits — pay for b · The Bitcoin Corporation Ltd',
-      colour: '#1a1608',
-      logo: '¢',
-      backLines: [
-        'Credits: one card for every credit type. bCredits — pay for b: prepay for b, the bWalletX agent. 1 bCredit = 1p.',
-        'Each b reply costs what it costs to run × 1.35. Top-ups up to £20. No expiry.',
-      ],
-      backButtons: [
-        {
-          label: 'Top up',
-          primary: true,
-          run: () => {
-            setWalletKind('credits');
-            requestCreditsSheet('topup');
-          },
-        },
-        {
-          label: 'History',
-          run: () => {
-            setWalletKind('credits');
-            requestCreditsSheet('history');
-          },
-        },
-      ],
-      agreement: BCREDITS_AGREEMENT,
     });
   cards.push(
     {

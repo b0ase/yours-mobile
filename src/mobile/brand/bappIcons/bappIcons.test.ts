@@ -30,7 +30,6 @@ const ALL_SLUGS = [
   'bsocial',
   'bchatx',
   'bexchange',
-  'bcredits',
   'bpaint',
   'bjobs',
   'bdrive',

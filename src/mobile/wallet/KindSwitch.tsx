@@ -7,18 +7,16 @@ const useWalletKind = () => useSyncExternalStore(subscribeWalletKind, getWalletK
 
 // Tokens | NFTs | Names (owner, 15 Oct 2026: Names replaces Friends; Friends is the address book, AddressBook.tsx). Tickets are ordinary tokens that get burned on entry, so they sit under Tokens
 // (owner, 3 Oct 2026); the Tickets view (WalletKindGate kind="tickets") is kept but nothing opens it.
-// Credits (bCredits) are shelved the same way (2 Oct 2026).
 const KINDS: [WalletKind, string][] = walletKindsFor<[WalletKind, string]>([
   ['tokens', 'Tokens'],
   ['nfts', 'NFTs'],
   ['names', 'Names'],
 ]);
-// Views with no chip that a balance card opens (tickets, credits, shares; 15 Oct 2026). Store builds drop them.
+// Views with no chip that a balance card opens (tickets, shares; 15 Oct 2026). Store builds drop them.
 const SHOWN = new Set<WalletKind>([
   ...KINDS.map(([k]) => k),
   ...walletKindsFor<[WalletKind]>([
     ['tickets'],
-    ['credits'],
     ...(PLACEMENT_ENABLED ? [['shares'] as [WalletKind]] : []),
   ]).map(([k]) => k),
 ]);
@@ -78,7 +76,7 @@ export const WalletKindSwitch = () => {
       box.removeEventListener('touchstart', stop);
     };
   }, [kind]);
-  // Desktop (wide/flag.ts sets html.ww-on): the Wallet tab bar with NFTs, Tickets and Credits as their own pages.
+  // Desktop (wide/flag.ts sets html.ww-on): the Wallet tab bar with NFTs and Tickets as their own pages.
   if (document.documentElement.classList.contains('ww-on')) return <WalletTabs active={kind} />;
   return (
     <div

@@ -15,7 +15,6 @@ A 2-column grid of category tiles at the top. No sideways-scrolling filter row.
 | Themes           | Free / Premium / Holders / Editions (the old Theme Store tabs)             | Free only   |
 | Subscriptions    | Open listing type: seller, price per day/week/month, perks, cancel anytime | Hidden      |
 | Names            | Links the Name Store (`/m/names`)                                          | Hidden      |
-| Credits          | Links the bCredits top-up (`/m/credits`, `BCREDITS_ENABLED`)               | Hidden      |
 | Stickers & emoji | Sticker and emoji packs (bCorp and creators)                               | Hidden      |
 | Services         | Theme edition order ($99 a year, existing flow), business agent in a room  | Hidden      |
 | Community        | Third-party listings, Sell something, Report                               | Hidden      |

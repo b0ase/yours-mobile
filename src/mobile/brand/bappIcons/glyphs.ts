@@ -26,8 +26,6 @@ export const GLYPHS = {
   bchat: '<path d="M4 5h16v11H10.5L6 19.5V16H4z"/>',
   bchatx: '<path d="M4 5h16v11H10.5L6 19.5V16H4z"/><path d="M10 8.5l4 4M14 8.5l-4 4"/>',
   bexchange: '<path d="M4 9h15.5l-4-4"/><path d="M20 15H4.5l4 4"/>',
-  bcredits:
-    '<ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v10c0 1.7 3.1 3 7 3s7-1.3 7-3V7M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/>',
   bshares: '<path d="M11 4a8.5 8.5 0 1 0 9 9h-9z"/><path d="M14 3a7 7 0 0 1 7 7h-7z"/>',
   btrust: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   bmint: '<circle cx="11" cy="13" r="7.5"/><path d="M19 3v4.5M16.75 5.25h4.5"/>',

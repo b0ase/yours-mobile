@@ -150,11 +150,6 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "onClick={() => setPageState('asset-picker')}\n            className=\"flex flex-1",
       "onClick={() => setPageState('asset-picker')}\n            className=\"order-1 flex flex-1",
     ],
-    // Credits row under the action buttons: balance, Top up, history (src/mobile/credits).
-    [
-      "import { MintButton } from '../mobile/mint/MintButton';",
-      "import { MintButton } from '../mobile/mint/MintButton';\nimport { CreditsRow } from '../mobile/credits/CreditsRow';",
-    ],
     // Send to a name now lives in the Send card itself (src/mobile/wallet/send/SendCard → NameInput).
     [
       "import { MintButton } from '../mobile/mint/MintButton';",
@@ -183,8 +178,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['      <OrdinalsAddress />\n    </motion.div>\n  );', '    </motion.div>\n  );'],
     // "Choose your handle" after create / restore, else a dismissible "Get your $name" card (src/mobile/names).
     [
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';",
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';\nimport { SweepPrompt } from '../mobile/sweep/SweepPrompt';",
+      "import { MintButton } from '../mobile/mint/MintButton';",
+      "import { MintButton } from '../mobile/mint/MintButton';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';\nimport { SweepPrompt } from '../mobile/sweep/SweepPrompt';",
     ],
     // Wide web layout: the token table and totals beside the wallet read this page's balances (wide/walletFeed.ts).
     [
@@ -192,10 +187,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '  useWideWalletFeed({ bsvBalance, mneeBalance, exchangeRate, bsv21s });\n  if (showWelcome) {',
     ],
     [
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';",
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { useWideWalletFeed } from '../mobile/wide/walletFeed';",
+      "import { MintButton } from '../mobile/mint/MintButton';",
+      "import { MintButton } from '../mobile/mint/MintButton';\nimport { useWideWalletFeed } from '../mobile/wide/walletFeed';",
     ],
-    // Under Receive / Send / Mint, outside the Tokens / NFTs / Credits gates so it shows on every view.
+    // Under Receive / Send / Mint, outside the Tokens / NFTs gates so it shows on every view.
     [
       '</SectionBoundary>\n        </motion.div>',
       '</SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Handle"><HandleOnboarding /></SectionBoundary>\n<SectionBoundary name="Sweep"><SweepPrompt /></SectionBoundary>\n<SectionBoundary name="Airdrops"><AirdropsRow /></SectionBoundary>',
@@ -511,7 +506,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       'const favs = account?.settings?.favoriteTokens ?? [];\n    const hidden = (account?.settings as { hiddenTokens?: string[] } | undefined)?.hiddenTokens ?? [];\n    const held = bsv21s.filter((t) => t.id && (favs.includes(t.id) || (BigInt(t.amt || "0") > 0n && !hidden.includes(t.id))));\n    const filtered = [...held].sort((a, b) => (favs.indexOf(a.id!) + 1 || 1e9) - (favs.indexOf(b.id!) + 1 || 1e9));',
     ],
   ],
-  // Wallet tab: Tokens | NFTs | Names (+ Tickets | Credits | Shares from the cards). NFTs is the media library (src/mobile/wallet, src/mobile/media).
+  // Wallet tab: Tokens | NFTs | Names (+ Tickets | Shares from the cards). NFTs is the media library (src/mobile/wallet, src/mobile/media).
   'src/pages/BsvWallet.tsx#kinds': [
     [
       "import { ManageTokens } from '../components/ManageTokens';",
@@ -523,7 +518,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        {/* Bottom breathing room */}',
-      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="names">\n          <SectionBoundary name="Names"><NamesSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <SectionBoundary name="Credits"><CreditsRow /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="shares">\n          <SectionBoundary name="Shares"><SharesSection /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
+      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="names">\n          <SectionBoundary name="Names"><NamesSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="shares">\n          <SectionBoundary name="Shares"><SharesSection /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
     ],
     // The switch replaces the section label and its top margin.
     [

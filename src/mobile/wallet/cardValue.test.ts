@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { cardTotals, cardValueText, creditsUsd, sumHoldings, unpricedNote, type CardValue } from './cardValue';
+import { cardTotals, cardValueText, sumHoldings, unpricedNote, type CardValue } from './cardValue';
 import type { Fx } from '../../utils/displayCurrency';
 
 const USD: Fx = { currency: 'USD', usdPerUnit: 1 };
@@ -55,11 +55,5 @@ describe('card value sums', () => {
     expect(cardValueText(mnee, 'usd', 0, USD)).toBe('$5.00');
     expect(cardValueText(mnee, 'bsv', 0, USD)).toBe('—');
     expect(cardValueText({ usd: 0, sats: 0, unpriced: 0 }, 'bsv', 0, USD)).toBe('BSV 0.00');
-  });
-
-  it('prices bCredits at 1p each', () => {
-    expect(creditsUsd(500, 1.25)).toBeCloseTo(6.25, 10);
-    expect(creditsUsd(500, null)).toBeNull();
-    expect(creditsUsd(0, null)).toBe(0);
   });
 });
