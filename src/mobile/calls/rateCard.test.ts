@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   bookingSlots,
   calleeShouldHangUp,
   capReachedAtS,
+  checkCardToken,
   costForMinutes,
   decideMeterPayment,
   FIRST_PAYMENT_S,
@@ -90,6 +92,55 @@ describe('rate card parsing', () => {
       { day: 1, from: '09:00', to: '12:30' },
       { day: 5, from: '09:00', to: '17:00' },
     ]);
+  });
+});
+
+describe('token cards: decimals come from the caller wallet, not the card', () => {
+  const id = `${'b'.repeat(64)}_0`;
+  const card = (dec: number, sym = 'BOB'): RateCard => ({
+    amount: 1,
+    per: 'minute',
+    asset: { kind: 'bsv21', id, sym, dec, address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },
+  });
+  const details = (dec?: string, sym = 'BOB', tokenId = id) => ({
+    tokenId,
+    token: { id: tokenId, op: 'deploy+mint', amt: '1000', sym, ...(dec === undefined ? {} : { dec }) },
+  });
+
+  test('a card whose decimals disagree with the token is refused', () => {
+    const r = checkCardToken(card(8), details('0'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("doesn't match");
+    expect(checkCardToken(card(0), details('8')).ok).toBe(false);
+  });
+  test('no lookup, a lookup for another token, or unreadable decimals: refused', () => {
+    expect(checkCardToken(card(0), null).ok).toBe(false);
+    expect(checkCardToken(card(0), {}).ok).toBe(false);
+    expect(checkCardToken(card(0), details('0', 'BOB', `${'c'.repeat(64)}_0`)).ok).toBe(false);
+    expect(checkCardToken(card(0), details('x')).ok).toBe(false);
+    expect(checkCardToken(card(0), details('19')).ok).toBe(false);
+  });
+  test('matching decimals pass, with the looked-up symbol; absent decimals mean 0', () => {
+    const r = checkCardToken(card(2, 'MNEE'), details('2', 'BOB'));
+    expect(r).toEqual({ ok: true, card: { ...card(2), asset: { ...card(2).asset, sym: 'BOB' } } });
+    expect(checkCardToken(card(0), details(undefined)).ok).toBe(true);
+    expect(checkCardToken(card(0), details('0', 'BOB', id.replace('_', '.'))).ok).toBe(true);
+  });
+  test('BSV and MNEE cards are untouched', () => {
+    expect(checkCardToken(usdPerMin, null)).toEqual({ ok: true, card: usdPerMin });
+    expect(checkCardToken(mneePerHour, null)).toEqual({ ok: true, card: mneePerHour });
+  });
+  test('the caller quotes and pays only checked token cards', () => {
+    const src = readFileSync(new URL('./store.ts', import.meta.url), 'utf8');
+    const dial = src.slice(
+      src.indexOf('export async function dial('),
+      src.indexOf('export async function acceptQuote('),
+    );
+    expect(dial).toContain('checkCardToken(offered, await lookupToken(offered.asset.id))');
+    expect(dial).toContain("dispatch({ type: 'QUOTE', peer, card, payTo");
+    const pay = src.slice(src.indexOf('async function pay('), src.indexOf('export const currentMeter'));
+    expect(pay.indexOf('checkedTokenDec.get(asset.id) !== asset.dec')).toBeGreaterThan(-1);
+    expect(pay.indexOf('checkedTokenDec.get(asset.id) !== asset.dec')).toBeLessThan(pay.indexOf('guardedSendBsv21'));
   });
 });
 
