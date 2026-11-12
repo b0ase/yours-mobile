@@ -7,9 +7,10 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OneSatContext } from '@1sat/actions';
-// The real actions, by file: other test files patch '@1sat/actions' with mock.module, which outlives their file.
-import { buyBsv21 } from '../../../node_modules/@1sat/actions/dist/tokens/index.js';
-import { buyOrdinal } from '../../../node_modules/@1sat/actions/dist/ordinals/index.js';
+// The real actions as their own module instance (`?unmocked`): other test files patch '@1sat/actions' with
+// mock.module, and in one bun run that patch outlives their file.
+import { buyBsv21 } from '../../../node_modules/@1sat/actions/dist/tokens/index.js?unmocked';
+import { buyOrdinal } from '../../../node_modules/@1sat/actions/dist/ordinals/index.js?unmocked';
 import { BSV21, OrdLockV2 } from '@1sat/templates';
 import { Beef, LockingScript, P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
 import { getPaused } from '../config/killSwitch';
