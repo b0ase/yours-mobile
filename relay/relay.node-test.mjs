@@ -211,6 +211,112 @@ test('wc is only for the site role and must be a SHA-256 hex digest', async () =
   await done();
 });
 
+// Wallet claim v2 (12 Nov 2026): the QR claim is computable from the QR, so it admits the first join only.
+const SESS = 'sessionwalletclaim_0001';
+const SESS2 = 'sessionwalletclaim_0002';
+
+test('v2: the QR claim admits one join; afterwards only the session claim does, and the QR claim cannot evict', async () => {
+  for (const legacyUntil of [0, Date.now() + 60_000]) {
+    const { base, done } = await boot({ legacyUntil });
+    const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+    const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS)}`);
+    await until(() => phone.inbox.length);
+    assert.deepEqual(phone.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol', wcv: 2 });
+    // Someone who saw the QR computes the same QR claim: refused, and the phone stays connected.
+    await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`), /403/);
+    await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS2)}`), /403/);
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(phone.ws.readyState, 1);
+    // The phone reconnects with its session claim.
+    const again = await open(`${base}/v1/c/${C}?role=wallet&claim=${SESS}&nc=${digest(SESS)}`);
+    await until(() => phone.ws.readyState === 3);
+    again.ws.close();
+    site.ws.close();
+    await done();
+  }
+});
+
+test('v2: a site that proved its claim re-binds a re-created channel to the session claim', async () => {
+  const { base, done } = await boot({ legacyUntil: 0 });
+  // The relay restarted: the site re-creates the channel with the session claim digest it derived itself.
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(SESS)}`, 'https://a.lol');
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`), /403/);
+  const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${SESS}&nc=${digest(SESS)}`);
+  await until(() => phone.inbox.length);
+  assert.deepEqual(phone.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol', wcv: 2 });
+  phone.ws.close();
+  site.ws.close();
+  await done();
+});
+
+test('v2: a site rejoin with wc moves the binding; without the site claim it changes nothing', async () => {
+  const { base, done } = await boot({ legacyUntil: 0 });
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+  const v1 = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`); // a wallet from before v2: no nc
+  await until(() => v1.inbox.length);
+  assert.deepEqual(v1.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol' });
+  v1.ws.close();
+  // A stranger can't rejoin as the site to move the binding.
+  await assert.rejects(open(`${base}/v1/c/${C}?role=site&claim=strangerstrangerstrang&wc=${digest(SESS2)}`, 'https://a.lol'), /403/);
+  const site2 = await open(`${base}/v1/c/${C}?role=site&claim=${SITE}&wc=${digest(SESS)}`, 'https://a.lol');
+  await until(() => site.ws.readyState === 3);
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`), /403/);
+  const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${SESS}`);
+  await until(() => phone.inbox.length);
+  phone.ws.close();
+  site2.ws.close();
+  await done();
+});
+
+test('v2: a site claim pinned on this connect cannot move the binding (channel opened without a site claim)', async () => {
+  const { base, done } = await boot({ legacyUntil: Date.now() + 60_000 });
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&wc=${digest(QRW)}`, 'https://a.lol'); // no site claim
+  const other = await open(`${base}/v1/c/${C}?role=site&claim=strangerstrangerstrang&wc=${digest(SESS2)}`, 'https://a.lol');
+  await until(() => site.ws.readyState === 3);
+  // The binding is still the QR one: a wallet with the stranger's session claim gets in only through the window,
+  // unbound, and the scanning phone evicts it and binds.
+  const squat = await open(`${base}/v1/c/${C}?role=wallet&claim=${SESS2}&nc=${digest(SESS2)}`);
+  await until(() => squat.inbox.length);
+  assert.equal(squat.inbox[0].wcv, undefined);
+  const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS)}`);
+  await until(() => phone.inbox.length);
+  assert.equal(phone.inbox[0].wcv, 2);
+  phone.ws.close();
+  other.ws.close();
+  await done();
+});
+
+test('v2: a squatter admitted by the window cannot bind; the QR phone still evicts it and binds', async () => {
+  const { base, done } = await boot({ legacyUntil: Date.now() + 60_000 });
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+  const squat = await open(`${base}/v1/c/${C}?role=wallet&claim=squattersquattersquat1&nc=${digest(SESS2)}`);
+  await until(() => squat.inbox.length);
+  assert.equal(squat.inbox[0].wcv, undefined);
+  const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS)}`);
+  await until(() => squat.ws.readyState === 3 && phone.inbox.length);
+  assert.equal(phone.inbox[0].wcv, 2);
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=squattersquattersquat1`), /403/);
+  phone.ws.close();
+  site.ws.close();
+  await done();
+});
+
+test('v2: nc is only for the wallet role and must be a digest; enforcement refuses a wallet without it', async () => {
+  const { base, done } = await boot({ legacyUntil: 0, sessionClaimsFrom: 0 });
+  await assert.rejects(open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&nc=${digest(SESS)}`, 'https://a.lol'), /400/);
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=nothex`), /400/);
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`), /403/); // a wallet from before v2
+  const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS)}`);
+  await until(() => phone.inbox.length);
+  phone.ws.close();
+  // Holding the role, the owner reconnects with the session claim alone.
+  const again = await open(`${base}/v1/c/${C}?role=wallet&claim=${SESS}`);
+  again.ws.close();
+  site.ws.close();
+  await done();
+});
+
 test('x-real-ip is believed only from a trusted proxy', () => {
   const req = (remoteAddress, ip) => ({ socket: { remoteAddress }, headers: ip ? { 'x-real-ip': ip } : {} });
   assert.equal(clientIp(req('127.0.0.1', '203.0.113.9')), '203.0.113.9');

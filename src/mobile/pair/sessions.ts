@@ -15,6 +15,8 @@ import {
   relaySocketUrl,
   newClaim,
   walletClaimFor,
+  sessionWalletClaim,
+  claimDigestSync,
   isAllowedRelay,
   verifyPairProofs,
   type HelloFrame,
@@ -195,6 +197,11 @@ export type StoredSession = {
   account?: string;
   /** Relay role claim (protocol.ts newClaim): only this wallet can rejoin the channel. Missing on older sessions. */
   claim?: string;
+  /**
+   * 2: `claim` is the session claim (protocol.ts sessionWalletClaim) and the relay bound it, so rejoins send its digest
+   * as `nc`. Unset: `claim` is the QR claim or a random one (relays or sessions from before 12 Nov 2026).
+   */
+  wcv?: 2;
   /** The site proved its origin (protocol.ts verifyPairProof). Unset: the host is only claimed. */
   proven?: boolean;
 };
@@ -560,8 +567,10 @@ function connect(c: string) {
       // Sessions stored before claims existed get one now; the relay binds it on this connect.
       const claim = stored.claim ?? newClaim();
       if (!stored.claim) update(c, { claim });
+      // v2: also send the session claim's digest, so a channel the relay re-created stays bound to this phone.
+      const nc = stored.wcv === 2 ? claimDigestSync(claim) : undefined;
       attach({
-        ws: new WebSocket(relaySocketUrl(stored.r, stored.c, 'wallet', undefined, claim)),
+        ws: new WebSocket(relaySocketUrl(stored.r, stored.c, 'wallet', undefined, claim, nc)),
         sealer,
         stored: { ...stored, claim },
         resumed: true,
@@ -605,18 +614,23 @@ export function beginPairing(scanned: string, opts: { allowCli?: boolean } = {})
   // pair the CLI themselves (Agents, Settings), never from the general scanner or a link that opened the app.
   if (link.o === CLI_ORIGIN && !opts.allowCli) return Promise.reject(new Error(CLI_ONLY_FROM_SETTINGS));
   const P = PrivateKey.fromRandom();
-  // Bound to the QR (N3-2): a site that registered this claim's digest lets only us take the wallet role.
-  return connectPairing(link, P, walletClaimFor(link.c, link.k), opts);
+  // Bound to the QR (N3-2): a site that registered this claim's digest lets only us take the wallet role. Anyone who
+  // sees the QR can compute that claim too, so it is good for this first join only: we also send the digest of our
+  // session claim (wallet claim v2), which only we and the site can compute, and the relay binds the role to it.
+  return connectPairing(link, P, walletClaimFor(link.c, link.k), sessionWalletClaim(P, link.k, link.c), opts);
 }
 
 function connectPairing(
   link: PairLink,
   P: PrivateKey,
   claim: string,
+  sessionClaim: string,
   opts: { allowCli?: boolean },
 ): Promise<PendingPair> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(relaySocketUrl(link.r, link.c, 'wallet', undefined, claim));
+    const ws = new WebSocket(
+      relaySocketUrl(link.r, link.c, 'wallet', undefined, claim, claimDigestSync(sessionClaim)),
+    );
     let settled = false;
     const fail = (m: string) => {
       if (settled) return;
@@ -662,11 +676,14 @@ function connectPairing(
       // client can set any Origin header, so the session never gets the site's saved grants (see onRequest).
       if (f.verifiedOrigin !== link.o)
         return fail(`This code was shown by ${f.verifiedOrigin}, not ${link.o}. Don't connect.`);
+      // The relay says it bound the wallet role to our session claim: tell the site, which re-binds it on reconnects.
+      const v2 = f.wcv === 2;
       const hello: HelloFrame = {
         t: 'hello',
         k: P.toPublicKey().toString(),
         info: { name: appNameFor(), rdns: 'space.bwallet.mobile' },
         ...(link.cd === 8 && { cd: 8 as const }),
+        ...(v2 && { wcv: 2 as const }),
       };
       ws.send(JSON.stringify(hello));
       const { key, code } = await deriveSession(P, link.k, link.c, link.cd ?? 4);
@@ -726,7 +743,8 @@ function connectPairing(
             lastUsed: Date.now(),
             ...(agent && { agent }),
             ...(agentDeps.currentId && { account: agentDeps.currentId }),
-            claim,
+            // v2: the QR claim is spent at the relay; rejoin with the session claim. An older relay kept the QR claim.
+            ...(v2 ? { claim: sessionClaim, wcv: 2 as const } : { claim }),
             ...(proven && { proven: true }),
           };
           save([...load().filter((s) => s.c !== link.c), stored]);

@@ -35,6 +35,19 @@ const claimHash = (c) => createHash('sha256').update(c).digest('hex');
 // can produce (protocol walletClaimFor(channel, site pubkey)). The relay never sees the QR, so someone who only
 // knows the channel ID can't make that claim, and a wallet that brings it always wins the role.
 const CLAIM_DIGEST = /^[0-9a-f]{64}$/;
+// Session-bound wallet claim (wallet claim v2, 12 Nov 2026). The QR-bound claim above is computable by anyone who sees
+// the QR, so it is good for the first join only. A v2 wallet joins with it plus `nc`, the SHA-256 (hex) of its session
+// claim: an HMAC keyed by the ECDH secret of its own pairing key and the site's, which only the two ends can compute.
+// The relay then binds the wallet role to `nc` and the QR claim stops admitting anyone. Sites that know the pairing
+// is v2 send that same digest as `wc` whenever they reconnect, so a re-created channel stays bound to the phone.
+export const WALLET_CLAIM_V2 = 2;
+
+/**
+ * From this moment a wallet that takes an unclaimed wallet role must bring `nc` (wallets from before wallet claim v2
+ * are refused and have to update). Default: not enforced; set RELAY_SESSION_CLAIMS_FROM (ISO date) or
+ * createRelay({ sessionClaimsFrom }) in ms once the wallet release that sends `nc` is out.
+ */
+export const SESSION_CLAIMS_FROM = Infinity;
 
 /**
  * Compatibility window for clients from before 26 Oct 2026 (sites without a site claim, wallets with a random
@@ -76,9 +89,11 @@ export function createRelay({
   now = () => Date.now(),
   log = () => {},
   legacyUntil = LEGACY_CLAIMS_UNTIL,
+  sessionClaimsFrom = SESSION_CLAIMS_FROM,
   trustedProxies = DEFAULT_TRUSTED_PROXIES,
 } = {}) {
   const legacy = () => now() < legacyUntil;
+  const sessionClaimsRequired = () => now() >= sessionClaimsFrom;
   const channels = new Map();
   const perIp = new Map();
   const wss = new WebSocketServer({ noServer: true, maxPayload: LIMITS.maxFrame });
@@ -125,6 +140,14 @@ export function createRelay({
     return claim !== null;
   };
 
+  /**
+   * May this wallet join bind the role to its session claim digest `nc`? Only the phone that proves it saw the QR
+   * (the bound claim), or the first wallet on a channel nobody bound (sites and CLIs without `wc`). Never a claim the
+   * relay admitted only because of the compatibility window: that would let a squatter pin the role before the phone.
+   */
+  const mayBind = (ch, role, claim, nc) =>
+    role === 'wallet' && !!nc && (qrBound(ch, role, claim) || (!ch.walletBinding && !ch.claims.wallet));
+
   /** Decide whether an upgrade is allowed. Returns { ok, code, reason, ... }. */
   function admit(req) {
     const url = new URL(req.url, 'http://relay');
@@ -135,6 +158,9 @@ export function createRelay({
     if (claim !== null && !CLAIM.test(claim)) return { ok: false, code: 400, reason: 'bad request' };
     const wc = url.searchParams.get('wc');
     if (wc !== null && (role !== 'site' || !CLAIM_DIGEST.test(wc)))
+      return { ok: false, code: 400, reason: 'bad request' };
+    const nc = url.searchParams.get('nc');
+    if (nc !== null && (role !== 'wallet' || !CLAIM_DIGEST.test(nc)))
       return { ok: false, code: 400, reason: 'bad request' };
     const id = m[1];
     const ip = clientIp(req, trustedProxies);
@@ -147,7 +173,7 @@ export function createRelay({
       if (ch) {
         if (ch.origin !== origin) return { ok: false, code: 403, reason: 'origin mismatch' };
         if (!claimOk(ch, role, claim)) return { ok: false, code: 403, reason: 'role claimed' };
-        return { ok: true, id, role, ch, claim };
+        return { ok: true, id, role, ch, claim, wc };
       }
       const e = Number(url.searchParams.get('e'));
       if (!Number.isFinite(e) || e * 1000 < t || e * 1000 > t + LIMITS.maxQrLifetimeS * 1000)
@@ -180,20 +206,37 @@ export function createRelay({
     // opened it, so the wallet may join and its frames queue for the site like any other away case.
     if (!ch.paired && t > ch.expiry) return { ok: false, code: 410, reason: 'qr expired' };
     if (!claimOk(ch, role, claim)) return { ok: false, code: 403, reason: 'role claimed' };
-    return { ok: true, id, role, ch, claim };
+    // After the cut-over a wallet taking an empty role must be a v2 wallet (the owner reconnecting holds the role).
+    if (sessionClaimsRequired() && !ch.claims.wallet && !nc)
+      return { ok: false, code: 403, reason: 'claim proof required' };
+    return { ok: true, id, role, ch, claim, nc };
   }
 
-  function attach(ws, { role, ch, claim }) {
+  function attach(ws, { role, ch, claim, wc = null, nc = null }) {
     // Re-check: another socket may have claimed the role between admit and the upgrade finishing.
     if (!claimOk(ch, role, claim ?? null)) return ws.close(4003, 'role claimed');
-    if (qrBound(ch, role, claim)) ch.claims[role] = ch.walletBinding;
+    // Only a site claim the relay already held may move the wallet binding, never one this attach is pinning now.
+    const siteProven = role === 'site' && !!claim && !!ch.claims.site && ch.claims.site === claimHash(claim);
+    let bound = false;
+    if (mayBind(ch, role, claim, nc)) {
+      // Wallet claim v2: from now on only the session claim admits the wallet; the QR claim is spent.
+      ch.walletBinding = nc;
+      ch.claims.wallet = nc;
+      bound = true;
+    } else if (qrBound(ch, role, claim)) ch.claims[role] = ch.walletBinding;
     else if (claim && !ch.claims[role]) ch.claims[role] = claimHash(claim);
+    // A site that proved its own claim may re-bind the wallet role to the session claim digest it knows (v2 pairing).
+    if (siteProven && wc && ch.walletBinding !== wc) {
+      ch.walletBinding = wc;
+      ch.claims.wallet = wc;
+    }
     ch[role]?.close(4001, 'replaced');
     ch[role] = ws;
     ch.lastActive = now();
     if (role === 'wallet') {
       ch.paired = true;
-      send(ws, { t: 'relay', verifiedOrigin: ch.origin });
+      // `wcv` tells the wallet its session claim is now the one bound here (an older relay never says so).
+      send(ws, { t: 'relay', verifiedOrigin: ch.origin, ...(bound && { wcv: WALLET_CLAIM_V2 }) });
     }
     send(ch[other(role)], { t: 'relay', peer: 'joined', role });
     // Deliver what arrived while this side was away.

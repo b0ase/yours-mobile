@@ -109,6 +109,25 @@ test('QR → scan → same code → connect → request reaches the wallet and t
   ]);
   expect(phone.pairedSites().map((s: { origin: string }) => s.origin)).toEqual([SITE_ORIGIN]);
 
+  // Wallet claim v2: the relay bound the wallet role to the phone's session claim, so the QR claim (which anyone who
+  // saw the QR can compute) no longer admits anyone, and the phone keeps the session claim for rejoins.
+  const proto = await import('../../src/pair/protocol.ts');
+  const [stored] = JSON.parse(localStorage.getItem('bwallet.pair.sessions') ?? '[]') as {
+    c: string;
+    claim: string;
+    wcv?: number;
+    phoneKey: string;
+    sitePub: string;
+  }[];
+  expect(stored.wcv).toBe(2);
+  expect(stored.claim).toBe(proto.sessionWalletClaim((await import('@bsv/sdk')).PrivateKey.fromHex(stored.phoneKey), stored.sitePub, stored.c));
+  const refused = await new Promise<boolean>((res) => {
+    const w = new Native(proto.relaySocketUrl(`localhost:${port}`, stored.c, 'wallet', undefined, proto.walletClaimFor(stored.c, stored.sitePub)));
+    w.onopen = () => (w.close(), res(false));
+    w.onerror = () => res(true);
+  });
+  expect(refused).toBe(true);
+
   // A QR claiming another origin is refused by the phone (relay reports the real one).
   const forged = link.replace(encodeURIComponent(SITE_ORIGIN), encodeURIComponent('https://tokenblaster.lol'));
   const stop2 = site.startPairing(() => {});

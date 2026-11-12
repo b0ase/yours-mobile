@@ -70,12 +70,21 @@ export type PairMessage =
   | { t: 'close'; reason: string };
 
 /** Unencrypted frames: from the relay, and the phone's hello (its key isn't shared yet). */
-export type RelayFrame = { t: 'relay'; verifiedOrigin?: string; peer?: 'joined' | 'left'; role?: Role; error?: string };
+export type RelayFrame = {
+  t: 'relay';
+  verifiedOrigin?: string;
+  peer?: 'joined' | 'left';
+  role?: Role;
+  error?: string;
+  /** 2: the relay bound the wallet role to this wallet's session claim (wallet claim v2). Older relays never send it. */
+  wcv?: number;
+};
 /**
  * `cd`: the code length this wallet is showing. Sent (as 8) only when the link asked for `cd=8`, so a site knows the
  * wallet understood it; a hello without it comes from an older wallet showing 4 digits.
  */
-export type HelloFrame = { t: 'hello'; k: string; info: WalletInfo; cd?: CodeDigits };
+/** `wcv: 2`: the relay holds the wallet role for this pairing's session claim; the site re-binds it on reconnects. */
+export type HelloFrame = { t: 'hello'; k: string; info: WalletInfo; cd?: CodeDigits; wcv?: 2 };
 export type SealedFrame = { s: number; n: string; d: string };
 
 const enc = new TextEncoder();
@@ -260,6 +269,22 @@ export function walletClaimFor(channel: string, sitePub: string): string {
   return b64url(new Uint8Array(Hash.sha256(Utils.toArray(`${WALLET_CLAIM_INFO}|${channel}|${sitePub}`, 'utf8'))));
 }
 
+const SESSION_CLAIM_INFO = 'bwallet-pair-wallet-claim-v2';
+
+/**
+ * Wallet claim v2 (12 Nov 2026): the wallet's relay claim for the life of a pairing. HMAC-SHA256 keyed by the ECDH
+ * point of the two pairing keys (compressed), over "bwallet-pair-wallet-claim-v2|<channel>". The phone computes it
+ * from its own pairing key and the site's key in the QR; the site from its key and the phone's hello. Nothing in the
+ * QR or on the relay is enough to compute it, unlike walletClaimFor, which anyone who sees the QR can compute.
+ */
+export function sessionWalletClaim(mine: PrivateKey, theirs: string, channel: string): string {
+  const point = mine.deriveSharedSecret(PublicKey.fromString(theirs)).encode(true) as number[];
+  return b64url(new Uint8Array(Hash.sha256hmac(point, Utils.toArray(`${SESSION_CLAIM_INFO}|${channel}`, 'utf8'))));
+}
+
+/** claimDigest without WebCrypto (synchronous), for building a socket URL at once. Same output. */
+export const claimDigestSync = (claim: string): string => Utils.toHex(Hash.sha256(Utils.toArray(claim, 'utf8')));
+
 /** SHA-256 (hex) of a claim: what the relay stores and what a site sends as `wc`. */
 export async function claimDigest(claim: string): Promise<string> {
   return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(claim))));
@@ -267,7 +292,8 @@ export async function claimDigest(claim: string): Promise<string> {
 
 /**
  * The relay socket URL. `claim` binds the role to this client; a site opening a new channel also passes `walletClaimHash`
- * (claimDigest(walletClaimFor(...))) so only the phone that scanned the QR can take the wallet role.
+ * (claimDigest(walletClaimFor(...))) so only the phone that scanned the QR can take the wallet role. A v2 wallet passes
+ * `walletClaimHash` too: the digest of its session claim (`nc`), which the relay binds the wallet role to from then on.
  */
 export const relaySocketUrl = (
   relay: string,
@@ -281,7 +307,7 @@ export const relaySocketUrl = (
   const q = new URLSearchParams({ role });
   if (expiry) q.set('e', String(expiry));
   if (claim) q.set('claim', claim);
-  if (walletClaimHash && role === 'site') q.set('wc', walletClaimHash);
+  if (walletClaimHash) q.set(role === 'site' ? 'wc' : 'nc', walletClaimHash);
   return `${local ? 'ws' : 'wss'}://${relay}/v1/c/${channel}?${q}`;
 };
 
