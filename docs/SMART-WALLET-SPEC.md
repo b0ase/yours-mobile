@@ -79,7 +79,8 @@ A strategy file contains:
 **Enforcement.** Rules and the spec's limits are checked by the wallet before any action is signed. If
 the AI asks for something outside them, the action is refused and logged. The AI chooses _when_ and
 _whether_ within the rules; it can never widen them. Exceptions today are listed in STRATEGY-FORMAT.md: `stop.downPct`
-isn't active yet, and minting from a paired CLI and exported keys are outside these checks.
+isn't active yet, minting from a paired CLI is outside the strategy rules (Stop all and the daily cap still apply), and
+exported keys are outside these checks.
 
 **Loading.** Account › **Load strategy** (app) or `bwalletx strategy load` (CLI). One strategy per account
 at a time; an agent on several accounts can run a different one in each.
