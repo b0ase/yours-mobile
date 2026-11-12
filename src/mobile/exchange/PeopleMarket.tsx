@@ -17,6 +17,7 @@ import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { clearMarketCache, roomMarket, type Listing } from '../market/indexer';
 import { marketFeeOptions, marketFeeSats } from '../market/fee';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
+import { checkedPurchaseContext } from '../p2p/checkedPurchase';
 import { showOnWallet } from '../tokens/indexFund';
 import { marketTradingEnabled, tokenRoomsEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
@@ -117,7 +118,14 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
     try {
       const outpoint = walletOutpoint(l.outpoint);
       await assertOrdLockV2(outpoint);
-      const res = await buyBsv21.execute(purchaseContext(apiContext, outpoint), {
+      // Checked before signing: the wallet pays exactly the price on the sheet, or nothing.
+      const checked = await checkedPurchaseContext(apiContext, {
+        tokenId: token.tokenId,
+        outpoint,
+        amount: BigInt(l.amount ?? '0'),
+        priceSats: l.priceSats,
+      });
+      const res = await buyBsv21.execute(purchaseContext(checked, outpoint), {
         tokenId: token.tokenId,
         outpoint,
         amount: l.amount ?? '0',

@@ -25,8 +25,9 @@ import type { Bapp } from './bappRooms';
 import { checkTicket, fetchTicketCard, recordTicket, ticketLabel, ticketRequests, type TicketCard } from './bappTicket';
 import { fetchQuote, pickCurveListing, recordPurchase, supporterBadge, centsLabel } from '../exchange/curveSales';
 import { roomMarket, clearMarketCache, type Listing } from '../market/indexer';
-import { marketFeeOptions } from '../market/fee';
+import { marketFeeOptions, marketFeeSats } from '../market/fee';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
+import { checkedPurchaseContext } from '../p2p/checkedPurchase';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { purchaseError } from '../exchange/purchase';
 import { FullSheet } from './FullSheet';
@@ -152,7 +153,14 @@ export const BappTicketButton = ({
     try {
       const outpoint = walletOutpoint(l.outpoint);
       await assertOrdLockV2(outpoint);
-      const res = await buyBsv21.execute(purchaseContext(apiContext, outpoint), {
+      // Checked before signing: the wallet pays exactly the listing price shown on the sheet, or nothing.
+      const checked = await checkedPurchaseContext(apiContext, {
+        tokenId: bapp.tokenId,
+        outpoint,
+        amount: BigInt(l.amount ?? '0'),
+        priceSats: l.priceSats,
+      });
+      const res = await buyBsv21.execute(purchaseContext(checked, outpoint), {
         tokenId: bapp.tokenId,
         outpoint,
         amount: l.amount ?? '0',
@@ -240,6 +248,12 @@ export const BappTicketButton = ({
                   <>
                     <div>
                       One ${bapp.ticker} from {bapp.name}’s own supply ({sheet.listing.label})
+                    </div>
+                    {/* The listing's own price: exactly what the wallet will sign (checkedPurchaseContext). */}
+                    <div>
+                      Price: {sheet.listing.priceSats.toLocaleString('en-US')} sats
+                      {marketFeeSats(sheet.listing.priceSats) > 0 &&
+                        ` + ${marketFeeSats(sheet.listing.priceSats).toLocaleString('en-US')} sats marketplace fee`}
                     </div>
                     <div>Holding it is your membership</div>
                   </>

@@ -10,6 +10,7 @@ import { fmtSats } from '../money/money';
 import { usdOrSats } from '../names/opnsSell';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
+import { checkedOrdinalPurchaseContext } from '../p2p/checkedPurchase';
 import { purchaseError } from './purchase';
 import { forSale, isOwned, type Podcast } from '../bradio/podcasts';
 import { PodcastCard } from '../bradio/PodcastCard';
@@ -135,7 +136,13 @@ export const PodcastMarket = ({ rate }: { rate: number }) => {
     try {
       const outpoint = walletOutpoint(p.nft.outpoint);
       await assertOrdLockV2(outpoint);
-      const res = await buyOrdinal.execute(purchaseContext(apiContext, outpoint), {
+      // Checked before signing: the wallet pays exactly the price on the sheet (no marketplace fee here), or nothing.
+      const checked = await checkedOrdinalPurchaseContext(apiContext, {
+        outpoint,
+        priceSats: p.nft.price ?? 0,
+        fee: null,
+      });
+      const res = await buyOrdinal.execute(purchaseContext(checked, outpoint), {
         outpoint,
         name: p.title.slice(0, 64),
         contentType: p.nft.contentType,

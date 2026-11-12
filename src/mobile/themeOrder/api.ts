@@ -1,6 +1,6 @@
 import { buildOrdinalCustomInstructions, ORDINALS_BASKET, P1SAT_PROTOCOL, type OneSatContext } from '@1sat/actions';
 import { buildInscriptionScript } from '@1sat/templates';
-import { guardedPay, scriptAddress, type Shown } from '../../services/guardedPay';
+import { GuardedPayError, guardedPay, scriptAddress, type Shown } from '../../services/guardedPay';
 import type { WalletInterface } from '@bsv/sdk';
 import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk';
 import { storeReceiptMap, storeReceiptSvg, STORE_RECEIPT_TYPE, type StoreReceipt } from '../storeReceipt/receipt';
@@ -304,9 +304,16 @@ export const getRenewQuote = (f: Fetch, wallet: Signer, slug: string) => getQuot
 export const MAX_THEME_BUY_SATS = 20_000_000;
 export const MAX_EDITION_SATS = 1_000_000_000;
 
-/** What the Pay sheet shows for a quote: each output as address + sats (refuses a non-P2PKH payment). */
-export const quoteShown = (q: Quote): Shown[] =>
-  q.outputs.filter((o) => o.satoshis > 1).map((o) => ({ address: scriptAddress(o.script), sats: o.satoshis }));
+/**
+ * What the Pay sheet shows for a quote: each output as address + sats (refuses a non-P2PKH payment). The sheet prints
+ * `q.sats`, so the outputs must add up to exactly that: the wallet never signs a different total than the one shown.
+ */
+export const quoteShown = (q: Quote): Shown[] => {
+  const total = q.outputs.reduce((n, o) => n + o.satoshis, 0);
+  if (!Number.isSafeInteger(total) || total !== q.sats)
+    throw new GuardedPayError('the payment does not match the price you were shown');
+  return q.outputs.filter((o) => o.satoshis > 1).map((o) => ({ address: scriptAddress(o.script), sats: o.satoshis }));
+};
 
 /** The quote's outputs + the memo as createAction outputs. Pure. */
 export const quoteOutputs = (q: Quote) => [

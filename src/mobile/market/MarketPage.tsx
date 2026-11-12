@@ -86,6 +86,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { PullToRefresh } from '../ui/PullToRefresh';
 import { openDappBrowser } from '../dappBrowser';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from './walletOutpoint';
+import { checkedOrdinalPurchaseContext, checkedPurchaseContext, feeFromOptions } from '../p2p/checkedPurchase';
 import { ContractsMarket } from '../contracts/ContractsMarket';
 import { GamesMarket } from '../games/GamesMarket';
 import { ErrorActions } from '../errors/ErrorActions';
@@ -370,7 +371,6 @@ const MarketPage = () => {
       // Ticket resales use the ticket resale fee (default 0), not the general Market fee.
       const fee = ticketPage ? ticketResaleFeeOptions() : marketFeeOptions();
       const outpoint = walletOutpoint(listing.outpoint);
-      const ctx = purchaseContext(apiContext, outpoint);
       // Pre-buy: drop a listing someone already bought (1Sat's search can lag a sale).
       if ((await listingSpendState(listing.outpoint)) === 'spent') {
         addSnackbar(STALE_LISTING_MESSAGE, 'info');
@@ -380,6 +380,19 @@ const MarketPage = () => {
         return;
       }
       await assertOrdLockV2(outpoint);
+      // Checked before signing: the wallet pays exactly the price on the sheet (and the fee it showed), or nothing.
+      const shownFee = feeFromOptions(fee, listing.priceSats);
+      const checked =
+        r.ref.kind === 'bsv21'
+          ? await checkedPurchaseContext(apiContext, {
+              tokenId: r.ref.id,
+              outpoint,
+              amount: BigInt(listing.amount ?? '0'),
+              priceSats: listing.priceSats,
+              fee: shownFee,
+            })
+          : await checkedOrdinalPurchaseContext(apiContext, { outpoint, priceSats: listing.priceSats, fee: shownFee });
+      const ctx = purchaseContext(checked, outpoint);
       const res =
         r.ref.kind === 'bsv21'
           ? await buyBsv21.execute(ctx, {
