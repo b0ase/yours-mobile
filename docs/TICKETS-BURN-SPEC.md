@@ -2,9 +2,9 @@
 
 Status: proposal, nothing built. Builds on `TICKETS.md` (tickets, `entry=hold|spend`, MAP deploy
 tag), `TOKEN-ROOMS.md` / bChat SPEC §7.2–7.3 (spend rules), bit-sign's token-room gate
-(`src/lib/token-room-gate.ts`, `token-room-rules.ts`, migration `20261001_token_room_addresses.sql`)
-and the bCredits deposit verifier (`feat/credits`: `src/lib/credits.ts` `verifyDeposit`,
-migration `20261001_credits.sql`).
+(`src/lib/token-room-gate.ts`, `token-room-rules.ts`, migration `20261001_token_room_addresses.sql`).
+A burn is verified the usual way for a payment: the txid is read from the chain once, checked, and recorded
+idempotently. (12 Nov 2026: the b-only prepaid credits this draft once cited were retired.)
 
 Today a "spend" room is recorded on chain but works as `hold` (`SPEND_ENTRY_SUPPORTED` is off,
 `WalletTicket.entry` is always `'hold'`). This spec turns on one spend mode: **spend N per entry,
@@ -72,18 +72,17 @@ Also `GET /api/bitsign/rooms/token-gated/entry?key=` → current pass, supply st
    `handle=` matches and is AIP-signed by such a key. Stops someone claiming another user's burn.
 4. Caller is not banned (`isBannedFrom`).
 
-**Idempotency:** one txid = one entry, enforced by a unique index (same pattern as
-`bit_sign_credit_ledger_txid_uq`). Re-submitting the same txid by the same handle returns the
+**Idempotency:** one txid = one entry, enforced by a unique index on the txid. Re-submitting the same txid by the same handle returns the
 existing pass (`duplicate: true`); by another handle returns `claimed`.
 
 **Mempool vs confirmed:** the indexer validates BSV-21 before the block (status `1` usually
 within seconds). Accept `status = 1` (indexer-valid, may be unconfirmed); refuse `0` as
-`pending` (client retries with backoff, as bCredits does); refuse `-1`. Double-spend risk of an
+`pending` (client retries with backoff); refuse `-1`. Double-spend risk of an
 unconfirmed burn is low-value (one room entry); a nightly job re-checks entries less than one day
 old and revokes any whose tx vanished.
 
-**Races:** the insert happens inside a SQL function with `FOR UPDATE` on the room row (as
-`bit_sign_credit_deposit` does), so expiry/close and entry can't interleave. Two devices
+**Races:** the insert happens inside a SQL function with `FOR UPDATE` on the room row, so expiry/close and entry
+can't interleave. Two devices
 submitting the same txid: the unique index decides.
 
 **Schema sketch** (new migration, applied by hand like the others):
@@ -203,7 +202,7 @@ so the wallet knows to show the burn sheet instead of "Hold 1".
    - **messages**: each ticket buys N messages;
    - **words** or **characters**: each ticket buys N words / N characters of posting.
      Reading may stay free or also be metered (creator's choice). bit-sign keeps the per-member allowance as a ledger
-     (deposit on burn, debit per message/word/char, never below 0, idempotent per message), like the credits ledger;
+     (deposit on burn, debit per message/word/char, never below 0, idempotent per message);
      when it runs out the composer asks to burn another ticket.
 6. **No refunds.** Burns are final; there is no refund or creator-bond mechanism.
 7. **Rooms expire, tickets don't.** A ticket for an expired (or closed) room stays a normal token in the wallet but
