@@ -13,7 +13,8 @@
  * Rules, all enforced here and unit tested (envelopes.test.ts):
  * - One envelope per site, keyed by the browser-derived originator (never anything the page says).
  * - A spend is approved only when the whole amount fits in the balance; the balance can never go negative.
- * - Every change goes through one queue, so two payments racing for the last cents cannot both win.
+ * - Every change goes through one lock per storage key (shared by every store instance and, on the web, every tab),
+ *   so two payments racing for the last cents cannot both win.
  * - Another site's payment never reads or touches this envelope.
  */
 
@@ -149,29 +150,84 @@ export const returnCoins = (state: EnvelopeState, originator: string): { state: 
 export type EnvelopeBackend = {
   load(): Promise<unknown>;
   save(state: EnvelopeState): Promise<void>;
+  /**
+   * The storage key this backend reads and writes (`bwxEnvelopes:<account>`). Every store over the same key shares
+   * one lock, whichever instance it is. Without a key, stores share a lock only when they share this backend object.
+   */
+  readonly key?: string;
+};
+
+/** A Web Locks API, as navigator.locks offers it (shared by every tab, worker and popup of one origin). */
+type Locks = { request: <T>(name: string, options: object, cb: () => Promise<T>) => Promise<T> };
+const localLocks = new Map<string, Promise<unknown>>();
+let sharedLockRequired = false;
+export const ENVELOPE_LOCK_UNAVAILABLE =
+  'Envelopes need a browser with Web Locks here, so this payment was not taken from the envelope.';
+/**
+ * The web wallet calls this in each tab's background worker: other tabs run their own worker over the same storage,
+ * so only navigator.locks serialises them. Without it every envelope operation is refused (fail closed).
+ */
+export const requireSharedEnvelopeLock = (on = true) => {
+  sharedLockRequired = on;
 };
 
 /**
- * The envelope store. Every read-modify-write runs in one queue, and the stored state is re-read inside the queue,
- * so concurrent payments are applied one after another: two payments cannot both spend the same last balance.
- * Only the background owns a store; pages ask the background (ENVELOPES_* messages) and never write it.
+ * One lock per envelope storage key, across store instances (13 Nov 2026). Every wallet init (unlock, restore,
+ * recovery) builds a new EnvelopeStore over the same `bwxEnvelopes:<account>` key, and a payment already running keeps
+ * the old wallet and its old store. With one queue per instance, two stores could both load the same balance before
+ * either saved and both approve the last sats. navigator.locks where there is one, so the web wallet's other tabs
+ * (each with its own background worker) queue too; else a module-level queue, shared by every instance in this
+ * process. Same pattern as storePay.ts withPayLock. Not re-entrant: never take it twice in one call chain. A lock
+ * that cannot be taken rejects, so the spend is refused (fail closed), never run unlocked.
+ */
+export function withEnvelopeLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const locks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
+  if (locks && typeof locks.request === 'function') return locks.request(`bwx-envelopes:${name}`, {}, fn);
+  // Web wallet without Web Locks (Safari before 15.4): a module queue covers this tab only, so refuse.
+  if (sharedLockRequired) return Promise.reject(new Error(ENVELOPE_LOCK_UNAVAILABLE));
+  const before = localLocks.get(name) ?? Promise.resolve();
+  const run = before.then(fn, fn);
+  const tail = run.catch(() => undefined);
+  localLocks.set(name, tail);
+  void tail.then(() => {
+    if (localLocks.get(name) === tail) localLocks.delete(name);
+  });
+  return run;
+}
+
+/** Lock names for backends without a key: one per backend object. */
+const anonLockNames = new WeakMap<EnvelopeBackend, string>();
+let anonSeq = 0;
+const lockNameFor = (backend: EnvelopeBackend): string => {
+  if (backend.key) return backend.key;
+  let name = anonLockNames.get(backend);
+  if (!name) anonLockNames.set(backend, (name = `anon:${++anonSeq}`));
+  return name;
+};
+
+/**
+ * The envelope store. Every read-modify-write runs under the storage key's lock (withEnvelopeLock), shared by every
+ * store over that key, and the stored state is re-read inside the lock, so concurrent payments are applied one after
+ * another: two payments cannot both spend the same last balance, even from two stores (an old wallet's and the
+ * re-initialised one's) or, in the web wallet, two tabs. Only the background owns a store; pages ask the background
+ * (ENVELOPES_* messages) and never write it.
  */
 export class EnvelopeStore {
-  private queue: Promise<unknown> = Promise.resolve();
+  private readonly lockName: string;
   constructor(
     private readonly backend: EnvelopeBackend,
     private readonly now: () => number = Date.now,
-  ) {}
+  ) {
+    this.lockName = lockNameFor(backend);
+  }
 
   private run<T>(fn: (s: EnvelopeState) => { state?: EnvelopeState; result: T }): Promise<T> {
-    const job = this.queue.then(async () => {
+    return withEnvelopeLock(this.lockName, async () => {
       const state = parseEnvelopeState(await this.backend.load());
       const out = fn(state);
       if (out.state && out.state !== state) await this.backend.save(out.state);
       return out.result;
     });
-    this.queue = job.catch(() => undefined);
-    return job;
   }
 
   get(originator: string): Promise<Envelope | undefined> {
@@ -211,7 +267,17 @@ export class EnvelopeStore {
 export const chromeEnvelopeBackend = (accountId: string): EnvelopeBackend => {
   const key = ENVELOPES_KEY_PREFIX + (accountId || 'no-account');
   return {
-    load: () => new Promise((resolve) => chrome.storage.local.get(key, (v) => resolve((v ?? {})[key]))),
+    key,
+    // A failed read rejects (the spend is refused) instead of reading as "no envelopes": a fill or close must never
+    // save over envelopes it could not see.
+    load: () =>
+      new Promise((resolve, reject) =>
+        chrome.storage.local.get(key, (v) => {
+          const err = chrome.runtime?.lastError;
+          if (err) reject(new Error(err.message));
+          else resolve((v ?? {})[key]);
+        }),
+      ),
     save: (state) =>
       new Promise<void>((resolve, reject) =>
         chrome.storage.local.set({ [key]: state }, () => {
@@ -225,7 +291,8 @@ export const chromeEnvelopeBackend = (accountId: string): EnvelopeBackend => {
 
 /**
  * Coin return for one site in other accounts' envelopes (a device-wide unpair / Revoke all). The live account uses
- * its own store (its queue); this is for the accounts that are not open.
+ * its own store; this is for the accounts that are not open. Each store takes its key's shared lock, so a close here
+ * still queues behind a live store's payment on the same key.
  */
 export const closeEnvelopeInAccounts = async (
   accountIds: string[],
