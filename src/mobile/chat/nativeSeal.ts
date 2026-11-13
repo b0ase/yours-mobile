@@ -8,7 +8,15 @@ import {
 } from '../../utils/sendErrors';
 import { browserWakeClock, waitForCoinCheck, type WakeClock } from './coinWait';
 import { WALL_TIMEOUT, withinWallClock } from '../../services/wallClock';
-import { SEAL_MISMATCH_MESSAGE, SEAL_PREPARE_MISMATCH_MESSAGE, checkComposed, checkPrepared } from './sealCheck';
+import { SEAL_MAX_SATS, SEAL_REF_MAX_CHARS, shortText } from '../../services/sealPass';
+import {
+  SEAL_MISMATCH_MESSAGE,
+  SEAL_PREPARE_MISMATCH_MESSAGE,
+  checkComposed,
+  checkPrepared,
+  sealRef,
+} from './sealCheck';
+import { estimateSealFee, sealScriptFee } from './sealFee';
 
 /**
  * NATIVE sign + seal of a bChatX room document, inside bWalletX (CTO / owner, 3 Nov 2026: "chat should be IN the
@@ -21,7 +29,8 @@ import { SEAL_MISMATCH_MESSAGE, SEAL_PREPARE_MISMATCH_MESSAGE, checkComposed, ch
  *   POST /api/bitsign/nds/seal/compose {nonce, svg}                     → signing {protocolID,keyID,counterparty},
  *                                                                          recordCanonical, lockingScriptHex
  *   CHECK compose's answer (chat/sealCheck.ts): the wallet rebuilds the record and the output from the document on
- *     screen, the drawn signature, its own identity key and prepare's nonce, and signs / pays only for its own copy
+ *     screen, the drawn signature, its own identity key and prepare's nonce, and signs / pays only for its own copy,
+ *     and only when that copy's fee is within the one the sheet showed (worked out from the document, not prepare)
  *   wallet.createSignature(recordCanonical bytes)                       → attestation (hex)
  *   wallet.createAction(one 0-sat OP_RETURN output, acceptDelayedBroadcast:false) → txid + AtomicBEEF
  *   SAVE {nonce, txid, beefHex, attestation} locally (the money has moved)
@@ -488,9 +497,14 @@ async function call(api: SealApi, path: Parameters<SealApi>[0], body: Record<str
   return r.body;
 }
 
+/** Shown when the seal's output would cost more than the sheet showed or a seal may. Nothing was signed or paid. */
+export const SEAL_TOO_BIG_MESSAGE =
+  'Not sealed: this seal would cost more than the fee you were shown. Nothing was signed or paid.';
+
 /**
- * Sign and seal. `approve(prepared)` is the ONE approval (the wallet's own sheet + Face ID), asked after prepare (so it
- * can show the fee and the reference) and before anything is signed or paid; false = cancelled, nothing happens.
+ * Sign and seal. `approve(prepared, feeSats)` is the ONE approval (the wallet's own sheet + Face ID), asked after
+ * prepare (so it can show the fee and the reference) and before anything is signed or paid; false = cancelled, nothing
+ * happens.
  */
 export async function nativeSignAndSeal(input: {
   documentId: string;
@@ -505,7 +519,10 @@ export async function nativeSignAndSeal(input: {
   ledger?: SealLedger | null;
   /** The wallet's identity key: part of the seal's key (another account on this phone signs on its own). */
   identityKey?: string;
-  approve: (prepared: PreparedSeal) => Promise<boolean>;
+  /** `feeSats`: the fee to show, from the document on screen (never prepare's `ref`); the seal never pays for more. */
+  approve: (prepared: PreparedSeal, feeSats: number) => Promise<boolean>;
+  /** The wallet's own fee rate (sat/kB), the one its createAction pays (default 100). */
+  satsPerKb?: number;
   /**
    * The coin check started when the pad opened (so the press pays straight away). Still running after approval →
    * step 'healing' ("Finding a fresh coin…") and wait for `done`, at most COIN_WAIT_CAP_MS on the wall clock
@@ -627,8 +644,17 @@ async function afterPrepare(
     console.warn('[nativeSeal] prepare refused:', preparedWrong);
     throw new NativeSealError(SEAL_PREPARE_MISMATCH_MESSAGE, 'refused');
   }
+  // ⚠ THE SHEET'S FEE IS THE WALLET'S OWN: from the reference the record will carry (the document's manifest), never
+  // prepare's `ref`. A document whose seal would cost more than a seal may is refused before any sheet.
+  const rate = input.satsPerKb ?? 100;
+  const ref = sealRef(input.documentHtml, input.documentId);
+  const shownFee = estimateSealFee(input.fieldIds, ref, rate);
+  if (!shortText(ref, SEAL_REF_MAX_CHARS) || shownFee > SEAL_MAX_SATS) {
+    console.warn('[nativeSeal] refused before approval: seal too big', { refChars: ref.length, shownFee });
+    throw new NativeSealError(SEAL_TOO_BIG_MESSAGE, 'refused');
+  }
   step('approving');
-  if (!(await input.approve(prepared)))
+  if (!(await input.approve(prepared, shownFee)))
     throw new NativeSealError('Not sealed: you cancelled. Nothing was signed or paid.', 'cancelled');
 
   if (input.coins?.pending()) {
@@ -661,6 +687,12 @@ async function afterPrepare(
     throw new NativeSealError(SEAL_MISMATCH_MESSAGE, 'refused');
   }
   const { signing, recordCanonical, lockingScriptHex } = checked;
+  // ⚠ NEVER MORE THAN THE SHEET SAID: the output the wallet rebuilt, by the same fee model, within the approved fee.
+  const scriptFee = sealScriptFee(lockingScriptHex, rate);
+  if (scriptFee > shownFee || scriptFee > SEAL_MAX_SATS) {
+    console.warn('[nativeSeal] compose refused: fee over the approved one', { scriptFee, shownFee });
+    throw new NativeSealError(SEAL_TOO_BIG_MESSAGE, 'refused');
+  }
 
   step('signing');
   const { signature } = await input.keys.createSignature({

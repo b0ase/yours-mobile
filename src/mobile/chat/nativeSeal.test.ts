@@ -13,6 +13,7 @@ import {
   nativeSignAndSeal,
   recoverNativeSeals,
   SEAL_SPENT_MESSAGE,
+  SEAL_TOO_BIG_MESSAGE,
   MAY_HAVE_PAID_MESSAGE,
   signedFieldIds,
   strokesToSvg,
@@ -22,8 +23,16 @@ import {
   type SealApi,
   type SealKeys,
 } from './nativeSeal';
-import { SEAL_HTML, SEAL_KEY, composedFor, preparedFor } from './nativeSeal.fixtures';
-import { SEAL_MISMATCH_MESSAGE, SEAL_PREPARE_MISMATCH_MESSAGE } from './sealCheck';
+import { SEAL_HTML, SEAL_KEY, SEAL_TS, composedFor, preparedFor } from './nativeSeal.fixtures';
+import {
+  SEAL_MISMATCH_MESSAGE,
+  SEAL_PREPARE_MISMATCH_MESSAGE,
+  canonicalJson,
+  expectedSealRecord,
+  sealScriptHex,
+  sha256Hex,
+} from './sealCheck';
+import { estimateSealFee, sealScriptFee } from './sealFee';
 
 const memStore = () => {
   const m = new Map<string, PendingSeal>();
@@ -751,5 +760,95 @@ describe('the wallet decides what it signs (chat/sealCheck.ts)', () => {
     const r = await run({});
     expect(r.e.txid).toBe(TX);
     expect(r.log).toContain(`pay:0:${HONEST.lockingScriptHex}:false`);
+  });
+});
+
+describe('the fee: the sheet shows what the document costs, and the seal never pays for more', () => {
+  const base = (log: string[], over: Parameters<typeof api>[1] = {}) => ({
+    documentId: 'D',
+    documentHtml: SEAL_HTML,
+    identityKey: SEAL_KEY,
+    fieldIds: ['f1'],
+    svg: '<svg/>',
+    api: api(log, over),
+    keys: keys(log),
+    store: memStore(),
+  });
+  const normalLog = async () => {
+    const log: string[] = [];
+    await nativeSignAndSeal({ ...base(log), approve: async () => true });
+    return log;
+  };
+
+  test("a normal seal: the sheet's fee is the wallet's model over its own output, at the wallet's rate", async () => {
+    for (const rate of [undefined, 500]) {
+      const log: string[] = [];
+      const shown: number[] = [];
+      await nativeSignAndSeal({
+        ...base(log),
+        ...(rate ? { satsPerKb: rate } : {}),
+        approve: async (_p, fee) => (shown.push(fee), true),
+      });
+      expect(shown).toEqual([estimateSealFee(['f1'], 'R', rate ?? 100)]);
+      expect(shown[0]).toBe(sealScriptFee(HONEST.lockingScriptHex, rate ?? 100));
+      expect(log).toContain(`pay:0:${HONEST.lockingScriptHex}:false`);
+    }
+  });
+
+  test("prepare's ref differs from the document's: the sheet uses the document's, and nothing signed or paid changes", async () => {
+    const want = await normalLog();
+    for (const ref of ['short', 'Z'.repeat(500_000)]) {
+      const log: string[] = [];
+      const shown: number[] = [];
+      await nativeSignAndSeal({
+        ...base(log, { prepare: () => ({ ok: true, status: 200, body: { ...preparedFor('N1'), ref } }) }),
+        approve: async (_p, fee) => (shown.push(fee), true),
+      });
+      expect(shown).toEqual([estimateSealFee(['f1'], 'R', 100)]);
+      expect(log.filter((l) => /^(sign|pay)/.test(l))).toEqual(want.filter((l) => /^(sign|pay)/.test(l)));
+    }
+  });
+
+  test("a huge reference in the document's own manifest: refused before the sheet, nothing signed or paid", async () => {
+    const html = SEAL_HTML.replace('"documentRef":"R"', `"documentRef":"${'X'.repeat(500_000)}"`);
+    const record = expectedSealRecord(
+      { documentId: 'D', documentHtml: html, svg: '<svg/>', fieldIds: ['f1'], identityKey: SEAL_KEY, nonce: 'N1' },
+      'boase',
+      SEAL_TS,
+    );
+    const log: string[] = [];
+    let asked = false;
+    const e = await nativeSignAndSeal({
+      ...base(log, {
+        prepare: () => ({ ok: true, status: 200, body: { ...preparedFor('N1'), origHash: sha256Hex(html) } }),
+        // bit-sign's exact seal of that document: still never signed or paid for.
+        compose: () => ({
+          ok: true,
+          status: 200,
+          body: {
+            ...HONEST,
+            recordCanonical: canonicalJson(record),
+            lockingScriptHex: sealScriptHex(HONEST.docHash, record),
+          },
+        }),
+      }),
+      documentHtml: html,
+      approve: async () => (asked = true),
+    }).catch((x) => x);
+    expect(e).toBeInstanceOf(NativeSealError);
+    expect(e.message).toBe(SEAL_TOO_BIG_MESSAGE);
+    expect(asked).toBe(false);
+    expect(log.some((l) => /^(compose|sign|pay)/.test(l))).toBe(false);
+  });
+
+  test('a fee rate that would take a seal over SEAL_MAX_SATS: refused before the sheet', async () => {
+    const log: string[] = [];
+    let asked = false;
+    const e = await nativeSignAndSeal({ ...base(log), satsPerKb: 100_000, approve: async () => (asked = true) }).catch(
+      (x) => x,
+    );
+    expect(e.message).toBe(SEAL_TOO_BIG_MESSAGE);
+    expect(asked).toBe(false);
+    expect(log.some((l) => /^(sign|pay)/.test(l))).toBe(false);
   });
 });

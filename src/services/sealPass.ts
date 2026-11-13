@@ -39,6 +39,12 @@ export const SEAL_RECORD_VERSION = 'bitsign-seal-2';
 export const SEAL_PASS_MS = 60_000;
 /** The most a seal may spend without its own sheet (a seal pays only the network fee, a few hundred sats at most). */
 export const SEAL_MAX_SATS = 1_000;
+/** The longest reference a seal record may carry (it goes on chain in the seal's output, so it sets the fee). */
+export const SEAL_REF_MAX_CHARS = 200;
+/** The longest handle, block id, party or role a seal record may carry. */
+export const SEAL_TEXT_MAX_CHARS = 100;
+/** The most blocks one seal may cover. */
+export const SEAL_FIELDS_MAX = 50;
 /** Synthetic sheet line id prefix: never sent to the permissions manager. */
 export const SEAL_REQUEST_PREFIX = 'seal-';
 /** Feature flag sites read from `bitsign.capabilities`. */
@@ -101,7 +107,9 @@ export const isSealProtocol = isProtocol;
 /** A seal-protocol signature asked for while an approved seal's own is being made (SealPasses.signing). */
 export const SEAL_BUSY_REFUSAL = 'A seal is being signed for this site. Try again once it is done.';
 
-const shortText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max && !CTRL.test(v);
+/** A string of at most `max` characters with no control or direction-override characters. */
+export const shortText = (v: unknown, max: number): v is string =>
+  typeof v === 'string' && v.length <= max && !CTRL.test(v);
 
 const bytesOf = (data: unknown): number[] | null => {
   if (!Array.isArray(data) || data.length === 0 || data.length > 8192) return null;
@@ -138,12 +146,20 @@ export const readSealSign = (args: unknown, identityKey: string): SealSign | nul
   for (const k of ['doc', 'manifest', 'svg'] as const) if (typeof r[k] !== 'string' || !HEX64.test(r[k])) return null;
   if (typeof r.key !== 'string' || !IDENTITY_KEY.test(r.key)) return null;
   if (!identityKey || r.key !== identityKey.toLowerCase()) return null;
-  if (!shortText(r.ref, 200) || !r.ref || !shortText(r.handle, 100) || !r.handle || !shortText(r.ts, 40)) return null;
-  if (!Array.isArray(r.fields) || r.fields.length === 0 || r.fields.length > 50) return null;
+  if (!shortText(r.ref, SEAL_REF_MAX_CHARS) || !r.ref || !shortText(r.handle, SEAL_TEXT_MAX_CHARS) || !r.handle)
+    return null;
+  if (!shortText(r.ts, 40)) return null;
+  if (!Array.isArray(r.fields) || r.fields.length === 0 || r.fields.length > SEAL_FIELDS_MAX) return null;
   const fields: SealRecordField[] = [];
   for (const f of r.fields as unknown[]) {
     const o = f as Record<string, unknown> | null;
-    if (!o || typeof o !== 'object' || !shortText(o.id, 100) || !shortText(o.party, 100) || !shortText(o.role, 100))
+    if (
+      !o ||
+      typeof o !== 'object' ||
+      !shortText(o.id, SEAL_TEXT_MAX_CHARS) ||
+      !shortText(o.party, SEAL_TEXT_MAX_CHARS) ||
+      !shortText(o.role, SEAL_TEXT_MAX_CHARS)
+    )
       return null;
     fields.push({ id: o.id, party: o.party, role: o.role });
   }

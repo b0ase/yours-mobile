@@ -1,4 +1,5 @@
 import { Hash, Utils } from '@bsv/sdk';
+import { SEAL_FIELDS_MAX, SEAL_REF_MAX_CHARS, SEAL_TEXT_MAX_CHARS, shortText } from '../../services/sealPass';
 
 /**
  * THE WALLET DECIDES WHAT IT SIGNS (native seal, chat/nativeSeal.ts). bit-sign's compose step answers with how to sign
@@ -18,6 +19,8 @@ import { Hash, Utils } from '@bsv/sdk';
  *                    (prepare's time) are bit-sign's, checked for shape (and ts against prepare's).
  *   lockingScriptHex = OP_FALSE OP_RETURN <hashes-only payload> rebuilt here; the wallet pays for its own copy, a
  *                    0-sat data output. No payee, no amount: the only cost is the miner fee the wallet sets.
+ *   sizes          = the ref, handle, block ids, parties and roles within the web/extension seal pass's limits
+ *                    (services/sealPass.ts): the ref goes on chain, so a long one would set the fee.
  *
  * PURE: no network, no wallet, no clock.
  */
@@ -97,13 +100,21 @@ const parseManifest = (text: string | null): Manifest | null => {
   }
 };
 
+const manifestOf = (html: string): { text: string | null; manifest: Manifest | null } => {
+  const text = html.includes('npg-sig-manifest') ? (MANIFEST_RE.exec(html)?.[1] ?? null) : null;
+  return { text, manifest: parseManifest(text) };
+};
+
+/** The reference the seal record (and its on-chain output) will carry for this document: what the sheet's fee uses. */
+export const sealRef = (documentHtml: string, documentId: string): string =>
+  String(manifestOf(documentHtml).manifest?.documentRef || documentId);
+
 /**
  * The record bit-sign must have built for this document (bit-sign composeSeal → buildSealRecord), with bit-sign's
  * `handle` and `ts`. Throws a plain reason when the document has no manifest or a block isn't in it.
  */
 export function expectedSealRecord(e: SealExpect, handle: string, ts: string): SealRecord {
-  const text = e.documentHtml.includes('npg-sig-manifest') ? (MANIFEST_RE.exec(e.documentHtml)?.[1] ?? null) : null;
-  const manifest = parseManifest(text);
+  const { text, manifest } = manifestOf(e.documentHtml);
   const sigFields: unknown[] | null =
     manifest && Array.isArray(manifest.signatureFields) ? manifest.signatureFields : null;
   if (!manifest || !sigFields) throw new Error('the document has no signature manifest');
@@ -208,7 +219,13 @@ export function checkComposed(composed: Record<string, unknown>, e: SealExpect):
   }
   if (!got || typeof got !== 'object' || Array.isArray(got)) return no('record is not an object');
   const { handle, ts } = got;
-  if (typeof handle !== 'string' || !handle.trim() || handle !== handle.trim()) return no('record handle is malformed');
+  if (
+    typeof handle !== 'string' ||
+    !handle.trim() ||
+    handle !== handle.trim() ||
+    !shortText(handle, SEAL_TEXT_MAX_CHARS)
+  )
+    return no('record handle is malformed');
   if (typeof ts !== 'string' || !ISO_INSTANT.test(ts) || Number.isNaN(Date.parse(ts)))
     return no('record time is malformed');
   if (e.ts !== undefined && ts !== e.ts) return no("record time is not prepare's");
@@ -219,6 +236,11 @@ export function checkComposed(composed: Record<string, unknown>, e: SealExpect):
   } catch (err) {
     return no(err instanceof Error ? err.message : 'record cannot be rebuilt');
   }
+  // ⚠ The ref is on chain in the output: an unbounded one (from the document's manifest) would set the fee.
+  if (!shortText(want.ref, SEAL_REF_MAX_CHARS)) return no('reference is too long');
+  if (!want.fields.length || want.fields.length > SEAL_FIELDS_MAX) return no('block count is out of range');
+  for (const f of want.fields)
+    if (![f.id, f.party, f.role].every((t) => shortText(t, SEAL_TEXT_MAX_CHARS))) return no('a block is too long');
   const wantText = canonicalJson(want);
   if (text !== wantText) {
     const keys = new Set([...Object.keys(want), ...Object.keys(got)]);

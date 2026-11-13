@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { checkComposed, checkPrepared, sha256Hex, type SealExpect } from './sealCheck';
+import {
+  canonicalJson,
+  checkComposed,
+  checkPrepared,
+  expectedSealRecord,
+  sealRef,
+  sealScriptHex,
+  sha256Hex,
+  type SealExpect,
+} from './sealCheck';
 
 /**
  * A seal made with bit-sign's OWN code (nds-seal-record.ts buildSealRecord / canonicalSealRecord / buildSealPayloadV2,
@@ -108,6 +117,41 @@ describe('checkComposed: anything else is refused', () => {
   test('a document with no manifest, or no wallet key, is never signed', () => {
     expect(why(checkComposed(composed(), expectFor({ documentHtml: '<html>plain</html>' })))).toMatch(/manifest/);
     expect(why(checkComposed(composed(), expectFor({ identityKey: '' })))).toMatch(/identity key/);
+  });
+});
+
+describe('checkComposed: sizes (the web/extension seal pass limits)', () => {
+  /** A document whose manifest says `ref` and has block `id`, and bit-sign's honest seal of it (handle `handle`). */
+  const sealOf = (ref: string, id = 'sig-a', handle = 'boase') => {
+    const html =
+      '<html><head><script type="application/npg-sig-manifest+json">' +
+      JSON.stringify({ documentRef: ref, signatureFields: [{ id, party: 'P', role: 'signer' }] }) +
+      '</script></head><body>Agreement</body></html>';
+    const e = expectFor({ documentHtml: html, fieldIds: [id] });
+    const record = expectedSealRecord(e, handle, V.ts);
+    const c = composed({
+      recordCanonical: canonicalJson(record),
+      lockingScriptHex: sealScriptHex(V.docHash, record),
+    });
+    return { e, c };
+  };
+  test('a reference of up to 200 characters is sealed, and sealRef reads it as the record will carry it', () => {
+    const { e, c } = sealOf('R'.repeat(200));
+    expect(checkComposed(c, e).ok).toBe(true);
+    expect(sealRef(e.documentHtml, e.documentId)).toBe('R'.repeat(200));
+    expect(sealRef('<html>plain</html>', 'DOC1')).toBe('DOC1');
+  });
+  test("a huge reference in the document's own manifest is refused, even as bit-sign's exact seal of it", () => {
+    for (const ref of ['R'.repeat(201), 'X'.repeat(500_000)]) {
+      const { e, c } = sealOf(ref);
+      expect(why(checkComposed(c, e))).toMatch(/reference is too long/);
+    }
+  });
+  test('an over-long handle or block id is refused', () => {
+    const longHandle = sealOf('R', 'sig-a', 'h'.repeat(101));
+    expect(why(checkComposed(longHandle.c, longHandle.e))).toMatch(/handle/);
+    const longId = sealOf('R', 'i'.repeat(101));
+    expect(why(checkComposed(longId.c, longId.e))).toMatch(/block is too long/);
   });
 });
 
