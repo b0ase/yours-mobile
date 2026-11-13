@@ -31,6 +31,10 @@ import '@fontsource/space-grotesk/700.css';
 import '@fontsource/chakra-petch/latin-700';
 import './mobile.css';
 import { applyBootAccent } from './theme/accent';
+import { markBootStage, startBootWatchdog } from './bootWatchdog';
+
+// Boot trace + 15 s "taking longer than usual" notice (bootWatchdog.ts; owner, 13 Nov 2026: black screen on switch).
+startBootWatchdog();
 
 // App accent (Theme → App colours) before the first paint, so a non-gold accent never flashes gold.
 applyBootAccent();
@@ -110,11 +114,15 @@ const worker = new Worker(new URL('./background.worker.ts', import.meta.url), { 
 hub.register('background', { post: (json) => worker.postMessage(json), sender: senderFor(rootUrl + 'background.js') });
 worker.addEventListener('message', (e) => {
   if (typeof e.data === 'string') void hub.handle('background', JSON.parse(e.data));
-  else if (e.data?.t === 'ready') hub.markBackgroundReady();
+  else if (e.data?.t === 'ready') {
+    markBootStage('background: ready');
+    hub.markBackgroundReady();
+  }
   else if (e.data?.t === 'error') {
     // Release held messages anyway: listeners registered before the throw still answer, and without this every
     // runtime.sendMessage waited forever (owner, 6 Oct 2026: balance, tokens and sync all timing out).
     console.error('[background worker] failed to start:', e.data.message);
+    markBootStage('background: failed to start');
     hub.markBackgroundReady();
   } else if (e.data?.t === 'console') {
     console[e.data.level as 'error' | 'warn' | 'log']('[background]', e.data.text);
@@ -136,6 +144,7 @@ worker.addEventListener('message', (e) => {
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));
 worker.postMessage({ t: 'init', rootUrl, version: __MOBILE_VERSION__ });
+markBootStage('background: worker started');
 
 // This window's own chrome (the "popup").
 const mainChrome = attachContext('main', window);
@@ -144,6 +153,7 @@ routeWindowOpen(window);
 // Upstream's embedder hooks (src/platform.ts); overlay frames share this object.
 const platform: PlatformHooks = { welcomeNotice: UNOFFICIAL_NOTICE, ...(await initBiometricUnlock(mainChrome)) };
 (window as any).__yoursPlatform = platform;
+markBootStage('biometric unlock init done');
 
 // dApp browser: each site gets an endpoint carrying its real origin, not the
 // internal one, so the background applies its external-caller rules.
@@ -178,6 +188,8 @@ if ((await import('./wide/flag')).WIDE_ON) {
   // Desktop opens with the Just b advert before any screen (welcome, unlock or wallet): its own root, on top.
   void import('./wide/mountIntro').then((m) => m.mountJustBIntro());
 }
+markBootStage('ui: loading');
 await import('../index');
+markBootStage('ui: loaded');
 // Desktop (Tauri): deep links, tray (lock), native notifications, external links (desktop/boot.ts).
 if (IS_TAURI) void import('./desktop/boot').then((m) => m.initDesktop(mainChrome));

@@ -9,6 +9,8 @@ import { truncate } from '../utils/format';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { useServiceContext } from '../hooks/useServiceContext';
 import { useBottomMenu } from '../hooks/useBottomMenu';
+import { claimAccountSwitch, releaseAccountSwitch } from '../mobile/account/closeForReload';
+import { closeAndReload } from '../mobile/account/accountSwitch';
 
 export const TopNav = () => {
   const { theme } = useTheme();
@@ -32,24 +34,26 @@ export const TopNav = () => {
 
   const handleSwitchAccount = async (identityAddress: string) => {
     if (switchingTo) return;
+    if (!claimAccountSwitch()) return;
     setSwitchingTo(identityAddress);
     // Unmount the wallet UI for the whole switch. The service worker drops the
     // old account context immediately and rebuilds for the new one, so anything
     // the outgoing page did in the meantime (balance refreshes, lock checks,
     // auto-unlock) would run against the wrong account.
     setIsSwitchingAccount(true);
-    wallet?.close?.();
     try {
       await chromeStorageService.switchAccountForReload(identityAddress);
     } catch (err) {
       console.error('[TopNav] account switch failed:', err);
+      releaseAccountSwitch();
       setIsSwitchingAccount(false);
       setSwitchingTo(null);
       addSnackbar('Failed to switch account. Please try again.', 'error');
       return;
     }
-    // Full reload; the in-memory router restarts at "/" and Start redirects to the wallet.
-    window.location.reload();
+    // Close the wallet (awaited, capped at 3 s), then a full reload; the in-memory router restarts at "/" and Start
+    // redirects to the wallet (mobile/account/accountSwitch.ts closeAndReload).
+    await closeAndReload(wallet);
   };
 
   const toggleDropdown = (event: React.MouseEvent) => {
