@@ -89,4 +89,7 @@ export const EXTERNAL_OK: readonly (readonly [number, string, string])[] = [
   [1, 'bwalletx ordinal receive', 'Site ordinal receive keys: getPublicKey only (siteTokens.ts)'],
   [1, 'sigma', 'SIGMA post signatures: the wallet asks for it with a first post (permissionBundle.ts POST_PROTOCOL)'],
   [2, 'bitsign seal', "bit-sign's document seal: one Seal sheet for its sign and its payment (sealPass.ts)"],
+  // BRC-103 mutual auth: every @bsv/sdk Peer / AuthFetch signature. The cross-site guard reads AuthFetch frames under
+  // it as naming no site (crossSiteSignGuard.ts, signDataScan.ts).
+  [2, 'auth message signature', 'BRC-103 Peer / AuthFetch message signatures (any BRC-103 app)'],
 ];

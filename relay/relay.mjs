@@ -54,9 +54,10 @@ export const WALLET_CLAIM_V2 = 2;
 export const SESSION_CLAIMS_FROM = Infinity;
 
 /**
- * Compatibility window for clients from before 26 Oct 2026 (sites without a site claim, wallets with a random
- * claim). Until this moment the relay still opens a new channel for a site with no claim, and still lets the first
- * wallet claim win on a channel without a QR-bound one. After it, both are refused. Override with
+ * Compatibility window for clients from before 26 Oct 2026 (sites without a site claim or `wc`, wallets with a random
+ * claim). Until this moment the relay still opens a new channel for a site with no claim or no `wc`, and still lets the
+ * first wallet claim win on a channel without a QR-bound one. After it, all of these are refused: a new channel needs a
+ * site claim and `wc`, and the wallet role is never first-come (b-Aware triage 13 Nov 2026). Override with
  * RELAY_LEGACY_CLAIMS_UNTIL (ISO date) or createRelay({ legacyUntil }) in ms.
  */
 export const LEGACY_CLAIMS_UNTIL = Date.parse('2026-11-30T00:00:00Z');
@@ -116,6 +117,10 @@ export function createRelay({
     // True when the site claim was brought by the socket that opened the channel (or restored as such): only that
     // claim may move the wallet binding. A claim pinned later, on a channel opened without one, holds the site role only.
     siteBinds: false,
+    // True when the wallet role went to the first wallet that came (no `wc`, nobody holding it), which only the
+    // compatibility window allows. After the window such a channel lives only while in use (unpaired idle limit) and is
+    // not kept across restarts, until its site proves its claim and re-binds the wallet role with `wc`.
+    legacyWallet: false,
     ...c,
   });
 
@@ -126,7 +131,7 @@ export function createRelay({
   // and a wallet binding are kept (nothing else is worth defending), at most LIMITS.stateChannels, most recent first.
   // No addresses are kept, so a restored channel counts against no one's per-IP limit: a restart resets that quota,
   // bounded by the cap above.
-  const kept = (ch) => ch.paired && !!ch.claims.site && !!ch.walletBinding;
+  const kept = (ch) => ch.paired && !!ch.claims.site && !!ch.walletBinding && !(ch.legacyWallet && !legacy());
   const snapshot = () => {
     const list = [...channels].filter(([, ch]) => kept(ch));
     list.sort((a, b) => b[1].lastActive - a[1].lastActive);
@@ -138,6 +143,7 @@ export function createRelay({
         wl: ch.claims.wallet,
         wb: ch.walletBinding,
         sb: ch.siteBinds,
+        ...(ch.legacyWallet && { lw: true }),
         at: ch.lastActive,
       };
       ch.savedAt = ch.lastActive;
@@ -243,6 +249,7 @@ export function createRelay({
           claims: { site: s.sc, wallet: wl },
           walletBinding: s.wb,
           siteBinds: s.sb === true,
+          legacyWallet: s.lw === true,
         }),
       );
   };
@@ -264,7 +271,9 @@ export function createRelay({
     for (const [id, ch] of channels) {
       const idle = t - ch.lastActive;
       const bothGone = !ch.site && !ch.wallet;
-      if (idle > LIMITS.pairedIdleMs || (!ch.paired && bothGone && idle > LIMITS.unpairedIdleMs)) drop(id);
+      // A wallet that got its role first-come (window only) counts as unpaired once the window has closed.
+      const unpaired = !ch.paired || (ch.legacyWallet && !legacy());
+      if (idle > LIMITS.pairedIdleMs || (unpaired && bothGone && idle > LIMITS.unpairedIdleMs)) drop(id);
       for (const role of ROLES) ch.queue[role] = ch.queue[role].filter((q) => t - q.at < LIMITS.queueMs);
       if (kept(ch) && ch.lastActive - ch.savedAt > STATE_ACTIVITY_MS) save();
     }
@@ -280,23 +289,25 @@ export function createRelay({
    * Who may take a role:
    * - the QR-bound wallet claim always may (it evicts anyone who got there first: N3-2);
    * - a claimed role admits only its claim;
-   * - an unclaimed role: with a QR binding, only the bound claim (legacy wallets may still take it during the
-   *   compatibility window); without one, any claim, and no claim only during the window.
+   * - an unclaimed role: during the compatibility window, anyone. After it, an unclaimed site role takes any claim,
+   *   and an unclaimed wallet role takes only the bound claim (above): never the first wallet that comes, even on a
+   *   channel opened during the window without `wc` (b-Aware triage 13 Nov 2026).
    */
   const claimOk = (ch, role, claim) => {
     if (qrBound(ch, role, claim)) return true;
     const held = ch.claims?.[role];
     if (held) return claim !== null && claimHash(claim) === held;
     if (legacy()) return true;
-    if (role === 'wallet' && ch.walletBinding) return false;
+    if (role === 'wallet') return false;
     return claim !== null;
   };
 
   /**
    * May this wallet join bind the role to its session claim digest `nc`? Only the phone that proves it saw the QR (the
    * bound claim) while that QR is still live, or the first wallet on a channel nobody bound (sites and CLIs without
-   * `wc`). Never a claim the relay admitted only because of the compatibility window: that would let a squatter pin
-   * the role before the phone. Never a v1 session's claim later on (review 13 Nov 2026): whoever saw the QR holds the
+   * `wc`; inside the compatibility window only, as claimOk refuses that wallet afterwards). Never a claim the relay
+   * admitted only because of the window on a channel that has a binding: that would let a squatter pin the role before
+   * the phone. Never a v1 session's claim later on (review 13 Nov 2026): whoever saw the QR holds the
    * same claim and could bind their own `nc`, locking the phone out for good. A v1 session upgrades through its site
    * instead (the site proves its claim and re-binds with `wc`; see attach).
    */
@@ -335,8 +346,10 @@ export function createRelay({
       const e = Number(url.searchParams.get('e'));
       if (!Number.isFinite(e) || e * 1000 < t || e * 1000 > t + LIMITS.maxQrLifetimeS * 1000)
         return { ok: false, code: 400, reason: 'expiry' };
-      // A new channel needs a site claim, so nobody else can take the site socket later (N3-1).
+      // A new channel needs a site claim, so nobody else can take the site socket later (N3-1), and `wc`, so the wallet
+      // role goes only to the phone that scanned the QR, never to whoever joins first (b-Aware triage 13 Nov 2026).
       if (claim === null && !legacy()) return { ok: false, code: 403, reason: 'claim required' };
+      if (wc === null && !legacy()) return { ok: false, code: 403, reason: 'wallet binding required' };
       if ((perIp.get(ip) ?? 0) >= LIMITS.channelsPerIp) return { ok: false, code: 429, reason: 'too many channels' };
       ch = newChannel({
         origin,
@@ -373,6 +386,8 @@ export function createRelay({
     // only the one that opened the channel (a claim pinned later on a channel opened without one never may).
     const siteProven =
       role === 'site' && ch.siteBinds && !!claim && !!ch.claims.site && ch.claims.site === claimHash(claim);
+    // Nobody bound or holds the wallet role and this wallet takes it: first come, which only the window lets through.
+    if (role === 'wallet' && !ch.walletBinding && !ch.claims.wallet) ch.legacyWallet = true;
     let bound = false;
     if (mayBind(ch, role, claim, nc)) {
       // Wallet claim v2: from now on only the session claim admits the wallet; the QR claim is spent.
@@ -386,6 +401,8 @@ export function createRelay({
       ch.walletBinding = wc;
       ch.claims.wallet = wc;
     }
+    // The wallet role is now bound to a digest the site chose (only the paired ends can compute it), not first-come.
+    if (siteProven && wc) ch.legacyWallet = false;
     ch[role]?.close(4001, 'replaced');
     ch[role] = ws;
     ch.lastActive = now();
