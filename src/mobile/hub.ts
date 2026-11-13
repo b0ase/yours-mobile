@@ -144,8 +144,8 @@ export class Hub {
   private fenced = false;
   /** storage.local values as last saved (loaded, re-read, or a write that went through): what a refused write restores. */
   private confirmed = new Map<string, unknown>();
-  /** Per storage.local key: how many set/remove attempts it has had, no-ops included (rollback ownership, R1). */
-  private writeSeq = new Map<string, number>();
+  /** Per storage.local key: writes of it still in the persist queue (R1: no-ops and settling, see runStorageOp). */
+  private queued = new Map<string, number>();
   private backgroundReady: Promise<void>;
   private resolveBackgroundReady!: () => void;
 
@@ -428,28 +428,35 @@ export class Hub {
     try {
       const { result, changes } = this.applyStorageOp(store, msg.op, msg.arg);
       if (msg.area === 'local' && changes) {
-        // Every key's attempt count as this op left it: a later attempt on the key (even a no-op) owns it from then.
-        const seqAt = new Map(Object.keys(changes).map((k) => [k, this.writeSeq.get(k) ?? 0]));
+        const keys = Object.keys(changes);
+        for (const k of keys) this.queued.set(k, (this.queued.get(k) ?? 0) + 1);
+        let saved = false;
         try {
           const write = this.persist(Object.entries(changes).map(([key, change]) => [key, change.newValue]));
           // The queue never holds a failure: one refused write (the one-tab fence could not confirm, a full
           // localStorage) must not fail every later write until a reload (re-review A). This write still fails.
           this.persistQueue = write.catch(() => undefined);
           await write;
-          // Saved: writes reach the backend in queue order, so these are now the stored values.
-          for (const [key, change] of Object.entries(changes)) {
-            if (change.newValue === undefined) this.confirmed.delete(key);
-            else this.confirmed.set(key, change.newValue);
+          saved = true;
+        } finally {
+          // Writes reach the backend in queue order: a saved one's values are now the stored values; a refused one
+          // wrote none of it (all-or-nothing backends). Once a key has no write left in the queue, this hub's copy
+          // is set to what is stored, so it never holds a value localStorage doesn't (R1, fuzzed).
+          for (const k of keys) {
+            if (saved) {
+              const v = changes[k].newValue;
+              if (v === undefined) this.confirmed.delete(k);
+              else this.confirmed.set(k, v);
+            }
+            const left = (this.queued.get(k) ?? 1) - 1;
+            if (left > 0) {
+              this.queued.set(k, left);
+              continue;
+            }
+            this.queued.delete(k);
+            if (this.confirmed.has(k)) store.set(k, this.confirmed.get(k));
+            else store.delete(k);
           }
-        } catch (error) {
-          // Not saved (and the backend wrote none of it): put this hub's copy back to what is stored, for every key
-          // no later op has touched since (re-review R1: a later identical set owns the key and persists it itself).
-          for (const key of Object.keys(changes)) {
-            if ((this.writeSeq.get(key) ?? 0) !== seqAt.get(key)) continue;
-            if (this.confirmed.has(key)) store.set(key, this.confirmed.get(key));
-            else store.delete(key);
-          }
-          throw error;
         }
       } else if (changes) {
         if (this.persistSession) sessionStorage.setItem(SESSION_KEY, JSON.stringify(Object.fromEntries(this.session)));
@@ -507,11 +514,11 @@ export class Hub {
       for (const [key, raw] of Object.entries(clone(arg as Record<string, unknown>))) {
         const oldValue = store.get(key);
         if (raw === undefined) continue;
-        if (local) this.writeSeq.set(key, (this.writeSeq.get(key) ?? 0) + 1);
-        // Same as this hub's copy: a no-op, unless that value isn't saved yet (an earlier write still going out, or
-        // refused): then this set writes it too, so its "ok" is true even if the earlier write fails (re-review R1).
+        // Same as this hub's copy: a no-op only when that value is already stored and no write of the key is still
+        // queued (one could yet be refused, or land after). Otherwise this set writes it too, so its "ok" is true.
         if (JSON.stringify(oldValue) === JSON.stringify(raw)) {
-          if (!local || JSON.stringify(this.confirmed.get(key)) === JSON.stringify(raw)) continue;
+          if (!local) continue;
+          if (!this.queued.has(key) && JSON.stringify(this.confirmed.get(key)) === JSON.stringify(raw)) continue;
           changes[key] = { oldValue, newValue: raw };
           continue;
         }
@@ -519,10 +526,15 @@ export class Hub {
         changes[key] = oldValue === undefined ? { newValue: raw } : { oldValue, newValue: raw };
       }
     } else {
-      const keys = op === 'clear' ? [...store.keys()] : typeof arg === 'string' ? [arg] : (arg as string[]);
+      const keys =
+        op === 'clear'
+          ? [...new Set([...store.keys(), ...(local ? this.queued.keys() : [])])]
+          : typeof arg === 'string'
+            ? [arg]
+            : (arg as string[]);
       for (const key of keys) {
-        if (local) this.writeSeq.set(key, (this.writeSeq.get(key) ?? 0) + 1);
-        if (!store.has(key)) continue;
+        // Absent here: a no-op only when it is absent from storage too and no write of it is still queued.
+        if (!store.has(key) && (!local || (!this.queued.has(key) && !this.confirmed.has(key)))) continue;
         changes[key] = { oldValue: store.get(key) };
         store.delete(key);
       }

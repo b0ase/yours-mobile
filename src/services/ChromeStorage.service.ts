@@ -629,7 +629,7 @@ export class ChromeStorageService {
     );
     const passKey = await this.getPassKey();
     if (!passKey) throw new Error('Unlock the wallet first');
-    const { accounts, keyRekey } = await this.get(['accounts', 'keyRekey']);
+    const { accounts, keyRekey, salt: prevSalt } = await this.get(['accounts', 'keyRekey', 'salt']);
     if (keyRekey) throw new Error('Wallet keys are being re-encrypted; try again in a moment');
     const salt = generateWalletSalt();
     const newKey = await derivePassKey(newPassword, salt, undefined);
@@ -647,8 +647,14 @@ export class ChromeStorageService {
         throw new Error('Password change check failed; nothing was changed');
       next[id] = { ...acct, encryptedKeys: sealed };
     }
+    // Recovery note first (one item, one write), then the swap, then clear the note: exactly as upgradeKdf. A swap cut
+    // off halfway (an app kill: phones write accounts and salt as separate secure items) leaves keys and salt that
+    // don't match; the next unlock (repairInterruptedKdfUpgrade) finds the salt that opens them: the old password
+    // with prevSalt, or the new password with salt. Without the note only the 12 words could open the wallet.
+    if (typeof prevSalt === 'string' && prevSalt) await this.set({ kdfPending: { prevSalt, salt } });
     await this.set({ accounts: next, salt } as Partial<ChromeStorageObject>);
     await this.setPassKey(newKey);
+    await this.set({ kdfPending: null }).catch(() => undefined);
     await this.getAndSetStorage();
   };
 
