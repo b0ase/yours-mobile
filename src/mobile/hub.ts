@@ -109,6 +109,7 @@ export class Hub {
   private persistSession: boolean;
   private persistQueue: Promise<unknown> = Promise.resolve();
   private storageReady: Promise<void>;
+  private fenced = false;
   private backgroundReady: Promise<void>;
   private resolveBackgroundReady!: () => void;
 
@@ -126,6 +127,19 @@ export class Hub {
 
   markBackgroundReady() {
     this.resolveBackgroundReady();
+  }
+
+  /**
+   * Web wallet, another tab took over (webTab.ts): refuse every storage write from now on, so this tab's copy can
+   * never be written back. Reads still answer while the page reloads.
+   */
+  fence() {
+    this.fenced = true;
+  }
+
+  /** Resolves once every write already accepted has reached the backend (or failed). */
+  async flush() {
+    await this.persistQueue.catch(() => undefined);
   }
 
   register(id: string, endpoint: Endpoint) {
@@ -250,6 +264,9 @@ export class Hub {
   private async onStorage(from: string, msg: Extract<ToHub, { t: 'storage' }>) {
     await this.storageReady;
     const store = msg.area === 'local' ? this.local : this.session;
+    if (this.fenced && msg.op !== 'get') {
+      return this.send(from, { t: 'storageResult', reqId: msg.reqId, error: 'bWalletX is open in another tab' });
+    }
     try {
       const { result, changes } = this.applyStorageOp(store, msg.op, msg.arg);
       if (msg.area === 'local' && changes) {

@@ -4,7 +4,8 @@ import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
-import { Hub } from './hub';
+import { Hub, nativeLocalBackend } from './hub';
+import { fencedBackend, isWebEdition, startWebTab } from './webTab';
 import { IS_TAURI, invoke as tauriInvoke } from './desktop/ipc';
 import { tauriLocalBackend } from './desktop/storage';
 import type { PlatformHooks } from '../platform';
@@ -34,6 +35,15 @@ import './look/chamfer.css';
 import { applyBootAccent } from './theme/accent';
 import { markBootStage, startBootWatchdog } from './bootWatchdog';
 
+// Web (web.bwalletx.com): ONE active tab (webTab.ts). Every tab used to run its own hub, serving storage from a copy
+// loaded at start, and its own background worker, so two tabs wrote stale copies over each other (lost accounts, a
+// password change undone into a lockout, doubled spending caps). A second tab waits here, showing "bWalletX is open
+// in another tab", and builds no hub, starts no worker and loads no UI until the user takes over. Phones (Capacitor)
+// and Desktop (Tauri) run one hub per app and skip this; the extension never loads this file.
+const webTab = isWebEdition({ native: Capacitor.isNativePlatform(), tauri: IS_TAURI })
+  ? await startWebTab()
+  : undefined;
+
 // Boot trace + 15 s "taking longer than usual" notice (bootWatchdog.ts; owner, 13 Nov 2026: black screen on switch).
 startBootWatchdog();
 
@@ -61,9 +71,13 @@ const defineChrome = (target: any, chrome: unknown) =>
 
 // Desktop (Tauri): storage.local lives in an owner-only file on the Rust side, not in the webview (desktop/storage.ts).
 // Web + Desktop keep storage.session (the unlock key) in memory only; phones mirror it to the in-process WebView.
-const hub = new Hub(handleHostOp, IS_TAURI ? tauriLocalBackend(tauriInvoke) : undefined, {
-  persistSession: Capacitor.isNativePlatform(),
-});
+// Web: storage.local is fresh from localStorage here (this tab only just became the active one), and every write
+// checks this tab still owns the wallet (webTab.ts fencedBackend).
+const hub = new Hub(
+  handleHostOp,
+  IS_TAURI ? tauriLocalBackend(tauriInvoke) : webTab ? fencedBackend(nativeLocalBackend, webTab) : undefined,
+  { persistSession: Capacitor.isNativePlatform() },
+);
 
 // Frames (overlay iframes) register here; swept when their overlay closes.
 const frames = new Map<string, Window>();
@@ -144,6 +158,16 @@ worker.addEventListener('message', (e) => {
   }
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));
+// Web: another tab asked for the wallet. Refuse new writes, flush the accepted ones, stop the worker; then this tab
+// reloads into the "open in another tab" screen. Set in the same synchronous run as the hub and worker, so no
+// takeover can arrive before them.
+webTab?.onRelease(async () => {
+  hub.fence();
+  await hub.flush();
+  worker.terminate();
+  hub.unregister('background');
+});
+webTab?.onLost(() => location.reload());
 worker.postMessage({ t: 'init', rootUrl, version: __MOBILE_VERSION__ });
 markBootStage('background: worker started');
 
