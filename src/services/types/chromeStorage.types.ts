@@ -72,6 +72,11 @@ export type Settings = {
 export type StorageConfig = {
   activeRemote?: string;
   remotes?: string[];
+  /**
+   * Remote stores' server identity keys (origin -> key), saved by the wallet when each first connects, so no site can
+   * sign in to them as the user even before they reconnect (services/ownBackendKeys.ts).
+   */
+  serverKeys?: Record<string, string>;
 };
 
 export interface Account {
