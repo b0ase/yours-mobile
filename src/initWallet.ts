@@ -98,7 +98,7 @@ import {
   type FullPassPlan,
 } from './services/fullPass';
 import { afterPull } from './services/pullIntegrity';
-import { createSyncHealth, registerSyncHealth, type SyncHealth } from './services/syncHealth';
+import { createPullRecord, createSyncHealth, registerSyncHealth, type SyncHealth } from './services/syncHealth';
 import { ownPayments } from './services/ownPayments';
 import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
 import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
@@ -723,6 +723,14 @@ export const initWallet = async (
   // How the pulls are doing, for a one-line status (services/syncHealth.ts): the last pull that caught up, stuck.
   const pullHealth = createSyncHealth();
   registerSyncHealth(pullHealth);
+  // The same, per account, where the home screen's sync line reads it (chrome.storage.local deviceSyncPull:<address>).
+  const pullRecord = createPullRecord(
+    {
+      get: (k) => chrome.storage.local.get(k) as Promise<Record<string, unknown>>,
+      set: (items) => chrome.storage.local.set(items),
+    },
+    openedAccount,
+  );
   /** The backup's output rows for one of its transactions (the coin check after a pull, services/pullIntegrity.ts). */
   const backupOutputsOf = async (backupTxId: number) => {
     const m = managed._backups?.[0] as
@@ -752,6 +760,7 @@ export const initWallet = async (
     pull: pullThenAdmitSoon(
       async () => {
         pullHealth.attempt();
+        void pullRecord({ attemptAt: Date.now() });
         try {
           const reader = managed._backups?.[0]?.storage;
           if (!reader) throw new Error('backup storage is not connected');
@@ -801,6 +810,7 @@ export const initWallet = async (
               return undefined;
             });
             pullHealth.succeeded(report);
+            void pullRecord({ okAt: Date.now(), stuck: pullHealth.get().stuck });
             if (report?.plan === 'healing') {
               console.warn(
                 `[deviceSync] ${report.missingTx} payment(s) arrived without some of their coins: pulling them again`,
@@ -810,10 +820,14 @@ export const initWallet = async (
               console.warn(
                 '[deviceSync] coins still missing after re-pulls: the backup is pulled again from the start',
               );
-          } else pullHealth.succeeded();
+          } else {
+            pullHealth.succeeded();
+            void pullRecord({ okAt: Date.now(), stuck: pullHealth.get().stuck });
+          }
           return paymentYields() > yieldsBefore ? ('yielded' as const) : undefined;
         } catch (e) {
           pullHealth.failed(e);
+          void pullRecord({ failAt: Date.now(), stuck: pullHealth.get().stuck });
           throw e;
         }
       },

@@ -156,3 +156,39 @@ export function onSyncHealth(cb: (h: SyncHealth) => void): () => void {
   listeners.add(cb);
   return () => void listeners.delete(cb);
 }
+
+// ── the per-account pull record the UI line reads (fix 5: services/balanceTruth.ts) ──
+
+/** chrome.storage.local key of the account's pull record. */
+export const deviceSyncPullKey = (identityAddress: string) => `deviceSyncPull:${identityAddress}`;
+
+/**
+ * The record's fields (ms since epoch): okAt the last pull that went through, failAt the last that failed, attemptAt the
+ * last attempt started (an attemptAt newer than okAt and old means an attempt never finished), stuck from syncHealth.
+ */
+export type DeviceSyncPullRecord = { okAt?: number; failAt?: number; attemptAt?: number; stuck?: boolean };
+
+export type PullRecordKv = {
+  get(key: string): Promise<Record<string, unknown>>;
+  set(items: Record<string, unknown>): Promise<void>;
+};
+
+/**
+ * Merge `patch` into the account's pull record (other fields, and other writers' fields, kept). Writes are chained so
+ * an attempt and its result never land out of order; a storage failure is swallowed (a status line only).
+ */
+export function createPullRecord(kv: PullRecordKv, identityAddress: string | undefined) {
+  let chain: Promise<void> = Promise.resolve();
+  return (patch: DeviceSyncPullRecord): Promise<void> => {
+    if (!identityAddress) return Promise.resolve();
+    const key = deviceSyncPullKey(identityAddress);
+    chain = chain
+      .then(async () => {
+        const had = (await kv.get(key))?.[key];
+        const prev = had && typeof had === 'object' ? (had as Record<string, unknown>) : {};
+        await kv.set({ [key]: { ...prev, ...patch } });
+      })
+      .catch(() => undefined);
+    return chain;
+  };
+}

@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { STUCK_PASS_MS } from './fullPass';
 import type { IntegrityReport } from './pullIntegrity';
-import { EMPTY_SYNC_HEALTH, createSyncHealth, onSyncHealth, registerSyncHealth, syncHealth } from './syncHealth';
+import {
+  EMPTY_SYNC_HEALTH,
+  createPullRecord,
+  createSyncHealth,
+  deviceSyncPullKey,
+  onSyncHealth,
+  registerSyncHealth,
+  syncHealth,
+} from './syncHealth';
 
 const MIN = 60_000;
 const report = (p: Partial<IntegrityReport>): IntegrityReport => ({
@@ -85,5 +93,19 @@ describe('syncHealth: what the UI line reads', () => {
     expect(seen).toContain(true);
     h.hydrate(42);
     expect(h.get().lastPullOkAt).toBe(42);
+  });
+
+  test('the per-account record (deviceSyncPull:<address>) is merged, in order, other fields kept', async () => {
+    const store: Record<string, unknown> = { [deviceSyncPullKey('1Abc')]: { okAt: 5, other: 'fix 5' } };
+    const kv = {
+      get: async (k: string) => ({ [k]: store[k] }),
+      set: async (items: Record<string, unknown>) => void Object.assign(store, items),
+    };
+    const rec = createPullRecord(kv, '1Abc');
+    void rec({ attemptAt: 10 });
+    await rec({ okAt: 11, stuck: false });
+    expect(store['deviceSyncPull:1Abc']).toEqual({ okAt: 11, other: 'fix 5', attemptAt: 10, stuck: false });
+    await createPullRecord(kv, undefined)({ attemptAt: 1 }); // no account: nothing written
+    expect(Object.keys(store)).toEqual(['deviceSyncPull:1Abc']);
   });
 });
