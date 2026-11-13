@@ -24,6 +24,7 @@ import {
   canonicalCounterparty,
   guardSharedKeySigning,
   isAnyoneCounterparty,
+  isOneUseHmac,
   isOneUseRequestID,
   isSharedKeyGrant,
   revokeSharedKeyGrants,
@@ -234,6 +235,61 @@ describe('item 2: every level-1 anyone signature asks, whatever the name or keyI
     await wallet.createSignature(sig('c', other), SITE);
     await wallet.createSignature(sig('d', other), SITE);
     expect(sheets.filter((x) => isOneUseRequestID(x.requestID)).length).toBe(2);
+  });
+});
+
+describe('review of fc614295: level-1 HMACs for a named service ask every time', () => {
+  const hmacSetup = () => {
+    const store = new InMemoryPermissionStore();
+    const keys = new ProtoWallet(PrivateKey.fromRandom());
+    const underlying = {
+      createHmac: (a: never, o?: string) => keys.createHmac(a, o),
+      createSignature: (a: never, o?: string) => keys.createSignature(a, o),
+      getPublicKey: (a: never, o?: string) => keys.getPublicKey(a, o),
+      listOutputs: async () => ({ outputs: [], totalOutputs: 0 }),
+    };
+    const mgr = new LocalWalletPermissionsManager(underlying as never, ADMIN, {}, { store });
+    const sheets: Req[] = [];
+    mgr.bindCallback('onProtocolPermissionRequested', (async (r: Req) => {
+      sheets.push(r);
+      await mgr.grantPermission(
+        isOneUseRequestID(r.requestID) ? oneUseGrant(r.requestID) : { requestID: r.requestID, expiry: 0 },
+      );
+    }) as never);
+    const wallet = guardReservedProtocols(
+      guardCrossSiteSigning(guardSharedKeySigning(mgr, { adminOriginator: ADMIN }), ADMIN),
+      ADMIN,
+    ) as unknown as { createHmac: (a: unknown, o?: string) => Promise<{ hmac: number[] }> };
+    return { wallet, sheets, keys };
+  };
+  test('3 HMACs to a service key = 3 approvals, and the service can check each one', async () => {
+    const { wallet, sheets, keys } = hmacSetup();
+    const svc = PrivateKey.fromRandom();
+    const C = svc.toPublicKey().toString();
+    const macs: number[][] = [];
+    for (let i = 0; i < 3; i++)
+      macs.push(
+        (await wallet.createHmac({ protocolID: [1, 'acme api'], keyID: `k${i}`, counterparty: C, data: [i] }, SITE))
+          .hmac,
+      );
+    expect(sheets.filter((x) => isOneUseRequestID(x.requestID)).length).toBe(3); // was 1 sheet for 3 in fc614295
+    const { publicKey } = await keys.getPublicKey({ identityKey: true });
+    const ok = await new ProtoWallet(svc).verifyHmac({
+      protocolID: [1, 'acme api'],
+      keyID: 'k0',
+      counterparty: publicKey,
+      data: [0],
+      hmac: macs[0],
+    });
+    expect(ok.valid).toBe(true);
+  });
+  test("HMACs as 'self' (or with no counterparty, the SDK's 'self') keep their standing grant", async () => {
+    const { wallet, sheets } = hmacSetup();
+    await wallet.createHmac({ protocolID: [1, 'acme api'], keyID: 'a', counterparty: 'self', data: [1] }, SITE);
+    await wallet.createHmac({ protocolID: [1, 'acme api'], keyID: 'b', data: [1] }, SITE);
+    expect(sheets.length).toBe(1);
+    expect(isOneUseHmac({ protocolID: [1, 'acme api'], keyID: 'b', counterparty: 'anyone' })).toBe(true);
+    expect(isOneUseHmac({ protocolID: [2, 'acme api'], keyID: 'b', counterparty: '02'.padEnd(66, 'a') })).toBe(false);
   });
 });
 

@@ -98,6 +98,16 @@ const hostIn = (host: string | undefined, hosts: readonly string[]) =>
 
 const protoKey = (p: readonly [number, string]) => `${p[0]}:${p[1].trim().toLowerCase()}`;
 
+/**
+ * A level-1 name shaped like a sign-in (auth, login, sign in..., 'message signing'). The upgrade removes such grants,
+ * and the sheet never pre-ticks such a line (permissionBundle.ts isSharedKeyRequest): the same rule in both places.
+ */
+export const isSignInShapedName = (name: unknown): boolean => {
+  if (typeof name !== 'string') return false;
+  const n = name.trim().toLowerCase();
+  return SIGN_IN_NAME.test(n) || n === 'message signing';
+};
+
 /** A one-tap sign-in of ours (see ONE_TAP_SIGN_INS). */
 export const isOneTapSignIn = (protocolID: unknown): boolean => {
   const p = asProtocol(protocolID);
@@ -162,6 +172,21 @@ export const isBearerSignature = (args: unknown, host?: string): boolean => {
   return SIGN_IN_NAME.test(name) || name === 'message signing' || isTimeKeyID(a.keyID);
 };
 
+/**
+ * A site's level-1 createHmac for anyone other than 'self' (review of fc614295): the named service can recompute that
+ * HMAC from its own key and the user's identity key, so it works as a token there, and a level-1 grant can't be
+ * limited to one counterparty. It asks every time, like a level-1 signature not made as 'self'. A missing
+ * counterparty is 'self' for an HMAC (the SDK default), so it is not one of these.
+ */
+export const isOneUseHmac = (args: unknown): boolean => {
+  if (!args || typeof args !== 'object') return false;
+  const a = args as SignArgs;
+  const p = asProtocol(a.protocolID);
+  if (!p || p[0] !== 1 || p[1].trim().toLowerCase().startsWith('p ')) return false;
+  const cp = canonicalCounterparty('createHmac', a.counterparty);
+  return cp !== undefined && cp !== null && cp !== 'self';
+};
+
 export const BEARER_SIGN_DENIED = 'Permission denied.';
 
 /** Wallet methods whose args carry a counterparty that selects a derived key. */
@@ -180,7 +205,7 @@ type Fn = (args: unknown, originator?: string) => Promise<unknown>;
 type Manager = Partial<Record<(typeof COUNTERPARTY_METHODS)[number], Fn>> & {
   grantPermission?: (params: { requestID: string; ephemeral?: boolean; expiry?: number }) => Promise<void>;
   enqueueAndFireEvent?: (request: Record<string, unknown>, key: string) => Promise<boolean>;
-  underlying?: { createSignature: Fn };
+  underlying?: { createSignature?: Fn; createHmac?: Fn };
   isAdminProtocol?: (p: [number, string]) => boolean;
   prepareOriginator?: (originator: string) => { normalized: string };
   pendingSingle?: Map<string, unknown>;
@@ -234,53 +259,57 @@ export function guardSharedKeySigning<T extends object>(manager: T, deps: { admi
     return grant.call(manager, { requestID: params.requestID, ephemeral: true, expiry: 1 });
   };
 
-  // 3. Tokens: their own request, every time.
-  const sign = m.createSignature as Fn;
+  // 3. Tokens: their own request, every time (signatures, and level-1 HMACs for someone other than 'self').
   let seq = 0;
-  m.createSignature = async (args: unknown, originator?: string) => {
-    if (!outside(originator)) return sign.call(manager, args, originator);
-    // The manager's own originator rules (no scheme, no IP, a DNS name) and its site key (hostname only), as every
-    // other request from this site is keyed. An originator it refuses goes on to the manager, which refuses it.
-    let site = '';
-    try {
-      site = m.prepareOriginator!.call(manager, originator as string).normalized;
-    } catch {
-      return sign.call(manager, args, originator);
-    }
-    if (!site || !isBearerSignature(args, site)) return sign.call(manager, args, originator);
-    const a = args as SignArgs;
-    const protocolID = asProtocol(a.protocolID) as [number, string];
-    // Admin-only names still get the manager's own refusal.
-    if (m.isAdminProtocol!.call(manager, protocolID)) return sign.call(manager, args, originator);
-    const underlying = m.underlying;
-    if (!underlying || typeof underlying.createSignature !== 'function')
-      throw new Error('guardSharedKeySigning: permissions manager has no underlying wallet');
-    seq = (seq + 1) % Number.MAX_SAFE_INTEGER;
-    const key = `${ONE_USE_REQUEST_PREFIX}${site}:${protocolID[0]},${protocolID[1]}:${Date.now().toString(36)}.${seq}`;
-    const granted = await m.enqueueAndFireEvent!.call(
-      manager,
-      {
-        type: 'protocol',
-        originator: site,
-        displayOriginator: originator,
-        privileged: a.privileged === true,
-        protocolID,
-        // Level 1 has no counterparty in a request (the manager's own convention).
-        counterparty: protocolID[0] === 1 ? '' : 'anyone',
-        usageType: 'signing',
-        ...(typeof a.privilegedReason === 'string' ? { reason: a.privilegedReason } : {}),
-        renewal: false,
-        oneUse: true,
-      },
-      key,
-    );
-    if (granted !== true) throw Object.assign(new Error(BEARER_SIGN_DENIED), { code: 'ERR_PERMISSION_DENIED' });
-    // Signed exactly as asked, in the one spelling of its counterparty (a missing one is 'anyone', as the SDK signs it).
-    return underlying.createSignature(
-      { ...a, counterparty: canonicalCounterparty('createSignature', a.counterparty) },
-      originator,
-    );
+  const askOnce = (
+    method: 'createSignature' | 'createHmac',
+    needsOne: (args: unknown, site: string) => boolean,
+    usageType: 'signing' | 'hmac',
+  ) => {
+    const original = m[method] as Fn;
+    m[method] = async (args: unknown, originator?: string) => {
+      if (!outside(originator)) return original.call(manager, args, originator);
+      // The manager's own originator rules (no scheme, no IP, a DNS name) and its site key (hostname only), as every
+      // other request from this site is keyed. An originator it refuses goes on to the manager, which refuses it.
+      let site = '';
+      try {
+        site = m.prepareOriginator!.call(manager, originator as string).normalized;
+      } catch {
+        return original.call(manager, args, originator);
+      }
+      if (!site || !needsOne(args, site)) return original.call(manager, args, originator);
+      const a = args as SignArgs;
+      const protocolID = asProtocol(a.protocolID) as [number, string];
+      // Admin-only names still get the manager's own refusal.
+      if (m.isAdminProtocol!.call(manager, protocolID)) return original.call(manager, args, originator);
+      const base = m.underlying?.[method];
+      if (typeof base !== 'function') throw new Error(`guardSharedKeySigning: the underlying wallet has no ${method}`);
+      seq = (seq + 1) % Number.MAX_SAFE_INTEGER;
+      const key = `${ONE_USE_REQUEST_PREFIX}${site}:${protocolID[0]},${protocolID[1]}:${Date.now().toString(36)}.${seq}`;
+      const granted = await m.enqueueAndFireEvent!.call(
+        manager,
+        {
+          type: 'protocol',
+          originator: site,
+          displayOriginator: originator,
+          privileged: a.privileged === true,
+          protocolID,
+          // Level 1 has no counterparty in a request (the manager's own convention).
+          counterparty: protocolID[0] === 1 ? '' : 'anyone',
+          usageType,
+          ...(typeof a.privilegedReason === 'string' ? { reason: a.privilegedReason } : {}),
+          renewal: false,
+          oneUse: true,
+        },
+        key,
+      );
+      if (granted !== true) throw Object.assign(new Error(BEARER_SIGN_DENIED), { code: 'ERR_PERMISSION_DENIED' });
+      // Made exactly as asked, in the one spelling of its counterparty (a missing signature one is 'anyone').
+      return base.call(m.underlying, { ...a, counterparty: canonicalCounterparty(method, a.counterparty) }, originator);
+    };
   };
+  askOnce('createSignature', (args, site) => isBearerSignature(args, site), 'signing');
+  askOnce('createHmac', (args) => isOneUseHmac(args), 'hmac');
   return manager;
 }
 
@@ -314,7 +343,7 @@ export const isSharedKeyGrant = (key: {
 }): boolean => {
   const name = typeof key.protocolName === 'string' ? key.protocolName.trim().toLowerCase() : '';
   if (!name || (key.protocolLevel !== 1 && key.protocolLevel !== 2)) return true;
-  if (key.protocolLevel === 1) return SIGN_IN_NAME.test(name) || name === 'message signing';
+  if (key.protocolLevel === 1) return isSignInShapedName(name);
   return isAnyoneCounterparty(key.counterparty) && !ONE_TAP_SIGN_INS.has(`2:${name}`);
 };
 

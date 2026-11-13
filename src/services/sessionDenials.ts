@@ -108,40 +108,148 @@ export class ManifestOnce {
   }
 }
 
-/** How long a "Not now" to a one-signature request stands for that site (review of 1020b69c). */
-export const ONCE_DENIAL_MS = 10 * 60_000;
+/**
+ * How long a "Not now" to a one-signature request stands for that site (review of 1020b69c; 3 minutes, not 10, after
+ * the review of fc614295: a real retry after a mistaken Not now must not be stuck for long, and a minutes-long pause
+ * already ends a sheet loop: the site's next request a few minutes later is a single sheet, not a storm).
+ */
+export const ONCE_DENIAL_MS = 3 * 60_000;
+/** chrome.storage.session key: survives the MV3 service worker restarting (about 30 s idle), not the browser session. */
+export const ONCE_DENIALS_KEY = 'bwx.onceDenials';
+/** Most one-signature sheets shown in any rolling minute, all sites together. More are refused without a sheet. */
+export const ONCE_SHEETS_PER_MINUTE = 6;
 
 /**
- * "Not now" to a one-signature request (services/sharedKeySigning.ts), remembered per site for ONCE_DENIAL_MS. A site
- * could otherwise loop SIGN ONCE sheets, one straight after each "Not now", until the user gave in. While a site's
- * No stands, its next one-signature requests are refused without a sheet. Cleared when the user opens Permissions in
- * the wallet or forgets the site. Memory only: never stored, never turned into a Yes.
+ * Hosting suffixes where every subdomain is a different owner's site (a free one each). A "Not now" there stays with
+ * that one host, never the whole platform. Not the full public suffix list (none is bundled), so a suffix missing here
+ * is grouped too broadly: siblings on it are refused for a few minutes, never allowed.
+ */
+const SHARED_HOSTING = [
+  'vercel.app',
+  'netlify.app',
+  'github.io',
+  'gitlab.io',
+  'pages.dev',
+  'workers.dev',
+  'web.app',
+  'firebaseapp.com',
+  'appspot.com',
+  'herokuapp.com',
+  'onrender.com',
+  'fly.dev',
+  'railway.app',
+  'replit.app',
+  'repl.co',
+  'glitch.me',
+  'surge.sh',
+  'deno.dev',
+  'netlify.com',
+  'azurewebsites.net',
+  'cloudfront.net',
+  'blogspot.com',
+  'ngrok.io',
+  'ngrok-free.app',
+  'trycloudflare.com',
+  'paired.invalid',
+];
+
+/**
+ * The key a one-signature "Not now" is kept under: the site's registrable domain, so a site can't escape it by moving
+ * to another subdomain of its own (a.evil.example, b.evil.example). Without a public suffix list: two labels, or three
+ * under a short two-letter country suffix ("example.co.uk"); a host on a shared-hosting suffix (or a phone pairing)
+ * keeps its full name; an IP address or a single label is kept whole.
+ */
+export const onceSiteKey = (originator: string): string => {
+  const host = site(originator).replace(/:\d+$/, '').replace(/\.$/, '');
+  if (!host || /^\d+(\.\d+){3}$/.test(host) || host.startsWith('[')) return host;
+  if (SHARED_HOSTING.some((s) => host === s || host.endsWith(`.${s}`))) {
+    const base = SHARED_HOSTING.find((s) => host === s || host.endsWith(`.${s}`))!;
+    if (base === 'paired.invalid') return host;
+    const own = host
+      .slice(0, host.length - base.length - 1)
+      .split('.')
+      .pop();
+    return own ? `${own}.${base}` : host;
+  }
+  const parts = host.split('.');
+  if (parts.length <= 2) return host;
+  const [sld, tld] = parts.slice(-2);
+  const n = tld.length === 2 && sld.length <= 3 ? 3 : 2;
+  return parts.slice(-n).join('.');
+};
+
+export type OnceStore = {
+  load(): Promise<[string, number][]>;
+  save(entries: [string, number][]): Promise<void>;
+};
+
+/**
+ * "Not now" to a one-signature request (services/sharedKeySigning.ts), remembered per registrable domain for
+ * ONCE_DENIAL_MS, in chrome.storage.session so a service worker restart doesn't wipe it. A site could otherwise loop
+ * SIGN ONCE sheets, one straight after each "Not now", until the user gave in. While a site's No stands, its next
+ * one-signature requests are refused (the standard "Permission denied.") without a sheet. Cleared when the user opens
+ * Permissions in the wallet or forgets the site. Never turned into a Yes. Also caps one-signature sheets at
+ * ONCE_SHEETS_PER_MINUTE across all sites (memory only), so many different sites can't storm either.
  */
 export class OnceDenials {
   private until = new Map<string, number>();
+  private shown: number[] = [];
+  private loaded: Promise<void> | undefined;
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly store?: OnceStore,
+    private readonly now: () => number = Date.now,
+  ) {}
 
-  note(originator: string | undefined): void {
+  private ready(): Promise<void> {
+    this.loaded ??= (this.store?.load() ?? Promise.resolve([]))
+      .then((entries) => {
+        for (const e of Array.isArray(entries) ? entries : [])
+          if (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number')
+            this.until.set(e[0], Math.max(this.until.get(e[0]) ?? 0, e[1]));
+      })
+      .catch(() => undefined);
+    return this.loaded;
+  }
+
+  private async save(): Promise<void> {
+    const t = this.now();
+    for (const [k, v] of this.until) if (v <= t) this.until.delete(k);
+    await this.store?.save([...this.until]).catch(() => undefined);
+  }
+
+  async note(originator: string | undefined): Promise<void> {
     if (!originator) return;
-    this.until.set(site(originator), this.now() + ONCE_DENIAL_MS);
+    await this.ready();
+    this.until.set(onceSiteKey(originator), this.now() + ONCE_DENIAL_MS);
+    await this.save();
   }
 
-  active(originator: string | undefined): boolean {
+  async active(originator: string | undefined): Promise<boolean> {
     if (!originator) return false;
-    const key = site(originator);
-    const t = this.until.get(key);
-    if (t === undefined) return false;
-    if (this.now() < t) return true;
-    this.until.delete(key);
-    return false;
+    await this.ready();
+    const t = this.until.get(onceSiteKey(originator));
+    return t !== undefined && this.now() < t;
   }
 
-  forget(originator: string): void {
-    this.until.delete(site(originator));
+  /** A one-signature sheet is about to be shown: false when ONCE_SHEETS_PER_MINUTE showed in the last minute. */
+  allowSheet(): boolean {
+    const t = this.now();
+    this.shown = this.shown.filter((x) => t - x < 60_000);
+    if (this.shown.length >= ONCE_SHEETS_PER_MINUTE) return false;
+    this.shown.push(t);
+    return true;
   }
 
-  clear(): void {
+  async forget(originator: string): Promise<void> {
+    await this.ready();
+    this.until.delete(onceSiteKey(originator));
+    await this.save();
+  }
+
+  async clear(): Promise<void> {
+    await this.ready();
     this.until.clear();
+    await this.save();
   }
 }

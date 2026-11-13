@@ -16,7 +16,13 @@
 
 import { BLOCK_SITE_BASKET, basketDisplayName, isReservedBasket } from './reservedBaskets';
 import type { SealSheet } from './sealPass';
-import { isAnyoneCounterparty, isOneTapSignIn, isOneUseRequestID, SIGN_IN_NAME } from './sharedKeySigning';
+import {
+  isAnyoneCounterparty,
+  isOneTapSignIn,
+  isOneUseRequestID,
+  isSignInShapedName,
+  SIGN_IN_NAME,
+} from './sharedKeySigning';
 
 export { BLOCK_SITE_BASKET };
 
@@ -503,6 +509,8 @@ export const isSharedKeyRequest = (r: BundleRequest): boolean => {
   if (isOneUseRequest(r)) return true;
   if (isIdentityKeyRequest(r) || isPostSignature(r) || r.usageType === 'generic' || r.usageType === 'identityKey')
     return false;
+  // A level-1 sign-in-shaped name (review of fc614295): never pre-ticked, the same rule as the upgrade's revocation.
+  if (protoLevel(r) === 1) return isSignInShapedName(protoName(r));
   return protoLevel(r) === 2 && forAnyone(r) && !isOneTapSignIn(r.protocolID);
 };
 
@@ -596,7 +604,10 @@ const hostOf = (r: BundleRequest) => r.originator;
 const sharedLineText = (r: BundleRequest): string => {
   const name = protoName(r);
   const site = hostOf(r);
-  if (isOneUseRequest(r)) return `Sign once as you for ${site} ("${name}"). Other sites could accept this too`;
+  if (isOneUseRequest(r))
+    return keyOperation(r) === 'hmac'
+      ? `Make one code as you for ${site} ("${name}"). The service it is for could accept it as you`
+      : `Sign once as you for ${site} ("${name}"). Other sites could accept this too`;
   const op = keyOperation(r);
   if (op === 'sign' || op === 'other')
     return forAnyone(r)
