@@ -198,7 +198,7 @@ import {
 import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
 import { runUnsentExpiry, storageKV, type ExpiryReport } from './services/unsentExpiry';
-import { makeExpiryDeps, type ExpiryStorage, type ExpiryWallet } from './services/unsentExpiryWiring';
+import { makeExpiryDeps } from './services/unsentExpiryWiring';
 import { chainActive } from './services/dappChain';
 import { healthStatus, SYNC_HEALTH_KEY } from './services/storageHealth';
 import {
@@ -2264,8 +2264,8 @@ export const initWallet = async (
       runUnsentExpiry(
         // One wiring for the app and the two-device simulation (services/unsentExpiryWiring.ts).
         makeExpiryDeps({
-          wallet: baseWallet as unknown as ExpiryWallet,
-          storage: storage as unknown as ExpiryStorage,
+          wallet: baseWallet,
+          storage,
           services: toolboxServices,
           identityKey: baseWallet.keyDeriver.identityKey,
           kv: storageKV(baseWallet.keyDeriver.identityKey),

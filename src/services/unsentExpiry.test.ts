@@ -32,6 +32,7 @@ const B = T('b');
 const P = T('1'); // a mined parent
 const Q = T('2'); // another mined parent
 const X = T('9'); // someone else's tx
+const Y = T('8'); // another one
 
 /** A fake world: which txids the chain has, and who spent which outpoint. */
 function world() {
@@ -559,6 +560,12 @@ describe('BRC-177 block height and the 14-day cap', () => {
 });
 
 // ── 13 Nov 2026 (tx 446): a payment one of whose inputs a confirmed foreign tx spent can never be mined ──
+/** A payment's output to someone else, its change (wallet basket 'default'), a Store memo, and an unrelated output. */
+const PAY = { lockingScript: '76a914' + '11'.repeat(20) + '88ac', satoshis: 20_000 };
+const CHANGE = { lockingScript: '76a914' + '22'.repeat(20) + '88ac', satoshis: 79_000, basket: 'default' };
+const MEMO = { lockingScript: '006a0d' + '62'.repeat(13), satoshis: 0 };
+const OTHER = '76a914' + '33'.repeat(20) + '88ac';
+
 describe('conflicted payments (an input spent on chain by a different, confirmed tx)', () => {
   /** A world where conflict + detach are wired; `conclusive` lists the outpoints whose foreign spend counts. */
   function conflictWorld() {
@@ -571,6 +578,8 @@ describe('conflicted payments (an input spent on chain by a different, confirmed
       if (detachFails) throw new Error('store busy');
       detached.push(`${t}:${o}>${by}`);
     };
+    // The foreign spender pays someone else (not a copy of the payment): what `due` gives the action below.
+    w.deps.spenderOutputs = async () => [{ lockingScript: OTHER, satoshis: 250_000 }];
     return {
       w,
       conclusive,
@@ -581,7 +590,7 @@ describe('conflicted payments (an input spent on chain by a different, confirmed
     };
   }
   const due = async (w: ReturnType<typeof world>, a: NoSendAction) => {
-    w.actions = [a];
+    w.actions = [{ outputs: [PAY, CHANGE], ...a }];
     await expireOnce(w.deps);
     w.advance(DEFAULT_TTL_S);
   };
@@ -708,8 +717,9 @@ describe('conflicted payments (an input spent on chain by a different, confirmed
     expect(r.kept).toEqual([{ txid: A, reason: 'abort-failed' }]);
   });
 
-  test('every input spent elsewhere (maybe a malleated copy of this very payment) → kept, nothing detached', async () => {
+  test('every input spent by a malleated copy of this very payment (same outputs) → kept, nothing detached', async () => {
     const { w, conclusive, detached } = conflictWorld();
+    w.deps.spenderOutputs = async () => [PAY, CHANGE];
     await due(w, act(A, [`${P}.0`, `${P}.1`]));
     w.spends.set(`${P}.0`, X);
     w.spends.set(`${P}.1`, X);
@@ -758,13 +768,124 @@ describe('conflicted payments (an input spent on chain by a different, confirmed
       expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
       expect(c.detached).toEqual([]);
     }
-    // Our own outputs unknown (no locking scripts listed): kept.
+    // Our own outputs unknown (no locking scripts listed), or none paying others: kept.
     c = one([{ lockingScript: 'aa', satoshis: 1 }]);
-    await due(c.w, act(A, [`${P}.0`]));
+    await due(c.w, { ...act(A, [`${P}.0`]), outputs: [{ satoshis: 20_000 }] });
     c.w.spends.set(`${P}.0`, X);
     c.conclusive.add(`${P}.0>${X}`);
     r = await expireOnce(c.w.deps);
     expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+    c = one([{ lockingScript: 'aa', satoshis: 1 }]);
+    await due(c.w, { ...act(A, [`${P}.0`]), outputs: [CHANGE, MEMO] });
+    c.w.spends.set(`${P}.0`, X);
+    c.conclusive.add(`${P}.0>${X}`);
+    r = await expireOnce(c.w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+  });
+
+  // Review of e8f086f5 (probe cases): a spender that is this payment re-signed must never be taken for "someone else".
+  describe('a re-signed copy of the payment is kept (it paid the recipient: cancelling it invites a double payment)', () => {
+    const run = async (
+      ins: string[],
+      spends: Record<string, string>,
+      spenderOuts: Record<string, { lockingScript: string; satoshis: number }[]>,
+      outputs: NoSendAction['outputs'] = [PAY, MEMO, CHANGE],
+    ) => {
+      const c = conflictWorld();
+      c.w.deps.spenderOutputs = async (t) => spenderOuts[t];
+      await due(c.w, { ...act(A, ins), outputs });
+      for (const [o, by] of Object.entries(spends)) {
+        c.w.spends.set(o, by);
+        c.conclusive.add(`${o}>${by}`);
+      }
+      const r = await expireOnce(c.w.deps);
+      return { r, c };
+    };
+    test('same recipient, different change (a fee bump), memo dropped', async () => {
+      const { r, c } = await run([`${P}.0`], { [`${P}.0`]: X }, { [X]: [PAY, { ...CHANGE, satoshis: 78_900 }] });
+      expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+      expect(c.w.aborted).toEqual([]);
+    });
+    test('reordered, with extra outputs', async () => {
+      const { r } = await run(
+        [`${P}.0`],
+        { [`${P}.0`]: X },
+        { [X]: [{ lockingScript: '6a', satoshis: 0 }, CHANGE, PAY] },
+      );
+      expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+    });
+    test('its outputs split across two spenders', async () => {
+      const PAY2 = { lockingScript: '76a914' + '44'.repeat(20) + '88ac', satoshis: 5_000 };
+      const { r } = await run(
+        [`${P}.0`, `${Q}.0`],
+        { [`${P}.0`]: X, [`${Q}.0`]: Y },
+        { [X]: [PAY], [Y]: [PAY2, { lockingScript: OTHER, satoshis: 1 }] },
+        [PAY, PAY2, CHANGE],
+      );
+      expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+    });
+    test('re-signed from a subset of its inputs plus other coins (one input still unspent here)', async () => {
+      const { r, c } = await run(
+        [`${P}.0`, `${Q}.1`],
+        { [`${P}.0`]: X },
+        { [X]: [PAY, { lockingScript: OTHER, satoshis: 9 }] },
+      );
+      expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+      expect(c.detached).toEqual([]);
+    });
+    test('the same subset case, but the spender pays someone else: cancelled', async () => {
+      const { r } = await run(
+        [`${P}.0`, `${Q}.1`],
+        { [`${P}.0`]: X },
+        { [X]: [{ lockingScript: OTHER, satoshis: 9 }] },
+      );
+      expect(r.released).toEqual([A]);
+    });
+    test('no spenderOutputs wired: kept, even with a clean input', async () => {
+      const c = conflictWorld();
+      c.w.deps.spenderOutputs = undefined;
+      await due(c.w, act(A, [`${P}.0`, `${Q}.1`]));
+      c.w.spends.set(`${P}.0`, X);
+      c.conclusive.add(`${P}.0>${X}`);
+      const r = await expireOnce(c.w.deps);
+      expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+    });
+  });
+
+  test('abortRemarking: the abort and the re-mark run as one call; reaffirmSpent only if its re-mark failed', async () => {
+    const calls: string[] = [];
+    const c = conflictWorld();
+    c.w.deps.abortRemarking = async (t, remark) => {
+      calls.push(`abortRemarking ${t} ${remark.map(([o, by]) => `${o}>${by}`).join(',')}`);
+      return { aborted: true, remarked: true };
+    };
+    c.w.deps.reaffirmSpent = async (o) => void calls.push(`reaffirm ${o}`);
+    await due(c.w, act(A, [`${P}.0`, `${P}.1`]));
+    c.w.spends.set(`${P}.1`, X);
+    c.conclusive.add(`${P}.1>${X}`);
+    let r = await expireOnce(c.w.deps);
+    expect(r.released).toEqual([A]);
+    expect(calls).toEqual([`abortRemarking ${A} ${P}.1>${X}`]);
+    expect(c.w.aborted).toEqual([]); // deps.abort not used
+
+    const d = conflictWorld();
+    calls.length = 0;
+    d.w.deps.abortRemarking = async () => ({ aborted: true, remarked: false });
+    d.w.deps.reaffirmSpent = async (o) => void calls.push(`reaffirm ${o}`);
+    await due(d.w, act(A, [`${P}.0`, `${P}.1`]));
+    d.w.spends.set(`${P}.1`, X);
+    d.conclusive.add(`${P}.1>${X}`);
+    r = await expireOnce(d.w.deps);
+    expect(r.released).toEqual([A]);
+    expect(calls).toEqual([`reaffirm ${P}.1`]);
+
+    const e = conflictWorld();
+    e.w.deps.abortRemarking = async () => ({ aborted: false });
+    await due(e.w, act(A, [`${P}.0`, `${P}.1`]));
+    e.w.spends.set(`${P}.1`, X);
+    e.conclusive.add(`${P}.1>${X}`);
+    r = await expireOnce(e.w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'abort-failed' }]);
   });
 
   test('after the abort the detached coins are re-marked spent; a failed re-mark does not undo the release', async () => {
@@ -784,7 +905,8 @@ describe('conflicted payments (an input spent on chain by a different, confirmed
     conclusive.add(`${P}.1>${X}`);
     const r = await expireOnce(w.deps);
     expect(r.released).toEqual([A]);
-    expect(order).toEqual(['abort', `reaffirm ${P}.1>${X}`]);
+    // Retried three times, then left to the coin check (logged); the release stands.
+    expect(order).toEqual(['abort', ...Array(3).fill(`reaffirm ${P}.1>${X}`)]);
     expect(w.logs.some((l) => l.includes('could not re-mark'))).toBe(true);
   });
 
@@ -1052,7 +1174,8 @@ describe('Store payments released early (storeAsk)', () => {
     const detached: string[] = [];
     w.deps.conflict = async () => true;
     w.deps.detachInput = async (_t, o) => void detached.push(o);
-    w.actions = [act(A, [`${P}.0`, `${Q}.0`])];
+    w.deps.spenderOutputs = async () => [{ lockingScript: OTHER, satoshis: 250_000 }];
+    w.actions = [{ ...act(A, [`${P}.0`, `${Q}.0`]), outputs: [PAY, CHANGE] }];
     await expireOnce(w.deps);
     w.advance(DEFAULT_TTL_S);
     w.spends.set(`${P}.0`, X);

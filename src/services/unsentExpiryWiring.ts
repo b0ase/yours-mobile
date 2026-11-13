@@ -6,7 +6,7 @@
  * Everything that reaches the network takes `fetch` (the sim's fake chain; the global fetch in the app); everything
  * that touches storage goes through the WalletStorageManager it is handed.
  */
-import { Transaction } from '@bsv/sdk';
+import { Transaction, type ListActionsArgs, type ListActionsResult, type WalletInterface } from '@bsv/sdk';
 import { wocSpentStatus } from './coinPreflight';
 import { eitherChainSource, oneSatChainLookups } from './chainSources';
 import { wocChainLookups } from './seedChange';
@@ -16,6 +16,9 @@ import {
   storageReaffirmSpent,
   wocHeight,
   wocSpent,
+  storageAbortRemarking,
+  type AbortProvider,
+  type AuthId,
   type DetachProvider,
   type ExpiryDeps,
   type ExpiryKV,
@@ -28,38 +31,24 @@ import { withPayLock } from '../mobile/themeOrder/storePay';
 
 type F = (url: string, init?: RequestInit) => Promise<Response>;
 
-type ListedAction = {
-  txid: string;
-  labels?: string[];
-  description?: string;
-  inputs?: { sourceOutpoint: string }[];
-  outputs?: { lockingScript?: string; satoshis?: number }[];
+/**
+ * The wallet calls the expiry pass makes: the toolbox Wallet (the app's baseWallet, the sim's devices) as it is.
+ * `actionBatch`: a reference an action batch owns is aborted through the wallet (abortRemarking is skipped for it).
+ */
+export type ExpiryWallet = Pick<
+  WalletInterface,
+  'abortAction' | 'createAction' | 'getPublicKey' | 'createSignature'
+> & {
+  listNoSendActions(args: ListActionsArgs): Promise<ListActionsResult>;
+  actionBatch?: { ownsReference?(reference: string): boolean };
 };
 
-export type ExpiryWallet = {
-  listNoSendActions: (args: {
-    labels: string[];
-    includeLabels: true;
-    includeInputs: true;
-    includeOutputs: true;
-    includeOutputLockingScripts: true;
-    limit: number;
-    offset: number;
-  }) => Promise<{ actions: ListedAction[] }>;
-  abortAction: (args: { reference: string }) => Promise<unknown>;
-  createAction: (args: {
-    description: string;
-    options: { sendWith: string[]; acceptDelayedBroadcast: false };
-  }) => Promise<unknown>;
-  getPublicKey: (args: { identityKey: true }) => Promise<{ publicKey: string }>;
-  createSignature: (args: never) => Promise<{ signature: number[] }>;
-};
-
+/** The storage manager calls it makes (WalletStorageManager, as initWallet and the sim hold it). */
 export type ExpiryStorage = {
-  isActiveStorageProvider: () => boolean;
-  getAuth: () => Promise<{ userId?: number }>;
-  runAsStorageProvider: <T>(fn: (sp: never) => Promise<T>) => Promise<T>;
-  getActiveStore: () => string;
+  isActiveStorageProvider(): boolean;
+  getAuth(mustBeActive?: boolean): Promise<AuthId>;
+  runAsStorageProvider<T>(fn: (sp: DetachProvider & AbortProvider) => Promise<T>): Promise<T>;
+  getActiveStore(): string;
 };
 
 export type ExpiryWiring = {
@@ -93,8 +82,7 @@ export function makeExpiryDeps(w: ExpiryWiring): ExpiryDeps {
   const store = {
     isActive: () => w.storage.isActiveStorageProvider(),
     userId: async () => (await w.storage.getAuth()).userId!,
-    run: <T>(fn: (sp: DetachProvider) => Promise<T>) =>
-      w.storage.runAsStorageProvider((sp: never) => fn(sp as unknown as DetachProvider)),
+    run: <T>(fn: (sp: DetachProvider & AbortProvider) => Promise<T>) => w.storage.runAsStorageProvider(fn),
   };
   const chain = eitherChainSource(wocChainLookups({ fetch: f, ...w.woc }), () => oneSatChainLookups(w.services));
   return {
@@ -118,7 +106,12 @@ export function makeExpiryDeps(w: ExpiryWiring): ExpiryDeps {
             labels: a.labels,
             inputs: (a.inputs ?? []).map((i) => ({ sourceOutpoint: i.sourceOutpoint })),
             description: a.description,
-            outputs: (a.outputs ?? []).map((o) => ({ lockingScript: o.lockingScript, satoshis: o.satoshis })),
+            // `basket` tells the wallet's own change from the outputs paying others (the copy check compares those).
+            outputs: (a.outputs ?? []).map((o) => ({
+              lockingScript: o.lockingScript,
+              satoshis: o.satoshis,
+              basket: o.basket ?? null,
+            })),
           });
         if (page.actions.length < 500) break;
       }
@@ -148,6 +141,18 @@ export function makeExpiryDeps(w: ExpiryWiring): ExpiryDeps {
     }),
     detachInput: storageDetachInput({ ...store, recordCleared: w.recordCleared }),
     reaffirmSpent: storageReaffirmSpent(store),
+    // The cancel's abort and the re-mark of the chain-spent coins under one exclusive storage lock (no coin selection
+    // in between). A reference an action batch owns goes through the wallet instead (then reaffirmSpent follows).
+    abortRemarking: async (txid, remark) => {
+      if (w.wallet.actionBatch?.ownsReference?.(txid)) {
+        const r = (await w.wallet.abortAction({ reference: txid })) as { aborted?: unknown };
+        return { aborted: r?.aborted, remarked: false };
+      }
+      return storageAbortRemarking({ isActive: store.isActive, auth: () => w.storage.getAuth(true), run: store.run })(
+        txid,
+        remark,
+      );
+    },
     // A payment whose every input is spent elsewhere is cancelled only when the spender isn't a copy of it.
     spenderOutputs: async (txid) => {
       const r = await chain.chainTx(txid);
