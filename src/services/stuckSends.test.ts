@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   GIVE_UP_MS,
   MIN_ATTEMPTS,
+  NOSEND_COPY_GIVE_UP_MS,
   releaseStuckSends,
   releasedMessage,
   stuckVerdict,
@@ -28,6 +29,16 @@ describe('stuckVerdict', () => {
   test('gives up when old and retried enough', () => {
     expect(stuckVerdict({ createdAt: NOW - GIVE_UP_MS, attempts: MIN_ATTEMPTS }, NOW)).toBe('give-up');
   });
+  test("another device's payment kept here as 'nosend' (never sent from here, no attempts counted): a week, by age alone", () => {
+    expect(NOSEND_COPY_GIVE_UP_MS).toBe(7 * 24 * 3_600_000);
+    expect(stuckVerdict({ createdAt: NOW - NOSEND_COPY_GIVE_UP_MS, attempts: 0, reqStatus: 'nosend' }, NOW)).toBe('give-up');
+    expect(stuckVerdict({ createdAt: NOW - NOSEND_COPY_GIVE_UP_MS + 1, attempts: 0, reqStatus: 'nosend' }, NOW)).toBe('wait');
+    // Not at the sending device's own 24 h, however many attempts are recorded: that device may still be sending it.
+    expect(stuckVerdict({ createdAt: NOW - GIVE_UP_MS * 2, attempts: 99, reqStatus: 'nosend' }, NOW)).toBe('wait');
+    expect(stuckVerdict({ createdAt: NaN, attempts: 0, reqStatus: 'nosend' }, NOW)).toBe('wait');
+    // Any other request still needs its attempts.
+    expect(stuckVerdict({ createdAt: NOW - GIVE_UP_MS * 3, attempts: 0, reqStatus: 'sending' }, NOW)).toBe('wait');
+  });
 });
 
 describe('releaseStuckSends', () => {
@@ -53,6 +64,19 @@ describe('releaseStuckSends', () => {
     const { r, cancelled } = await run([q()], async () => true);
     expect(cancelled).toEqual([]);
     expect(r.kept).toEqual([T('a')]);
+  });
+
+  test("a 'nosend' copy the network has, or may have, is never cancelled; one it has no copy of is", async () => {
+    const copy = q({ attempts: 0, reqStatus: 'nosend', createdAt: NOW - NOSEND_COPY_GIVE_UP_MS });
+    expect((await run([copy], async () => true)).cancelled).toEqual([]);
+    expect(
+      (
+        await run([copy], async () => {
+          throw new Error('offline');
+        })
+      ).cancelled,
+    ).toEqual([]);
+    expect((await run([copy], async () => false)).cancelled).toEqual([T('a')]);
   });
 
   test('fails closed when the chain check throws', async () => {

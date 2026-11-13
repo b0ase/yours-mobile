@@ -83,8 +83,8 @@ export const BalanceTruthView = ({
         ) : (
           <div
             key={l.kind}
-            className={`bw-truth-${l.kind}${l.kind === 'sync' && l.warn ? ' is-warn' : ''}`}
-            style={{ color: l.kind === 'sync' && l.warn ? RED : MUTED, fontWeight: l.kind === 'arriving' ? 600 : 400 }}
+            className={`bw-truth-${l.kind}${'warn' in l && l.warn ? ' is-warn' : ''}`}
+            style={{ color: 'warn' in l && l.warn ? RED : MUTED, fontWeight: l.kind === 'arriving' ? 600 : 400 }}
           >
             {l.text}
           </div>

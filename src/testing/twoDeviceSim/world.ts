@@ -10,6 +10,9 @@
  *    then pullIntegrity's afterPull on builds that have it, loaded by URL: postPullStep) and the push (makeBackupPush / pushView); the inbound guard (installInboundSyncGuard, registerInboundVerifier)
  *    with the production verifier shape (walletOwnership, walletRecords, eitherChainSource over wocChainLookups +
  *    oneSatChainLookups); admission (admitPending);
+ *  - the push before a broadcast (services/changeWriteAhead.ts watchStorage + onBroadcast, wired as initWallet wires it:
+ *    the device sync's in-flight records, pushNow as its urgent retry, its push clearing the marks), on builds that
+ *    have it (loaded by URL: writeAheadModule);
  *  - autoCoinResync (runAutoResyncIfDue → autoResyncCoins) with background.ts's deps (readAutoResyncCoins, the same
  *    markSpent/markUnspent writes, txo.getSpends, a copy of its private wocSpendStatus over the fake fetch);
  *  - the Store's release (settleStorePayments → releaseNeverSent, memoryOutbox, signStorePayment) behind the
@@ -18,7 +21,10 @@
  *    makeExpiryDeps: conflict check, detach/re-mark on the device's store, storage gate, Store kind) where the build
  *    has it, else a copy of the older inline deps (listNoSendActions, abortAction, sendWith, expiryLookups, wocSpent,
  *    wocHeight);
- *  - the toolbox Monitor's proof task (TaskCheckForProofs), on demand only (prove());
+ *  - the toolbox Monitor's proof tasks (TaskCheckForProofs, TaskCheckNoSends), send task (TaskSendWaiting) and
+ *    abandoned-payment sweep (TaskFailAbandoned), on demand only (prove(), sendWaiting(), failAbandoned());
+ *  - the stuck-send release (services/stuckSends.ts releaseStuckSends with initWallet's stuckDeps: releaseStuck());
+ *  - a device's database deleted and restored from the backup (wipe(): the extension's Remove + reload);
  *  - the balance the wallet shows (depositBalance.balanceSplit over wallet.balance()).
  * FAKED:
  *  - the chain and every network source (chain.ts), with per-source 404/429/500/timeout faults;
@@ -65,6 +71,7 @@ import {
 } from '../../services/unsentExpiry';
 import { chainLookups, expiryLookups, releaseLookups } from '../../services/unsentGuard';
 import { abortTargetKnownOnChain, knownOnChain } from '../../services/recoverFailed';
+import { releaseStuckSends, type QueuedSend } from '../../services/stuckSends';
 import {
   AUTO_RESYNC_GAP_MS,
   OWN_PENDING_STATUSES,
@@ -120,6 +127,8 @@ export type Device = {
   svc: unknown;
   /** The toolbox's Monitor for this store (only its proof task is run, by prove()). */
   monitor: Monitor;
+  /** The push before a broadcast (services/changeWriteAhead.ts), on builds that have it. */
+  writeAhead?: WriteAheadLike;
 };
 
 let dbn = 0;
@@ -134,7 +143,12 @@ export function teardownSim() {
   _setPullOverlap();
 }
 
-export type WorldOptions = { seed?: number; log?: boolean };
+export type WorldOptions = {
+  seed?: number;
+  log?: boolean;
+  /** The push before a broadcast's deadline (changeWriteAhead budgetMs; the app's is WRITE_AHEAD_MS, 8 s). */
+  writeAheadBudgetMs?: number;
+};
 
 export class World {
   readonly chain = new FakeChain();
@@ -157,6 +171,14 @@ export class World {
   lastCut?: { transactions: number; outputs: number };
   /** Devices with no network to the backup (their pulls and pushes fail). */
   readonly offline = new Set<string>();
+  /**
+   * A slow backup: each push page it is sent (processSyncChunk) waits the next delay in this list (ms) before it is
+   * merged, and is merged even when the device gave up waiting (as a real backup would). Empty: no delay.
+   */
+  readonly backupPageDelays: number[] = [];
+  /** Push pages the backup has merged, in order (their row counts). */
+  readonly backupPages: number[] = [];
+  readonly writeAheadBudgetMs?: number;
   private storeKey: PrivateKey;
   private n = 0;
   private offs: (() => void)[] = [];
@@ -168,6 +190,7 @@ export class World {
     this.identityKey = this.kd.identityKey;
     this.storeKey = new PrivateKey(this.rand.bytes(32));
     this.chain.external.add(new P2PKH().lock(this.storeKey.toAddress()).toHex());
+    this.writeAheadBudgetMs = o.writeAheadBudgetMs;
     if (o.log) this.log = (...a: unknown[]) => console.log('[sim]', ...a);
   }
   log: (...a: unknown[]) => void = (...a: unknown[]) =>
@@ -188,6 +211,7 @@ export class World {
     w.backup = await w.store(`sim-backup-${++dbn}`);
     w.wireBackupFaults();
     IS._mergeUnchecked(w.backup); // wallet.1sat.app: in the app a StorageClient, never a guarded device store
+    w.slowBackupPages();
     w.devices.push(await w.device('phone'));
     w.devices.push(await w.device('extension'));
     return w;
@@ -197,6 +221,7 @@ export class World {
     Date.now = realNow;
     _setPullOverlap();
     for (const off of this.offs) off();
+    for (const d of this.devices) d.writeAhead?.stop();
     for (const d of this.devices) await d.wallet.destroy().catch(() => undefined);
   }
 
@@ -207,6 +232,36 @@ export class World {
     await s.makeAvailable();
     s.setServices(this.chain.services() as never);
     return s;
+  }
+
+  /** Push pages wait backupPageDelays (a slow backup), then merge whether or not the device is still waiting. */
+  private slowBackupPages() {
+    const b = this.backup as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+    const merge = b.processSyncChunk.bind(this.backup);
+    b.processSyncChunk = async (args: unknown, chunk: unknown) => {
+      const ms = this.backupPageDelays.shift() ?? 0;
+      if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+      const r = await merge(args, chunk);
+      this.backupPages.push(
+        Object.values((chunk ?? {}) as Record<string, unknown>).reduce<number>(
+          (n, v) => n + (Array.isArray(v) ? v.length : 0),
+          0,
+        ),
+      );
+      return r;
+    };
+  }
+
+  /** The backup's row for a coin (`txid.vout`): spendable, and what spent it. */
+  async backupCoin(outpoint: string) {
+    const [txid, vout] = outpoint.split('.');
+    const [t] = await this.backup.findTransactions({ partial: { txid }, noRawTx: true });
+    if (!t) return undefined;
+    const [o] = await this.backup.findOutputs({
+      partial: { transactionId: t.transactionId, vout: Number(vout) },
+      noScript: true,
+    });
+    return o ? { spendable: !!o.spendable, spentBy: o.spentBy ?? undefined } : undefined;
   }
 
   /** wallet.1sat.app's sync calls can fail ('backup' faults), and a pull can be cut between pages. */
@@ -291,6 +346,20 @@ export class World {
 
     const managed = sm as unknown as { _backups?: { storage: unknown }[] };
     const inFlight = new WeakMap<object, InFlight>();
+    const inFlightFor = (b: object) => {
+      let f = inFlight.get(b);
+      if (!f) inFlight.set(b, (f = createInFlight()));
+      return f;
+    };
+    // initWallet's push before a broadcast (services/changeWriteAhead.ts), on a build that has it; set up below, once
+    // the device sync exists (its pushNow is the urgent retry, its push reports to it).
+    let writeAhead: WriteAheadLike | undefined;
+    const backupPush = makeBackupPush({
+      storage: sm as never,
+      backups: () => managed._backups ?? [],
+      waiting: () => false,
+      inFlightFor,
+    });
     const sync = createDeviceSync({
       applies: () => sm.isActiveStorageProvider() && (managed._backups?.length ?? 0) > 0,
       ensureBackup: async () => (managed._backups?.length ?? 0) > 0,
@@ -353,22 +422,36 @@ export class World {
       ),
       push: offlineGuard(
         () => this.offline.has(name),
-        makeBackupPush({
-          storage: sm as never,
-          backups: () => managed._backups ?? [],
-          waiting: () => false,
-          inFlightFor: (b) => {
-            let f = inFlight.get(b);
-            if (!f) inFlight.set(b, (f = createInFlight()));
-            return f;
-          },
-        }),
+        // As initWallet: a push that went through clears the write-ahead's "not backed up yet" marks it carried.
+        async () => {
+          const cap = writeAhead?.checkpoint();
+          const r = await backupPush();
+          if (r !== 'yielded' && cap !== undefined) writeAhead?.pushed(cap);
+          return r;
+        },
       ),
       // Tests drive every sync themselves: nothing is scheduled on real timers.
       setTimer: () => null,
       clearTimer: () => undefined,
       log,
     });
+    const wam = await writeAheadModule();
+    if (wam) {
+      writeAhead = wam.createChangeWriteAhead({
+        applies: () => sm.isActiveStorageProvider() && (managed._backups?.length ?? 0) > 0,
+        // An offline device's backup requests fail (as its pulls and pushes do).
+        backups: () => (this.offline.has(name) ? [{ storage: OFFLINE_BACKUP }] : (managed._backups ?? [])),
+        storage: sm as never,
+        inFlightFor,
+        ...(this.writeAheadBudgetMs !== undefined ? { budgetMs: this.writeAheadBudgetMs } : {}),
+        pushNow: () => sync.pushNow({ busyWaitMs: [] }),
+        // Tests run the urgent retry themselves (retryNow) or through a sync: no real timers.
+        retryTimer: { set: () => null, clear: () => undefined },
+        log: (m: string) => log(m),
+      });
+      if (!wam.watchStorage(sm, writeAhead) || !wam.onBroadcast(svc, writeAhead))
+        throw new Error('write-ahead not installed');
+    }
     return {
       name,
       s,
@@ -386,6 +469,7 @@ export class World {
       resync: { kv: {}, reports: [] },
       svc,
       monitor,
+      writeAhead,
     };
   }
 
@@ -492,7 +576,24 @@ export class World {
       outputs: [{ lockingScript: this.externalScript(), satoshis: sats, outputDescription: 'payment' }],
       options: { acceptDelayedBroadcast: false },
     });
-    return { txid: r.txid!, inputs: inputsOf(Transaction.fromAtomicBEEF(r.tx as number[])) };
+    const tx = Transaction.fromAtomicBEEF(r.tx as number[]);
+    return { txid: r.txid!, inputs: inputsOf(tx), tx };
+  }
+
+  /**
+   * The wallet's own send queued for the Monitor to broadcast (acceptDelayedBroadcast, as bigDelayed's big mints are):
+   * the toolbox writes it with its request already 'unsent'; sendWaiting() posts it.
+   */
+  async sendDelayed(from: Device | 'A' | 'B', sats: number) {
+    const d = this.dev(from);
+    this.step(`${d.name} queues a send of ${sats} (delayed broadcast)`);
+    const r = await d.wallet.createAction({
+      description: `Delayed send ${sats}`,
+      outputs: [{ lockingScript: this.externalScript(), satoshis: sats, outputDescription: 'payment' }],
+      options: { acceptDelayedBroadcast: true },
+    });
+    const tx = Transaction.fromAtomicBEEF(r.tx as number[]);
+    return { txid: r.txid!, inputs: inputsOf(tx), tx };
   }
 
   /**
@@ -551,6 +652,22 @@ export class World {
     return d.wallet.abortAction({ reference: txid });
   }
 
+  /**
+   * `on`'s wallet database is deleted (the extension's Remove + reload, owner 11 Oct 2026) and the wallet reinstalled on
+   * the same seed with the same backup: a fresh, empty store that gets everything from the backup at its first sync.
+   * Nothing this device had not pushed survives.
+   */
+  async wipe(on: Device | 'A' | 'B') {
+    const d = this.dev(on);
+    this.step(`${d.name}'s wallet database is deleted (Remove + reload) and restored from the backup`);
+    d.writeAhead?.stop();
+    // Only its own store goes: wallet.destroy() would close the shared backup too.
+    await d.s.destroy().catch(() => undefined);
+    const fresh = await this.device(d.name);
+    this.devices[this.devices.indexOf(d)] = fresh;
+    return fresh;
+  }
+
   /** Device sync (pull then push), as on wallet open; failures are recorded, not thrown. */
   async sync(on: Device | 'A' | 'B') {
     const d = this.dev(on);
@@ -571,8 +688,12 @@ export class World {
     return { result: r, cut };
   }
 
-  /** The Monitor's proof task on `on` (TaskCheckForProofs): mined transactions get their proofs and go 'completed'. */
-  async prove(on: Device | 'A' | 'B') {
+  /**
+   * The Monitor's proof task on `on` (TaskCheckForProofs): mined transactions get their proofs and go 'completed'.
+   * `noSends`: its 'nosend' proof task too (TaskCheckNoSends), as its daily scheduled run (every 'nosend' request; the
+   * new-block run's age tiers read rows' created_at, which the harness clock does not move).
+   */
+  async prove(on: Device | 'A' | 'B', o: { noSends?: boolean } = {}) {
     const d = this.dev(on);
     this.step(`${d.name} collects proofs for what was mined`);
     const m = d.monitor as unknown as {
@@ -581,12 +702,121 @@ export class World {
       runTask: (n: string) => Promise<string>;
     };
     m.lastNewHeader = { height: this.chain.height };
-    const task = m._tasks.find((t) => t.name === 'CheckForProofs');
-    if (!task) throw new Error('no CheckForProofs task');
-    task.constructor.checkNow = true;
-    const out = await m.runTask('CheckForProofs');
-    this.log(`[${d.name}] CheckForProofs: ${out.replace(/\n/g, ' | ').slice(0, 300)}`);
+    const names = o.noSends ? ['CheckForProofs', 'CheckNoSends'] : ['CheckForProofs'];
+    let out = '';
+    for (const name of names) {
+      const task = m._tasks.find((t) => t.name === name);
+      if (!task) throw new Error(`no ${name} task`);
+      task.constructor.checkNow = name === 'CheckForProofs';
+      const r = await m.runTask(name);
+      this.log(`[${d.name}] ${name}: ${r.replace(/\n/g, ' | ').slice(0, 300)}`);
+      out += r;
+    }
     return out;
+  }
+
+  /**
+   * The Monitor's abandoned-payment sweep on `on` (TaskFailAbandoned, run at every wallet open in the app), with every
+   * 'unprocessed' / 'unsigned' transaction counted as old enough (abandonedMsecs 0): such a payment is failed and its
+   * inputs freed.
+   */
+  async failAbandoned(on: Device | 'A' | 'B') {
+    const d = this.dev(on);
+    this.step(`${d.name} runs the abandoned-payment sweep`);
+    const m = d.monitor as unknown as {
+      options: { abandonedMsecs: number };
+      _tasks: { name: string }[];
+      runTask: (n: string) => Promise<string>;
+    };
+    if (!m._tasks.some((t) => t.name === 'FailAbandoned')) throw new Error('no FailAbandoned task');
+    const was = m.options.abandonedMsecs;
+    m.options.abandonedMsecs = 0;
+    await new Promise((r) => setTimeout(r, 2)); // rows written this millisecond count as older
+    try {
+      const out = await m.runTask('FailAbandoned');
+      if (out) this.log(`[${d.name}] FailAbandoned: ${out.replace(/\n/g, ' | ').slice(0, 300)}`);
+      return out;
+    } finally {
+      m.options.abandonedMsecs = was;
+    }
+  }
+
+  /**
+   * The Monitor's send task on `on` (TaskSendWaiting: posts every 'unsent' / 'sending' proof request, as each copy's
+   * Monitor does every few seconds in the app), with every request old enough. Returns what `on` broadcast in it.
+   */
+  async sendWaiting(on: Device | 'A' | 'B') {
+    const d = this.dev(on);
+    this.step(`${d.name}'s Monitor sends what is waiting`);
+    const m = d.monitor as unknown as { _tasks: { name: string }[]; runTask: (n: string) => Promise<string> };
+    if (!m._tasks.some((t) => t.name === 'SendWaiting')) throw new Error('no SendWaiting task');
+    this.advance(10 * 60_000); // past its 7 s age and 5 min 'sending' limits
+    const before = d.posted.length;
+    // What it posted counts even when the task then fails (e.g. updating a payment this device holds as failed).
+    const out = await m.runTask('SendWaiting').catch((e: unknown) => `failed after posting: ${String(e)}`);
+    if (out) this.log(`[${d.name}] SendWaiting: ${out.replace(/\n/g, ' | ').slice(0, 300)}`);
+    return d.posted.slice(before);
+  }
+
+  /**
+   * The stuck-send release on `on` (services/stuckSends.ts releaseStuckSends with initWallet's stuckDeps: outgoing
+   * 'sending' payments and their request's attempts and status, the network check over the chain lookups, the cancel).
+   */
+  async releaseStuck(on: Device | 'A' | 'B') {
+    const d = this.dev(on);
+    this.step(`${d.name} gives up on queued sends the network never had`);
+    const f = this.chain.fetch;
+    const sm = d.sm as unknown as { runAsStorageProvider: <T>(fn: (sp: StorageIdb) => Promise<T>) => Promise<T> };
+    return releaseStuckSends({
+      listQueued: () =>
+        sm.runAsStorageProvider(async (sp) => {
+          const out: QueuedSend[] = [];
+          for (const t of await sp.findTransactions({ partial: { status: 'sending', isOutgoing: true }, noRawTx: true })) {
+            if (!t.txid) continue;
+            const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
+            out.push({
+              transactionId: t.transactionId,
+              txid: t.txid,
+              createdAt: new Date(t.created_at).getTime(),
+              attempts: req?.attempts ?? 0,
+              reqStatus: req?.status,
+              description: t.description,
+              satoshis: t.satoshis,
+            });
+          }
+          return out;
+        }),
+      knownOnChain: (txid) => knownOnChain(txid, chainLookups(f)),
+      cancel: (q) =>
+        sm.runAsStorageProvider(async (sp) => {
+          for (const req of await sp.findProvenTxReqs({ partial: { txid: q.txid } }))
+            await sp.updateProvenTxReq(req.provenTxReqId, { status: 'invalid' });
+          await sp.updateTransactionStatus('failed', q.transactionId);
+        }),
+      log: (m) => this.log(`[${d.name}] ${m}`),
+    });
+  }
+
+  /** `on` gives up on a payment (as the stuck-send release does): request 'invalid', payment failed, inputs freed. */
+  async giveUp(on: Device | 'A' | 'B', txid: string) {
+    const d = this.dev(on);
+    this.step(`${d.name} gives up on ${txid.slice(0, 8)}… (failed, inputs freed)`);
+    const sm = d.sm as unknown as { runAsStorageProvider: <T>(f: (sp: StorageIdb) => Promise<T>) => Promise<T> };
+    await sm.runAsStorageProvider(async (sp) => {
+      const [q] = await sp.findProvenTxReqs({ partial: { txid } });
+      if (q) await sp.updateProvenTxReq(q.provenTxReqId, { status: 'invalid' });
+      const [t] = await sp.findTransactions({ partial: { txid } });
+      if (!t) throw new Error(`no transaction ${txid}`);
+      await sp.updateTransactionStatus('failed', t.transactionId);
+    });
+  }
+
+  /** The status of `txid`'s transaction and proof request in `on`'s store (or the backup's). */
+  async statusOf(on: Device | 'A' | 'B' | 'backup', txid: string) {
+    const s = on === 'backup' ? this.backup : this.dev(on).s;
+    const [t] = await s.findTransactions({ partial: { txid }, noRawTx: true });
+    const [q] = await s.findProvenTxReqs({ partial: { txid } });
+    return { tx: t?.status as string | undefined, req: q?.status as string | undefined };
   }
 
   /**
@@ -1014,6 +1244,41 @@ export const postPullStep = (): Promise<PostPullStep | undefined> =>
       throw e;
     },
   ));
+
+/** The push before a broadcast (services/changeWriteAhead.ts) as the harness uses it. */
+export type WriteAheadLike = {
+  checkpoint(): number;
+  pushed(cap: number): void;
+  retryNow(): Promise<boolean>;
+  count(): number;
+  unbacked(): { txid: string; at: number }[];
+  stop(): void;
+};
+type WriteAheadModule = {
+  createChangeWriteAhead: (d: Record<string, unknown>) => WriteAheadLike;
+  watchStorage: (manager: unknown, wa: WriteAheadLike) => boolean;
+  onBroadcast: (services: unknown, wa: WriteAheadLike) => boolean;
+};
+let writeAheadMod: Promise<WriteAheadModule | undefined> | undefined;
+/** services/changeWriteAhead.ts when the build under test has it (loaded by URL, as postPullStep). */
+export const writeAheadModule = (): Promise<WriteAheadModule | undefined> =>
+  (writeAheadMod ??= import(/* @vite-ignore */ new URL('../../services/changeWriteAhead.ts', import.meta.url).href).then(
+    (m: Partial<WriteAheadModule>) =>
+      typeof m.createChangeWriteAhead === 'function' ? (m as WriteAheadModule) : undefined,
+    (e: unknown) => {
+      if (/cannot find module|module not found/i.test(String((e as Error)?.message ?? e))) return undefined;
+      throw e;
+    },
+  ));
+
+/** An offline device's view of the backup: every request fails. */
+const OFFLINE_BACKUP = new Proxy(
+  {},
+  {
+    get: (_t, p) =>
+      p === 'then' ? undefined : () => Promise.reject(new Error('network: this device is offline')),
+  },
+);
 
 /** A push that fails while the device is offline. */
 const offlineGuard =

@@ -99,14 +99,40 @@ export function createInFlight(t: Timers & { maxAgeMs?: number } = {}): InFlight
   };
 }
 
-/** The backup with a deadline on each push request; a request that timed out is recorded in `inFlight`. */
+/**
+ * The write-ahead never STARTS the cycle's first data page with less than this left before its deadline: a page sent
+ * is given the ordinary limit, so one started too late would only make the payment wait longer.
+ */
+export const FIRST_PAGE_MIN_MS = 2_000;
+
+/**
+ * The backup with a deadline on each push request; a request that timed out is recorded in `inFlight`.
+ *
+ * `deadlineAt` (ms, on `now`; services/changeWriteAhead.ts, the push before a broadcast) only bounds what runs BEFORE
+ * any data reaches the backup: the small requests get what is left of it (one asked for after it fails at once, never
+ * sent), and the cycle's first data page (processSyncChunk) is started only with at least `firstPageMinMs` left.
+ * Once a page has been sent it, and the rest of the cycle, run under the ordinary per-request limits: any data page cut
+ * by a deadline may still be committed by the backup afterwards (a timed-out request can't be cancelled), and every
+ * cycle is a data page plus a closing page, so a cut page leaves the backup's checkpoint mid-cycle (the hazard above;
+ * re-review of 18c93dd9: a first page that timed out and committed late left a later payment's spent coin spendable).
+ */
 export function pushView<T extends object>(
   writer: T,
-  o: Timers & { inFlight: InFlight; callMs?: number; smallCallMs?: number },
+  o: Timers & {
+    inFlight: InFlight;
+    callMs?: number;
+    smallCallMs?: number;
+    deadlineAt?: number;
+    firstPageMinMs?: number;
+  },
 ): T {
   const callMs = o.callMs ?? PUSH_CALL_MS;
   const smallCallMs = o.smallCallMs ?? PUSH_SMALL_CALL_MS;
   const { setTimer, clearTimer } = timersOf(o);
+  const now = o.now ?? Date.now;
+  const firstPageMinMs = o.firstPageMinMs ?? FIRST_PAGE_MIN_MS;
+  /** A data page of this cycle has been sent: `deadlineAt` no longer applies. */
+  let paged = false;
   return new Proxy(writer, {
     get(target, p) {
       const v = Reflect.get(target, p, target) as unknown;
@@ -115,6 +141,16 @@ export function pushView<T extends object>(
       const name = String(p);
       if (!PUSH_CALLS.has(name)) return fn.bind(target);
       return (...a: unknown[]) => {
+        const page = name === 'processSyncChunk';
+        const perCall = page ? callMs : smallCallMs;
+        let ms = perCall;
+        if (o.deadlineAt !== undefined && !paged) {
+          const left = o.deadlineAt - now();
+          if (page ? left < firstPageMinMs : left <= 0)
+            return Promise.reject(new Error(`network: the backup did not answer in time (${name})`));
+          if (!page) ms = Math.min(perCall, left);
+        }
+        if (page) paged = true; // sent: this page and the rest of the cycle under the ordinary limits
         const call = Promise.resolve().then(() => fn.apply(target, a));
         call.catch(() => undefined);
         let timer: unknown;
@@ -126,7 +162,7 @@ export function pushView<T extends object>(
                 o.inFlight.add(call); // still running on the backup's side: no second request until it settles
                 reject(new Error(`network: the backup did not answer in time (${name})`));
               },
-              name === 'processSyncChunk' ? callMs : smallCallMs,
+              ms,
             );
           }),
         ]).finally(() => clearTimer(timer));

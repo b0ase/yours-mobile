@@ -355,10 +355,26 @@ describe('the real initWallet wiring', () => {
       src.indexOf('  const deviceSync = createDeviceSync({'),
       src.indexOf('    log: (...a) => console.warn(...a),\n  });'),
     );
-    expect(sync).toMatch(/push: async \(\) => \{\s*return backupPush\(\);/);
+    // The push is the plain backupPush; a cycle that went through (not yielded) clears the write-ahead's marks it carried.
+    expect(sync).toMatch(
+      /push: async \(\) => \{[\s\S]*?const cap = writeAhead\?\.checkpoint\(\);\s*const r = await backupPush\(\);\s*if \(r !== 'yielded' && cap !== undefined\) writeAhead\?\.pushed\(cap\);\s*return r;/,
+    );
     expect(sync).toMatch(/yieldTo: ownPayments/);
     // Never a paused cycle: the old mid-page yield (onYield) is gone from the push.
     expect(src).not.toContain('onYield');
+  });
+
+  test("a payment's rows reach the backup before it is broadcast (fix 4: services/changeWriteAhead.ts)", () => {
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    // The device sync's own push pieces: its in-flight records, its pushNow as the urgent retry, the health line.
+    expect(src).toMatch(/writeAhead = createChangeWriteAhead\(\{[\s\S]*?inFlightFor: pushInFlightFor,[\s\S]*?pushNow: \(\) => deviceSync\.pushNow\(\),[\s\S]*?onChange: \(n\) => pullHealth\.changeNotBackedUp\(n\),/);
+    expect(src).toMatch(/watchStorage\(storage, writeAhead\)/);
+    // The outermost postBeef wrapper: installed after every other one.
+    const hook = src.indexOf('onBroadcast(toolboxServices, writeAhead)');
+    for (const other of ['sizeAwareBroadcast(toolboxServices)', 'recheckRefusals(toolboxServices)', 'rememberRefusals(toolboxServices)'])
+      expect(src.indexOf(other)).toBeLessThan(hook);
+    expect(src).toMatch(/changeUnbacked: writeAhead\?\.count\(\) \?\? 0/);
+    expect(src).toMatch(/writeAhead\?\.stop\(\);/);
   });
 
   test('a heal leaves a pass from the start to the device-sync pulls, and a failed one asks for a full pass (review 23, M2)', () => {

@@ -47,6 +47,14 @@ import {
   type BackupBeforeSend,
   type DeviceSyncResult,
 } from './services/deviceSync';
+import {
+  createChangeWriteAhead,
+  onBroadcast,
+  watchStorage,
+  type ChangeWriteAhead,
+  type UnbackedRecord,
+  type WriteAheadStorage,
+} from './services/changeWriteAhead';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
 import { ensureBackupConnected, keepDeviceStoreActive, switchActiveAs } from './services/deviceActive';
@@ -816,16 +824,19 @@ export const initWallet = async (
   // request, no second request to a backup still answering a timed-out one, and own payments first only before a cycle
   // or between backups (owner's seal and its review, 7 Nov 2026).
   const pushInFlight = new WeakMap<object, InFlight>();
+  const pushInFlightFor = (backup: object) => {
+    let f = pushInFlight.get(backup);
+    if (!f) pushInFlight.set(backup, (f = createInFlight()));
+    return f;
+  };
   const backupPush = makeBackupPush({
     storage: storage as unknown as Parameters<typeof makeBackupPush>[0]['storage'],
     backups: () => managed._backups ?? [],
     waiting: ownPayments.waiting,
-    inFlightFor: (backup) => {
-      let f = pushInFlight.get(backup);
-      if (!f) pushInFlight.set(backup, (f = createInFlight()));
-      return f;
-    },
+    inFlightFor: pushInFlightFor,
   });
+  /** A payment's rows reach the backup before it is broadcast (services/changeWriteAhead.ts); set up below. */
+  let writeAhead: ChangeWriteAhead | undefined;
   // How the pulls are doing, for a one-line status (services/syncHealth.ts): the last pull that caught up, stuck.
   const pullHealth = createSyncHealth();
   const unregisterPullHealth = registerSyncHealth(pullHealth);
@@ -963,7 +974,11 @@ export const initWallet = async (
       () => admitIn(0),
     ),
     push: async () => {
-      return backupPush();
+      // A push that went through carries every payment marked "change not backed up yet" before it started.
+      const cap = writeAhead?.checkpoint();
+      const r = await backupPush();
+      if (r !== 'yielded' && cap !== undefined) writeAhead?.pushed(cap);
+      return r;
     },
     yieldTo: ownPayments,
     busy: chainActive,
@@ -1018,6 +1033,24 @@ export const initWallet = async (
   };
   if (!notifyOnWalletChanges(baseWallet, deviceSync.changed))
     console.warn('[initWallet] wallet changes do not update the backup');
+  // A payment's change reaches the backup BEFORE it is broadcast (balance integrity plan, fix 4): the push runs inside
+  // the broadcast step with an 8 s limit. Backup down or slow: the payment still goes, flagged "change not backed up
+  // yet" (balance card, syncHealth) and pushed again urgently until it lands. Hooked to the broadcaster below.
+  const unbackedKey = `changeUnbacked:${keys.identityAddress}`;
+  writeAhead = createChangeWriteAhead({
+    applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
+    backups: () => managed._backups ?? [],
+    storage: storage as unknown as WriteAheadStorage,
+    inFlightFor: pushInFlightFor,
+    pushNow: () => deviceSync.pushNow(),
+    onChange: (n) => pullHealth.changeNotBackedUp(n),
+    kv: {
+      load: async () => ((await chrome.storage.local.get(unbackedKey))?.[unbackedKey] as UnbackedRecord) ?? null,
+      save: (r) => (r ? chrome.storage.local.set({ [unbackedKey]: r }) : chrome.storage.local.remove(unbackedKey)),
+    },
+  });
+  void writeAhead.hydrate();
+  if (!watchStorage(storage, writeAhead)) console.warn('[initWallet] payments are not backed up before broadcast');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
@@ -1048,6 +1081,8 @@ export const initWallet = async (
   // Resumed Store payments marked "may be out" survive a service-worker restart (06c M1).
   void loadMayBeOut();
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
+  // Last postBeef wrapper (outermost): the backup push before a payment's broadcast is not timed as the broadcast.
+  if (!onBroadcast(toolboxServices, writeAhead)) console.warn('[initWallet] payments are not backed up before broadcast');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
   // The wallet's own sends check the coins storage picked against the chain before signing; coins another device
@@ -2017,6 +2052,7 @@ export const initWallet = async (
             txid: t.txid,
             createdAt: new Date(t.created_at).getTime(),
             attempts: req?.attempts ?? 0,
+            reqStatus: req?.status,
             description: t.description,
             satoshis: t.satoshis,
           });
@@ -2121,6 +2157,7 @@ export const initWallet = async (
     walletClosed = true;
     admitClosed = true;
     clearInterval(stalePullTimer);
+    writeAhead?.stop();
     unregisterPullHealth();
     receiveWatch.stop();
     // The receive watch's processed-tx stores close with the wallet, capped so a stuck one never holds the close
@@ -2198,6 +2235,7 @@ export const initWallet = async (
         arrivingSats,
         syncApplies: storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
         sync,
+        changeUnbacked: writeAhead?.count() ?? 0,
       };
     },
     receiveWatch: {

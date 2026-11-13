@@ -24,6 +24,10 @@
  *     15-minute overlap), then the tx is proven: the incremental pull merged the 'completed' tx with none of its
  *     outputs; only the 6-hourly tail pass / daily deep pull brought the change in (hours later). The app's post-pull
  *     step (pullIntegrity afterPull, run by the harness: world.ts postPullStep) heals it within the half hour.
+ *   - fix/change-writeahead: a send's change lived only on the sending device until its next push (~20 s, longer on a
+ *     back-off); a device wiped in that window (the extension's Remove + reload) lost it for good. The payment's rows now
+ *     reach the backup before the broadcast (services/changeWriteAhead.ts), as 'sending', never 'unprocessed' (which the
+ *     abandoned-payment sweep on a restored copy would fail); a backup that is down never holds a payment back.
  * Not reproduced (pass on 5.2.54, kept as regressions): a pull cut between the tx page and the outputs page resumes
  * from its checkpoint; a 1-sat BSV-21 token taken in as a 'bsv21' insertion is admitted on the other device.
  *   bun test src/incident/twoDeviceSim.test.ts
@@ -288,6 +292,247 @@ describe('two devices, one seed: named cases', () => {
       expect(w.logs.some((l) => /pushed late|full pass: (started|deep)/.test(l))).toBe(true);
     },
   );
+
+  // Fixed by fix/change-writeahead (services/changeWriteAhead.ts): a payment's rows reach the backup before it is
+  // broadcast. On 5.2.54 the change of a send lived only on the sending device until its next push (~20 s later).
+  sim(
+    '[fix/change-writeahead] a send, then the sending device is wiped before its next sync: the restore has the change and can spend it',
+    async () => {
+      const w = await threeCoins();
+      const s = await w.send('A', 42_000);
+      const change = s.tx.outputs.length - 1; // the payment is output 0; its change after it
+      expect(change).toBeGreaterThan(0);
+      await w.wipe('A'); // no device sync ran since the send
+      // The restored phone and the extension take the backup in, then run the wallet-open abandoned-payment sweep: the
+      // payment must not read as one that never went out (failed, its inputs freed, its change dropped).
+      await w.sync('A');
+      await w.sync('B');
+      await w.failAbandoned('A');
+      await w.failAbandoned('B');
+      await w.settleAndCheck('after the restore from the backup');
+      // The restored phone spends everything it has, the change included: signed with the derivation from the backup.
+      const all = (await w.view(w.A)).shown;
+      const s2 = await w.send('A', all - 5_000);
+      expect(s2.inputs.some((i) => i.startsWith(`${s.txid}.`))).toBe(true);
+      expect(await s2.tx.verify('scripts only')).toBe(true);
+      await w.settleAndCheck('after spending the change');
+    },
+  );
+
+  sim(
+    '[fix/change-writeahead] the backup is down when a send goes out: it is broadcast anyway, flagged, backed up once the backup is back',
+    async () => {
+      const w = await threeCoins();
+      w.offline.add('phone');
+      const s = await w.send('A', 42_000);
+      expect(w.chain.has(s.txid)).toBe(true); // never held back by the backup
+      expect(w.A.writeAhead?.unbacked().map((u) => u.txid)).toEqual([s.txid]);
+      expect(await w.A.writeAhead?.retryNow()).toBe(false); // still down: still flagged
+      w.offline.delete('phone');
+      expect(await w.A.writeAhead?.retryNow()).toBe(true); // the urgent retry
+      expect(w.A.writeAhead?.count()).toBe(0);
+      await w.wipe('A');
+      await w.settleAndCheck('after the restore from the backup');
+    },
+  );
+
+  // Review of fix/change-writeahead (13 Nov 2026, MEDIUM-HIGH): the copy the backup keeps of a payment about to go out
+  // was a request 'unsent'. The toolbox never merges a request's status, so the backup and every device that pulls it
+  // kept it 'unsent' for good, and each one's Monitor (SendWaiting) broadcast it. A payment this device gave up on (the
+  // network refused it for a while; inputs freed, perhaps paid again) could then go out from the other device.
+  sim(
+    '[fix/change-writeahead] a send the network did not take, given up on by its device: the other device never broadcasts the backup’s copy',
+    async () => {
+      const w = await threeCoins();
+      w.fault('broadcast', '500', 1); // the network does not take it (a transient error)
+      // The toolbox reports it for review (WERR_REVIEW_ACTIONS, with the txid): the payment is queued as 'sending'.
+      const s = await w.send('A', 42_000).then(
+        (r) => r,
+        (e: { txid?: string }) => ({ txid: String(e?.txid ?? '') }),
+      );
+      expect(s.txid).toMatch(/^[0-9a-f]{64}$/);
+      expect(w.chain.has(s.txid)).toBe(false);
+      await w.giveUp('A', s.txid);
+      await w.sync('A');
+      await w.sync('B');
+      expect((await w.statusOf('B', s.txid)).req).toBeDefined(); // B holds the backup's copy
+      expect(await w.sendWaiting('B')).toEqual([]); // its Monitor never sends it
+      expect(w.chain.has(s.txid)).toBe(false);
+      expect(['unsent', 'sending']).not.toContain((await w.statusOf('B', s.txid)).req);
+      // The backup's own copy is not one to send either (a server Monitor, or the next device restored from it).
+      expect(['unsent', 'sending']).not.toContain((await w.statusOf('backup', s.txid)).req);
+    },
+  );
+
+  // Re-review of 18c93dd9 (MEDIUM-HIGH): a delayed send (acceptDelayedBroadcast; bigDelayed's big mints) already has
+  // its request at 'unsent' when the Monitor posts it, and only 'unprocessed' was turned into 'nosend': the backup kept
+  // 'unsent', and the other device's Monitor broadcast a payment its own device had given up on.
+  sim(
+    '[fix/change-writeahead] a delayed send the network did not take, given up on by its device: the other device never broadcasts it',
+    async () => {
+      const w = await threeCoins();
+      const s = await w.sendDelayed('A', 42_000);
+      expect(w.chain.has(s.txid)).toBe(false); // queued, not yet posted
+      expect((await w.statusOf('A', s.txid)).req).toBe('unsent');
+      w.fault('broadcast', '500', 1); // the Monitor's post does not reach the network
+      expect(await w.sendWaiting('A')).toEqual([]);
+      expect(w.chain.has(s.txid)).toBe(false);
+      expect((await w.statusOf('backup', s.txid)).req).toBeDefined(); // the write-ahead pushed it before the post
+      await w.giveUp('A', s.txid);
+      await w.sync('A');
+      await w.sync('B');
+      expect((await w.statusOf('B', s.txid)).req).toBeDefined();
+      expect(await w.sendWaiting('B')).toEqual([]); // B's Monitor never sends it
+      expect(w.chain.has(s.txid)).toBe(false);
+      expect(['unsent', 'sending']).not.toContain((await w.statusOf('backup', s.txid)).req);
+    },
+  );
+
+  // Re-review of 18c93dd9 (LOW, stuck money): the toolbox counts no attempts on a 'nosend' request, and the stuck-send
+  // release needed 6, so a restored copy of a payment whose broadcast never landed stayed 'sending' for ever.
+  sim(
+    '[fix/change-writeahead] the broadcast never lands and the device is lost before its next push: the restored copy is released a week later',
+    async () => {
+      const w = await threeCoins();
+      w.fault('broadcast', '500', 1); // the write-ahead lands; the broadcast does not
+      const s = await w.send('A', 42_000).then(
+        (r) => r,
+        (e: { txid?: string }) => ({ txid: String(e?.txid ?? ''), inputs: [] as string[] }),
+      );
+      expect(w.chain.has(s.txid)).toBe(false);
+      expect((await w.statusOf('backup', s.txid)).req).toBe('nosend');
+      await w.wipe('A'); // lost before any device sync
+      await w.sync('A');
+      await w.sync('B');
+      for (const d of ['A', 'B'] as const) expect((await w.statusOf(d, s.txid)).tx).toBe('sending');
+      // A day later: not yet (its sending device, if alive, could still be sending it; its own 24 h rule acts first).
+      w.advance(25 * 3_600_000);
+      for (const d of ['A', 'B'] as const) expect((await w.releaseStuck(d)).released).toEqual([]);
+      // A week later: released. (Rows' created_at is on the real clock, which the harness does not move, so the
+      // first 25 h of world-clock offset from the coins' settle count too; the exact boundary is in stuckSends.test.ts.)
+      w.advance(6 * 24 * 3_600_000);
+      for (const d of ['A', 'B'] as const) {
+        const r = await w.releaseStuck(d);
+        expect(r.released.map((q) => q.txid)).toEqual([s.txid]);
+        expect((await w.statusOf(d, s.txid)).tx).toBe('failed');
+      }
+      // The inputs are spendable again and the change is not counted: the chain's 300,000 on both.
+      await w.settleAndCheck('after the release');
+      for (const d of [w.A, w.B]) expect((await w.view(d)).shown).toBe(300_000);
+    },
+  );
+
+  sim(
+    '[fix/change-writeahead] the same restored copy of a payment that did reach the network is never released',
+    async () => {
+      const w = await threeCoins();
+      const s = await w.send('A', 42_000);
+      expect(w.chain.has(s.txid)).toBe(true);
+      await w.wipe('A');
+      await w.sync('A');
+      await w.sync('B');
+      w.advance(8 * 24 * 3_600_000);
+      for (const d of ['A', 'B'] as const) {
+        const r = await w.releaseStuck(d);
+        expect(r.released).toEqual([]);
+        expect(r.kept).toEqual([s.txid]);
+        expect((await w.statusOf(d, s.txid)).tx).toBe('sending');
+      }
+      // The network check failing is no licence either.
+      w.fault('woc', '500', 20);
+      w.fault('oneSat', '500', 20);
+      expect((await w.releaseStuck('A')).released).toEqual([]);
+      w.chain.clearFaults();
+      w.chain.mine();
+      for (const d of ['A', 'B'] as const) {
+        await w.prove(d, { noSends: true });
+        expect((await w.statusOf(d, s.txid)).tx).toBe('completed');
+      }
+      await w.settleAndCheck('after the proof');
+    },
+  );
+
+  sim(
+    '[fix/change-writeahead] a restore from the backup that the sending device never synced again: the payment is tracked to its proof, never resent',
+    async () => {
+      const w = await threeCoins();
+      const s = await w.send('A', 42_000);
+      await w.wipe('A');
+      await w.sync('A');
+      await w.sync('B');
+      for (const d of ['A', 'B'] as const) {
+        expect(await w.sendWaiting(d)).toEqual([]); // the network has it: no copy sends it again
+        expect((await w.statusOf(d, s.txid)).tx).toBe('sending');
+      }
+      w.chain.mine();
+      for (const d of ['A', 'B'] as const) {
+        await w.prove(d, { noSends: true });
+        expect(await w.statusOf(d, s.txid)).toEqual({ tx: 'completed', req: 'completed' });
+      }
+      await w.settleAndCheck('after the proof');
+    },
+  );
+
+  /**
+   * A slow backup (each push page waits the next of `delays` before it merges, and merges even when the device gave
+   * up), then two payments, the second spending old coins already in the backup. Afterwards the backup must hold every
+   * coin either payment spent as spent.
+   */
+  async function slowBackupThenTwoPayments(o: { delays: number[]; backlog: number; budgetMs: number }) {
+    const w = (current = await World.open({ seed: 1, writeAheadBudgetMs: o.budgetMs }));
+    for (let i = 0; i < 3; i++) await w.receive('A', 100_000);
+    await w.settleAndCheck('after the three coins arrive');
+    // A backlog on A that no sync has pushed yet.
+    for (let i = 0; i < o.backlog; i++) await w.receive('A', 1_000 + i);
+    w.backupPageDelays.push(...o.delays);
+    const pagesBefore = w.backupPages.length;
+    const p1 = await w.send('A', 42_000);
+    const p2 = await w.send('A', 150_000);
+    expect(p2.inputs.some((i) => !p1.inputs.includes(i))).toBe(true);
+    await sleep(Math.max(...o.delays) + 500); // anything the backup was still merging has landed
+    w.backupPageDelays.length = 0;
+    await w.sync('A'); // the ordinary device-sync push
+    for (const i of [...p1.inputs, ...p2.inputs]) {
+      const c = await w.backupCoin(i);
+      if (c) expect({ coin: i, spendable: c.spendable }).toEqual({ coin: i, spendable: false });
+    }
+    await w.settleAndCheck('after both payments');
+    return { w, pages: w.backupPages.length - pagesBefore };
+  }
+
+  // Review of fix/change-writeahead (13 Nov 2026, MEDIUM): one 8 s deadline for the whole push cycle could cut it after
+  // its first page was committed, leaving the backup's checkpoint mid-cycle ("a push cycle is never paused",
+  // pushView.ts): the next payment's spent coin sorts before the saved position, is never sent, and the backup keeps it
+  // spendable for good.
+  sim(
+    '[fix/change-writeahead] a backlog of more than one page and a slow backup, then two payments: the backup ends with every spent coin spent',
+    async () => {
+      // The first page answers at once, the second takes longer than the payment's deadline.
+      const { pages } = await slowBackupThenTwoPayments({ delays: [0, 4_000], backlog: 20, budgetMs: 3_000 });
+      expect(pages).toBeGreaterThan(2); // the backlog went as more than one data page
+    },
+  );
+
+  // Re-review of 18c93dd9 (MEDIUM-LOW): the first data page itself, cut by the deadline, was still merged by the
+  // backup afterwards, which left its checkpoint mid-cycle the same way (every cycle is a data page plus a closing page).
+  sim(
+    '[fix/change-writeahead] a first page slower than the payment deadline, then a second payment: the backup ends with every spent coin spent',
+    async () => {
+      await slowBackupThenTwoPayments({ delays: [4_000], backlog: 0, budgetMs: 3_000 });
+    },
+  );
+
+  sim('[fix/change-writeahead] a flagged send is cleared by the next ordinary device sync too', async () => {
+    const w = await threeCoins();
+    w.fault('backup', '500', 1); // the push before the broadcast fails at its first request
+    const s = await w.send('A', 42_000);
+    expect(w.chain.has(s.txid)).toBe(true);
+    expect(w.A.writeAhead?.count()).toBe(1);
+    await w.sync('A');
+    expect(w.A.writeAhead?.count()).toBe(0);
+    await w.wipe('A');
+    await w.settleAndCheck('after the restore from the backup');
+  });
 
   sim('a 1-sat BSV-21 token taken in on one device is spendable on both, and never counted as BSV', async () => {
     const w = await threeCoins();
