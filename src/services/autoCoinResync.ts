@@ -167,8 +167,19 @@ export type AutoResyncReport = {
   mode?: AutoResyncMode;
   /** Coins whose records differ (or differed, before this run fixed them) from the chain. */
   mismatches?: CoinMismatch[];
-  /** Coins no lookup could answer for in this run (left as they are). */
+  /**
+   * Coins this run could not verify to its level (`verifiedBy`), left as they are: the index failed (whatever
+   * WhatsOnChain said), the index named a spender and WhatsOnChain failed, or (full runs) WhatsOnChain failed.
+   */
   unchecked?: number;
+  /**
+   * How far every checked coin was verified: 'index+woc' (a full run with WhatsOnChain: each coin the index calls
+   * unspent was also looked up on WhatsOnChain), else 'index' (a light run, or no WhatsOnChain off mainnet: coins the
+   * index calls unspent were taken at its word, apart from the biggest).
+   */
+  verifiedBy?: 'index' | 'index+woc';
+  /** Coins the rule cleared that storage no longer listed as spendable (an in-flight send got there first). */
+  gone?: string[];
 };
 
 /** Pure core. Never throws for lookup failures (fail closed per coin). */
@@ -216,6 +227,7 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
   let restored = 0;
   let unchecked = 0;
   const mismatches: CoinMismatch[] = [];
+  const gone: string[] = [];
   const satsOf = (o: string) => (Number(d.sats?.[o]) > 0 ? Number(d.sats![o]) : 0);
   for (const o of coins) {
     // An index that can't answer leaves a coin alone, except a big one: WhatsOnChain alone can still clear it below,
@@ -241,10 +253,12 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
       mode === 'full' || big.has(o),
     );
     if (!by) {
-      // Not cleared. A lookup naming a spender is a difference we could not settle; no answer at all is unchecked.
-      if (isSpender(index.get(o)) || (woc && isSpender(woc.txid)))
+      // Not cleared (no change). For the report only: a spender one lookup names and the other answered against is a
+      // difference we could not settle; a coin a lookup failed for is unchecked, never a difference.
+      const wocFailed = wocAsked && woc === undefined;
+      if (index.has(o) && ((woc && isSpender(woc.txid)) || (isSpender(index.get(o)) && wocAsked && !wocFailed)))
         mismatches.push({ outpoint: o, sats: satsOf(o), kind: 'unconfirmed-spend' });
-      else if (!index.has(o) && (!wocAsked || woc === undefined)) unchecked++;
+      else if (!index.has(o) || isSpender(index.get(o)) || (wocFailed && mode === 'full')) unchecked++;
       continue;
     }
     const n = await d.markSpent(o, by).catch(() => null);
@@ -252,6 +266,7 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
       mismatches.push({ outpoint: o, sats: satsOf(o), kind: 'update-failed' });
       continue;
     }
+    if (n === 0) gone.push(o);
     if (n > 0) {
       released += n;
       cleared[o] = by;
@@ -285,7 +300,8 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
     }
     delete cleared[o];
   }
-  return { checked: coins.length, released, restored, cleared, mode, mismatches, unchecked };
+  const verifiedBy = mode === 'full' && d.woc ? 'index+woc' : 'index';
+  return { checked: coins.length, released, restored, cleared, mode, mismatches, unchecked, verifiedBy, gone };
 }
 
 export const AUTO_RESYNC_KEY = 'bwxAutoCoinResync';
@@ -309,9 +325,16 @@ export type AutoResyncState = Record<
 >;
 
 /**
+ * An unlock makes a light run due once this long has passed since the last full or light run. runInitializeWallet
+ * (which says "unlock") also runs on worker cold starts, account switches, storage switches and restores; within the
+ * floor the stored self-check result is announced again instead (services/selfCheck.ts).
+ */
+export const AUTO_RESYNC_UNLOCK_FLOOR_MS = 90_000;
+
+/**
  * Pure: which run is due now: a full one, a light one, a foreground one (only when asked for), or none. At unlock
- * (`unlock`) at least a light run happens (the self-check, services/selfCheck.ts: one batched index pass over every
- * coin), so the result shown after unlock is from this unlock.
+ * (`unlock`) a light run (one batched index pass over every coin, the self-check) is due once
+ * AUTO_RESYNC_UNLOCK_FLOOR_MS has passed since the last run: a fresh result after unlock, not a run per worker restart.
  */
 export const autoResyncMode = (
   s: { at?: number; lightAt?: number; fgAt?: number } | undefined,
@@ -320,7 +343,7 @@ export const autoResyncMode = (
 ): AutoResyncMode | null => {
   if (shouldAutoResync(s?.at, now)) return 'full';
   const last = Math.max(s?.at ?? 0, s?.lightAt ?? 0);
-  if (o.unlock || now - last >= AUTO_RESYNC_LIGHT_GAP_MS) return 'light';
+  if (now - last >= (o.unlock ? AUTO_RESYNC_UNLOCK_FLOOR_MS : AUTO_RESYNC_LIGHT_GAP_MS)) return 'light';
   if (!o.foreground) return null;
   return now - Math.max(last, s?.fgAt ?? 0) >= AUTO_RESYNC_FOREGROUND_GAP_MS ? 'foreground' : null;
 };
