@@ -119,6 +119,7 @@ import { ENVELOPES_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
 import { normalizeOriginator, parsePrivateKey, type StoragePaymentHook } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
+import { trackSpendsInFlight } from './services/spendsInFlight';
 import {
   syncMessages,
   sweepDeposit,
@@ -1023,6 +1024,8 @@ export const initWallet = async (
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
+  // Web wallet: a tab handing the wallet to another tab lets these finish first (services/spendsInFlight.ts).
+  trackSpendsInFlight(baseWallet);
   // HARD RULE (P0, 3 Nov 2026): no payment builds change on the remote store; this device's store first, else refused
   // (services/localFirst.ts: wallet.1sat.app builds its own random change; seed-derived change exists only here).
   if (

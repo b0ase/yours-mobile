@@ -3,6 +3,7 @@ import '../utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (u
 import { Buffer } from 'buffer';
 import process from 'process';
 import { createChromeShim } from './chromeShim';
+import { onSpendsInFlight } from '../services/spendsInFlight';
 
 /**
  * Runs the extension's background.ts in a dedicated worker. Like a service
@@ -36,6 +37,9 @@ for (const level of relayLevels) {
     }
   };
 }
+
+// Payments running (services/spendsInFlight.ts): the web page lets them finish before handing the wallet to another tab.
+onSpendsInFlight((n) => self.postMessage({ t: 'spends', n }));
 
 // Hub traffic can arrive before init on WebKit; hold it until the shim exists.
 const early: string[] = [];

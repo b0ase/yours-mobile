@@ -10,15 +10,20 @@
  *
  * Now only one tab runs the wallet:
  * - The active tab holds the exclusive Web Lock `bwx-web-active` for the life of its wallet (from boot, locked or
- *   not: the worker and the UI write storage while locked too), and writes its id to `bwx.web.activeTab`.
+ *   not: the worker and the UI write storage while locked too). Where there are Web Locks, the HELD LOCK is the
+ *   authority; the owner record `bwx.web.activeTab` in localStorage is a best-effort extra (a full localStorage never
+ *   keeps a tab from starting).
  * - Another tab never builds a Hub, never starts the worker and never loads the UI. It shows one screen, "bWalletX is
- *   open in another tab", with "Use here instead".
- * - "Use here instead" asks the active tab (BroadcastChannel) to fence its hub, flush pending writes and stop its
- *   worker. It answers "released" after writing a marker to localStorage; this tab waits until that marker is
- *   visible (so the old tab's last writes are too), then takes the lock with `steal` and records itself as owner.
- *   Only then does main.ts build the Hub, which loads storage.local fresh from localStorage.
+ *   open in another tab", with "Use here instead" (or a storage message when localStorage is full or unreadable).
+ * - "Use here instead" asks the active tab (BroadcastChannel, or storage events) to let a running payment finish (up
+ *   to 20 s: "Finishing a payment in the other tab…"), fence its hub, flush pending writes and stop its worker. It
+ *   answers "released" after writing a marker to localStorage; this tab waits until that marker is visible (so the old
+ *   tab's last writes are too), then takes the lock with `steal`. Only then does main.ts build the Hub, which loads
+ *   storage.local fresh from localStorage. One takeover at a time (lock `bwx-web-takeover`).
  * - An old tab that never answers (frozen, hung) is stolen from after a wait. Its later writes are still refused:
- *   every storage.local write checks the owner record first (fencedBackend), and a foreign owner retires the tab.
+ *   every storage.local write first asks the browser (navigator.locks.query, answered by the browser process, not a
+ *   cached copy) whether this tab still holds `bwx-web-active` (fencedBackend). Without query(), a newer owner record
+ *   than this tab's own start retires it.
  * - A retired tab reloads (main.ts) and comes back as the same inactive screen.
  * - No Web Locks (old Safari): the owner record alone elects. Any other tab's record means inactive, however old,
  *   since a throttled background tab looks the same as a dead one; the user can always take over. Fails closed: no
@@ -29,10 +34,29 @@
 import type { LocalBackend } from './hub';
 
 export const WEB_TAB_LOCK = 'bwx-web-active';
+export const WEB_TAB_TAKEOVER_LOCK = 'bwx-web-takeover';
+export const WEB_TAB_MARKER_LOCK_PREFIX = 'bwx-web-tab:';
 export const WEB_TAB_OWNER_KEY = 'bwx.web.activeTab';
+export const WEB_TAB_TAKEOVER_KEY = 'bwx.web.takeover';
 export const WEB_TAB_FLUSH_KEY = 'bwx.web.handedOver';
 export const WEB_TAB_CHANNEL = 'bwx-web-tab';
 export const MOVED_ERROR = 'bWalletX is open in another tab';
+/** How long the old tab lets a running payment finish before it hands over anyway. */
+export const PAYMENT_HANDOVER_WAIT_MS = 20_000;
+
+/**
+ * storage.local keys re-read from localStorage on every get/set in the web wallet (Hub freshLocalKeys), so a
+ * read-merge-write of the key material always merges onto what is stored now, never onto a copy from start-up.
+ */
+export const WEB_FRESH_KEYS: ReadonlySet<string> = new Set([
+  'accounts',
+  'salt',
+  'keyRekey',
+  'keyEpoch',
+  'keyRecovery',
+  'kdfPending',
+]);
+export const isFreshWebKey = (key: string) => WEB_FRESH_KEYS.has(key);
 
 /** The parts of navigator.locks used here. */
 export interface LockManagerLike {
@@ -41,6 +65,7 @@ export interface LockManagerLike {
     options: { ifAvailable?: boolean; steal?: boolean },
     callback: (lock: unknown) => unknown,
   ): Promise<unknown>;
+  query?(): Promise<{ held?: Array<{ name?: string; clientId?: string }> }>;
 }
 
 export interface ChannelLike {
@@ -63,34 +88,60 @@ export interface WebTabEnv {
   storage?: StorageLike;
   /** Another tab changed localStorage (the `storage` event). key null = cleared. */
   onStorageEvent?: (listener: (key: string | null) => void) => void;
+  /** localStorage is full: drop caches that are fetched again anyway. Returns how many items were removed. */
+  freeSpace?: () => number;
   newId: () => string;
   now: () => number;
+  /** First load: retry the lock after these waits before showing the screen (a reload races the old page). */
+  claimRetryMs?: number[];
   /** How long "Use here instead" waits for the active tab to let go before taking the lock anyway. */
   takeoverWaitMs?: number;
+  /** After "a payment is finishing", how long the new tab keeps waiting. */
+  busyWaitMs?: number;
   /** How long it waits for the old tab's last writes to be visible here. */
   flushWaitMs?: number;
+  /** Cap on the old tab's release (payment wait + flush). */
+  releaseWaitMs?: number;
   /** How long a released tab waits to be replaced before it gives the lock back and reloads. */
   stealWaitMs?: number;
   /** No Web Locks: how long a fresh claim waits before checking no other tab claimed at the same moment. */
   claimSettleMs?: number;
 }
 
-type Msg = { t: 'takeover'; from: string } | { t: 'released'; by: string; to: string; marker: string };
+type Msg =
+  | { t: 'takeover'; from: string }
+  | { t: 'busy'; by: string; to: string; reason: 'payment' }
+  | { t: 'released'; by: string; to: string; marker: string };
 
 export type WebTabState = 'inactive' | 'active' | 'releasing' | 'lost';
+/** Why this tab is not the active one: the screen says which. */
+export type WebTabBlock = 'other-tab' | 'storage-full' | 'no-storage' | 'busy';
+export type HandoverProgress = 'payment';
+
+type OwnerRecord = { id: string; at: number };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const isQuota = (e: unknown) =>
+  e instanceof Error &&
+  (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || /quota/i.test(e.message));
 
 export class WebTab {
   readonly id: string;
   state: WebTabState = 'inactive';
+  /** Set when claim/takeOver returns false. */
+  blocked?: WebTabBlock;
+  /** Locks mode: the owner record could not be written (localStorage full); retried on later writes. */
+  recordPending = false;
   private channel?: ChannelLike;
-  private releaseHook: () => Promise<void> = async () => undefined;
+  private releaseHook: (tell: (p: HandoverProgress) => void) => Promise<void> = async () => undefined;
   private lostHooks: Array<() => void> = [];
   private letGo?: () => void;
   private waiters = new Set<(m: Msg) => void>();
   private released?: Promise<void>;
   private handingOver = false;
+  private activatedAt = 0;
+  private marker?: Promise<boolean>;
+  private lastWriteFull = false;
 
   constructor(private env: WebTabEnv) {
     this.id = env.newId();
@@ -105,8 +156,15 @@ export class WebTab {
     });
   }
 
-  /** main.ts, once its hub and worker exist: fence the hub, flush its writes and stop the worker. */
-  onRelease(fn: () => Promise<void>) {
+  private get markerName() {
+    return WEB_TAB_MARKER_LOCK_PREFIX + this.id;
+  }
+
+  /**
+   * main.ts, once its hub and worker exist: let a running payment finish (calling `tell('payment')` first), fence
+   * the hub, flush its writes and stop the worker.
+   */
+  onRelease(fn: (tell: (p: HandoverProgress) => void) => Promise<void>) {
     this.releaseHook = fn;
   }
 
@@ -115,59 +173,78 @@ export class WebTab {
     this.lostHooks.push(fn);
   }
 
-  /** At boot: become the active tab if no other tab is. Never waits for another tab. */
+  /** At boot: become the active tab if no other tab is. Never waits for another tab (beyond a short retry). */
   async claim(): Promise<boolean> {
-    if (!this.env.storage) return false;
-    return this.env.locks ? this.claimWithLock(false) : this.claimByRecord(false);
+    this.blocked = undefined;
+    if (!this.env.storage) return this.block('no-storage');
+    if (this.env.locks) {
+      for (const wait of [0, ...(this.env.claimRetryMs ?? [100, 250, 500])]) {
+        if (wait) await sleep(wait);
+        if (await this.claimWithLock(false)) return true;
+      }
+      return this.block('other-tab');
+    }
+    const r = await this.claimByRecord(false);
+    return r === 'ok' ? true : this.block(r === 'full' ? 'storage-full' : 'other-tab');
   }
 
-  /** "Use here instead": ask the active tab to flush, stop and let go, then take over. */
-  async takeOver(): Promise<boolean> {
+  /** "Use here instead": ask the active tab to finish, flush, stop and let go, then take over. */
+  async takeOver(onProgress?: (p: HandoverProgress) => void): Promise<boolean> {
     if (this.state === 'active') return true;
-    if (!this.env.storage) return false;
+    this.blocked = undefined;
+    if (!this.env.storage) return this.block('no-storage');
     this.state = 'inactive';
-    // Nobody has it (the other tab closed): take it straight away.
-    if (
-      this.env.locks
-        ? await this.claimWithLock(false)
-        : this.readOwnerSafe() === null && (await this.claimByRecord(false))
-    )
-      return true;
-
-    const answer = this.waitFor(
-      (m): m is Extract<Msg, { t: 'released' }> => m.t === 'released' && m.to === this.id,
-      this.env.takeoverWaitMs ?? 3000,
-    );
-    this.channel?.postMessage({ t: 'takeover', from: this.id } satisfies Msg);
-    const released = await answer;
-    // The old tab flushed: start only once its last write is visible here, or the hub would load a stale copy.
-    if (released && !(await this.markerVisible(released.marker))) return false;
-    // No answer: the old tab is frozen, hung or gone. Take it anyway; the owner record refuses its later writes.
-    return this.env.locks ? this.claimWithLock(true) : this.claimByRecord(true);
+    // One takeover at a time: a second tab pressing at the same moment is told to try again (no flip-flop).
+    const done = await this.takeoverIntent();
+    if (!done) return this.block('busy');
+    try {
+      return await this.takeOverNow(onProgress);
+    } finally {
+      done();
+    }
   }
 
   /**
-   * The write fence (fencedBackend): true only while this tab is active and the owner record still names it.
-   * Another tab's id there retires this tab; an unreadable record refuses the write.
+   * The write fence (fencedBackend): true only while this tab still holds the wallet. With Web Locks the browser is
+   * asked (query); a lock another tab holds now retires this tab. Anything it can't confirm refuses the write.
    */
-  isOwner(): boolean {
+  async stillOwner(): Promise<boolean> {
     if (this.state !== 'active') return false;
-    let owner: string | null;
-    try {
-      owner = this.readOwner();
-    } catch {
-      return false;
-    }
-    if (owner === this.id) return true;
-    if (owner === null) {
-      // The record was cleared under us (site data): we still hold the lock / the claim, so write it again.
-      try {
-        this.writeOwner();
-        return this.readOwner() === this.id;
-      } catch {
+    const locks = this.env.locks;
+    if (locks) {
+      if (locks.query && (await this.marker)) {
+        let held: Array<{ name?: string; clientId?: string }>;
+        try {
+          held = (await locks.query()).held ?? [];
+        } catch {
+          return false;
+        }
+        if (this.state !== 'active') return false;
+        const me = held.find((l) => l.name === this.markerName)?.clientId;
+        const holder = held.find((l) => l.name === WEB_TAB_LOCK)?.clientId;
+        if (me === undefined) return false; // can't tell: refuse this write, don't retire
+        if (holder !== me) {
+          this.lose();
+          return false;
+        }
+        if (this.recordPending) this.recordPending = !this.writeOwner();
+        return true;
+      }
+      // No query(): only an owner record newer than this tab's own start means another tab took over.
+      const rec = this.readRecordSafe();
+      if (rec === undefined) return false;
+      if (rec && rec.id !== this.id && rec.at >= this.activatedAt) {
+        this.lose();
         return false;
       }
+      if (!rec || rec.id !== this.id) this.recordPending = !this.writeOwner();
+      return true;
     }
+    // No Web Locks: the record is the election.
+    const rec = this.readRecordSafe();
+    if (rec === undefined) return false;
+    if (rec?.id === this.id) return true;
+    if (rec === null) return this.writeOwner(); // cleared under us (site data): we still hold the claim
     this.lose();
     return false;
   }
@@ -176,7 +253,7 @@ export class WebTab {
   onPageHide() {
     if (this.env.locks || this.state !== 'active') return;
     try {
-      if (this.readOwner() === this.id) this.env.storage?.removeItem(WEB_TAB_OWNER_KEY);
+      if (this.readRecord()?.id === this.id) this.env.storage?.removeItem(WEB_TAB_OWNER_KEY);
     } catch {
       /* storage unavailable */
     }
@@ -184,69 +261,196 @@ export class WebTab {
 
   // INTERNALS ***************************************************************
 
+  private block(reason: WebTabBlock): false {
+    this.blocked = reason;
+    return false;
+  }
+
+  private async takeOverNow(onProgress?: (p: HandoverProgress) => void): Promise<boolean> {
+    // Nobody has it (the other tab closed): take it straight away.
+    if (this.env.locks) {
+      if (await this.claimWithLock(false)) return true;
+    } else if (this.readRecordSafe() === null) {
+      const r = await this.claimByRecord(false);
+      if (r === 'ok') return true;
+      if (r === 'full') return this.block('storage-full');
+    }
+
+    let deadline = this.env.now() + (this.env.takeoverWaitMs ?? 3000);
+    const answers: Msg[] = [];
+    let wake: () => void = () => undefined;
+    const waiter = (m: Msg) => {
+      if ((m.t === 'released' || m.t === 'busy') && m.to === this.id) {
+        answers.push(m);
+        wake();
+      }
+    };
+    this.waiters.add(waiter);
+    let released: Extract<Msg, { t: 'released' }> | undefined;
+    try {
+      this.channel?.postMessage({ t: 'takeover', from: this.id } satisfies Msg);
+      while (!released) {
+        const left = deadline - this.env.now();
+        if (left <= 0) break;
+        if (answers.length === 0)
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, left);
+            wake = () => {
+              clearTimeout(timer);
+              resolve();
+            };
+          });
+        for (const m of answers.splice(0)) {
+          if (m.t === 'released') released = m;
+          else if (m.t === 'busy') {
+            // A payment is finishing there: keep waiting for it rather than cutting it off.
+            onProgress?.(m.reason);
+            deadline = Math.max(deadline, this.env.now() + (this.env.busyWaitMs ?? PAYMENT_HANDOVER_WAIT_MS + 5000));
+          }
+        }
+      }
+    } finally {
+      this.waiters.delete(waiter);
+    }
+    // The old tab flushed: start only once its last write is visible here, or the hub would load a stale copy.
+    if (released && released.marker && !(await this.markerVisible(released.marker))) return this.block('other-tab');
+    if (released && !released.marker) await sleep(Math.min(250, this.env.flushWaitMs ?? 3000));
+    // No answer: the old tab is frozen, hung or gone. Take it anyway; the fence refuses its later writes.
+    if (this.env.locks) return (await this.claimWithLock(true)) || this.block('other-tab');
+    const r = await this.claimByRecord(true);
+    return r === 'ok' ? true : this.block(r === 'full' ? 'storage-full' : 'other-tab');
+  }
+
+  /** A lock (or, without Web Locks, a short-lived record) held while this tab takes over. null: another tab is. */
+  private async takeoverIntent(): Promise<(() => void) | null> {
+    const locks = this.env.locks;
+    if (locks) {
+      return new Promise((resolve) => {
+        locks
+          .request(WEB_TAB_TAKEOVER_LOCK, { ifAvailable: true }, (lock) => {
+            if (!lock) return resolve(null);
+            return new Promise<void>((done) => resolve(() => done()));
+          })
+          .catch(() => resolve(null));
+      });
+    }
+    const storage = this.env.storage!;
+    try {
+      const raw = storage.getItem(WEB_TAB_TAKEOVER_KEY);
+      const other = raw ? (JSON.parse(raw) as OwnerRecord) : null;
+      if (other && other.id !== this.id && this.env.now() - other.at < 30_000) return null;
+      storage.setItem(WEB_TAB_TAKEOVER_KEY, JSON.stringify({ id: this.id, at: this.env.now() }));
+    } catch {
+      return () => undefined; // can't record the intent (full storage): carry on without it
+    }
+    return () => {
+      try {
+        const raw = storage.getItem(WEB_TAB_TAKEOVER_KEY);
+        if (raw && (JSON.parse(raw) as OwnerRecord).id === this.id) storage.removeItem(WEB_TAB_TAKEOVER_KEY);
+      } catch {
+        /* expires by itself */
+      }
+    };
+  }
+
+  /** A lock only this tab holds, so query() can tell which client holds the wallet lock. */
+  private holdMarker(): Promise<boolean> {
+    const locks = this.env.locks;
+    if (!locks?.query) return Promise.resolve(false);
+    this.marker ??= new Promise<boolean>((resolve) => {
+      locks
+        .request(this.markerName, {}, (lock) => {
+          resolve(!!lock);
+          return lock ? new Promise<void>(() => undefined) : undefined;
+        })
+        .catch(() => resolve(false));
+    });
+    return this.marker;
+  }
+
   private claimWithLock(steal: boolean): Promise<boolean> {
     const locks = this.env.locks!;
-    return new Promise<boolean>((resolve) => {
-      let held = false;
-      locks
-        .request(WEB_TAB_LOCK, steal ? { steal: true } : { ifAvailable: true }, (lock) => {
-          if (!lock) return resolve(false);
-          try {
-            this.writeOwner();
-            if (this.readOwner() !== this.id) return resolve(false);
-          } catch {
-            return resolve(false); // cannot record ownership: let the lock go, stay inactive
-          }
-          held = true;
-          this.state = 'active';
-          resolve(true);
-          return new Promise<void>((done) => (this.letGo = done));
-        })
-        .then(
-          () => {
-            if (held) this.lose(); // we let go
-          },
-          () => {
-            if (held)
-              this.lose(); // stolen (AbortError)
-            else resolve(false); // the request failed
-          },
-        );
-    });
+    return this.holdMarker().then(
+      () =>
+        new Promise<boolean>((resolve) => {
+          let held = false;
+          locks
+            .request(WEB_TAB_LOCK, steal ? { steal: true } : { ifAvailable: true }, (lock) => {
+              if (!lock) return resolve(false);
+              // The held lock is the authority: a full localStorage only delays the owner record.
+              held = true;
+              this.activatedAt = this.env.now();
+              this.state = 'active';
+              this.recordPending = !this.writeOwner();
+              resolve(true);
+              return new Promise<void>((done) => (this.letGo = done));
+            })
+            .then(
+              () => {
+                if (held) this.lose(); // we let go
+              },
+              () => {
+                if (held)
+                  this.lose(); // stolen (AbortError)
+                else resolve(false); // the request failed
+              },
+            );
+        }),
+    );
   }
 
-  private async claimByRecord(force: boolean): Promise<boolean> {
+  private async claimByRecord(force: boolean): Promise<'ok' | 'other' | 'full'> {
     try {
-      if (!force && this.readOwner() !== null) return false; // another tab's record, however old: inactive
-      this.writeOwner();
-      await sleep(this.env.claimSettleMs ?? 300);
-      if (this.readOwner() !== this.id) return false; // another tab claimed at the same moment
+      if (!force && this.readRecord() !== null) return 'other'; // another tab's record, however old: inactive
     } catch {
-      return false;
+      return 'other';
     }
+    if (!this.writeOwner()) return this.lastWriteFull ? 'full' : 'other';
+    await sleep(this.env.claimSettleMs ?? 300);
+    if (this.readRecordSafe()?.id !== this.id) return 'other'; // another tab claimed at the same moment
+    this.activatedAt = this.env.now();
     this.state = 'active';
-    return true;
+    return 'ok';
   }
 
-  private writeOwner() {
-    this.env.storage!.setItem(WEB_TAB_OWNER_KEY, JSON.stringify({ id: this.id, at: this.env.now() }));
+  /** Write the owner record; on a full localStorage, drop known caches and try once more. */
+  private writeOwner(): boolean {
+    const value = JSON.stringify({ id: this.id, at: this.env.now() } satisfies OwnerRecord);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        this.env.storage!.setItem(WEB_TAB_OWNER_KEY, value);
+        this.lastWriteFull = false;
+        return this.readRecordSafe()?.id === this.id;
+      } catch (e) {
+        this.lastWriteFull = isQuota(e);
+        if (!this.lastWriteFull || attempt > 0) return false;
+        try {
+          if (!this.env.freeSpace || this.env.freeSpace() === 0) return false;
+        } catch {
+          return false;
+        }
+      }
+    }
+    return false;
   }
 
-  /** The owner's id, null when there is no record, '?' for a record that can't be read (a foreign owner). */
-  private readOwner(): string | null {
+  /** The owner record, null when there is none, a foreign '?' record when it can't be parsed. Throws if unreadable. */
+  private readRecord(): OwnerRecord | null {
     const raw = this.env.storage!.getItem(WEB_TAB_OWNER_KEY);
     if (raw === null) return null;
     try {
-      const id = (JSON.parse(raw) as { id?: unknown }).id;
-      return typeof id === 'string' && id ? id : '?';
+      const r = JSON.parse(raw) as Partial<OwnerRecord>;
+      return typeof r.id === 'string' && r.id
+        ? { id: r.id, at: typeof r.at === 'number' ? r.at : Number.MAX_SAFE_INTEGER }
+        : { id: '?', at: Number.MAX_SAFE_INTEGER };
     } catch {
-      return '?';
+      return { id: '?', at: Number.MAX_SAFE_INTEGER };
     }
   }
 
-  private readOwnerSafe(): string | null | undefined {
+  private readRecordSafe(): OwnerRecord | null | undefined {
     try {
-      return this.readOwner();
+      return this.readRecord();
     } catch {
       return undefined;
     }
@@ -254,8 +458,11 @@ export class WebTab {
 
   private checkOwner() {
     if (this.state !== 'active' && this.state !== 'releasing') return;
-    const owner = this.readOwnerSafe();
-    if (owner !== this.id && owner !== null) this.lose();
+    const rec = this.readRecordSafe();
+    if (!rec || rec.id === this.id) return;
+    // With Web Locks the lock decides; a record only counts when it is newer than this tab's start.
+    if (this.env.locks && rec.at < this.activatedAt) return;
+    this.lose();
   }
 
   private onMessage(data: unknown) {
@@ -265,25 +472,28 @@ export class WebTab {
     if (m.t === 'takeover' && m.from !== this.id && this.state === 'active') void this.handOver(m.from);
   }
 
-  private runRelease(): Promise<void> {
-    this.released ??= Promise.race([this.releaseHook().catch(() => undefined), sleep(this.env.flushWaitMs ?? 3000)]);
+  private runRelease(tell: (p: HandoverProgress) => void = () => undefined): Promise<void> {
+    this.released ??= Promise.race([
+      this.releaseHook(tell).catch(() => undefined),
+      sleep(this.env.releaseWaitMs ?? PAYMENT_HANDOVER_WAIT_MS + (this.env.flushWaitMs ?? 3000)),
+    ]);
     return this.released;
   }
 
-  /** Another tab asked for the wallet: fence, flush, stop, mark, answer; then wait to be replaced. */
+  /** Another tab asked for the wallet: finish a payment, fence, flush, stop, mark, answer; then wait to be replaced. */
   private async handOver(to: string) {
-    if (this.handingOver) return; // a second asker gets no answer and takes over after its wait
+    if (this.handingOver) return; // a second asker gets no answer (and is held back by the takeover lock)
     this.handingOver = true;
-    // Still 'active' while the hook flushes: the hub is fenced (no new writes), and the writes it already accepted
+    // Still 'active' while the hook runs: the hub is fenced (no new writes), and the writes it already accepted
     // must still pass the owner check on their way to localStorage.
-    await this.runRelease();
+    await this.runRelease((reason) => this.channel?.postMessage({ t: 'busy', by: this.id, to, reason } satisfies Msg));
     if (this.state !== 'active') return; // stolen meanwhile
     this.state = 'releasing';
-    const marker = `${this.id}:${this.env.now()}`;
+    let marker = `${this.id}:${this.env.now()}`;
     try {
       this.env.storage?.setItem(WEB_TAB_FLUSH_KEY, marker);
     } catch {
-      /* the new tab then waits and stays inactive */
+      marker = ''; // localStorage full: no marker; the new tab gives the writes a moment instead
     }
     this.channel?.postMessage({ t: 'released', by: this.id, to, marker } satisfies Msg);
     // The steal (Web Locks) or the new owner record (storage event) retires this tab; if neither comes (the other
@@ -310,22 +520,6 @@ export class WebTab {
     });
   }
 
-  private waitFor<T extends Msg>(match: (m: Msg) => m is T, ms: number): Promise<T | undefined> {
-    return new Promise((resolve) => {
-      const waiter = (m: Msg) => {
-        if (!match(m)) return;
-        this.waiters.delete(waiter);
-        clearTimeout(timer);
-        resolve(m);
-      };
-      const timer = setTimeout(() => {
-        this.waiters.delete(waiter);
-        resolve(undefined);
-      }, ms);
-      this.waiters.add(waiter);
-    });
-  }
-
   private async markerVisible(marker: string): Promise<boolean> {
     const until = this.env.now() + (this.env.flushWaitMs ?? 3000);
     for (;;) {
@@ -344,13 +538,43 @@ export class WebTab {
  * storage.local for the active web tab: every write first checks this tab still owns the wallet, so a tab another
  * tab took over (even one too frozen to hear the handover) can never write its stale copy back.
  */
-export const fencedBackend = <B extends LocalBackend>(backend: B, tab: Pick<WebTab, 'isOwner'>): B => ({
+export const fencedBackend = <B extends LocalBackend>(backend: B, tab: Pick<WebTab, 'stillOwner'>): B => ({
   ...backend,
   apply: async (sets: Record<string, string>, removes: string[]) => {
-    if (!tab.isOwner()) throw new Error(MOVED_ERROR);
+    if (!(await tab.stillOwner())) throw new Error(MOVED_ERROR);
     return backend.apply(sets, removes);
   },
 });
+
+/** Payments running in this tab's worker (it posts { t: 'spends', n }): the release waits for them. */
+export class SpendGauge {
+  private n = 0;
+  private idleWaiters = new Set<() => void>();
+
+  get count() {
+    return this.n;
+  }
+
+  set(n: number) {
+    this.n = Number.isFinite(n) && n > 0 ? n : 0;
+    if (this.n === 0) for (const w of [...this.idleWaiters]) w();
+  }
+
+  /** True once no payment is running; false when `ms` passed first. */
+  idle(ms: number): Promise<boolean> {
+    if (this.n === 0) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const done = (v: boolean) => {
+        this.idleWaiters.delete(waiter);
+        clearTimeout(timer);
+        resolve(v);
+      };
+      const waiter = () => done(true);
+      const timer = setTimeout(() => done(false), ms);
+      this.idleWaiters.add(waiter);
+    });
+  }
+}
 
 /** The web edition: not a native phone (Capacitor) and not Desktop (Tauri). The extension never loads main.ts. */
 export const isWebEdition = (flags: { native: boolean; tauri: boolean }) => !flags.native && !flags.tauri;
@@ -387,9 +611,32 @@ export const storageChannel = (
   };
 };
 
+/**
+ * localStorage items that are only caches (fetched or rebuilt again on use), dropped when localStorage is full so the
+ * wallet can still start: list caches (ui/listCache.ts), the thread cache fallback (chat/threadCache.ts), the "avatar
+ * already published" markers (tabs/ChatPage.tsx), the previous boot trace and the private-build sync log. Avatar data
+ * URLs (names/avatar.ts) are kept: for an unpublished photo that is the only copy the picker has.
+ */
+export const isDisposableCacheKey = (key: string) =>
+  key.startsWith('bwallet:list-cache:') ||
+  key === 'bwallet:thread-cache' ||
+  key.startsWith('bwallet.chatAvatarPublished.') ||
+  key === 'bwallet.bootTrace.prev' ||
+  key === 'bwx.diag.syncLog';
+
+export const freeDisposableCaches = (storage: Pick<Storage, 'length' | 'key' | 'removeItem'>): number => {
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k !== null && isDisposableCacheKey(k)) keys.push(k);
+  }
+  for (const k of keys) storage.removeItem(k);
+  return keys.length;
+};
+
 export const browserWebTabEnv = (): WebTabEnv => {
   const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManagerLike }) : undefined;
-  let storage: StorageLike | undefined;
+  let storage: Storage | undefined;
   try {
     storage = window.localStorage;
     storage.getItem(WEB_TAB_OWNER_KEY);
@@ -409,6 +656,7 @@ export const browserWebTabEnv = (): WebTabEnv => {
       window.addEventListener('storage', (e) => {
         if (e.storageArea === null || e.storageArea === storage) listener(e.key);
       }),
+    freeSpace: () => (storage ? freeDisposableCaches(storage) : 0),
     newId: () =>
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
@@ -417,8 +665,33 @@ export const browserWebTabEnv = (): WebTabEnv => {
   };
 };
 
+const SCREEN_COPY: Record<Exclude<WebTabBlock, 'busy'>, { title: string; line: string; button: string }> = {
+  'other-tab': {
+    title: 'bWalletX is open in another tab',
+    line: 'Your wallet runs in one tab at a time, so everything stays in step.',
+    button: 'Use here instead',
+  },
+  'storage-full': {
+    title: 'This browser’s storage for bWalletX is full',
+    line: 'Please don’t clear this site’s data: your wallet’s keys are kept there. Free some space in your browser, then try again.',
+    button: 'Try again',
+  },
+  'no-storage': {
+    title: 'bWalletX can’t use this browser’s storage',
+    line: 'Allow site data for this site in your browser settings (private windows may block it), then try again.',
+    button: 'Try again',
+  },
+};
+
+const FAILED_NOTE: Record<WebTabBlock, string> = {
+  'other-tab': 'The other tab is still busy. Close it, or try again.',
+  busy: 'Another tab is already moving the wallet. Try again in a moment.',
+  'storage-full': 'Still full. Free some space, then try again.',
+  'no-storage': 'Still blocked. Check the site data setting, then try again.',
+};
+
 /** The one screen an inactive tab shows. Plain DOM: no React, no hub. */
-export const showInactiveScreen = (doc: Document, onUse: () => void) => {
+export const showInactiveScreen = (doc: Document, reason: WebTabBlock, onUse: () => void) => {
   const box = doc.createElement('div');
   box.id = 'bwallet-other-tab';
   box.setAttribute('role', 'main');
@@ -427,19 +700,23 @@ export const showInactiveScreen = (doc: Document, onUse: () => void) => {
     'justify-content:center;gap:16px;padding:24px 16px;background:#010101;color:#fff;text-align:center;' +
     'font:16px/1.4 Inter,system-ui,-apple-system,sans-serif';
   const title = doc.createElement('h1');
-  title.textContent = 'bWalletX is open in another tab';
   title.style.cssText = 'margin:0;font-size:20px;font-weight:700;max-width:340px';
   const line = doc.createElement('p');
-  line.textContent = 'Your wallet runs in one tab at a time, so everything stays in step.';
   line.style.cssText = 'margin:0;opacity:0.7;max-width:320px';
   const button = doc.createElement('button');
   button.type = 'button';
-  button.textContent = 'Use here instead';
   button.style.cssText =
     'padding:12px 32px;border:0;border-radius:999px;background:#f5c518;color:#000;font:inherit;font-weight:700;' +
     'cursor:pointer';
   const note = doc.createElement('p');
   note.style.cssText = 'margin:0;font-size:13px;opacity:0.6;max-width:300px;min-height:18px';
+  const show = (r: WebTabBlock) => {
+    const copy = SCREEN_COPY[r === 'busy' ? 'other-tab' : r];
+    title.textContent = copy.title;
+    line.textContent = copy.line;
+    button.textContent = copy.button;
+  };
+  show(reason);
   button.addEventListener('click', () => {
     if (button.disabled) return;
     button.disabled = true;
@@ -450,10 +727,13 @@ export const showInactiveScreen = (doc: Document, onUse: () => void) => {
   box.append(title, line, button, note);
   doc.body.appendChild(box);
   return {
-    failed: () => {
+    progress: (p: HandoverProgress) => {
+      if (p === 'payment') note.textContent = 'Finishing a payment in the other tab…';
+    },
+    failed: (r: WebTabBlock) => {
+      show(r);
       button.disabled = false;
-      button.textContent = 'Use here instead';
-      note.textContent = 'The other tab is still busy. Close it, or try again.';
+      note.textContent = FAILED_NOTE[r];
     },
     remove: () => box.remove(),
   };
@@ -474,12 +754,16 @@ export const startWebTab = async (env: WebTabEnv = browserWebTabEnv(), doc: Docu
   }
   if (await tab.claim()) return tab;
   await new Promise<void>((resolve) => {
-    const screen = showInactiveScreen(doc, () => {
-      void tab.takeOver().then((ok) => {
-        if (!ok) return screen.failed();
-        screen.remove();
-        resolve();
-      });
+    const screen = showInactiveScreen(doc, tab.blocked ?? 'other-tab', () => {
+      // localStorage could not be opened at all: only a fresh page can try again.
+      if (tab.blocked === 'no-storage' && typeof location !== 'undefined') return location.reload();
+      void tab
+        .takeOver((p) => screen.progress(p))
+        .then((ok) => {
+          if (!ok) return screen.failed(tab.blocked ?? 'other-tab');
+          screen.remove();
+          resolve();
+        });
     });
   });
   return tab;
