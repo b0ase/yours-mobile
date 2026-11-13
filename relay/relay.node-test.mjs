@@ -160,7 +160,7 @@ const digest = (c) => createHash('sha256').update(c).digest('hex');
 test('after the window a new channel needs a site claim, and only that claim can take the site socket', async () => {
   const { base, done } = await boot({ legacyUntil: 0 });
   await assert.rejects(open(`${base}/v1/c/${C}?role=site&e=${exp()}`, 'https://a.lol'), /403/);
-  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
   // A stranger with the channel ID and the right Origin can't replace the site (was 4001 + lockout).
   await assert.rejects(open(`${base}/v1/c/${C}?role=site`, 'https://a.lol'), /403/);
   await assert.rejects(open(`${base}/v1/c/${C}?role=site&claim=strangerstrangerstrang`, 'https://a.lol'), /403/);
@@ -208,7 +208,7 @@ test('QR-bound wallet claim: a squatter cannot pre-claim the wallet role, and th
 test('wc is only for the site role and must be a SHA-256 hex digest', async () => {
   const { base, done } = await boot({ legacyUntil: 0 });
   await assert.rejects(open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=nothex`, 'https://a.lol'), /400/);
-  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
   await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&wc=${digest(QRW)}`), /400/);
   site.ws.close();
   await done();
@@ -332,7 +332,8 @@ test('v2: nc is only for the wallet role and must be a digest; enforcement refus
 // Review 13 Nov 2026 (round 2): a v1 session's claim can't bind nc later, because whoever saw the QR holds the same
 // claim. The site re-binds it instead.
 test('v1 claim on an unbound channel: a QR holder cannot bind its own nc; it only evicts, and the phone re-takes', async () => {
-  const { base, done } = await boot({ legacyUntil: 0 });
+  // A channel without wc can only be opened inside the compatibility window (b-Aware triage 13 Nov 2026).
+  const { base, done } = await boot({ legacyUntil: Date.now() + 60_000 });
   const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol'); // no wc
   const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`);
   await until(() => phone.inbox.length);
@@ -439,6 +440,122 @@ const fileWritten = (path) =>
     }
   });
 
+// b-Aware triage 13 Nov 2026: after the window a channel opened without `wc` let the first wallet with any claim take
+// (and, with nc, bind) the wallet role. Now a new channel needs `wc`, and the wallet role is never first-come.
+const refusal = (url, origin) =>
+  new Promise((resolve, reject) => {
+    const ws = new WebSocket(url, origin ? { origin } : {});
+    ws.on('unexpected-response', (_req, res) => resolve(`${res.statusCode} ${res.statusMessage}`));
+    ws.on('open', () => (ws.close(), reject(new Error('admitted'))));
+    ws.on('error', () => {});
+  });
+
+test('after the window a new channel without wc is refused: wallet binding required (fails on the old relay)', async () => {
+  const { base, relay, done } = await boot({ legacyUntil: 0 });
+  assert.equal(
+    await refusal(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol'),
+    '403 wallet binding required',
+  );
+  assert.equal(relay.stats().channels, 0);
+  // So nobody can take the wallet role first-come on it, with or without nc.
+  for (const q of [`claim=squattersquattersquat1`, `claim=squattersquattersquat1&nc=${digest(SESS2)}`])
+    assert.equal(await refusal(`${base}/v1/c/${C}?role=wallet&${q}`), '404 no such channel');
+  // With wc it opens, and only the QR-bound claim takes the wallet role.
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+  assert.equal(await refusal(`${base}/v1/c/${C}?role=wallet&claim=squattersquattersquat1`), '403 role claimed');
+  const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS)}`);
+  await until(() => phone.inbox.length);
+  assert.equal(phone.inbox[0].wcv, 2);
+  phone.ws.close();
+  site.ws.close();
+  await done();
+});
+
+test('a channel opened in the window without wc: after the window no stranger takes the free wallet role', async () => {
+  let clock = Date.now();
+  const legacyUntil = clock + 60_000;
+  const { base, done } = await boot({ legacyUntil, now: () => clock });
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol'); // old site: no wc
+  clock = legacyUntil + 1;
+  for (const q of [`claim=squattersquattersquat1`, `claim=squattersquattersquat1&nc=${digest(SESS2)}`, ''])
+    assert.equal(await refusal(`${base}/v1/c/${C}?role=wallet&${q}`), '403 role claimed', q);
+  site.ws.close();
+  await done();
+});
+
+test('a phone that took the role first-come in the window keeps it after, but only while the channel is in use', async () => {
+  let clock = Date.now();
+  const legacyUntil = clock + 60_000;
+  const { base, relay, done } = await boot({ legacyUntil, now: () => clock });
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${SESS}&nc=${digest(SESS)}`);
+  await until(() => phone.inbox.length);
+  clock = legacyUntil + 1;
+  // The owner's phone reconnects on the claim it holds; a stranger is refused.
+  const again = await open(`${base}/v1/c/${C}?role=wallet&claim=${SESS}`);
+  await until(() => phone.ws.readyState === 3);
+  assert.equal(await refusal(`${base}/v1/c/${C}?role=wallet&claim=squattersquattersquat1`), '403 role claimed');
+  // Both leave: a first-come pairing gets the unpaired idle limit after the window, not the 31-day one.
+  again.ws.close();
+  site.ws.close();
+  await until(() => !again.ws.readyState || again.ws.readyState === 3);
+  await new Promise((r) => setTimeout(r, 30));
+  clock += LIMITS.unpairedIdleMs + 1000;
+  relay._sweep();
+  assert.equal(relay.stats().channels, 0);
+  await done();
+});
+
+test('a site that proves its claim and re-binds with wc lifts the first-come limit; a QR-bound channel never has it', async () => {
+  for (const reBind of [true, false]) {
+    let clock = Date.now();
+    const legacyUntil = clock + 60_000;
+    const { base, relay, done } = await boot({ legacyUntil, now: () => clock });
+    const wc = reBind ? '' : `&wc=${digest(QRW)}`;
+    const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}${wc}`, 'https://a.lol');
+    const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${reBind ? SESS : QRW}&nc=${digest(SESS)}`);
+    await until(() => phone.inbox.length);
+    let site2 = site;
+    if (reBind) {
+      // The site learned the session claim from the phone's sealed ready and re-binds on its next connect.
+      site2 = await open(`${base}/v1/c/${C}?role=site&claim=${SITE}&wc=${digest(SESS)}`, 'https://a.lol');
+      await until(() => site.ws.readyState === 3);
+    }
+    phone.ws.close();
+    site2.ws.close();
+    await new Promise((r) => setTimeout(r, 30));
+    clock = legacyUntil + LIMITS.unpairedIdleMs + 1000;
+    relay._sweep();
+    assert.equal(relay.stats().channels, 1, `reBind=${reBind}`);
+    await done();
+  }
+});
+
+test('restart: a first-come pairing is saved with its mark and, after the window, gets the unpaired idle limit', async () => {
+  const path = statePath('legacywallet');
+  const at = Date.now() - 1000;
+  const good = { o: 'https://a.lol', sc: digest(SITE), wl: digest(SESS), wb: digest(SESS), sb: true, at };
+  writeFileSync(path, JSON.stringify({ v: 1, channels: { [C]: good, BBBBBBBBBBBBBBBBBBBBBB: { ...good, lw: true } } }));
+  let clock = Date.now();
+  const b = await boot({ legacyUntil: 0, stateFile: path, now: () => clock });
+  assert.equal(b.relay.stats().channels, 2);
+  clock += LIMITS.unpairedIdleMs + 1000;
+  b.relay._sweep();
+  assert.equal(b.relay.stats().channels, 1);
+  await b.done();
+  // During the window the mark is written out.
+  const live = statePath('legacywallet-live');
+  const w = await boot({ legacyUntil: Infinity, stateFile: live, stateWriteMs: 10 });
+  const site = await open(`${w.base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  const phone = await open(`${w.base}/v1/c/${C}?role=wallet&claim=${SESS}&nc=${digest(SESS)}`);
+  await until(() => phone.inbox.length);
+  await fileWritten(live);
+  assert.equal(JSON.parse(readFileSync(live, 'utf8')).channels[C].lw, true);
+  phone.ws.close();
+  site.ws.close();
+  await w.done();
+});
+
 test('restart: a paired channel keeps its origin and claims; whoever opens it first after a restart cannot take it', async () => {
   const live = statePath('restart');
   const a = await boot({ legacyUntil: 0, stateFile: live, stateWriteMs: 10 });
@@ -494,7 +611,7 @@ test('restart: a v1 session bound before RELAY_SESSION_CLAIMS_FROM is still admi
   await until(() => back.inbox.length);
   // A channel nobody bound before still needs nc.
   const D = 'DDDDDDDDDDDDDDDDDDDDDD';
-  const s3 = await open(`${b.base}/v1/c/${D}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  const s3 = await open(`${b.base}/v1/c/${D}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
   await assert.rejects(open(`${b.base}/v1/c/${D}?role=wallet&claim=${QRW}`), /403/);
   s3.ws.close();
   site2.ws.close();
@@ -511,7 +628,7 @@ test('restart: a missing or corrupt file starts empty; bad and lapsed entries ar
   writeFileSync(corrupt, '{"v":1,"channels":{"AAAA');
   const c = await boot({ legacyUntil: 0, stateFile: corrupt });
   assert.equal(c.relay.stats().channels, 0);
-  const site = await open(`${c.base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  const site = await open(`${c.base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
   site.ws.close();
   await c.done();
 
@@ -565,7 +682,8 @@ test('state file: only channels with a site claim and a wallet binding, capped (
   const cap = LIMITS.stateChannels;
   LIMITS.stateChannels = 2;
   try {
-    const a = await boot({ legacyUntil: 0, stateFile: path, stateWriteMs: 10 });
+    // Inside the window: after it a site without wc can't open a channel at all.
+    const a = await boot({ legacyUntil: Infinity, stateFile: path, stateWriteMs: 10 });
     const ids = ['CAP1AAAAAAAAAAAAAAAAAA', 'CAP2AAAAAAAAAAAAAAAAAA', 'CAP3AAAAAAAAAAAAAAAAAA'];
     for (const id of ids) {
       const s1 = await open(
