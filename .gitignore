@@ -70,3 +70,7 @@ GoogleService-Info.plist
 
 # Desktop updater config with the real pubkey/endpoint (src-tauri/tauri.updater.example.json)
 /src-tauri/tauri.updater.json
+
+# pairing relay state (relay/server.mjs RELAY_STATE_FILE)
+relay/relay-state.json
+relay/relay-state.json.*.tmp
