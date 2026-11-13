@@ -16,13 +16,7 @@
 
 import { BLOCK_SITE_BASKET, basketDisplayName, isReservedBasket } from './reservedBaskets';
 import type { SealSheet } from './sealPass';
-import {
-  isAnyoneCounterparty,
-  isLevel1AnyoneOk,
-  isOneTapSignIn,
-  isOneUseRequestID,
-  SIGN_IN_NAME,
-} from './sharedKeySigning';
+import { isAnyoneCounterparty, isOneTapSignIn, isOneUseRequestID, SIGN_IN_NAME } from './sharedKeySigning';
 
 export { BLOCK_SITE_BASKET };
 
@@ -496,19 +490,19 @@ const forAnyone = (r: BundleRequest) => isAnyoneCounterparty(r.counterparty);
  * anybody with your public key, so other services may accept them as you (BitPlan: level-1 'bitcoin auth', keyID = a
  * timestamp, counterparty 'anyone'). A grant covers every use of its protocol (the store keeps no usageType), so the
  * request's own use doesn't matter:
- *  - level 1: a level-1 grant ignores the counterparty, so it covers 'anyone';
  *  - level 2 with counterparty 'anyone', except our own one-tap sign-ins (sharedKeySigning.ts ONE_TAP_SIGN_INS);
  *  - every one-signature request (sharedKeySigning.ts).
+ * Not level 1 (consent polish, 13 Nov 2026): a level-1 grant still covers every counterparty, but every level-1
+ * signature not made as 'self' asks on its own at signing time (sharedKeySigning.ts), whatever is stored. So a
+ * level-1 line is pre-ticked again like any other key use, and level-1 apps don't get "Permission denied".
  * Not: the public identity key, the first-post signature (its own POST card), 'generic' names (action labels,
- * certificate acquisition: no key is used), or level-1 names known safe (sharedKeySigning.ts LEVEL1_ANYONE_OK).
- * Level 0 never reaches a sheet, and level-0 signing is refused for sites.
+ * certificate acquisition: no key is used). Level 0 never reaches a sheet, and level-0 signing is refused for sites.
  */
 export const isSharedKeyRequest = (r: BundleRequest): boolean => {
   if (r.type !== 'protocol') return false;
   if (isOneUseRequest(r)) return true;
   if (isIdentityKeyRequest(r) || isPostSignature(r) || r.usageType === 'generic' || r.usageType === 'identityKey')
     return false;
-  if (protoLevel(r) === 1) return !isLevel1AnyoneOk(r.protocolID);
   return protoLevel(r) === 2 && forAnyone(r) && !isOneTapSignIn(r.protocolID);
 };
 
@@ -531,7 +525,9 @@ export const isSignInRequest = (r: BundleRequest): boolean =>
   !r.privileged &&
   !isSharedKeyRequest(r) &&
   (isIdentityKeyRequest(r) ||
-    (maySign(r) &&
+    // Never a level-1 key: its signatures are not a sign-in to this site (they ask on their own, sharedKeySigning.ts).
+    (protoLevel(r) !== 1 &&
+      maySign(r) &&
       (forAnyone(r) ||
         (SIGN_IN_PROTOCOL.test(protoName(r)) && (r.counterparty === undefined || r.counterparty === 'self')))));
 
@@ -618,6 +614,12 @@ const lineText = (r: BundleRequest): string => {
       const op = keyOperation(r);
       const name = protoName(r);
       const named = op !== 'sign' && op !== 'generic' && op !== 'other' ? OPERATION_WORDS[op] : '';
+      // A level-1 key (keys every app shares): plain words, the site named. Its signatures to anyone but 'self' ask
+      // one at a time (sharedKeySigning.ts), so "sign with" here means as yourself.
+      if (protoLevel(r) === 1 && !isPostSignature(r) && op !== 'generic')
+        return named
+          ? `${named} your "${name}" keys for ${hostOf(r)}`
+          : `Sign with your "${name}" keys for ${hostOf(r)}`;
       if (forAnyone(r)) {
         // "Prove it's you" is only for a real signature (Juann E-2: a decrypt with 'anyone' said it too).
         if (op === 'sign' || op === 'other') return "Prove it's you (a signature anyone can check)";

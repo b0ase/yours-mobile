@@ -203,14 +203,37 @@ describe('item 2: every level-1 anyone signature asks, whatever the name or keyI
       await wallet.createSignature(sig, SITE);
       expect(sheets.length).toBe(2);
     });
-  test("the known-safe level-1 name ('bcal record', bit-sign calendar records) keeps its grant", async () => {
+  test("'bcal record' (bChatX calendar records) keeps its grant only on the hosts that publish them", async () => {
+    const twice = async (host: string) => {
+      const { wallet, sheets } = setup();
+      for (const id of ['evt-1', 'evt-2'])
+        await wallet.createSignature(
+          { protocolID: [1, 'bcal record'], keyID: id, counterparty: 'anyone', data: [1] },
+          host,
+        );
+      return sheets.length;
+    };
+    for (const host of ['bchatx.com', 'chat.bwalletx.com', 'bit-sign.online', 'bcalx.com', 'www.bcalx.com'])
+      expect(await twice(host)).toBe(1);
+    // Any other site (review of 1020b69c: fake scheduled Spaces as the user): every record asks.
+    for (const host of [SITE, 'bchatx.com.evil.example', 'evilbchatx.com']) expect(await twice(host)).toBe(2);
+  });
+
+  test('level 1 to a named counterparty asks every time too; as self it keeps its grant', async () => {
+    const other = new PrivateKey(7).toPublicKey().toString();
     const { wallet, sheets } = setup();
-    for (const id of ['evt-1', 'evt-2'])
-      await wallet.createSignature(
-        { protocolID: [1, 'bcal record'], keyID: id, counterparty: 'anyone', data: [1] },
-        SITE,
-      );
+    const sig = (keyID: string, counterparty: string) => ({
+      protocolID: [1, 'acme feed'],
+      keyID,
+      counterparty,
+      data: [1],
+    });
+    await wallet.createSignature(sig('a', 'self'), SITE);
+    await wallet.createSignature(sig('b', 'self'), SITE);
     expect(sheets.length).toBe(1);
+    await wallet.createSignature(sig('c', other), SITE);
+    await wallet.createSignature(sig('d', other), SITE);
+    expect(sheets.filter((x) => isOneUseRequestID(x.requestID)).length).toBe(2);
   });
 });
 
@@ -220,7 +243,7 @@ describe('item 1b: stored shared-key grants are removed once on upgrade', () => 
   });
   const rows = [
     grant({ protocolLevel: 1, protocolName: 'bitcoin auth', counterparty: '' }), // removed
-    grant({ protocolLevel: 1, protocolName: 'acme feed', counterparty: '' }), // removed: any level-1 key
+    grant({ protocolLevel: 1, protocolName: 'acme login', counterparty: '' }), // removed: a level-1 sign-in name
     grant({ protocolLevel: 2, protocolName: 'message signing', counterparty: 'anyone' }), // removed
     grant({ protocolLevel: 2, protocolName: 'acme feed', counterparty: G.toUpperCase() }), // removed: anyone key
     grant({ protocolLevel: 2, protocolName: 'bwallet sign in', counterparty: 'anyone' }), // kept: our sign-in
@@ -232,6 +255,8 @@ describe('item 1b: stored shared-key grants are removed once on upgrade', () => 
     grant({ protocolLevel: 1, protocolName: 'bcal record', counterparty: '' }), // kept: known safe
     { key: { type: 'protocol', originator: ADMIN, protocolLevel: 1, protocolName: 'bitcoin auth', counterparty: '' } },
     grant({ protocolLevel: undefined, protocolName: undefined }), // removed: when unsure, revoke
+    // Kept (consent polish): its signatures to anyone but 'self' ask one at a time whatever is stored.
+    grant({ protocolLevel: 1, protocolName: 'acme feed', counterparty: '' }),
   ];
   const fakeStore = () => {
     const deleted: unknown[] = [];
@@ -241,7 +266,7 @@ describe('item 1b: stored shared-key grants are removed once on upgrade', () => 
     };
   };
 
-  test('removes level-1 keys, level-2 anyone (any spelling) and unreadable rows; keeps the rest', async () => {
+  test('removes level-1 sign-in names, level-2 anyone (any spelling) and unreadable rows; keeps the rest', async () => {
     const { store, deleted } = fakeStore();
     expect(await revokeSharedKeyGrants(store as never, ADMIN)).toBe(5);
     expect(deleted).toEqual([rows[0].key, rows[1].key, rows[2].key, rows[3].key, rows[12].key]);

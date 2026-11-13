@@ -22,6 +22,7 @@ import { siteThemeFor } from './mobile/theme/connectTheme';
 import {
   isBasketRead,
   ManifestOnce,
+  OnceDenials,
   SessionBasketDenials,
   SESSION_DENIALS_KEY,
   wantsManifestSheet,
@@ -1424,6 +1425,14 @@ const basketDenials = new SessionBasketDenials({
   },
 });
 const manifestOnce = new ManifestOnce();
+// A "Not now" to a one-signature request stands for that site for 10 minutes (services/sessionDenials.ts OnceDenials):
+// a site can't wear the user down with SIGN ONCE sheets one after another.
+const onceDenials = new OnceDenials();
+/** A one-signature request the user refused (services/sharedKeySigning.ts): remember it for the site. */
+const noteOnceDenial = (r: { requestID?: string; originator?: string }) => {
+  if (r.originator && r.originator !== ADMIN_ORIGINATOR && isOneUseRequestID(r.requestID))
+    onceDenials.note(normalizeOriginator(r.originator));
+};
 /** A basket read the user refused: remember it for the session. */
 const noteBasketDenial = (r: { type?: string; basket?: unknown; usageType?: unknown; originator?: string }) => {
   if (r.originator && r.originator !== ADMIN_ORIGINATOR && isBasketRead(r))
@@ -2254,7 +2263,13 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   const deniedThisSession =
     request.originator && request.originator !== ADMIN_ORIGINATOR && isBasketRead(request)
       ? basketDenials.has(normalizeOriginator(request.originator), request.basket)
-      : Promise.resolve(false);
+      : // A one-signature request from a site whose last one the user refused minutes ago: no new sheet.
+        Promise.resolve(
+          !!request.originator &&
+            request.originator !== ADMIN_ORIGINATOR &&
+            isOneUseRequestID(request.requestID) &&
+            onceDenials.active(normalizeOriginator(request.originator)),
+        );
   return Promise.all([siteBlocked(request.originator), siteTrustedFor(request), deniedThisSession]).then(
     ([blocked, trusted, denied]) =>
       new Promise<void>((resolve, reject) => {
@@ -3904,6 +3919,8 @@ if (!(
           return true;
         }
         case 'PERMISSIONS_LIST_ALL':
+          // The user opened Permissions in the wallet: a refused SIGN ONCE may ask again (sessionDenials.ts).
+          if (isFromExtension) onceDenials.clear();
           processPermissionsListAll(sendResponse);
           return true;
         case 'PERMISSIONS_QUERY_SPENT':
@@ -4994,6 +5011,7 @@ if (!(
         ['basket grants', () => revokeBasketGrantsFor(message.originator)],
         // Session memory too: its basket-read No's and its manifest sheet (services/sessionDenials.ts).
         ['basket answers', () => basketDenials.forget(site)],
+        ['one-signature answers', () => onceDenials.forget(site)],
         ['manifest sheet', () => manifestOnce.forget(site)],
         // "Let this site see my $SYM balance" answers (services/siteTokens.ts) go too: it must ask again.
         ['token consent', () => chromeConsentStore().forget(site)],
@@ -5079,6 +5097,7 @@ if (!(
         });
     } else {
       noteBasketDenial(pending.request);
+      noteOnceDenial(pending.request);
       // Deny the permission
       accountContext?.wallet
         .denyPermission(response.requestID)
@@ -5859,8 +5878,12 @@ if (!(
           if (!pending) return;
           if (isReconnectRequestId(r.requestID)) return pending.reject(new Error('Permission denied by user'));
           if (isSealRequestId(r.requestID)) return pending.reject(userDeniedError());
-          // A blocked sheet is handled by the block itself; a plain No to a basket read stands for the session.
-          if (!response.block) noteBasketDenial(r as BundleRequest);
+          // A blocked sheet is handled by the block itself; a plain No to a basket read stands for the session, and
+          // to a one-signature request for 10 minutes.
+          if (!response.block) {
+            noteBasketDenial(r as BundleRequest);
+            noteOnceDenial(r as BundleRequest);
+          }
           try {
             await wallet?.denyPermission(r.requestID);
           } catch (error) {

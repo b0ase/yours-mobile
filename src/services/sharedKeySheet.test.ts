@@ -52,26 +52,23 @@ const once = (id = 'once:evil.example:1,bitcoin auth:x.1') =>
   req(id, { protocolID: [1, 'bitcoin auth'], usageType: 'signing', oneUse: true });
 
 describe('keys every app shares are never pre-ticked', () => {
-  test("level-1 'bitcoin auth' (standing): unticked, no longer a sign-in, one tap grants nothing", () => {
+  test("level-1 'bitcoin auth' (standing): pre-ticked again, but never a sign-in, in plain words", () => {
+    // Consent polish (13 Nov 2026): every level-1 signature not made as 'self' asks on its own at signing time, so a
+    // standing level-1 grant can't make a token. The line is an ordinary key use: ticked, CONNECT card.
     const s = sheet(bitcoinAuth);
-    expect(isSharedKeyRequest(bitcoinAuth)).toBe(true);
-    expect(s.line.checked).toBe(false); // was true
-    expect(s.line.signIn).toBe(false); // was true
-    expect(s.kind).not.toBe('signin'); // was 'signin'
-    expect(s.line.text).toBe(`Sign with your "bitcoin auth" keys for ${SITE}`);
-    expect(oneTap(s)[bitcoinAuth.requestID]).toBe(false);
-  });
-
-  test('calm, not red: a standing shared line is not the careful card (no red storm)', () => {
-    const s = sheet(bitcoinAuth);
+    expect(isSharedKeyRequest(bitcoinAuth)).toBe(false);
+    expect(s.line.checked).toBe(true);
     expect(s.line.risky).toBe(false);
-    expect(s.kind).toBe('connect');
+    expect(s.line.signIn).toBe(false); // was true before ae664e79
+    expect(s.kind).toBe('connect'); // was 'signin' before ae664e79
+    expect(s.line.text).toBe(`Sign with your "bitcoin auth" keys for ${SITE}`);
+    expect(oneTap(s)[bitcoinAuth.requestID]).toBe(true);
   });
 
-  test('ticking it, then Allow, grants it (the user chooses knowingly)', () => {
+  test('unticking it, then Allow, leaves it out', () => {
     const s = sheet(bitcoinAuth);
-    const d = sheetAnswer(s.model, 'allow', { [bitcoinAuth.requestID]: true }, true, sheetView(s.model, false));
-    expect(d.decisions[bitcoinAuth.requestID]).toBe(true);
+    const d = sheetAnswer(s.model, 'allow', { [bitcoinAuth.requestID]: false }, true, sheetView(s.model, false));
+    expect(d.decisions[bitcoinAuth.requestID]).toBe(false);
   });
 
   test("level-2 'anyone' outside our sign-ins: unticked, in any spelling of 'anyone'", () => {
@@ -84,11 +81,11 @@ describe('keys every app shares are never pre-ticked', () => {
     }
   });
 
-  test('a level-1 decrypt is shared too (the grant covers every use of the protocol)', () => {
+  test('a level-1 decrypt names its operation and the site, pre-ticked', () => {
     const r = req('d', { protocolID: [1, 'docs vault'], usageType: 'encrypting', calls: ['decrypt'] });
     const s = sheet(r);
     expect(s.line.text).toBe(`Decrypt with your "docs vault" keys for ${SITE}`);
-    expect(s.line.checked).toBe(false);
+    expect(s.line.checked).toBe(true);
   });
 
   test('not shared: the public identity key, the first-post signature, labels, a known-safe level-1 name', () => {

@@ -107,3 +107,41 @@ export class ManifestOnce {
     this.runs.delete(site(originator));
   }
 }
+
+/** How long a "Not now" to a one-signature request stands for that site (review of 1020b69c). */
+export const ONCE_DENIAL_MS = 10 * 60_000;
+
+/**
+ * "Not now" to a one-signature request (services/sharedKeySigning.ts), remembered per site for ONCE_DENIAL_MS. A site
+ * could otherwise loop SIGN ONCE sheets, one straight after each "Not now", until the user gave in. While a site's
+ * No stands, its next one-signature requests are refused without a sheet. Cleared when the user opens Permissions in
+ * the wallet or forgets the site. Memory only: never stored, never turned into a Yes.
+ */
+export class OnceDenials {
+  private until = new Map<string, number>();
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  note(originator: string | undefined): void {
+    if (!originator) return;
+    this.until.set(site(originator), this.now() + ONCE_DENIAL_MS);
+  }
+
+  active(originator: string | undefined): boolean {
+    if (!originator) return false;
+    const key = site(originator);
+    const t = this.until.get(key);
+    if (t === undefined) return false;
+    if (this.now() < t) return true;
+    this.until.delete(key);
+    return false;
+  }
+
+  forget(originator: string): void {
+    this.until.delete(site(originator));
+  }
+
+  clear(): void {
+    this.until.clear();
+  }
+}
