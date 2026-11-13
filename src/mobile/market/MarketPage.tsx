@@ -73,7 +73,7 @@ import {
 } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { TokenFacts } from '../exchange/TokenFacts';
-import { TokenAudit } from '../exchange/TokenAudit';
+import { TokenDetails } from '../exchange/TokenDetails';
 import { TokenBoard } from '../exchange/TokenBoard';
 import { STALE_LISTING_MESSAGE, listingSpendState } from './tokenPage';
 import { sellRoute } from '../exchange/rowActions';
@@ -539,7 +539,7 @@ const MarketPage = () => {
     <div className="flex gap-1 rounded-xl p-1 bg-[var(--bw-surface)]">
       {(
         [
-          ['trending', 'Trending'],
+          ['trending', 'Browse'],
           ['mine', 'My listings'],
         ] as const
       ).map(([id, label]) => (
@@ -679,7 +679,7 @@ const MarketPage = () => {
     : tokenFilter === 'bapps'
       ? tokenRows.filter((r) => isBappToken(r.ref.id))
       : tokenRows;
-  // All tokens, no search: the card board (exchange/TokenBoard), which loads its own facts. Personal tokens keep
+  // All tokens, no search: the card board (exchange/TokenBoard), which loads its own prices. Personal tokens keep
   // their rows above it (social / access only, no price talk).
   const boardMode = kind === 'tokens' && tokenFilter === 'all' && !searched;
   const boardTokens = useMemo(
@@ -791,7 +791,12 @@ const MarketPage = () => {
         directory !== null &&
         !error && <p className="text-xs text-[#98A2B3] text-center py-8">No tokens found.</p>}
       {boardMode && boardTokens.length > 0 && (
-        <TokenBoard list={boardTokens} rate={cachedExchangeRate()} onOpen={(r) => void openRoom(r)} />
+        <TokenBoard
+          list={boardTokens}
+          rate={cachedExchangeRate()}
+          onOpen={(r) => void openRoom(r)}
+          onBuy={(r) => void openRoom(r)}
+        />
       )}
       {visibleTokens.map((r, i) => {
         // Personal tokens ($BOASE): social / access only. Badge, no floor, no price talk.
@@ -872,7 +877,7 @@ const MarketPage = () => {
         </div>
       )}
       {rooms?.length === 0 && !error && (
-        <p className="text-xs text-[#98A2B3] text-center py-8">Nothing trending right now.</p>
+        <p className="text-xs text-[#98A2B3] text-center py-8">No recent sales or listings.</p>
       )}
       {rooms
         ?.filter(roomSafe)
@@ -915,7 +920,7 @@ const MarketPage = () => {
         }}
         className="flex items-center gap-1 text-xs text-[#98A2B3] self-start"
       >
-        <ArrowLeft size={14} /> {ticketPage ? 'Tickets' : 'Trending'}
+        <ArrowLeft size={14} /> {ticketPage ? 'Tickets' : 'Back'}
       </button>
       <div className="flex items-center gap-3">
         <Art outpoint={room.icon} kind={room.ref.kind} collectionId={room.ref.id} />
@@ -955,7 +960,7 @@ const MarketPage = () => {
         <TokenFacts tokenId={room.ref.id} sym={room.title.replace(/^\$/, '')} priceSats={market?.floorSats ?? null} />
       )}
       {room.ref.kind === 'bsv21' && !ticketPage && !isPersonalTokenId(room.ref.id, personalLinks) && (
-        <TokenAudit tokenId={room.ref.id} sym={room.title.replace(/^\$/, '')} rate={cachedExchangeRate()} />
+        <TokenDetails tokenId={room.ref.id} sym={room.title.replace(/^\$/, '')} rate={cachedExchangeRate()} />
       )}
       {room.ref.kind === 'bsv21' && !ticketPage && SELL_ENABLED && TRADING && (
         <button
