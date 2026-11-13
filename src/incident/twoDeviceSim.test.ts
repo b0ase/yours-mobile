@@ -22,6 +22,10 @@
  *     15-minute overlap), then the tx is proven: the incremental pull merged the 'completed' tx with none of its
  *     outputs; only the 6-hourly tail pass / daily deep pull brought the change in (hours later). The app's post-pull
  *     step (pullIntegrity afterPull, run by the harness: world.ts postPullStep) heals it within the half hour.
+ *   - fix/change-writeahead: a send's change lived only on the sending device until its next push (~20 s, longer on a
+ *     back-off); a device wiped in that window (the extension's Remove + reload) lost it for good. The payment's rows now
+ *     reach the backup before the broadcast (services/changeWriteAhead.ts), as 'sending', never 'unprocessed' (which the
+ *     abandoned-payment sweep on a restored copy would fail); a backup that is down never holds a payment back.
  * Not reproduced (pass on 5.2.54, kept as regressions): a pull cut between the tx page and the outputs page resumes
  * from its checkpoint; a 1-sat BSV-21 token taken in as a 'bsv21' insertion is admitted on the other device.
  *   bun test src/incident/twoDeviceSim.test.ts
@@ -283,6 +287,61 @@ describe('two devices, one seed: named cases', () => {
       expect(w.logs.some((l) => /pushed late|full pass: (started|deep)/.test(l))).toBe(true);
     },
   );
+
+  // Fixed by fix/change-writeahead (services/changeWriteAhead.ts): a payment's rows reach the backup before it is
+  // broadcast. On 5.2.54 the change of a send lived only on the sending device until its next push (~20 s later).
+  sim(
+    '[fix/change-writeahead] a send, then the sending device is wiped before its next sync: the restore has the change and can spend it',
+    async () => {
+      const w = await threeCoins();
+      const s = await w.send('A', 42_000);
+      const change = s.tx.outputs.length - 1; // the payment is output 0; its change after it
+      expect(change).toBeGreaterThan(0);
+      await w.wipe('A'); // no device sync ran since the send
+      // The restored phone and the extension take the backup in, then run the wallet-open abandoned-payment sweep: the
+      // payment must not read as one that never went out (failed, its inputs freed, its change dropped).
+      await w.sync('A');
+      await w.sync('B');
+      await w.failAbandoned('A');
+      await w.failAbandoned('B');
+      await w.settleAndCheck('after the restore from the backup');
+      // The restored phone spends everything it has, the change included: signed with the derivation from the backup.
+      const all = (await w.view(w.A)).shown;
+      const s2 = await w.send('A', all - 5_000);
+      expect(s2.inputs.some((i) => i.startsWith(`${s.txid}.`))).toBe(true);
+      expect(await s2.tx.verify('scripts only')).toBe(true);
+      await w.settleAndCheck('after spending the change');
+    },
+  );
+
+  sim(
+    '[fix/change-writeahead] the backup is down when a send goes out: it is broadcast anyway, flagged, backed up once the backup is back',
+    async () => {
+      const w = await threeCoins();
+      w.offline.add('phone');
+      const s = await w.send('A', 42_000);
+      expect(w.chain.has(s.txid)).toBe(true); // never held back by the backup
+      expect(w.A.writeAhead?.unbacked().map((u) => u.txid)).toEqual([s.txid]);
+      expect(await w.A.writeAhead?.retryNow()).toBe(false); // still down: still flagged
+      w.offline.delete('phone');
+      expect(await w.A.writeAhead?.retryNow()).toBe(true); // the urgent retry
+      expect(w.A.writeAhead?.count()).toBe(0);
+      await w.wipe('A');
+      await w.settleAndCheck('after the restore from the backup');
+    },
+  );
+
+  sim('[fix/change-writeahead] a flagged send is cleared by the next ordinary device sync too', async () => {
+    const w = await threeCoins();
+    w.fault('backup', '500', 1); // the push before the broadcast fails at its first request
+    const s = await w.send('A', 42_000);
+    expect(w.chain.has(s.txid)).toBe(true);
+    expect(w.A.writeAhead?.count()).toBe(1);
+    await w.sync('A');
+    expect(w.A.writeAhead?.count()).toBe(0);
+    await w.wipe('A');
+    await w.settleAndCheck('after the restore from the backup');
+  });
 
   sim('a 1-sat BSV-21 token taken in on one device is spendable on both, and never counted as BSV', async () => {
     const w = await threeCoins();

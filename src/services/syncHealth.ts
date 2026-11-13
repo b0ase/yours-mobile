@@ -12,6 +12,7 @@
  *                         pass is asked for; "Find missing coins" can copy them in meanwhile).
  *  - lastAttemptAt / attempted: the last pull tried, and whether one has been since the wallet opened.
  *  - missingOutputs / healing: payments still waiting for coins, and whether a heal pass is bringing them.
+ *  - changeNotBackedUp: payments that went out before their change reached the backup (services/changeWriteAhead.ts).
  * Pulls run at open, on a wallet page coming to the front (last good pull older than 5 min) and on a timer (older than
  * 1 h), and a failed or deferred pull is retried as a pull (services/deviceSync.ts pullIfStale, review of fix 5).
  * Read it with syncHealth() (the open wallet's), or the wallet context's backupState().health; subscribe with
@@ -42,6 +43,11 @@ export type SyncHealth = {
   healing: boolean;
   /** The last pass given up as stuck (ms); the ordinary pulls ran again after it. */
   lastAbandonedAt?: number;
+  /**
+   * Payments broadcast while their rows (their change, with its derivation) could not reach the backup, not pushed since
+   * (services/changeWriteAhead.ts, fix 4): "1 payment's change not backed up yet". Retried urgently; 0 once a push lands.
+   */
+  changeNotBackedUp: number;
 };
 
 export const EMPTY_SYNC_HEALTH: SyncHealth = {
@@ -52,6 +58,7 @@ export const EMPTY_SYNC_HEALTH: SyncHealth = {
   stuck: false,
   missingOutputs: 0,
   healing: false,
+  changeNotBackedUp: 0,
 };
 
 /** Each failed attempt counts at most this much uptime since the one before (the wallet may have been asleep). */
@@ -120,6 +127,13 @@ export function createSyncHealth(o: { now?: () => number } = {}) {
           lastPullOkAt: Math.max(h.lastPullOkAt, r.pullOkAt ?? (caughtUp ? now() : 0)),
         };
       } else h = { ...h, lastError: undefined };
+      publish();
+    },
+    /** The write-ahead's count of payments whose change is not in the backup yet (services/changeWriteAhead.ts). */
+    changeNotBackedUp(n: number) {
+      const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+      if (v === h.changeNotBackedUp) return;
+      h = { ...h, changeNotBackedUp: v };
       publish();
     },
     failed(e: unknown) {

@@ -20,6 +20,8 @@
  *    pass from the start that has stopped moving (fullPass.ts passLooksStuck; the extension's froze on 8 Nov), or the
  *    last good pull is STALE_SYNC_MS old AND a pull was tried since and failed (or, from a newer writer, was attempted
  *    and never finished). Age alone is not a fault: pulls run on open and on demand. Hidden with no backup.
+ *  - "1 payment's change not backed up yet" (red): a payment went out while the backup could not be reached, and its
+ *    change is still only on this device (services/changeWriteAhead.ts, fix 4); gone once a push lands.
  *
  * Display only: everything here reads; nothing decides what is signed, sent or spent.
  */
@@ -95,12 +97,29 @@ export type BalanceTruth = {
   /** This device's store is active and a backup is configured: the sync line applies. */
   syncApplies: boolean;
   sync?: DeviceSyncHealth | null;
+  /**
+   * Payments broadcast while the backup was unreachable, whose change (with the derivation that spends it) is still only
+   * on this device (services/changeWriteAhead.ts, fix 4). Absent from older wallets.
+   */
+  changeUnbacked?: number;
 };
 
 export type TruthLine =
   | { kind: 'held'; text: string; sats: number; payments: HeldPayment[] }
   | { kind: 'arriving'; text: string; sats: number }
-  | { kind: 'sync'; text: string; warn: boolean };
+  | { kind: 'sync'; text: string; warn: boolean }
+  | { kind: 'backup'; text: string; warn: true };
+
+/** "1 payment's change not backed up yet": a payment whose change is still only on this device. Null when none. */
+export function backupLine(t: Pick<BalanceTruth, 'changeUnbacked'>): TruthLine | null {
+  const n = typeof t.changeUnbacked === 'number' && t.changeUnbacked > 0 ? Math.floor(t.changeUnbacked) : 0;
+  if (!n) return null;
+  return {
+    kind: 'backup',
+    text: n === 1 ? "1 payment's change not backed up yet" : `${n} payments' change not backed up yet`,
+    warn: true,
+  };
+}
 
 const ago = (ms: number) => {
   const m = Math.floor(ms / 60_000);
@@ -168,6 +187,8 @@ export function truthLines(
     lines.push({ kind: 'arriving', text: `Arriving from your other device: ${fmt(arriving)}`, sats: arriving });
   const s = syncLine(t, now);
   if (s) lines.push(s);
+  const b = backupLine(t);
+  if (b) lines.push(b);
   return lines;
 }
 

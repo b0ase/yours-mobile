@@ -381,6 +381,8 @@ export type BackupBeforeSend =
  *  - the remote store active: the rows were written there (createAction runs on it): ok;
  *  - no backup configured at all: nothing to push to: ok, logged (the same as every other payment).
  * A push that fails or takes longer than `timeoutMs` is { ok: false }: the caller must not broadcast.
+ * Every other payment (and the Store payment's own broadcast after this) goes through services/changeWriteAhead.ts: a
+ * push inside the broadcast step, at most 8 s, that never holds the payment back (flagged and retried instead).
  */
 export async function backupBeforeSend(d: {
   deviceActive: () => boolean;

@@ -10,13 +10,18 @@
  *    then pullIntegrity's afterPull on builds that have it, loaded by URL: postPullStep) and the push (makeBackupPush / pushView); the inbound guard (installInboundSyncGuard, registerInboundVerifier)
  *    with the production verifier shape (walletOwnership, walletRecords, eitherChainSource over wocChainLookups +
  *    oneSatChainLookups); admission (admitPending);
+ *  - the push before a broadcast (services/changeWriteAhead.ts watchStorage + onBroadcast, wired as initWallet wires it:
+ *    the device sync's in-flight records, pushNow as its urgent retry, its push clearing the marks), on builds that
+ *    have it (loaded by URL: writeAheadModule);
  *  - autoCoinResync (runAutoResyncIfDue → autoResyncCoins) with background.ts's deps (readAutoResyncCoins, the same
  *    markSpent/markUnspent writes, txo.getSpends, a copy of its private wocSpendStatus over the fake fetch);
  *  - the Store's release (settleStorePayments → releaseNeverSent, memoryOutbox, signStorePayment) behind the
  *    background's abort guard (abortTargetKnownOnChain + knownOnChain over chainLookups);
  *  - unsentExpiry (expireOnce) with initWallet's deps (listNoSendActions, abortAction, sendWith, expiryLookups,
  *    wocSpent, wocHeight);
- *  - the toolbox Monitor's proof task (TaskCheckForProofs), on demand only (prove());
+ *  - the toolbox Monitor's proof task (TaskCheckForProofs) and abandoned-payment sweep (TaskFailAbandoned), on demand
+ *    only (prove(), failAbandoned());
+ *  - a device's database deleted and restored from the backup (wipe(): the extension's Remove + reload);
  *  - the balance the wallet shows (depositBalance.balanceSplit over wallet.balance()).
  * FAKED:
  *  - the chain and every network source (chain.ts), with per-source 404/429/500/timeout faults;
@@ -115,6 +120,8 @@ export type Device = {
   svc: unknown;
   /** The toolbox's Monitor for this store (only its proof task is run, by prove()). */
   monitor: Monitor;
+  /** The push before a broadcast (services/changeWriteAhead.ts), on builds that have it. */
+  writeAhead?: WriteAheadLike;
 };
 
 let dbn = 0;
@@ -192,6 +199,7 @@ export class World {
     Date.now = realNow;
     _setPullOverlap();
     for (const off of this.offs) off();
+    for (const d of this.devices) d.writeAhead?.stop();
     for (const d of this.devices) await d.wallet.destroy().catch(() => undefined);
   }
 
@@ -286,6 +294,20 @@ export class World {
 
     const managed = sm as unknown as { _backups?: { storage: unknown }[] };
     const inFlight = new WeakMap<object, InFlight>();
+    const inFlightFor = (b: object) => {
+      let f = inFlight.get(b);
+      if (!f) inFlight.set(b, (f = createInFlight()));
+      return f;
+    };
+    // initWallet's push before a broadcast (services/changeWriteAhead.ts), on a build that has it; set up below, once
+    // the device sync exists (its pushNow is the urgent retry, its push reports to it).
+    let writeAhead: WriteAheadLike | undefined;
+    const backupPush = makeBackupPush({
+      storage: sm as never,
+      backups: () => managed._backups ?? [],
+      waiting: () => false,
+      inFlightFor,
+    });
     const sync = createDeviceSync({
       applies: () => sm.isActiveStorageProvider() && (managed._backups?.length ?? 0) > 0,
       ensureBackup: async () => (managed._backups?.length ?? 0) > 0,
@@ -348,22 +370,35 @@ export class World {
       ),
       push: offlineGuard(
         () => this.offline.has(name),
-        makeBackupPush({
-          storage: sm as never,
-          backups: () => managed._backups ?? [],
-          waiting: () => false,
-          inFlightFor: (b) => {
-            let f = inFlight.get(b);
-            if (!f) inFlight.set(b, (f = createInFlight()));
-            return f;
-          },
-        }),
+        // As initWallet: a push that went through clears the write-ahead's "not backed up yet" marks it carried.
+        async () => {
+          const cap = writeAhead?.checkpoint();
+          const r = await backupPush();
+          if (r !== 'yielded' && cap !== undefined) writeAhead?.pushed(cap);
+          return r;
+        },
       ),
       // Tests drive every sync themselves: nothing is scheduled on real timers.
       setTimer: () => null,
       clearTimer: () => undefined,
       log,
     });
+    const wam = await writeAheadModule();
+    if (wam) {
+      writeAhead = wam.createChangeWriteAhead({
+        applies: () => sm.isActiveStorageProvider() && (managed._backups?.length ?? 0) > 0,
+        // An offline device's backup requests fail (as its pulls and pushes do).
+        backups: () => (this.offline.has(name) ? [{ storage: OFFLINE_BACKUP }] : (managed._backups ?? [])),
+        storage: sm as never,
+        inFlightFor,
+        pushNow: () => sync.pushNow({ busyWaitMs: [] }),
+        // Tests run the urgent retry themselves (retryNow) or through a sync: no real timers.
+        retryTimer: { set: () => null, clear: () => undefined },
+        log: (m: string) => log(m),
+      });
+      if (!wam.watchStorage(sm, writeAhead) || !wam.onBroadcast(svc, writeAhead))
+        throw new Error('write-ahead not installed');
+    }
     return {
       name,
       s,
@@ -380,6 +415,7 @@ export class World {
       resync: { kv: {}, reports: [] },
       svc,
       monitor,
+      writeAhead,
     };
   }
 
@@ -486,7 +522,8 @@ export class World {
       outputs: [{ lockingScript: this.externalScript(), satoshis: sats, outputDescription: 'payment' }],
       options: { acceptDelayedBroadcast: false },
     });
-    return { txid: r.txid!, inputs: inputsOf(Transaction.fromAtomicBEEF(r.tx as number[])) };
+    const tx = Transaction.fromAtomicBEEF(r.tx as number[]);
+    return { txid: r.txid!, inputs: inputsOf(tx), tx };
   }
 
   /**
@@ -545,6 +582,22 @@ export class World {
     return d.wallet.abortAction({ reference: txid });
   }
 
+  /**
+   * `on`'s wallet database is deleted (the extension's Remove + reload, owner 11 Oct 2026) and the wallet reinstalled on
+   * the same seed with the same backup: a fresh, empty store that gets everything from the backup at its first sync.
+   * Nothing this device had not pushed survives.
+   */
+  async wipe(on: Device | 'A' | 'B') {
+    const d = this.dev(on);
+    this.step(`${d.name}'s wallet database is deleted (Remove + reload) and restored from the backup`);
+    d.writeAhead?.stop();
+    // Only its own store goes: wallet.destroy() would close the shared backup too.
+    await d.s.destroy().catch(() => undefined);
+    const fresh = await this.device(d.name);
+    this.devices[this.devices.indexOf(d)] = fresh;
+    return fresh;
+  }
+
   /** Device sync (pull then push), as on wallet open; failures are recorded, not thrown. */
   async sync(on: Device | 'A' | 'B') {
     const d = this.dev(on);
@@ -581,6 +634,32 @@ export class World {
     const out = await m.runTask('CheckForProofs');
     this.log(`[${d.name}] CheckForProofs: ${out.replace(/\n/g, ' | ').slice(0, 300)}`);
     return out;
+  }
+
+  /**
+   * The Monitor's abandoned-payment sweep on `on` (TaskFailAbandoned, run at every wallet open in the app), with every
+   * 'unprocessed' / 'unsigned' transaction counted as old enough (abandonedMsecs 0): such a payment is failed and its
+   * inputs freed.
+   */
+  async failAbandoned(on: Device | 'A' | 'B') {
+    const d = this.dev(on);
+    this.step(`${d.name} runs the abandoned-payment sweep`);
+    const m = d.monitor as unknown as {
+      options: { abandonedMsecs: number };
+      _tasks: { name: string }[];
+      runTask: (n: string) => Promise<string>;
+    };
+    if (!m._tasks.some((t) => t.name === 'FailAbandoned')) throw new Error('no FailAbandoned task');
+    const was = m.options.abandonedMsecs;
+    m.options.abandonedMsecs = 0;
+    await new Promise((r) => setTimeout(r, 2)); // rows written this millisecond count as older
+    try {
+      const out = await m.runTask('FailAbandoned');
+      if (out) this.log(`[${d.name}] FailAbandoned: ${out.replace(/\n/g, ' | ').slice(0, 300)}`);
+      return out;
+    } finally {
+      m.options.abandonedMsecs = was;
+    }
   }
 
   /**
@@ -963,6 +1042,41 @@ export const postPullStep = (): Promise<PostPullStep | undefined> =>
       throw e;
     },
   ));
+
+/** The push before a broadcast (services/changeWriteAhead.ts) as the harness uses it. */
+export type WriteAheadLike = {
+  checkpoint(): number;
+  pushed(cap: number): void;
+  retryNow(): Promise<boolean>;
+  count(): number;
+  unbacked(): { txid: string; at: number }[];
+  stop(): void;
+};
+type WriteAheadModule = {
+  createChangeWriteAhead: (d: Record<string, unknown>) => WriteAheadLike;
+  watchStorage: (manager: unknown, wa: WriteAheadLike) => boolean;
+  onBroadcast: (services: unknown, wa: WriteAheadLike) => boolean;
+};
+let writeAheadMod: Promise<WriteAheadModule | undefined> | undefined;
+/** services/changeWriteAhead.ts when the build under test has it (loaded by URL, as postPullStep). */
+export const writeAheadModule = (): Promise<WriteAheadModule | undefined> =>
+  (writeAheadMod ??= import(/* @vite-ignore */ new URL('../../services/changeWriteAhead.ts', import.meta.url).href).then(
+    (m: Partial<WriteAheadModule>) =>
+      typeof m.createChangeWriteAhead === 'function' ? (m as WriteAheadModule) : undefined,
+    (e: unknown) => {
+      if (/cannot find module|module not found/i.test(String((e as Error)?.message ?? e))) return undefined;
+      throw e;
+    },
+  ));
+
+/** An offline device's view of the backup: every request fails. */
+const OFFLINE_BACKUP = new Proxy(
+  {},
+  {
+    get: (_t, p) =>
+      p === 'then' ? undefined : () => Promise.reject(new Error('network: this device is offline')),
+  },
+);
 
 /** A push that fails while the device is offline. */
 const offlineGuard =

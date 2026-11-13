@@ -99,14 +99,19 @@ export function createInFlight(t: Timers & { maxAgeMs?: number } = {}): InFlight
   };
 }
 
-/** The backup with a deadline on each push request; a request that timed out is recorded in `inFlight`. */
+/**
+ * The backup with a deadline on each push request; a request that timed out is recorded in `inFlight`. `deadlineAt`
+ * (ms, on `now`): one deadline for the whole cycle as well (services/changeWriteAhead.ts, the push before a broadcast):
+ * each request gets what is left of it, and a request asked for after it has passed fails at once, never sent.
+ */
 export function pushView<T extends object>(
   writer: T,
-  o: Timers & { inFlight: InFlight; callMs?: number; smallCallMs?: number },
+  o: Timers & { inFlight: InFlight; callMs?: number; smallCallMs?: number; deadlineAt?: number },
 ): T {
   const callMs = o.callMs ?? PUSH_CALL_MS;
   const smallCallMs = o.smallCallMs ?? PUSH_SMALL_CALL_MS;
   const { setTimer, clearTimer } = timersOf(o);
+  const now = o.now ?? Date.now;
   return new Proxy(writer, {
     get(target, p) {
       const v = Reflect.get(target, p, target) as unknown;
@@ -115,6 +120,9 @@ export function pushView<T extends object>(
       const name = String(p);
       if (!PUSH_CALLS.has(name)) return fn.bind(target);
       return (...a: unknown[]) => {
+        const perCall = name === 'processSyncChunk' ? callMs : smallCallMs;
+        const ms = o.deadlineAt === undefined ? perCall : Math.min(perCall, o.deadlineAt - now());
+        if (ms <= 0) return Promise.reject(new Error(`network: the backup did not answer in time (${name})`));
         const call = Promise.resolve().then(() => fn.apply(target, a));
         call.catch(() => undefined);
         let timer: unknown;
@@ -126,7 +134,7 @@ export function pushView<T extends object>(
                 o.inFlight.add(call); // still running on the backup's side: no second request until it settles
                 reject(new Error(`network: the backup did not answer in time (${name})`));
               },
-              name === 'processSyncChunk' ? callMs : smallCallMs,
+              ms,
             );
           }),
         ]).finally(() => clearTimer(timer));
