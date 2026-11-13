@@ -275,6 +275,7 @@ import {
   type MintSheet,
 } from './services/pinnedMint';
 import { oneShotGrant, oneUseGrant } from './services/oneShotGrant';
+import { isOneUseRequestID } from './services/sharedKeySigning';
 import {
   SEAL_BUSY_REFUSAL,
   SEAL_PROTOCOL,
@@ -2303,6 +2304,13 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
             const labels = takeLabelsForSheet(permSite, request as BundleRequest);
             if (labels.length > 0) (request as BundleRequest).labels = labels;
           }
+          // Which calls raised a protocol request (decrypt, encrypt, sign...), so its line names the operation it is
+          // for (permissionBundle.ts keyOperation; Juann E-2, 13 Nov 2026). Display only.
+          if (request.type === 'protocol' && permSite && Array.isArray(request.protocolID))
+            (request as BundleRequest).calls = protocolCalls.methods(permSite, [
+              Number(request.protocolID[0]),
+              String(request.protocolID[1]),
+            ]);
           // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
         } catch (error) {
@@ -5056,11 +5064,13 @@ if (!(
     if (response.granted) {
       // Grant the permission through the manager
       // No expiry given: the grant lasts GRANT_DEFAULT_DAYS (services/grantExpiry.ts, audit 24 Oct B1), never for ever.
+      // A one-signature request (services/sharedKeySigning.ts) answers that signature only, whatever expiry came back.
       accountContext?.wallet
-        .grantPermission({
-          requestID: response.requestID,
-          expiry: withDefaultExpiry(response.expiry),
-        })
+        .grantPermission(
+          isOneUseRequestID(response.requestID)
+            ? oneUseGrant(response.requestID)
+            : { requestID: response.requestID, expiry: withDefaultExpiry(response.expiry) },
+        )
         .then(() => {
           pending.resolve();
         })
@@ -5833,7 +5843,11 @@ if (!(
           if (isReconnectRequestId(r.requestID) || isSealRequestId(r.requestID)) return pending.resolve();
           try {
             if (!wallet) throw new Error('Wallet is locked');
-            await wallet.grantPermission({ requestID: r.requestID, expiry });
+            // A sign-in-token signature (services/sharedKeySigning.ts): this one signature only, stored already
+            // expired, so the next token asks again (oneUseGrant, as the Seal sheet does; b-Aware 13 Nov 2026).
+            await wallet.grantPermission(
+              isOneUseRequestID(r.requestID) ? oneUseGrant(r.requestID) : { requestID: r.requestID, expiry },
+            );
             pending.resolve();
           } catch (error) {
             pending.reject(error instanceof Error ? error : new Error(String(error)));

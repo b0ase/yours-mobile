@@ -182,8 +182,9 @@ describe('background.ts binds the list to the request and checks it on Allow', (
   test('Allow grants a payment only when its list is still its own action', () => {
     const fn = bg.slice(bg.indexOf('permissionBundler.resolve(response.bundleID'));
     expect(fn.indexOf('spendApprovalMatches')).toBeGreaterThan(0);
-    expect(fn.indexOf('spendApprovalMatches')).toBeLessThan(
-      fn.indexOf('wallet.grantPermission({ requestID: r.requestID'),
-    );
+    // The grant call (a standing grant, or oneUseGrant for a one-signature request: sharedKeySigning.ts).
+    const grant = fn.indexOf('await wallet.grantPermission(');
+    expect(grant).toBeGreaterThan(0);
+    expect(fn.indexOf('spendApprovalMatches')).toBeLessThan(grant);
   });
 });

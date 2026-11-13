@@ -5,7 +5,7 @@ import type { SheetModel } from './permissionBundle';
  * kind looks different: SIGN IN (gold key), CONNECT (wallet ↔ site), PAY (the dollar amount), MINT
  * (the bAvatar), CAREFUL (red, the safe answer is the big button).
  */
-export type ApprovalKind = 'signin' | 'connect' | 'pay' | 'mint' | 'careful' | 'post' | 'private';
+export type ApprovalKind = 'signin' | 'connect' | 'pay' | 'mint' | 'careful' | 'post' | 'private' | 'signonce';
 
 /**
  * The card for a one-sheet bundle. Risk wins over everything; then a first post (POST, its cost shown); then
@@ -17,6 +17,8 @@ export const approvalKindForSheet = (
   // A payment's size never makes a sheet CAREFUL (owner, 25 Oct 2026: "I have no spending caps"). There is no
   // site allowance, cap or threshold to be "over": the user sees the amount and approves it, whatever it is.
   if (model.lines.some((l) => l.risky)) return 'careful';
+  // One signature other sites may accept, alone on its sheet (permissionBundle.ts once): SIGN ONCE, one tap.
+  if (!model.payment && model.lines.length === 1 && model.lines[0].once) return 'signonce';
   if (model.purpose === 'post') return 'post';
   if (model.payment) return 'pay';
   if (model.lines.length > 0 && model.lines.every(isSignInLine)) return 'signin';

@@ -52,18 +52,19 @@ const PROTOCOL_CALLS = new Set([
 
 /** In-flight protocol calls per site+protocol, split into encrypt and everything else. */
 export class ProtocolCalls {
-  private calls = new Map<string, { encrypt: number; other: number }>();
+  private calls = new Map<string, { encrypt: number; other: number; methods: Map<string, number> }>();
 
   /** Note a call starting; returns the function that ends it. `origin` must be normalised and browser-derived. */
   start(method: string, origin: string | undefined, args: unknown): () => void {
     const pid = asPid((args as { protocolID?: unknown } | null)?.protocolID);
     if (!origin || !pid || !PROTOCOL_CALLS.has(method)) return () => undefined;
     const k = keyOf(origin, pid);
-    const c = this.calls.get(k) ?? { encrypt: 0, other: 0 };
+    const c = this.calls.get(k) ?? { encrypt: 0, other: 0, methods: new Map<string, number>() };
     const counterpartySelf = ((args as { counterparty?: unknown }).counterparty ?? 'self') === 'self';
     const isEncrypt = method === 'encrypt' && counterpartySelf;
     if (isEncrypt) c.encrypt++;
     else c.other++;
+    c.methods.set(method, (c.methods.get(method) ?? 0) + 1);
     this.calls.set(k, c);
     let ended = false;
     return () => {
@@ -73,8 +74,20 @@ export class ProtocolCalls {
       if (!cur) return;
       if (isEncrypt) cur.encrypt--;
       else cur.other--;
+      const left = (cur.methods.get(method) ?? 1) - 1;
+      if (left > 0) cur.methods.set(method, left);
+      else cur.methods.delete(method);
       if (cur.encrypt <= 0 && cur.other <= 0) this.calls.delete(k);
     };
+  }
+
+  /**
+   * Which methods this site has running on this protocol (e.g. ['decrypt']), so a protocol sheet can name the
+   * operation it is for (permissionBundle.ts keyOperation). Display only: never a reason to grant anything.
+   */
+  methods(origin: string, pid: Pid): string[] {
+    const c = this.calls.get(keyOf(origin, pid));
+    return c ? [...c.methods.keys()].sort() : [];
   }
 
   /** How many protocol calls this site has running on this protocol (services/sealPass.ts: the seal's sign is alone). */

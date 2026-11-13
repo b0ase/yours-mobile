@@ -33,6 +33,26 @@ export async function launchChrome(): Promise<Browser | null> {
   });
 }
 
+/**
+ * Close headless Chrome without hanging an afterAll: on a loaded machine (full `bun test src/services src/mobile`,
+ * 13 Nov 2026) browser.close() took longer than bun's 5 s hook default and all three describes failed as "(unnamed)".
+ * Waits up to 10 s for a clean close, then kills the process. Use with an afterAll timeout above that.
+ */
+export const CLOSE_CHROME_HOOK_MS = 30_000;
+export async function closeChrome(browser: Browser | null): Promise<void> {
+  if (!browser) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const closed = await Promise.race([
+    browser.close().then(
+      () => true,
+      () => false,
+    ),
+    new Promise<boolean>((r) => (timer = setTimeout(() => r(false), 10_000))),
+  ]);
+  clearTimeout(timer);
+  if (!closed) browser.process()?.kill('SIGKILL');
+}
+
 /** Bundles the fixture and compiles the app CSS into a temp folder; returns the folder. */
 /** `store`: the store edition (bWallet: the yellow card, Apps in the dock), as VITE_STORE_BUILD=1 builds it. */
 export async function buildFixture(opts: { store?: boolean } = {}): Promise<string> {

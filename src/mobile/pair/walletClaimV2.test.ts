@@ -85,6 +85,13 @@ const sessions = (await import('./sessions?walletClaimV2' as string)) as typeof 
 // that file's localStorage and WebSocket stubs (bun runs every test file in one process).
 afterAll(() => sessions.__resetPairingForTests());
 const settle = () => new Promise<void>((r) => setTimeout(r, 25));
+/**
+ * Wait until `ok()` holds (polling, up to 5 s). A fixed 25 ms wait raced the phone's reconnect on a loaded machine
+ * (full `bun test src`, 13 Nov 2026): the claim was read from the socket the test had just closed.
+ */
+const until = async (ok: () => boolean) => {
+  for (let t = 0; t < 1000 && !ok(); t++) await new Promise<void>((r) => setTimeout(r, 5));
+};
 const HOST = 'https://pairtest.example';
 sessions.setPairRevoker(async () => true);
 sessions.setAgentPairDeps({ ctx: undefined, currentId: '1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA', accountCount: 1 });
@@ -129,8 +136,7 @@ describe('wallet claim v2', () => {
     expect(stored(c)!.claim).not.toBe(walletClaimFor(c, k));
     // Rejoin: the session claim and its digest, never the QR claim.
     FakeWS.all.findLast((w) => w.url.includes(c))!.close();
-    sessions.onPairVisibility();
-    await settle();
+    await resume(c);
     const re = new URL(FakeWS.all.findLast((w) => w.url.includes(c))!.url);
     expect(re.searchParams.get('claim')).toBe(session);
     expect(re.searchParams.get('nc')).toBe(claimDigestSync(session));
@@ -153,6 +159,13 @@ describe('wallet claim v2', () => {
 
 /** The latest socket for a channel. */
 const sock = (c: string) => FakeWS.all.findLast((w) => w.url.includes(c))!;
+/** The phone comes back to the page after its socket closed: wait for the socket it opens again, then settle. */
+const resume = async (c: string) => {
+  const before = sock(c);
+  sessions.onPairVisibility();
+  await until(() => sock(c) !== before);
+  await settle();
+};
 /** What the site reads from the phone's sealed frames on `ws` (its own key + the hello), in order. */
 const siteReads = async (ws: FakeWS, from: Sealer) => {
   const out: PairMessage[] = [];
@@ -179,8 +192,7 @@ describe('v1 sessions upgrade through the site (review 13 Nov 2026)', () => {
     const reader = await siteSealer(S, hello.k, c);
     expect(await siteReads(sock(c), reader)).toContainEqual(want); // the first ready
     sock(c).close();
-    sessions.onPairVisibility();
-    await settle();
+    await resume(c);
     const ws = sock(c);
     const u = new URL(ws.url);
     expect(u.searchParams.get('claim')).toBe(walletClaimFor(c, k));
@@ -199,21 +211,18 @@ describe('v1 sessions upgrade through the site (review 13 Nov 2026)', () => {
     p.confirm();
     await settle();
     sock(c).close();
-    sessions.onPairVisibility();
-    await settle();
+    await resume(c);
     const session = sessionWalletClaim(S, hello.k, c);
     expect(new URL(sock(c).url).searchParams.get('claim')).toBe(walletClaimFor(c, k));
     sock(c).close(); // refused (the relay now holds only the session claim): closed before any relay frame
-    sessions.onPairVisibility();
-    await settle();
+    await resume(c);
     expect(new URL(sock(c).url).searchParams.get('claim')).toBe(session);
     sock(c).deliver({ t: 'relay', verifiedOrigin: HOST, wcv: 2 });
     await settle();
     expect(stored(c)).toMatchObject({ claim: session, wcv: 2 });
     // The next resume is a plain v2 one.
     sock(c).close();
-    sessions.onPairVisibility();
-    await settle();
+    await resume(c);
     const re = new URL(sock(c).url);
     expect(re.searchParams.get('claim')).toBe(session);
     expect(re.searchParams.get('nc')).toBe(claimDigestSync(session));
@@ -238,8 +247,7 @@ describe('v1 sessions upgrade through the site (review 13 Nov 2026)', () => {
     const tried: (string | null)[] = [];
     sock(c).close();
     for (let i = 0; i < 3; i++) {
-      sessions.onPairVisibility();
-      await settle();
+      await resume(c);
       tried.push(new URL(sock(c).url).searchParams.get('claim'));
       if (i < 2) sock(c).close(); // refused: the relay holds the QR binding only
     }
@@ -256,12 +264,10 @@ describe('v1 sessions upgrade through the site (review 13 Nov 2026)', () => {
     await settle();
     const session = sessionWalletClaim(S, hello.k, c);
     sock(c).close();
-    sessions.onPairVisibility();
-    await settle();
+    await resume(c);
     expect(new URL(sock(c).url).searchParams.get('claim')).toBe(session);
     sock(c).close();
-    sessions.onPairVisibility();
-    await settle();
+    await resume(c);
     expect(new URL(sock(c).url).searchParams.get('claim')).toBe(walletClaimFor(c, k));
     sock(c).deliver({ t: 'relay', verifiedOrigin: HOST });
     await settle();
@@ -274,8 +280,7 @@ describe('v1 sessions upgrade through the site (review 13 Nov 2026)', () => {
     p.confirm();
     await settle();
     sock(c).close();
-    sessions.onPairVisibility();
-    await settle();
+    await resume(c);
     sock(c).deliver({ t: 'relay', verifiedOrigin: HOST });
     await settle();
     expect(stored(c)?.claim).toBe(walletClaimFor(c, k));

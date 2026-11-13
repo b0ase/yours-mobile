@@ -57,7 +57,10 @@ describe('background.ts: every paying sheet is checked', () => {
     const fn = bg.slice(bg.indexOf('const processPermissionResponse'));
     const body = fn.slice(0, fn.indexOf('closeDappPopupIfNoUi();\n  };'));
     expect(body).toContain('spendApprovalMatches(');
-    expect(body.indexOf('spendApprovalMatches(')).toBeLessThan(body.indexOf('.grantPermission({'));
+    // The grant call (a standing grant, or oneUseGrant for a one-signature request: sharedKeySigning.ts).
+    const grant = body.indexOf('.grantPermission(');
+    expect(grant).toBeGreaterThan(0);
+    expect(body.indexOf('spendApprovalMatches(')).toBeLessThan(grant);
   });
   test('wallet teardown releases running spend runs', () => {
     const drop = bg.slice(bg.indexOf('const dropWalletContext'), bg.indexOf('const dropWalletContext') + 400);

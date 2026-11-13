@@ -77,6 +77,7 @@ import { guardSpendRecipients } from './services/spendRecipients';
 import { guardLabelsOnSpend } from './services/labelsOnSpend';
 import { chromeConsentStore, guardSiteTokens } from './services/siteTokens';
 import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
+import { guardSharedKeySigning, revokeSharedKeyGrantsOnce } from './services/sharedKeySigning';
 import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
@@ -1166,32 +1167,38 @@ export const initWallet = async (
             // A message naming another site (a login challenge fetched from good.com) is never signed for evil.com
             // (services/crossSiteSignGuard.ts, payment-safety audit 24 Oct 2026 B1).
             guardCrossSiteSigning(
-              preserveOriginalErrors(
-                withLocalSpendLedger(
-                  // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
-                  // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
-                  // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
-                  // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
-                  ALLOWANCES_ENABLED
-                    ? guardAllowance(sitePermissions, {
-                        store: permissionStore,
-                        adminOriginator: ADMIN_ORIGINATOR,
-                        normalize: normalizeOriginator,
-                      })
-                    : ENVELOPES_ENABLED
-                      ? guardEnvelopes(sitePermissions, {
-                          envelopes,
+              // A sign-in token other services accept (counterparty 'anyone' under a sign-in protocol, or a time as
+              // keyID) asks every time and the answer covers that one signature (services/sharedKeySigning.ts,
+              // b-Aware 13 Nov 2026). Inside the refusal guards, so a refused call never raises a sheet.
+              guardSharedKeySigning(
+                preserveOriginalErrors(
+                  withLocalSpendLedger(
+                    // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
+                    // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
+                    // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
+                    // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
+                    ALLOWANCES_ENABLED
+                      ? guardAllowance(sitePermissions, {
+                          store: permissionStore,
                           adminOriginator: ADMIN_ORIGINATOR,
                           normalize: normalizeOriginator,
                         })
-                      : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
-                        // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
-                        guardEverySpendAsks(sitePermissions, {
-                          adminOriginator: ADMIN_ORIGINATOR,
-                          normalize: normalizeOriginator,
-                        }),
-                  spendLedger,
+                      : ENVELOPES_ENABLED
+                        ? guardEnvelopes(sitePermissions, {
+                            envelopes,
+                            adminOriginator: ADMIN_ORIGINATOR,
+                            normalize: normalizeOriginator,
+                          })
+                        : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
+                          // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
+                          guardEverySpendAsks(sitePermissions, {
+                            adminOriginator: ADMIN_ORIGINATOR,
+                            normalize: normalizeOriginator,
+                          }),
+                    spendLedger,
+                  ),
                 ),
+                { adminOriginator: ADMIN_ORIGINATOR },
               ),
               ADMIN_ORIGINATOR,
             ),
@@ -1226,6 +1233,17 @@ export const initWallet = async (
   await revokeReservedBasketGrants(permissionStore, ADMIN_ORIGINATOR)
     .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for wallet-internal baskets`))
     .catch((e: unknown) => console.warn('[initWallet] reserved-basket grant cleanup failed:', e));
+  // Upgrade migration, once per account (b-Aware 13 Nov 2026): grants that let a site make signatures anyone can
+  // check (level-1 keys, level-2 'anyone'), given by a pre-ticked line or a manifest before the fix, are removed;
+  // the site asks again (services/sharedKeySigning.ts revokeSharedKeyGrants).
+  await revokeSharedKeyGrantsOnce(
+    permissionStore,
+    ADMIN_ORIGINATOR,
+    { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+    accountId || 'no-account',
+  )
+    .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for keys every app shares`))
+    .catch((e: unknown) => console.warn('[initWallet] shared-key grant cleanup failed (retried next unlock):', e));
 
   // 5. Initialize sync context (derives addresses, creates services, queue, addressManager).
   // Background sync calls go through the manager-wrapped wallet (admin
