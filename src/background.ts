@@ -256,7 +256,7 @@ import {
 import { normalizeOriginator } from '@1sat/wallet';
 import { withDefaultExpiry } from './services/grantExpiry';
 import { markPayeeMismatch, parsePayees, payeesAllowed } from './services/allowanceGuard';
-import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
+import { ADMIN_ORIGINATOR, initWallet, lastCloseSteps, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
 import { ROOM_PLAYING_ACTION, ROOM_QUERY_ACTION, ROOM_TAB_ACTION, parseRoomPlaying, roomTabOrigin } from './mobile/chat/gameRoomLive';
 import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
@@ -3525,8 +3525,8 @@ if (!(
             () => Promise.all([closing, opening?.catch(() => null)]),
             CLOSE_FOR_RELOAD_CAP_MS - 250,
           ).then((how) => {
-            console.log(`[background] ${CLOSE_FOR_RELOAD_ACTION}: ${how}`);
-            sendResponse({ type: CLOSE_FOR_RELOAD_ACTION, success: true, data: how });
+            console.log(`[background] ${CLOSE_FOR_RELOAD_ACTION}: ${how}`, lastCloseSteps);
+            sendResponse({ type: CLOSE_FOR_RELOAD_ACTION, success: true, data: { how, steps: [...lastCloseSteps] } });
           });
           return true;
         }
