@@ -151,6 +151,7 @@ import {
   normOutpoint,
   restoreMoved,
   setArriving,
+  arrivingCoins,
 } from './services/receiveGuard';
 import {
   accountedVia,
@@ -1540,8 +1541,10 @@ export const initWallet = async (
     }
     // Whatever is still missing counts as arriving, so the balance never shows $0 for it. Each balance read checks these
     // outpoints against storage again (services/receiveGuard.ts arrivingNow).
-    setArriving(final.outputs, since);
-    if (final.satoshis) sendSyncStatus({ status: 'arriving', satoshis: final.satoshis });
+    // Money only: a 1-sat ordinal / marker still missing is never shown as BSV arriving (receiveGuard.ts isCoinSats).
+    const stillArriving = arrivingCoins(final.outputs);
+    setArriving(stillArriving.outputs, since);
+    if (stillArriving.satoshis) sendSyncStatus({ status: 'arriving', satoshis: stillArriving.satoshis });
   };
   // One receive-guard run at a time: overlapping runs each internalized and swept the same outputs.
   const receiveGuardFlight = singleFlight(receiveGuardOnce);

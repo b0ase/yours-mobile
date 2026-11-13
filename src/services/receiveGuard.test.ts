@@ -77,3 +77,49 @@ describe('outputs the wallet already moved (5.2.1 double count, 11 Oct 2026)', (
     expect(isMoved(op, Date.now() + MOVED_TTL_MS + 1)).toBe(false);
   });
 });
+
+describe('a 1-sat output is never BSV (owner, 13 Nov 2026: extension 9,532,115 sats, storage and iPhone 9,532,114)', () => {
+  const STORED = 9_532_114;
+  const MARKER = 'c'.repeat(64);
+  const COUNTED = 'd'.repeat(64);
+  const wallet = {
+    balance: async () => STORED,
+    listOutputs: async () => ({ totalOutputs: 0, outputs: [] }),
+  };
+
+  test('a 1-sat marker at a receive address that storage lacks never raises the balance', async () => {
+    const { addArriving, arrivingCoins, _resetReceiveState } = await import('./receiveGuard');
+    _resetReceiveState();
+    // The guard still reports it missing (it may be an inscription to take in), but the balance never counts it.
+    const r = await checkReceiveAddresses([receive], {
+      ownerSync: () => stream([{ outpoint: `${MARKER}.1`, satoshis: 1 }]),
+      outputSats: async () => 1,
+      walletOutpoints: async () => [],
+    });
+    expect(r.satoshis).toBe(1);
+    expect(arrivingCoins(r.outputs)).toEqual({ outputs: [], satoshis: 0 });
+    setArriving(r.outputs);
+    addArriving([{ outpoint: `${MARKER}_1`, satoshis: 1, address: '' }]);
+    expect(arrivingSats()).toBe(0);
+    expect(await balanceWithDeposits(wallet)).toBe(STORED);
+    _resetReceiveState();
+  });
+
+  test('an outpoint storage already counts is never added again; a real payment still is', async () => {
+    const { addArriving, noteUnconfirmed, _resetReceiveState } = await import('./receiveGuard');
+    const { balanceSplit } = await import('./depositBalance');
+    _resetReceiveState();
+    addArriving([
+      { outpoint: `${COUNTED}.0`, satoshis: 5_000, address: '' }, // storage counts it already
+      { outpoint: `${MARKER}.1`, satoshis: 1, address: '' }, // a marker
+      { outpoint: `${PAYMENT}.0`, satoshis: 2_000, address: '' }, // a genuine payment still on its way
+    ]);
+    noteUnconfirmed([{ outpoint: `${MARKER}.1`, satoshis: 1, address: '' }]);
+    const accountedFor = async (ops: string[]) => ops.filter((o) => o.startsWith(COUNTED));
+    const split = await balanceSplit(wallet, { accountedFor });
+    expect(split.total).toBe(STORED + 2_000);
+    expect(split.pending).toBe(2_000);
+    _resetReceiveState();
+    expect(await balanceWithDeposits(wallet, { accountedFor })).toBe(STORED);
+  });
+});
