@@ -4,7 +4,7 @@ import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { getListCoin, getWalletKind, setWalletKind, setWalletView, subscribeWalletKind } from './walletKind';
 import { clearFocusedToken, getFocusedToken, hasFocusHost, registerFocusHost, setFocusedToken } from './cardFocus';
 
-const ALL = ['bsv', 'tokens', 'btickets', 'bshares', 'bcredits', 'mnee', 'pnee', 'topup'];
+const ALL = ['bsv', 'tokens', 'btickets', 'bshares', 'mnee', 'pnee', 'topup'];
 const STORE = ['bsv', 'tokens', 'mnee', 'pnee', 'topup'];
 
 describe('filterForCard', () => {
@@ -12,7 +12,6 @@ describe('filterForCard', () => {
     expect(filterForCard('bsv')).toEqual({ kind: 'tokens', coin: null });
     expect(filterForCard('tokens')).toEqual({ kind: 'tokens', coin: null });
     expect(filterForCard('btickets')).toEqual({ kind: 'tickets', coin: null });
-    expect(filterForCard('bcredits')).toEqual({ kind: 'credits', coin: null });
     expect(filterForCard('bshares')).toEqual({ kind: 'shares', coin: null });
     expect(filterForCard('mnee')).toEqual({ kind: 'tokens', coin: 'mnee' });
     expect(filterForCard('pnee')).toEqual({ kind: 'tokens', coin: 'pnee' });
@@ -24,11 +23,10 @@ describe('filterForCard', () => {
 describe('cardForView', () => {
   test('chips land on the matching card', () => {
     expect(cardForView({ kind: 'tickets', coin: null }, ALL, 'bsv')).toBe(2);
-    expect(cardForView({ kind: 'credits', coin: null }, ALL, 'bsv')).toBe(4);
     expect(cardForView({ kind: 'shares', coin: null }, ALL, 'bsv')).toBe(3);
     expect(cardForView({ kind: 'tokens', coin: null }, ALL, 'btickets')).toBe(0);
     expect(cardForView({ kind: 'tokens', coin: null }, ALL, 'mnee')).toBe(0);
-    expect(cardForView({ kind: 'tokens', coin: 'pnee' }, ALL, 'bsv')).toBe(6);
+    expect(cardForView({ kind: 'tokens', coin: 'pnee' }, ALL, 'bsv')).toBe(5);
   });
   test('stays put when the current card already shows the view', () => {
     expect(cardForView({ kind: 'tokens', coin: null }, ALL, 'bsv')).toBeNull();
@@ -40,7 +38,6 @@ describe('cardForView', () => {
     expect(cardForView({ kind: 'nfts', coin: null }, ALL, 'bsv')).toBeNull();
     expect(cardForView({ kind: 'names', coin: null }, ALL, 'btickets')).toBeNull();
     expect(cardForView({ kind: 'tickets', coin: null }, STORE, 'bsv')).toBeNull();
-    expect(cardForView({ kind: 'credits', coin: null }, STORE, 'bsv')).toBeNull();
     expect(cardForView({ kind: 'shares', coin: null }, STORE, 'bsv')).toBeNull();
   });
 });

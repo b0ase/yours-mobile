@@ -15,7 +15,6 @@ const KNOWN: Record<string, Skin> = {
   topup: { pattern: 'starburst', colour: '#F5B800', finish: 'enamel', ink: '#FFF6D6' },
   tickets: { pattern: 'halftone', colour: '#C77DFF', finish: 'paper', ink: '#FFE9FF' },
   mnee: { pattern: 'waves', colour: '#2BD4A4', finish: 'foil', ink: '#E6FFF6' },
-  bcredits: { pattern: 'circuit', colour: '#FFC83D', finish: 'neon', ink: '#FFE9A8' },
   mandala: { pattern: 'topo', colour: '#3CC9A8', finish: 'satin', ink: '#E2FFF6' },
   pnee: { pattern: 'chevron', colour: '#FFD24D', finish: 'lacquer', ink: '#FFE9A8' },
   bcorp: { pattern: 'guilloche', colour: '#C9CED6', finish: 'foil', ink: '#F2F4F7' },

@@ -3,9 +3,9 @@
 Status: draft for owner review, 1 Oct 2026. Docs only, no code yet.
 Builds on: `docs/TICKETS-BURN-SPEC.md` (meter units, 0-conf entry), the Phase 0 mainnet burn test
 (branch history, `docs/TICKETS-BURN-PHASE0.md`), bit-sign PR #44 (`src/lib/ticket-burn-verify.ts`,
-`migrations/20261002_room_ticket_burns.sql`), bit-sign credits (`origin/feat/credits`,
-`migrations/20261001_credits.sql`), wallet `src/mobile/settings/oneClick.ts`, `src/mobile/credits`,
+`migrations/20261002_room_ticket_burns.sql`), wallet `src/mobile/settings/oneClick.ts`,
 `src/mobile/media`, and the paymail P2P destination in `site/lib/paymail.js`.
+(12 Nov 2026: the b-only prepaid credits this draft once built on were retired; payments here are paid from the wallet.)
 
 ## Pricing principle
 
@@ -45,12 +45,11 @@ figures here use ~$19.75/BSV (1,000 sats ≈ $0.0002).
 - **Live spend counter** in the MiniPlayer (`src/mobile/media/MiniPlayer.tsx`) and in the room header:
   "$0.02 · 12:24" (sats as secondary text). Tapping it opens the allowance with Stop / Raise cap.
 - **Auto-stop**: stops paying (and the stream stops) when the session cap is reached, the balance
-  (or credits) would drop below a floor, the app is killed, or the user taps Stop. A warning shows ~30 s
+  would drop below a floor, the app is killed, or the user taps Stop. A warning shows ~30 s
   before the cap.
 - **Receipts / history**: each session becomes one history row (creator, duration, USD amount with
-  the sats actually paid, txids or
-  credit ledger ids). Uses the existing activity list and the credits ledger view (`CreditsRow`).
-- **No refunds** (owner decision). Unused prepaid stays as credit for later.
+  the sats actually paid, txids). Uses the existing activity list.
+- **No refunds** (owner decision). Payments are paid from the wallet as they go; nothing is prepaid.
 
 ## 3. Payment modes
 
@@ -68,10 +67,11 @@ Payments are chained 0-conf, so the wallet never waits for confirmation.
 - Cons: tx fee on every tick; a wallet tx (and UTXO churn) every N seconds; the app must be running and
   online; double-spend risk on 0-conf is limited to one interval.
 
-### (B) Prepaid credits, debited per second off-chain
+### (B) Prepaid credits, debited per second off-chain (OPEN: no model)
 
-User tops up a balance (bCredits-style ledger, `bit_sign_credit_ledger`, or the room allowance ledger
-with `meter_unit = 'seconds'`). The gate debits per second (in batches, e.g. every 10 s, idempotent per
+**Open (12 Nov 2026):** the b-only prepaid credits product this mode leaned on is retired, and there is no prepaid
+model. Any mode B needs its own owner-approved model first; until then streams are paid from the wallet (mode A).
+Sketch only: the user tops up a balance (e.g. the room allowance ledger with `meter_unit = 'seconds'`). The gate debits per second (in batches, e.g. every 10 s, idempotent per
 `session:tick`). Creator balances are settled on-chain periodically (daily, or when owed ≥ a threshold).
 
 - Pros: zero per-tick fees, instant, works on flaky networks, one approval covers many streams,
@@ -201,8 +201,8 @@ updates the counter; stopping playback stops the loop.
 2. **Margin:** at that price there is room for a platform fee of up to ~25%, configurable per stream (default 0 for
    creators who self-host). It funds hosting the gating proxy for small creators; self-hosting creators pay nothing.
 3. **Direct payouts are the default.** Mode A (on-chain every N seconds, straight to the creator) is the product.
-   Prepaid credits (mode B) stay in the code but are **off by default** and not marketed: holding user funds may be
-   regulated, and the owner prefers direct payment. No credit payout schedule is needed while B is off.
+   Prepaid credits (mode B) are **not built** and stay open (no model; see above): holding user funds may be
+   regulated, and the owner prefers direct payment. No credit payout schedule is needed.
 4. **Session cap and low-balance floor:** configurable by the listener (with sensible defaults) and per stream.
 5. **Hosting:** host the gating proxy for small creators only if the platform fee covers it; otherwise provide the
    snippet for self-hosting.
