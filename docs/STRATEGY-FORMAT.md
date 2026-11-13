@@ -33,8 +33,10 @@ See SMART-WALLET-SPEC.md §3. Code: `src/mobile/agents/strategy.ts`.
 ## Rules
 
 The wallet checks these before b, or a CLI paired to the phone, buys or sends. Exceptions are marked in the table.
-Not covered at all: minting from a paired CLI (it has its own item and dollar limits, set at pairing) and keys
-exported with **Run on a computer** (they sign outside this wallet).
+Minting from a paired CLI has its own item and dollar limits, set at pairing, and is not checked against these rules
+(minting isn't a strategy action). It is still refused while **Stop all agents**, the account's Stop or the spending
+pause is on, and on an agent account it counts against the account's daily cap. Not covered at all: keys exported
+with **Run on a computer** (they sign outside this wallet).
 
 | Field             | Required  | Meaning                                                                  |
 | ----------------- | --------- | ------------------------------------------------------------------------ |

@@ -20,7 +20,15 @@ import {
   UploadStore,
   type MintLimits,
 } from './mintScope';
-import { getAgentAccount, getAgentLog, isPairableAgent } from '../agents/agentAccounts';
+import {
+  allAgentsStopped,
+  appendAgentLog,
+  checkAgentSpend,
+  getAgentAccount,
+  getAgentLog,
+  isPairableAgent,
+} from '../agents/agentAccounts';
+import { isPaused, PAUSED_MESSAGE } from '../config/killSwitch';
 import { runAgentAction } from '../agents/agentTrade';
 import { serialSpend } from '../agents/spendQueue';
 import { getLoadedStrategy, getPaperBook, loadStrategy, parseStrategy } from '../agents/strategy';
@@ -102,6 +110,20 @@ export type AgentDeps = {
   saveGrant?: (g: AgentGrant) => void;
   /** Swappable for tests. */
   mintMedia?: typeof mintMedia;
+  /** The `spending` kill switch (config/killSwitch.ts); swappable for tests. */
+  spendingPaused?: () => Promise<boolean>;
+};
+
+/**
+ * Refuse a paired-CLI spend (buy, send, mint) while "Stop all agents", the account's own Stop or the `spending`
+ * pause is on. Checked before anything is assembled or signed, for agent and mint-only pairings alike.
+ */
+const assertMaySpend = async (grant: AgentGrant, deps: AgentDeps) => {
+  if (allAgentsStopped()) throw new AgentCallError('STOPPED', 'All agents are stopped in bWalletX.');
+  if (getAgentAccount(grant.agentId)?.stopped)
+    throw new AgentCallError('STOPPED', `${grant.name} is stopped in bWalletX.`);
+  const paused = deps.spendingPaused ?? (() => isPaused('spending'));
+  if (await paused().catch(() => true)) throw new AgentCallError('PAUSED', PAUSED_MESSAGE);
 };
 
 const uploads = new UploadStore();
@@ -176,6 +198,7 @@ export async function handleAgentCall(
         action === 'buy'
           ? { kind: 'buy' as const, token: String(p.tokenId ?? ''), usd }
           : { kind: 'send' as const, token: 'BSV', usd, to: String(p.to ?? '') };
+      await assertMaySpend(grant, deps);
       // Serialised like mint: checkAgentAction reads the log and the spend is logged only after it is
       // signed, so two parallel requests could both pass the daily cap (18 Oct 2026 review).
       const rate = await deps.bsvUsd();
@@ -217,10 +240,22 @@ const wrapLimit = <T>(fn: () => T): T => {
   }
 };
 
+/**
+ * On an agent account a mint is an agent spend too: the account's daily cap and hourly limit apply, refusals are
+ * logged, and the spend is logged after broadcast so it counts against them. Mint-only pairings on an ordinary
+ * account keep only the pairing's own limits (it has no agent cap).
+ */
+const assertAgentCap = (grant: AgentGrant, usd: number) => {
+  if (!getAgentAccount(grant.agentId)) return;
+  const r = checkAgentSpend(grant.agentId, usd);
+  if (r.ok) return;
+  appendAgentLog(grant.agentId, { at: Date.now(), action: 'refused', detail: `Refused mint: ${r.reason}`, usd: 0 });
+  throw new AgentCallError('REFUSED', r.reason);
+};
+
 /** `mint`: checks, budget BEFORE signing, the Mint screen's own routine, then the actual spend is recorded. */
 async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
-  const acct = getAgentAccount(grant.agentId);
-  if (acct?.stopped) throw new AgentCallError('STOPPED', `${grant.name} is stopped in bWalletX.`);
+  await assertMaySpend(grant, deps);
   const contentType = String(p.contentType ?? '');
   if (!isMintableType(contentType))
     throw new AgentCallError(
@@ -241,6 +276,7 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
   const satsPerKb = deps.feeRate?.() ?? 100;
   const est = estimateCost(declared > 0 ? declared : 1, satsPerKb, rate, { newCollection: collection.kind === 'new' });
   wrapLimit(() => checkMintBudget(g0, est.usd));
+  assertAgentCap(grant, est.usd ?? 0);
 
   let base64Content: string;
   if (p.uploadId !== undefined) base64Content = await wrapLimitAsync(() => uploads.take(p.uploadId));
@@ -262,6 +298,9 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
     if (!outputs.some((o) => o.outpoint.replace('.', '_') === collection.id))
       throw new AgentCallError('INVALID', "That collection isn't in this wallet.");
   }
+  // Last look right before signing: Stop all / Stop / pause may have been turned on while the file came in.
+  await assertMaySpend(grant, deps);
+  assertAgentCap(grant, cost.usd ?? 0);
 
   const r = await (deps.mintMedia ?? mintMedia)(deps.ctx, {
     base64Content,
@@ -285,6 +324,14 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
   };
   grant.mint = next.mint;
   deps.saveGrant?.(next);
+  if (getAgentAccount(grant.agentId))
+    appendAgentLog(grant.agentId, {
+      at: Date.now(),
+      action: 'mint',
+      detail: `Minted ${form.title.trim()} from a paired computer`,
+      usd,
+      txid: r.txid,
+    });
   notifyMinted();
   return {
     txid: r.txid,
