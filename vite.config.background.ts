@@ -47,5 +47,9 @@ export default defineConfig({
   define: {
     'process.env': {},
     ...brandDefines(),
+    // The Store's address for the wallet's own unsent-payment pass (src/mobile/themeOrder/storeHeard.ts): this worker
+    // is built without the pages' paymail defines, and only that module reads this one. Same env and default as
+    // __PAYMAIL_API__ in vite.config.mobile.ts.
+    __STORE_API__: JSON.stringify(process.env.BWALLET_PAYMAIL_API ?? 'https://pay.bwallet.space'),
   },
 });

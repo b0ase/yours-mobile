@@ -411,8 +411,9 @@ export const HistoryScreen = ({
                   {heldByUnsent.count === 1 ? "It isn't" : "They aren't"} on the network, so{' '}
                   {heldByUnsent.count === 1 ? "it isn't" : "they aren't"} listed here.{' '}
                   {heldByUnsent.count === 1 ? 'It is' : 'They are'} given back once the wallet confirms the network
-                  never got it: a Store payment when you open the Store a few minutes after it was made (online), and
-                  any payment by itself about a day after it was made, the next time the wallet opens.
+                  never got it: a Store payment within about 20 minutes on the device that made it (while the wallet is
+                  open and online; 3 days on your other devices), and any other payment by itself about a day after it
+                  was made, the next time the wallet opens.
                 </div>
               ) : (
                 <div>

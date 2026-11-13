@@ -4,7 +4,6 @@ import { GuardedPayError, guardedPay, scriptAddress, type Shown } from '../../se
 import type { WalletInterface } from '@bsv/sdk';
 import { P2PKH, PublicKey, Random, Utils } from '@bsv/sdk';
 import { storeReceiptMap, storeReceiptSvg, STORE_RECEIPT_TYPE, type StoreReceipt } from '../storeReceipt/receipt';
-import { BWALLET_PAYMAIL_API } from '../names/config';
 import type { Fetch } from '../names/names';
 import { signRequest } from '../names/paymail';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
@@ -19,6 +18,16 @@ import {
   type UnsentWallet,
 } from '../../services/unsentGuard';
 import type { MyOrder, OrderForm } from './form';
+import {
+  askStoreHeardOf,
+  claimAction,
+  claimOp,
+  createdHereKV,
+  markStoreCreatedHere,
+  STORE_PAYMENT_DESC,
+  STORE_PROTOCOL,
+  storeApiBase,
+} from './storeHeard';
 import {
   localOutbox,
   pruneOutbox,
@@ -79,11 +88,8 @@ const MESSAGES: Record<string, string> = {
   update_required: 'Please update bWalletX to buy from the Store.',
 };
 
-/**
- * The Store protocol this client speaks (review 4 Nov 2026, F12): the wallet broadcasts, after a backup and a claim
- * intent. Sent in every signed quote and claim; the server answers 426 update_required to clients without it.
- */
-export const STORE_PROTOCOL = '2';
+// STORE_PROTOCOL, STORE_PAYMENT_DESC and the claim names live in storeHeard.ts (shared with the background's release).
+export { STORE_PROTOCOL, STORE_PAYMENT_DESC } from './storeHeard';
 
 /** The wallet's backup push (background STORE_BACKUP_BEFORE_SEND, services/deviceSync.ts). Fails closed. */
 export const backupThroughWallet = async (): Promise<BackupAnswer> => {
@@ -100,7 +106,12 @@ export const backupThroughWallet = async (): Promise<BackupAnswer> => {
 /** The app's Store payment deps: the background backup push and this device's outbox for this identity. */
 export const defaultStorePayDeps = async (wallet: Pick<WalletInterface, 'getPublicKey'>): Promise<StorePayDeps> => {
   const { publicKey } = await wallet.getPublicKey({ identityKey: true });
-  return { backup: backupThroughWallet, outbox: localOutbox(publicKey) };
+  const created = createdHereKV(publicKey);
+  return {
+    backup: backupThroughWallet,
+    outbox: localOutbox(publicKey),
+    markCreated: (e) => markStoreCreatedHere(created, e.txid, e.quoteId),
+  };
 };
 
 type ActionsWallet = UnsentWallet & {
@@ -158,9 +169,6 @@ export async function actionStatusOf(wallet: ActionsWallet, txid: string): Promi
   if (found) return found.status;
   return head.totalActions <= ACTION_STATUS_WINDOW ? undefined : 'unknown';
 }
-
-const claimAction = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'theme-buy-claim' : 'theme-orders-claim');
-const claimOp = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'buy-claim' : 'claim');
 
 /**
  * Fill the parts of the Store deps that need the wallet and the Store (review 4 Nov 2026):
@@ -231,12 +239,14 @@ export function withStoreDeps(ctx: OneSatContext, f: Fetch, deps: StorePayDeps):
 }
 
 const post = async <T>(f: Fetch, op: string, body: unknown, o: { timeoutMs?: number } = {}): Promise<T> => {
-  if (!BWALLET_PAYMAIL_API) throw new ThemeOrderError('Orders open soon', 'not_configured', 503);
+  // The Store's address, read at call time (storeHeard.ts storeApiBase: names/config's rule on the same build defines).
+  const base = storeApiBase();
+  if (!base) throw new ThemeOrderError('Orders open soon', 'not_configured', 503);
   // With a deadline: aborted (AbortController, as names/paymailDomains.ts probes), and given up on even if the fetch
   // ignores the signal. A timeout is a plain Error, never a ThemeOrderError: callers read it as "unreachable".
   const ctl = o.timeoutMs && typeof AbortController !== 'undefined' ? new AbortController() : undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const request = f(`${BWALLET_PAYMAIL_API}/api/theme-orders/${op}`, {
+  const request = f(`${base}/api/theme-orders/${op}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -548,8 +558,6 @@ async function finishBuy(ctx: OneSatContext, f: Fetch, entry: OutboxEntry, deps:
 export const ownedThemes = async (f: Fetch, wallet: Signer) =>
   post<{ packs: string[]; configured: boolean }>(f, 'owned', await signRequest(wallet, 'theme-buy-owned', {}));
 
-/** The descriptions payQuote / payBuyQuote give their payments (wallet/txHistory.ts labels them by these). */
-export const STORE_PAYMENT_DESC = /^(Theme purchase · |bWalletX theme edition$)/;
 const TXID_RE = /^[0-9a-f]{64}$/i;
 /** A pending claim is asked again at most this often. */
 export const RECLAIM_EVERY_MS = 10 * 60 * 1000;
@@ -574,26 +582,14 @@ export type SettleReport = {
  * it can't see. 'yes' = paid, or recorded as pending (an intent or a claim); 'no' = it holds no such payment; 'unclear'
  * = no clear answer (never release on that).
  */
-async function storeHeardOf(
+function storeHeardOf(
   ctx: OneSatContext,
   f: Fetch,
   memo: { kind: OutboxEntry['kind']; quoteId: string },
   txid: string,
 ): Promise<'yes' | 'no' | 'unclear'> {
-  try {
-    const signed = await signRequest(ctx.wallet, claimAction(memo.kind), {
-      quote_id: memo.quoteId,
-      txid,
-      store: STORE_PROTOCOL,
-    });
-    const r = await post<{ pending?: boolean; unverified?: boolean }>(f, claimOp(memo.kind), signed);
-    return r.unverified ? 'no' : 'yes';
-  } catch (e) {
-    if (!(e instanceof ThemeOrderError)) return 'unclear';
-    if (e.code === 'tx_used') return 'yes'; // the txid is recorded (on another row)
-    if (['rawtx', 'quote_not_found', 'payment_pending', 'quote_used'].includes(e.code)) return 'no';
-    return 'unclear';
-  }
+  // One rule for the Store screen and the background's release (storeHeard.ts); this build's Store address.
+  return askStoreHeardOf(ctx.wallet, f, memo, txid);
 }
 
 /** Txids the Store has confirmed paid (so the scan doesn't ask again). Small, per identity, best effort. */

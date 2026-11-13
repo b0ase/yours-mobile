@@ -944,11 +944,14 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
         .catch((err: unknown) => console.warn('[background] postage reconcile failed:', err));
       // Unbroadcast (nosend) payments past their deadline: released only once the chain shows they never went out
       // (BRC-177, services/unsentExpiry.ts). Rate-limited inside.
-      await ctx
-        .expireUnsent()
-        .then((x) =>
-          x.released.length || x.settled.length || x.lateSeen.length ? console.log('[background] nosend expiry:', x) : undefined,
-        )
+      // Never while storage is switching (the detach and abort must land on this device's store).
+      await (storageSwitching() ? Promise.resolve(null) : ctx.expireUnsent(false, { storageBusy: storageSwitching }))
+        .then((x) => {
+          if (!x) return;
+          if (!x.released.length && !x.settled.length && !x.lateSeen.length) return;
+          console.log('[background] nosend expiry:', x);
+          notifyBalanceUpdate();
+        })
         .catch((err: unknown) => console.warn('[background] nosend expiry failed:', err));
       // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
       // Anything still queued keeps the send-retry alarm on (services/sendRetry.ts).
@@ -995,6 +998,8 @@ const noteMoveFailed = (id: string, reason?: string) => {
  * 22 Oct 2026 by making backups during sign-up), so the backup waits for it and a switch never starts during one.
  */
 let storageSwitch: Promise<void> | null = null;
+/** A switch of this account's storage is under way (read fresh: unsentExpiry's detach and abort wait for it). */
+const storageSwitching = (): boolean => storageSwitch !== null;
 
 /** After a failed switch: if the active store no longer answers, rebuild the wallet once (it stays on the backup). */
 const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>, id: string) => {
@@ -2035,7 +2040,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeAutoCoinResync();
   // Coins from the backup waiting on the chain: their next try, even if the worker slept through its timer (16d D2).
   if (alarm.name === AUTO_COIN_RESYNC_ALARM) void accountContext?.admitBackupRows().catch(() => undefined);
+  // Unsent payments (services/unsentExpiry.ts) are looked at again while the wallet stays open, not only at unlock: a
+  // check the network or the Store couldn't answer (timeout, 429) is retried here instead of holding the coins until
+  // the next unlock (13 Nov 2026). At most every 10 minutes (rate-limited inside); never while storage is switching.
+  if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeExpireUnsent();
 });
+const maybeExpireUnsent = async (): Promise<void> => {
+  const ctx = accountContext;
+  if (!ctx || storageSwitching()) return;
+  try {
+    const x = await ctx.expireUnsent(false, { storageBusy: storageSwitching });
+    if (x.released.length || x.settled.length || x.lateSeen.length) {
+      console.log('[background] nosend expiry:', x);
+      notifyBalanceUpdate();
+    }
+  } catch (err) {
+    console.warn('[background] nosend expiry failed:', err);
+  }
+};
 (globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
   if (pageHidden() === false) void maybeAutoCoinResync(true);
   if (pageHidden() === false) void accountContext?.admitBackupRows().catch(() => undefined);
