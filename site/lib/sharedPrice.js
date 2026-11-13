@@ -9,8 +9,10 @@
 //
 // - WhatsOnChain is asked at most once per server minute per instance (a failure may be retried after RETRY_MS).
 // - The rate is rounded to 2 dp exactly like the wallet did (Number(rate.toFixed(2))).
-// - WoC failure: the last good value is returned with `stale: true` and a 5 s cache (so it heals quickly), or a 503
-//   when this instance has never had one.
+// - WoC failure: the last good value is returned with `stale: true` and a 5 s cache (so it heals quickly) while it is
+//   at most STALE_MAX_MS old; older, or never had one, a 503 (an hours-old price must not pass for a current one).
+// - Only the current and the previous minute can be asked for, and the next one only in the last NEXT_EARLY_MS of
+//   the current minute (device clocks run a little fast), so nobody can pin a minute's value long before it starts.
 // - Without ?m (or with an m too far from the server clock) the answer is for the server's current minute; a plain
 //   /api/price is cached until 2 s after the next minute starts, with stale-while-revalidate=30 (owner's spec).
 // - No secrets, no writes. CORS is `*` on purpose: the data is public and read without credentials, and echoing the
@@ -25,9 +27,10 @@ const OFFSET_S = 2;
 const RETRY_MS = 10_000;
 const TIMEOUT_MS = 4_000;
 const STALE_S = 5;
-/** How far a requested minute may be from the server's (device clocks drift): 2 minutes back, 1 ahead. */
-const MAX_BEHIND = 2;
-const MAX_AHEAD = 1;
+/** A stale value older than this is not served at all. */
+const STALE_MAX_MS = 5 * MINUTE_MS;
+/** How early the next minute may be asked for (a device clock a few seconds fast). */
+const NEXT_EARLY_MS = 5_000;
 const MEMO_KEEP = 6;
 
 const minuteStart = (ms) => Math.floor(ms / MINUTE_MS) * MINUTE_MS;
@@ -39,14 +42,18 @@ const plainMaxAge = (now) => Math.max(1, Math.ceil((minuteStart(now) + MINUTE_MS
  */
 const keyedMaxAge = (now, minute) => Math.max(1, Math.ceil((minute + 2 * MINUTE_MS - now) / 1000) + OFFSET_S);
 
-/** The requested minute (ms) when `m` is an exact minute start near the server clock, else null. */
+/**
+ * The requested minute (ms) when `m` is an exact minute start that is the current or the previous server minute, or
+ * the next one within its last NEXT_EARLY_MS; else null.
+ */
 function parseMinute(m, now) {
   if (typeof m !== 'string' || !m) return null;
   const ms = Date.parse(m);
   if (!Number.isFinite(ms) || ms % MINUTE_MS !== 0) return null;
   const cur = minuteStart(now);
-  if (ms < cur - MAX_BEHIND * MINUTE_MS || ms > cur + MAX_AHEAD * MINUTE_MS) return null;
-  return ms;
+  if (ms === cur || ms === cur - MINUTE_MS) return ms;
+  if (ms === cur + MINUTE_MS && ms - now <= NEXT_EARLY_MS) return ms;
+  return null;
 }
 
 function makeSharedPrice({ fetch: f = (...a) => fetch(...a), now = () => Date.now() } = {}) {
@@ -120,9 +127,19 @@ function makeSharedPrice({ fetch: f = (...a) => fetch(...a), now = () => Date.no
       while (byMinute.size > MEMO_KEEP) byMinute.delete(byMinute.keys().next().value);
       return [200, body, cacheOk];
     }
-    if (last) return [200, shape(last, minute, true), `public, max-age=0, s-maxage=${STALE_S}`];
+    if (last && now() - last.fetchedAt <= STALE_MAX_MS)
+      return [200, shape(last, minute, true), `public, max-age=0, s-maxage=${STALE_S}`];
     return [503, { error: 'price-unavailable' }, 'no-store'];
   };
 }
 
-module.exports = { makeSharedPrice, parseMinute, plainMaxAge, keyedMaxAge, minuteStart, WOC_RATE_URL, MINUTE_MS };
+module.exports = {
+  makeSharedPrice,
+  parseMinute,
+  plainMaxAge,
+  keyedMaxAge,
+  minuteStart,
+  WOC_RATE_URL,
+  MINUTE_MS,
+  STALE_MAX_MS,
+};

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import sp from '../lib/sharedPrice.js';
 import handler from '../api/price.js';
 
-const { makeSharedPrice, parseMinute, plainMaxAge, keyedMaxAge, WOC_RATE_URL, MINUTE_MS } = sp;
+const { makeSharedPrice, parseMinute, plainMaxAge, keyedMaxAge, WOC_RATE_URL, MINUTE_MS, STALE_MAX_MS } = sp;
 const M = 29_000_000 * MINUTE_MS; // a minute start
 const iso = (ms) => new Date(ms).toISOString();
 
@@ -19,13 +19,15 @@ function woc(start = { rate: 15.174, time: M / 1000 - 7 }) {
 }
 
 describe('minute bucketing', () => {
-  test('parseMinute takes an exact minute start near the server clock only', () => {
+  test('parseMinute takes the current or previous minute, the next only in the last 5 s', () => {
     const now = M + 30_000;
     expect(parseMinute(iso(M), now)).toBe(M);
-    expect(parseMinute(iso(M - 2 * MINUTE_MS), now)).toBe(M - 2 * MINUTE_MS);
-    expect(parseMinute(iso(M + MINUTE_MS), now)).toBe(M + MINUTE_MS); // device clock a little ahead
-    expect(parseMinute(iso(M - 3 * MINUTE_MS), now)).toBeNull();
-    expect(parseMinute(iso(M + 2 * MINUTE_MS), now)).toBeNull();
+    expect(parseMinute(iso(M - MINUTE_MS), now)).toBe(M - MINUTE_MS);
+    expect(parseMinute(iso(M - 2 * MINUTE_MS), now)).toBeNull();
+    expect(parseMinute(iso(M + MINUTE_MS), now)).toBeNull(); // no pinning the next minute 30 s early
+    expect(parseMinute(iso(M + MINUTE_MS), M + 55_000)).toBe(M + MINUTE_MS); // a device clock a few seconds fast
+    expect(parseMinute(iso(M + MINUTE_MS), M + 54_999)).toBeNull();
+    expect(parseMinute(iso(M + 2 * MINUTE_MS), M + 59_999)).toBeNull();
     expect(parseMinute(iso(M + 1000), now)).toBeNull(); // not a minute start
     expect(parseMinute('nonsense', now)).toBeNull();
     expect(parseMinute(null, now)).toBeNull();
@@ -131,6 +133,18 @@ describe('WhatsOnChain failure', () => {
     expect((await price(null))[0]).toBe(503);
   });
 
+  test('a stale value older than 5 minutes is not served: 503', async () => {
+    let now = M + 2_000;
+    const w = woc();
+    const price = makeSharedPrice({ fetch: w.fetch, now: () => now });
+    await price(iso(M));
+    w.down = true;
+    now = M + 2_000 + STALE_MAX_MS; // exactly 5 min: still served, stale
+    expect((await price(null))[1].stale).toBe(true);
+    now += 10_001; // past 5 min (and past the retry wait)
+    expect(await price(null)).toEqual([503, { error: 'price-unavailable' }, 'no-store']);
+  });
+
   test('last good value, marked stale, cached 5 s, not memoised; retried after 10 s; heals', async () => {
     let now = M + 2_000;
     const w = woc();
@@ -191,6 +205,28 @@ describe('handler', () => {
     const head = await call('HEAD', '/api/price');
     expect(head.status).toBe(200);
     expect(head.body).toBeUndefined();
+  });
+
+  test('unknown or repeated query parameters: 400, cacheable, no WoC call', async () => {
+    const w = woc();
+    handler.__setPriceForTests(makeSharedPrice({ fetch: w.fetch, now: () => M + 2_000 }));
+    for (const url of ['/api/price?x=1', `/api/price?m=${encodeURIComponent(iso(M))}&cb=7`, '/api/price?m=a&m=b']) {
+      const r = await call('GET', url);
+      expect(r.status).toBe(400);
+      expect(r.body).toEqual({ error: 'bad-query' });
+      expect(r.headers['cache-control']).toBe('public, max-age=3600, s-maxage=86400');
+    }
+    expect(w.calls).toBe(0);
+  });
+
+  test('per-IP limit: 60 a minute, then 429 no-store', async () => {
+    const w = woc();
+    handler.__setPriceForTests(makeSharedPrice({ fetch: w.fetch, now: () => M + 2_000 }));
+    for (let i = 0; i < 60; i++) expect((await call('GET', '/api/price')).status).toBe(200);
+    const r = await call('GET', '/api/price');
+    expect(r.status).toBe(429);
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(w.calls).toBe(1);
   });
 
   test('503 passes through with no-store', async () => {
