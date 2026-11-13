@@ -122,15 +122,29 @@ export const bareHost = (value: string, lenient = false): string | null => {
   v = v.replace(/[/?#].*$/, '');
   if (authority) v = v.slice(v.lastIndexOf('@') + 1);
   v = v.replace(/:\d*$/, '').toLowerCase();
+  // Anything with an ASCII character no host can hold is not one (checked before the costlier URL conversion).
+  if (/[^a-z0-9.%\-\u0080-\uffff]/.test(v)) return null;
+  // Percent-encoding decoded once, as a URL parser does for a host; what still holds a % or a non-host character is
+  // not a host (so a run of %25 doesn't reach the URL constructor, whose throw is the slow path).
+  if (v.includes('%')) {
+    try {
+      v = decodeURIComponent(v).toLowerCase();
+    } catch {
+      return null;
+    }
+    if (/[^a-z0-9.\-\u0080-\uffff]/.test(v)) return null;
+  }
+  // Unicode and numeric-IPv4 hosts ("0x7f.1") converted as a URL parser does.
   // eslint-disable-next-line no-control-regex
-  if (/[^\x00-\x7f]|%/.test(v)) {
-    // Unicode read out of bytes that aren't text is junk, not an IDN.
-    if (lenient) return null;
+  if (/[^\x00-\x7f]/.test(v) || NUMERIC_HOST.test(v)) {
     try {
       v = new URL(`http://${v}`).hostname;
     } catch {
       return null;
     }
+    // In bytes that aren't text, Unicode that converts to punycode is junk, not an IDN (review N4); fullwidth letters
+    // and the ideographic full stop convert to plain ASCII and still count (follow-up F2).
+    if (lenient && /(?:^|\.)xn--/.test(v)) return null;
   }
   v = v.replace(/\.$/, '').replace(/(\.c[0-9a-f]{44})?\.paired\.invalid$/, '');
   if (!HOST_RE.test(v)) return null;
@@ -138,6 +152,9 @@ export const bareHost = (value: string, lenient = false): string | null => {
   if (lenient && !LENIENT_TLD.test(v)) return null;
   return v;
 };
+// Two to four numeric labels, at least one in hex (0x7f.1), or three or more (127.0.1): a parser reads an IPv4 address.
+// One bare number ("6") is left alone, so junk in a random blob doesn't become 0.0.0.6.
+const NUMERIC_HOST = /^(?=[^.]*\.)(?=.*0x|(?:[^.]*\.){2})(?:0x[0-9a-f]*|\d+)(?:\.(?:0x[0-9a-f]*|\d+)){1,3}\.?$/i;
 const LENIENT_TLD = /(?:\.(?:[a-z]{2,}|xn--[a-z0-9-]+)|^localhost|^(?:\d{1,3}\.){3}\d{1,3})$/;
 
 /**
@@ -146,13 +163,18 @@ const LENIENT_TLD = /(?:\.(?:[a-z]{2,}|xn--[a-z0-9-]+)|^localhost|^(?:\d{1,3}\.)
  * '@'. Everything else in the authority (& | < , ; space quotes...) is userinfo. Null when `s` doesn't start one.
  */
 const isAuthorityEnd = (c: number) => c === 47 || c === 92 || c === 63 || c === 35 || c === 10 || c === 13; // / \ ? # LF CR
-/** Per string, built once: where each authority would end, and the last '@' before each position. */
+// Unquoted values (follow-up F1): a text line also ends at white space (tabs are dropped by the parser, so they don't
+// end it), and a form value (key=value) at a raw & or ; as well, so "redirect_uri=https://good.com&email=bob@x.com"
+// doesn't read bob's mail domain as the host.
+const isLineEnd = (c: number) => isAuthorityEnd(c) || c === 32 || c === 11 || c === 12 || c === 0xa0 || c === 0x85;
+const isFormEnd = (c: number) => isLineEnd(c) || c === 38 || c === 59;
+/** Per string and rule, built once: where each authority would end, and the last '@' before each position. */
 type AuthorityIndex = { end: Int32Array; lastAt: Int32Array };
-const authorityIndex = (s: string): AuthorityIndex => {
+const authorityIndex = (s: string, isEnd: (c: number) => boolean): AuthorityIndex => {
   const n = s.length;
   const end = new Int32Array(n + 1);
   end[n] = n;
-  for (let i = n - 1; i >= 0; i--) end[i] = isAuthorityEnd(s.charCodeAt(i)) ? i : end[i + 1];
+  for (let i = n - 1; i >= 0; i--) end[i] = isEnd(s.charCodeAt(i)) ? i : end[i + 1];
   const lastAt = new Int32Array(n + 1);
   let la = -1;
   for (let i = 0; i <= n; i++) {
@@ -162,7 +184,13 @@ const authorityIndex = (s: string): AuthorityIndex => {
   return { end, lastAt };
 };
 const authorityHost = (s: string, from: number, lenient: boolean, idx?: AuthorityIndex): string | null => {
-  const head = s.slice(from, from + 40);
+  let head = s.slice(from, from + 48);
+  // A blob: URL's origin is the URL inside it.
+  const blob = /^[ \t]*blob:/i.exec(head);
+  if (blob) {
+    from += blob[0].length;
+    head = s.slice(from, from + 48);
+  }
   const scheme = /^[ \t]*([a-z][a-z0-9+.-]*):/i.exec(head);
   let at: number;
   if (scheme && SPECIAL.has(scheme[1].toLowerCase())) at = from + scheme[0].length;
@@ -224,9 +252,12 @@ const jsonUnescape = (v: string) =>
  * most one key, and values are read a bounded length. Same shape as the old `["']?(key)["']?\s*[:=]\s*["']?(value)`
  * regex, which backtracked quadratically on long words.
  */
-const fieldHosts = (s: string, lenient: boolean, out: Set<string>) => {
+/** Returns how many binding fields it read (each costs the scan budget extra: BINDING_COST). */
+const fieldHosts = (s: string, lenient: boolean, out: Set<string>): number => {
   const n = s.length;
-  let idx: AuthorityIndex | undefined;
+  let bindings = 0;
+  let lineIdx: AuthorityIndex | undefined;
+  let formIdx: AuthorityIndex | undefined;
   let i = 0;
   while (i < n) {
     const c = s.charCodeAt(i);
@@ -242,11 +273,13 @@ const fieldHosts = (s: string, lenient: boolean, out: Set<string>) => {
     if (k === i) continue;
     let j = i;
     const xml = runStart > 0 && s.charCodeAt(runStart - 1) === 60 && j < n && s.charCodeAt(j) === 62; // <key>
+    let form = false; // key=value (form syntax), not key: value or <key>
     if (xml) j++;
     else {
       if (j < n && isQuote(s.charCodeAt(j))) j++;
       while (j < n && isSpace(s.charCodeAt(j))) j++;
       if (j >= n || (s.charCodeAt(j) !== 58 && s.charCodeAt(j) !== 61)) continue; // ':' or '='
+      form = s.charCodeAt(j) === 61 && s.charCodeAt(j + 1) !== 62;
       j++;
       if (j < n && s.charCodeAt(j) === 62) j++; // "=>"
       while (j < n && isSpace(s.charCodeAt(j))) j++;
@@ -259,13 +292,16 @@ const fieldHosts = (s: string, lenient: boolean, out: Set<string>) => {
       i = v;
       continue;
     }
+    bindings++;
     while (j < n && !isStop(s.charCodeAt(j))) j++;
     // A quoted URL is one string (JSON, a quoted attribute): its host is what a URL parser reads, nothing else, so
     // "https://evil.com&@good.com" names only good.com. Unquoted, the value may also have been split at & or ; by a
     // form parser, so both readings count (review N1).
     const asUrl = q
       ? authorityHost(jsonUnescape(quoted(s, v, q)), 0, lenient)
-      : authorityHost(s, v, lenient, (idx ??= authorityIndex(s)));
+      : form
+        ? authorityHost(s, v, lenient, (formIdx ??= authorityIndex(s, isFormEnd)))
+        : authorityHost(s, v, lenient, (lineIdx ??= authorityIndex(s, isLineEnd)));
     if (q && asUrl) {
       out.add(asUrl);
       i = Math.max(j, i);
@@ -273,6 +309,9 @@ const fieldHosts = (s: string, lenient: boolean, out: Set<string>) => {
     }
     const value = s.slice(v, Math.min(j, v + MAX_VALUE));
     const found: (string | null)[] = [bareHost(value, lenient), asUrl];
+    // A form value split at the raw & or ; and then percent-decoded is read in full as a URL (F1): so
+    // "redirect_uri=https%3A%2F%2Fevil.com%26%40good.com" names good.com, and a real "&email=" is another field.
+    if (form && value.includes('%')) found.push(authorityHost(decodeOnce(value), 0, lenient));
     // A URL parser drops tabs and newlines, so "https://go<TAB>od.com" names good.com (review A4). Only when the
     // part before the break names no host: in "Origin: https://a.com<LF>Nonce: 1" the line break ends the value.
     if (!found[0] && /^(?:[a-z][a-z0-9+.-]*:)?[/\\]{2}[^/\\?#]*$/i.test(value)) {
@@ -288,6 +327,7 @@ const fieldHosts = (s: string, lenient: boolean, out: Set<string>) => {
     // Carry on after the value as first read (a global regex would), so a long value is read once.
     i = Math.max(j, i);
   }
+  return bindings;
 };
 
 // Every login line contains one of these words; most data contains none, so the line regexes are skipped.
@@ -530,6 +570,7 @@ export const authFetchParts = (b: Uint8Array): { text: string[]; body: Uint8Arra
 
 /** Most characters one call reads, across every reading, decode pass, decoded token and inflated stream (1M). */
 export const MAX_SCAN_CHARS = 1 << 20;
+const BINDING_COST = 64;
 const MAX_DEPTH = 2; // decoded tokens, and tokens inside those
 // Decoded tokens are read together, one buffer per string, split by a line that no host pattern crosses.
 const TOKEN_SEP = [10, 124, 10]; // "\n|\n"
@@ -571,7 +612,13 @@ const scanString = (s: string, depth: number, lenient: boolean, budget: Budget, 
     }
     budget.chars += cur.length;
     lineHosts(cur, lenient, out);
-    fieldHosts(cur, lenient, out);
+    // A binding field costs far more than a character (several URL readings), so crafted input packed with them
+    // (thousands of url=... across eight decode passes) runs out of budget instead of taking 80+ ms.
+    budget.chars += fieldHosts(cur, lenient, out) * BINDING_COST;
+    if (budget.chars > MAX_SCAN_CHARS) {
+      budget.exhausted = true;
+      return;
+    }
     if (depth < MAX_DEPTH) {
       const bytes = decodedTokens(cur, budget);
       if (bytes) scanBytes(bytes, depth + 1, budget, out);

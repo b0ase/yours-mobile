@@ -125,6 +125,7 @@ import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
+import { learnOwnBackends, ownBackendsReady } from './services/ownBackendKeys';
 import { normalizeOriginator, parsePrivateKey, type StoragePaymentHook } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
@@ -464,6 +465,10 @@ export interface InitWalletOptions {
 
 // A backup call that fails names itself and its page in the sync log (services/syncErrorDetail.ts, 6 Nov 2026).
 tagStorageClientErrors(StorageClient);
+// The servers the wallet itself signs in to over BRC-103 (online storage, bMail) are remembered, so no site can sign
+// in to them as the user (services/ownBackendKeys.ts; refused in services/crossSiteSignGuard.ts).
+learnOwnBackends(Wallet, ADMIN_ORIGINATOR);
+void ownBackendsReady();
 
 /**
  * Storage top-ups (HTTP 507) are never paid without a check (services/storagePaymentGuard.ts, b-Aware 12 Nov 2026).

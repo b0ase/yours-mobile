@@ -10,13 +10,17 @@
  * calling (or a parent/subdomain of it). Data that names no site is signed as before; free links inside content (a post with a URL) are not
  * treated as a binding, so signed posts keep working.
  *
- * Not covered here: relaying a BRC-103 session itself. evil.com can open a BRC-103 (AuthFetch) session with good.com's
+ * The wallet's own servers are covered (ownBackendKeys.ts): a site can't sign under 'auth message signature' towards a
+ * server the wallet itself signs in to (online storage, bMail).
+ *
+ * Not covered here: relaying a BRC-103 session itself to anyone else. evil.com can open a BRC-103 (AuthFetch) session with good.com's
  * server and ask the wallet to sign its messages; those frames name no site, and a signature under 'auth message
  * signature' verifies at any BRC-103 peer. Stopping that needs the peer's identity (the counterparty) tied to the
  * calling site, not a reading of the data.
  */
 
 import { bareHost, scanSignData } from './signDataScan';
+import { noteOwnBackendCall, ownBackendRefusal, ownBackendsReady } from './ownBackendKeys';
 
 // The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
 export { bareHost, boundHosts, normaliseKey } from './signDataScan';
@@ -150,6 +154,16 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
     const original = m[method];
     if (typeof original !== 'function') continue;
     m[method] = async (args: unknown, originator?: string) => {
+      if (!originator || originator === adminOriginator) {
+        // The wallet's own BRC-103 calls (bMail, Spaces doors) teach which servers are its own.
+        noteOwnBackendCall(args);
+      } else {
+        // No site signs in as the user to the wallet's own servers (follow-up review, 13 Nov 2026): wait for the
+        // remembered keys first, so a call right after a restart is checked against them too.
+        await ownBackendsReady();
+        const own = ownBackendRefusal(args);
+        if (own) throw new Error(own);
+      }
       if (originator !== adminOriginator) {
         const refusal = crossSiteSignRefusal(originator, args);
         if (refusal) throw new Error(refusal);
