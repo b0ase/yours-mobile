@@ -19,7 +19,8 @@
  *     ('input-spent-elsewhere'), and its change counts in the balance (+change sats on that device);
  *   - fix/sync-atomic-pull: a push that lands late (row times older than the other device's cursor beyond the
  *     15-minute overlap), then the tx is proven: the incremental pull merges the 'completed' tx with none of its
- *     outputs; only the 6-hourly tail pass / daily deep pull bring the change in (hours later).
+ *     outputs; only the 6-hourly tail pass / daily deep pull bring the change in (hours later). The harness runs
+ *     the app's post-pull step (pullIntegrity afterPull) on builds that have it (world.ts postPullStep).
  * Not reproduced (pass on 5.2.54, kept as regressions): a pull cut between the tx page and the outputs page resumes
  * from its checkpoint; a 1-sat BSV-21 token taken in as a 'bsv21' insertion is admitted on the other device.
  *   bun test src/incident/twoDeviceSim.test.ts
