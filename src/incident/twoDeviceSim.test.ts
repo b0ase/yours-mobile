@@ -386,7 +386,7 @@ describe('two devices, one seed: named cases', () => {
   // Re-review of 18c93dd9 (LOW, stuck money): the toolbox counts no attempts on a 'nosend' request, and the stuck-send
   // release needed 6, so a restored copy of a payment whose broadcast never landed stayed 'sending' for ever.
   sim(
-    '[fix/change-writeahead] the broadcast never lands and the device is lost before its next push: the restored copy is released a day later',
+    '[fix/change-writeahead] the broadcast never lands and the device is lost before its next push: the restored copy is released a week later',
     async () => {
       const w = await threeCoins();
       w.fault('broadcast', '500', 1); // the write-ahead lands; the broadcast does not
@@ -400,9 +400,12 @@ describe('two devices, one seed: named cases', () => {
       await w.sync('A');
       await w.sync('B');
       for (const d of ['A', 'B'] as const) expect((await w.statusOf(d, s.txid)).tx).toBe('sending');
-      // (Rows' created_at is on the real clock, which the harness does not move: the day's wait is unit-tested in
-      // stuckSends.test.ts.)
+      // A day later: not yet (its sending device, if alive, could still be sending it; its own 24 h rule acts first).
       w.advance(25 * 3_600_000);
+      for (const d of ['A', 'B'] as const) expect((await w.releaseStuck(d)).released).toEqual([]);
+      // A week later: released. (Rows' created_at is on the real clock, which the harness does not move, so the
+      // first 25 h of world-clock offset from the coins' settle count too; the exact boundary is in stuckSends.test.ts.)
+      w.advance(6 * 24 * 3_600_000);
       for (const d of ['A', 'B'] as const) {
         const r = await w.releaseStuck(d);
         expect(r.released.map((q) => q.txid)).toEqual([s.txid]);
@@ -423,7 +426,7 @@ describe('two devices, one seed: named cases', () => {
       await w.wipe('A');
       await w.sync('A');
       await w.sync('B');
-      w.advance(25 * 3_600_000);
+      w.advance(8 * 24 * 3_600_000);
       for (const d of ['A', 'B'] as const) {
         const r = await w.releaseStuck(d);
         expect(r.released).toEqual([]);

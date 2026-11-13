@@ -65,11 +65,11 @@
  * Monitor posts it, goes the same way (re-review). 'nosend' = "not this store's to send": no copy ever sends it, and
  * the toolbox's 'nosend' proof task (CheckNoSends) collects its proof once mined. That task counts no attempts on a
  * 'nosend' request, so it never gives one up: a copy of a payment the network never had is released by the stuck-send
- * release (stuckSends.ts) by age alone (24 h), only when the network has no copy (fails closed). 'unknown' (also never
- * sent) was not used: the toolbox reads a
- * payment's bytes from its request only in a known set of states (getRawTxForSlice / getProvenOrRawTx: 'unsent',
- * 'sending', 'nosend', 'unmined', 'completed'…, never 'unknown'), so no copy could read its change's scripts or build a
- * spend of it until mined; the sim shows the restored device refusing all its change.
+ * release (stuckSends.ts) by age alone, a week (NOSEND_COPY_GIVE_UP_MS: the sending device's own 24 h rule acts first
+ * while it is in use), only when the network has no copy (fails closed). 'unknown' (also never sent) was not used:
+ * the toolbox reads a payment's bytes from its request only in a known set of states (getRawTxForSlice /
+ * getProvenOrRawTx: 'unsent', 'sending', 'nosend', 'unmined', 'completed'…, never 'unknown'), so no copy could read
+ * its change's scripts or build a spend of it until mined; the sim shows the restored device refusing all its change.
  */
 import type { DeviceSyncResult } from './deviceSync';
 import { pushView, type InFlight } from './pushView';
