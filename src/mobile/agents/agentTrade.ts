@@ -23,6 +23,7 @@ import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { parseRoom, roomMarket, roomMeta, type Listing } from '../market/indexer';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { marketFeeOptions } from '../market/fee';
+import { checkedPurchaseContext } from '../p2p/checkedPurchase';
 
 export type AgentActionBlock = { kind: StrategyAction; token: string; usd: number; to?: string; amount?: number };
 
@@ -187,7 +188,19 @@ export const runAgentAction = async (
   } catch (e) {
     return { ok: false, text: e instanceof Error ? e.message : 'Listing check failed' };
   }
-  const res = await buyBsv21.execute(purchaseContext(ctx, outpoint), {
+  // The cap above was checked against pick.priceSats, so that is the only price the wallet may sign.
+  let checked: OneSatContext;
+  try {
+    checked = await checkedPurchaseContext(ctx, {
+      tokenId: a.token,
+      outpoint,
+      amount: BigInt(pick.amount ?? '0'),
+      priceSats: pick.priceSats,
+    });
+  } catch (e) {
+    return { ok: false, text: e instanceof Error ? e.message : 'Listing check failed' };
+  }
+  const res = await buyBsv21.execute(purchaseContext(checked, outpoint), {
     tokenId: a.token,
     outpoint,
     amount: pick.amount ?? '0',

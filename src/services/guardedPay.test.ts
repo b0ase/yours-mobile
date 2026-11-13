@@ -81,6 +81,19 @@ describe('server quotes and charges', () => {
     expect(signed).toBe(0);
     expect(await run(q(ours, 3000))).toBe(1);
   });
+  test('a theme quote whose outputs pay more (or less) than the sats on the sheet is refused', () => {
+    const q = (outSats: number, sheetSats: number) => ({
+      quote_id: 'q',
+      outputs: [{ script: p2pkhScript(ours), satoshis: outSats }],
+      memo_hex: '006a',
+      usd: 1,
+      sats: sheetSats,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(() => quoteShown(q(9000, 3000))).toThrow(/Nothing was paid/);
+    expect(() => quoteShown(q(2000, 3000))).toThrow(/Nothing was paid/);
+    expect(quoteShown(q(3000, 3000))).toEqual([{ address: ours, sats: 3000 }]);
+  });
   test("a room message charge may only pay the room's issuer, or burn", () => {
     expect(() => checkChargePayees([{ unit: 'sats', amount: '100', to: issuer }], issuer)).not.toThrow();
     expect(() => checkChargePayees([{ unit: 'token', tokenId: 't', amount: '1', to: 'burn' }], null)).not.toThrow();

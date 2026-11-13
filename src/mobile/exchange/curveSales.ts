@@ -87,6 +87,26 @@ export const listingPriceSats = (centsEach: number, pack: number, usdPerBsv: num
   centsEach > 0 && pack > 0 && usdPerBsv > 0 ? Math.max(1, Math.ceil(((centsEach * pack) / 100 / usdPerBsv) * 1e8)) : 0;
 
 /**
+ * How far a price in sats may sit from its US cents at this wallet's BSV rate: bit-sign's rate and WhatsOnChain's
+ * differ a little, and a listing keeps the sats it was priced at while BSV moves.
+ */
+export const PRICE_TOLERANCE = 0.1;
+
+/** The most sats `cents` may cost at `usdPerBsv`, tolerance included; 0 without a rate (pay nothing). */
+export const maxSatsForCents = (cents: number, usdPerBsv: number) =>
+  Math.floor(listingPriceSats(cents, 1, usdPerBsv) * (1 + PRICE_TOLERANCE));
+
+/**
+ * The curve sheet's headline price: the quote's cents when the picked listing's sats match them at this wallet's
+ * rate, else the listing's own price in cents (the listing's sats are what gets signed). Null without a rate.
+ */
+export const curveHeadlineCents = (quoteCents: number, listingSats: number, usdPerBsv: number): number | null => {
+  if (!(usdPerBsv > 0) || !(listingSats > 0)) return null;
+  const real = (listingSats / 1e8) * usdPerBsv * 100;
+  return quoteCents > 0 && Math.abs(real - quoteCents) <= quoteCents * PRICE_TOLERANCE ? quoteCents : real;
+};
+
+/**
  * What the seller's wallet should do now. `live` = the registered listings still unspent.
  *  - closed → cancel every live listing
  *  - open   → re-price everything when the holder count moved past what they were priced at
