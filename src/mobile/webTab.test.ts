@@ -730,7 +730,9 @@ describe('web wallet: one active tab', () => {
       expect(src).toContain(
         'IS_TAURI ? tauriLocalBackend(tauriInvoke) : webTab ? fencedBackend(nativeLocalBackend, webTab) : undefined',
       );
-      expect(src).toContain('freshLocalKeys: webTab ? isFreshWebKey : undefined');
+      // The key material is re-read on the web (a merge with fix/envelope-queue ORs its envelope predicate in here).
+      const hubCall = src.slice(src.indexOf('new Hub('), src.indexOf(');', src.indexOf('new Hub(')));
+      expect(hubCall).toMatch(/freshLocalKeys: webTab \? [^\n]*isFreshWebKey/);
       const between = src.slice(src.indexOf('new Hub('), src.indexOf('webTab?.onRelease('));
       expect(between).not.toMatch(/\bawait\b/);
     });
