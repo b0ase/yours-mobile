@@ -35,10 +35,9 @@ know about and issues listed under "Known and accepted" on the b-Aware page earn
 pool is spent, valid reports still get credit and are paid from the next quarter's pool, in order. Severity is ours to
 set, by impact on users' money and keys; we explain the reasoning in writing.
 
-Rewards are paid in BSV to an address you give us, within 30 days of the fix being live on every channel (including
-the App Store and Chrome Web Store) or 60 days after we confirm your report, whichever is first. We pay in one batch
-each month. Reports received before 25 October 2026 keep the earlier terms: 14 days from the fix shipping or 30 days
-from triage.
+Rewards are paid in BSV to an address you give us, within 14 days of the fix going live, or within 30 days of triage
+if the fix takes longer, whichever is sooner. These are the same terms as the b-Aware page. Where two published terms
+conflicted, the better one is honoured for everyone who reported while both were up.
 
 We pay people we can name, and we record every payout: who, which address, how much, and the transaction. Under
 1 BSV, a stable handle and a paymail or address is enough. For 1 BSV or more (every High and Critical), you need to
@@ -74,3 +73,10 @@ reasonable time to fix before you publish. We will not ask you to sign anything 
 
 Our responses to published advisories that touch BRC-100 wallets, the BSV TypeScript stack or our dependencies are
 listed, dated, on https://bwalletx.com/b-Aware#advisories.
+
+## Changes to this policy
+
+- 13 November 2026: payout terms aligned to the b-Aware page (`site/b-aware.html`): within 14 days of the fix going
+  live, or within 30 days of triage if the fix takes longer, whichever is sooner. This replaces "30 days after the fix
+  is live on every channel / 60 days after we confirm your report" and the monthly payment batch. The more favourable
+  term applies to every report made while both were published.
