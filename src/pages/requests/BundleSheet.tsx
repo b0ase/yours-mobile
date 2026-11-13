@@ -646,24 +646,32 @@ export const BundleSheet = (props: {
       </>
     );
   } else if (kind === 'signonce') {
-    // One signature other sites may accept as you (services/sharedKeySigning.ts): calm, one tap, said plainly.
-    hero = <SignInHero />;
-    siteSub = 'One signature';
-    title = <>Sign once as you for {gold(name)}</>;
+    // One signature other sites may accept as you (services/sharedKeySigning.ts). The careful card's plain red style
+    // without its scroll gate: still one tap ("Sign once"), with Not now and Block this site beside it. Nothing here
+    // says no money moves: a token like BitPlan's can deposit, start a checkout or spend credits (review of 1020b69c).
+    const onceProto = String(request.items[0]?.protocolID?.[1] ?? '');
+    const soft = (t: string) => <span style={{ color: CARD.redSoft }}>{t}</span>;
+    hero = null;
+    siteSub = 'One signature, check it';
+    title = <>Sign once as you for {soft(name)}</>;
     body = (
       <div className="flex flex-col" style={{ gap: 8, marginTop: 4 }} data-testid="sign-once">
         {signingAs && <span style={{ fontSize: 15 }}>as {signingAs}</span>}
         <div className="flex flex-wrap" style={{ gap: 8 }}>
-          <Chip>
+          {onceProto && (
+            <Chip tone="red">
+              <span data-testid="sign-once-protocol">&ldquo;{onceProto}&rdquo;</span>
+            </Chip>
+          )}
+          <Chip tone="red">
             <Check />
             Just this once
           </Chip>
-          <Chip>
-            <Check />
-            No money moves
-          </Chip>
         </div>
-        <div className="flex items-center gap-2" style={{ fontSize: 14, color: CARD.soft }}>
+        <div
+          className="flex items-center gap-2.5"
+          style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
+        >
           <Cross />
           Other sites could accept it as you. Only sign if you trust {name}.
         </div>
@@ -797,7 +805,7 @@ export const BundleSheet = (props: {
       onPointerDownCapture={freeze}
     >
       <ApprovalCard
-        tone={careful ? 'red' : 'gold'}
+        tone={careful || kind === 'signonce' ? 'red' : 'gold'}
         site={request.originator}
         siteSub={siteSub}
         onClose={() => void send('notNow')}
@@ -807,7 +815,7 @@ export const BundleSheet = (props: {
         title={title}
         primary={careful ? deny : allow}
         secondary={careful ? allow : deny}
-        tertiary={careful ? block : undefined}
+        tertiary={careful || kind === 'signonce' ? block : undefined}
         error={usbError || (mustRead ? 'Scroll to read every line before allowing' : '')}
       >
         {body}

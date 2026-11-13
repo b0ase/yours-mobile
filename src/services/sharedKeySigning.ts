@@ -13,11 +13,14 @@
  * key itself (the point 1·G) written out in any hex form. Every protocol call from a site is rewritten to the one
  * spelling 'anyone' first (canonicalCounterparty), so the manager, the sheet and this check all see what is signed.
  *
- * The rule, for a site's createSignature with counterparty 'anyone':
- *  - level 1: ALWAYS one approval per signature, whatever the name or keyID, except LEVEL1_ANYONE_OK. A level-1 grant
- *    can't be limited to a counterparty, so no stored grant (sheet, manifest, or from before this fix) may answer it.
- *  - level 2: one approval per signature when it looks like a token: a sign-in name (auth, login, sign in...),
- *    BRC-77 'message signing', or a time in the keyID. Our own one-tap sign-ins (ONE_TAP_SIGN_INS) keep their grant.
+ * The rule, for a site's createSignature:
+ *  - level 1, any counterparty but 'self': ALWAYS one approval per signature, whatever the name or keyID (consent
+ *    polish, 13 Nov 2026: a named counterparty too, so a standing level-1 grant only ever signs as 'self'). A level-1
+ *    grant can't be limited to a counterparty, so no stored grant (sheet, manifest, or from before this fix) may answer
+ *    it. The one exception, LEVEL1_ANYONE_OK, holds only for the hosts listed with it.
+ *  - level 2 with counterparty 'anyone': one approval per signature when it looks like a token: a sign-in name (auth,
+ *    login, sign in...), BRC-77 'message signing', or a time in the keyID. Our own one-tap sign-ins
+ *    (ONE_TAP_SIGN_INS) keep their grant.
  *  - level 0 signing is refused for sites already (reservedProtocols.ts).
  *
  * How: the request goes straight to the manager's prompt queue (enqueueAndFireEvent) under a key of its own
@@ -76,13 +79,22 @@ export const canonicalCounterparty = (method: string, cp: unknown): unknown => {
 const ONE_TAP_SIGN_INS = new Set(['2:bwallet sign in', '2:bads session', '2:auth message signature']);
 
 /**
- * Level-1 'anyone' signatures known to be safe to remember, by name. Found by reading what apps really sign
- * (13 Nov 2026): @1sat/actions signs level 1 only under 'sigma' with counterparty 'self' (not 'anyone') and under the
- * wallet-reserved 'message signing'; @bsv/sdk's level-1 names (kvstore, protomap, basketmap, certmap, identity...) are
- * not signed as 'anyone' by sites; bit-sign signs calendar records under 'bcal record' as 'anyone' (keyID = the event
- * id, data = the record itself), which no service takes as a sign-in. Anything not listed asks every time.
+ * Level-1 'anyone' signatures that may be remembered, by name, and only for the hosts listed (and their subdomains).
+ * Found by reading what apps really sign (13 Nov 2026): @1sat/actions signs level 1 only under 'sigma' with
+ * counterparty 'self' and under the wallet-reserved 'message signing'; @bsv/sdk's level-1 names (kvstore, protomap,
+ * basketmap, certmap, identity...) are not signed as 'anyone' by sites; bit-sign (bChatX) signs a scheduled Space's
+ * calendar record under 'bcal record' as 'anyone' (src/lib/bcal-anchor-client.ts, keyID = the event id), and bit-sign
+ * and bCalX treat that signature as the record's authority. So it is pinned to the hosts that publish those records
+ * (the bChat app: bchatx.com, chat.bwalletx.com, bit-sign.online; and bcalx.com): from any other site, a 'bcal record'
+ * signature asks every time (review of 1020b69c: otherwise any site could publish fake Spaces as the user).
  */
-const LEVEL1_ANYONE_OK = new Set(['bcal record']);
+const LEVEL1_ANYONE_OK = new Map<string, readonly string[]>([
+  ['bcal record', ['bchatx.com', 'chat.bwalletx.com', 'bit-sign.online', 'bcalx.com']],
+]);
+
+/** The host is one of `hosts` or a dot-boundary subdomain of one (never a parent, never a sibling). */
+const hostIn = (host: string | undefined, hosts: readonly string[]) =>
+  !!host && hosts.some((h) => host === h || host.endsWith(`.${h}`));
 
 const protoKey = (p: readonly [number, string]) => `${p[0]}:${p[1].trim().toLowerCase()}`;
 
@@ -92,10 +104,12 @@ export const isOneTapSignIn = (protocolID: unknown): boolean => {
   return !!p && ONE_TAP_SIGN_INS.has(protoKey(p));
 };
 
-/** A level-1 name whose 'anyone' signatures may be remembered (see LEVEL1_ANYONE_OK). */
-export const isLevel1AnyoneOk = (protocolID: unknown): boolean => {
+/** A level-1 name whose 'anyone' signatures this host may have remembered (see LEVEL1_ANYONE_OK). */
+export const isLevel1AnyoneOk = (protocolID: unknown, host: string | undefined): boolean => {
   const p = asProtocol(protocolID);
-  return !!p && p[0] === 1 && LEVEL1_ANYONE_OK.has(p[1].trim().toLowerCase());
+  if (!p || p[0] !== 1) return false;
+  const hosts = LEVEL1_ANYONE_OK.get(p[1].trim().toLowerCase());
+  return !!hosts && hostIn(host?.toLowerCase(), hosts);
 };
 
 /**
@@ -129,18 +143,21 @@ function asProtocol(p: unknown): [number, string] | null {
 
 /**
  * True for a site's createSignature that needs its own approval every time (the rule above). Reads the counterparty
- * the signature really uses: missing, 'anyone' and the written-out 'anyone' key all count as 'anyone'.
+ * the signature really uses: missing, 'anyone' and the written-out 'anyone' key all count as 'anyone'. `host` is the
+ * calling site's hostname (the manager's site key); without it no host-pinned exception applies.
  */
-export const isBearerSignature = (args: unknown): boolean => {
+export const isBearerSignature = (args: unknown, host?: string): boolean => {
   if (!args || typeof args !== 'object') return false;
   const a = args as SignArgs;
   const p = asProtocol(a.protocolID);
   if (!p || (p[0] !== 1 && p[0] !== 2)) return false;
-  if (canonicalCounterparty('createSignature', a.counterparty) !== 'anyone') return false;
+  const cp = canonicalCounterparty('createSignature', a.counterparty);
   const name = p[1].trim().toLowerCase();
   // A module's keys ("p <scheme>") are the asset modules' business (reservedProtocols.ts).
   if (name.startsWith('p ')) return false;
-  if (p[0] === 1) return !LEVEL1_ANYONE_OK.has(name);
+  // Level 1: every signature not made as 'self' (a level-1 grant covers every counterparty).
+  if (p[0] === 1) return cp !== 'self' && !(cp === 'anyone' && isLevel1AnyoneOk(p, host));
+  if (cp !== 'anyone') return false;
   if (ONE_TAP_SIGN_INS.has(protoKey(p))) return false;
   return SIGN_IN_NAME.test(name) || name === 'message signing' || isTimeKeyID(a.keyID);
 };
@@ -221,15 +238,20 @@ export function guardSharedKeySigning<T extends object>(manager: T, deps: { admi
   const sign = m.createSignature as Fn;
   let seq = 0;
   m.createSignature = async (args: unknown, originator?: string) => {
-    if (!outside(originator) || !isBearerSignature(args)) return sign.call(manager, args, originator);
+    if (!outside(originator)) return sign.call(manager, args, originator);
+    // The manager's own originator rules (no scheme, no IP, a DNS name) and its site key (hostname only), as every
+    // other request from this site is keyed. An originator it refuses goes on to the manager, which refuses it.
+    let site = '';
+    try {
+      site = m.prepareOriginator!.call(manager, originator as string).normalized;
+    } catch {
+      return sign.call(manager, args, originator);
+    }
+    if (!site || !isBearerSignature(args, site)) return sign.call(manager, args, originator);
     const a = args as SignArgs;
     const protocolID = asProtocol(a.protocolID) as [number, string];
     // Admin-only names still get the manager's own refusal.
     if (m.isAdminProtocol!.call(manager, protocolID)) return sign.call(manager, args, originator);
-    // The manager's own originator rules (no scheme, no IP, a DNS name) and its site key (hostname only), as every
-    // other request from this site is keyed; throws for an originator the manager would refuse.
-    const site = m.prepareOriginator!.call(manager, originator as string).normalized;
-    if (!site) throw new Error('Originator is required for permission checks.');
     const underlying = m.underlying;
     if (!underlying || typeof underlying.createSignature !== 'function')
       throw new Error('guardSharedKeySigning: permissions manager has no underlying wallet');
@@ -243,7 +265,7 @@ export function guardSharedKeySigning<T extends object>(manager: T, deps: { admi
         displayOriginator: originator,
         privileged: a.privileged === true,
         protocolID,
-        // Level 1 has no counterparty in a request (the manager's own convention); the sheet knows it is 'anyone'.
+        // Level 1 has no counterparty in a request (the manager's own convention).
         counterparty: protocolID[0] === 1 ? '' : 'anyone',
         usageType: 'signing',
         ...(typeof a.privilegedReason === 'string' ? { reason: a.privilegedReason } : {}),
@@ -253,8 +275,11 @@ export function guardSharedKeySigning<T extends object>(manager: T, deps: { admi
       key,
     );
     if (granted !== true) throw Object.assign(new Error(BEARER_SIGN_DENIED), { code: 'ERR_PERMISSION_DENIED' });
-    // Signed exactly as asked; 'anyone' spelled out so a missing counterparty can't mean anything else downstream.
-    return underlying.createSignature({ ...a, counterparty: 'anyone' }, originator);
+    // Signed exactly as asked, in the one spelling of its counterparty (a missing one is 'anyone', as the SDK signs it).
+    return underlying.createSignature(
+      { ...a, counterparty: canonicalCounterparty('createSignature', a.counterparty) },
+      originator,
+    );
   };
   return manager;
 }
@@ -275,16 +300,12 @@ type GrantStore = {
 };
 
 /**
- * Level-1 grants the migration keeps: the toolbox's own names that are not keys (labels, certificate lists, identity
- * lookups), and 'sigma', the first-post signature (signed as 'self'; an 'anyone' sigma signature asks every time).
- */
-const LEVEL1_KEEP =
-  /^(action label |certificate acquisition |certificate relinquishment |certificate list$|identity key retrieval$|identity resolution$|sigma$)/;
-
-/**
- * Whether a stored protocol grant could let a site make signatures anyone can check: every level-1 key grant (it
- * covers 'anyone'), except LEVEL1_KEEP and LEVEL1_ANYONE_OK, and every level-2 grant for 'anyone'
- * (any spelling) except our one-tap sign-ins. When unsure (no level, no name), yes.
+ * Whether the upgrade removes a stored protocol grant:
+ *  - level 1: only sign-in-shaped names (auth, login, sign in..., 'message signing'). Those were granted as a
+ *    pre-ticked "sign in". Other level-1 grants stay (consent polish, 13 Nov 2026): every level-1 signature not made
+ *    as 'self' now asks on its own whatever is stored, so they can't make a signature anyone can check.
+ *  - level 2: every grant for 'anyone' (any spelling) except our one-tap sign-ins.
+ *  - when unsure (no level, no name): removed.
  */
 export const isSharedKeyGrant = (key: {
   protocolLevel?: number;
@@ -293,7 +314,7 @@ export const isSharedKeyGrant = (key: {
 }): boolean => {
   const name = typeof key.protocolName === 'string' ? key.protocolName.trim().toLowerCase() : '';
   if (!name || (key.protocolLevel !== 1 && key.protocolLevel !== 2)) return true;
-  if (key.protocolLevel === 1) return !LEVEL1_KEEP.test(name) && !LEVEL1_ANYONE_OK.has(name);
+  if (key.protocolLevel === 1) return SIGN_IN_NAME.test(name) || name === 'message signing';
   return isAnyoneCounterparty(key.counterparty) && !ONE_TAP_SIGN_INS.has(`2:${name}`);
 };
 

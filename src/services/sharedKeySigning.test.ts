@@ -207,7 +207,8 @@ describe('isBearerSignature', () => {
   });
   test('not: other counterparties, our one-tap sign-ins, ordinary anyone signatures, module names, level 0', () => {
     expect(isBearerSignature(sig([1, 'bitcoin auth'], NOW_S, 'self'))).toBe(false);
-    expect(isBearerSignature(sig([1, 'bitcoin auth'], NOW_S, '02'.padEnd(66, 'a')))).toBe(false);
+    // Level 1 to a named counterparty: asks every time (consent polish), so a level-1 grant only signs as 'self'.
+    expect(isBearerSignature(sig([1, 'bitcoin auth'], NOW_S, '02'.padEnd(66, 'a')))).toBe(true);
     expect(isBearerSignature(sig([2, 'bwallet sign in'], NOW_S))).toBe(false);
     expect(isBearerSignature(sig([2, 'Auth Message Signature'], NOW_S))).toBe(false);
     expect(isBearerSignature(sig([2, 'bads session'], 'abcdef0123456789'))).toBe(false);
