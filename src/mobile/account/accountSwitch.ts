@@ -7,6 +7,8 @@ import { setChatAccount, setChatReceiveAddress } from '../chat/chatAccount';
 import { markAccountUsed } from './accountMenu';
 import { IS_EXTENSION } from '../extension';
 import { markBootStage } from '../bootWatchdog';
+import { SWITCH_LANDED_KEY } from '../phone/pageEl';
+import { loseAllGl } from '../ui/liveGl';
 import {
   CLOSE_FOR_RELOAD_ACTION,
   claimAccountSwitch,
@@ -25,9 +27,18 @@ export const closeAndReload = async (wallet: LegacyWallet | undefined) => {
     legacyClose: wallet?.close ? () => wallet.close?.() : undefined,
     closeBackground: IS_EXTENSION ? undefined : () => chrome.runtime.sendMessage({ action: CLOSE_FOR_RELOAD_ACTION }),
   });
+  releaseGraphics();
+  try {
+    sessionStorage.setItem(SWITCH_LANDED_KEY, '1'); // the reload opens on the Wallet, not Ask b (phone/pageEl.ts)
+  } catch {
+    /* storage unavailable: it opens on Ask b as before */
+  }
   markBootStage('switch: reloading');
   window.location.reload();
 };
+
+/** Drop the app's live WebGL contexts (ui/liveGl.ts) before the reload. */
+export const releaseGraphics = () => loseAllGl();
 
 /**
  * Account switching, shared by the account drawer (TopNav), the account strip above it and Settings.

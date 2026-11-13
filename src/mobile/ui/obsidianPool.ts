@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { liveGl } from './liveGl';
 
 /**
  * The obsidian pool (owner, 11-12 Oct 2026: "LOVE this obsidian pool"), on its own: the WebGL canvas behind Ask b
@@ -289,9 +290,11 @@ export const usePool = (
     // Always paint one frame at once, so the pool is never a black square (e.g. a tab opened in the background).
     draw(8);
     if (!still) raf = requestAnimationFrame(loop);
+    liveGl.add(gl);
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      liveGl.delete(gl);
       gl.getExtension('WEBGL_lose_context')?.loseContext();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- colours are compared by value
