@@ -373,6 +373,12 @@ export interface UnseenHealDeps {
   broadcast(beef: number[], txid: string): Promise<BroadcastOutcome>;
   submitOverlay(beef: number[], tokenId: string): Promise<void>;
   relinquish(outpoint: string): Promise<void>;
+  /**
+   * Does the chain know this transaction? Asked before relinquishing on a refused rebroadcast (fix 7, 13 Nov 2026): a
+   * transaction already mined is refused as "missing inputs" too (it spent them itself), so a chainBeef lookup that
+   * merely failed would otherwise remove valid token coins for good. Only 'unknown' lets them go.
+   */
+  txOnChain?(txid: string): Promise<'known' | 'unknown' | 'unclear'>;
   log?(msg: string): void;
 }
 
@@ -458,6 +464,14 @@ export async function healUnseenTokenOutputs(
         }
         if (!sent.inputsSpent) {
           report.errors.push(`${txid.slice(0, 8)} broadcast: ${sent.error}`);
+          continue;
+        }
+        // Never on a refusal alone: the chain must say it has never seen the transaction (fix 7).
+        const seen = deps.txOnChain ? await deps.txOnChain(txid).catch(() => 'unclear' as const) : 'unclear';
+        if (seen !== 'unknown') {
+          report.errors.push(
+            `${txid.slice(0, 8)} broadcast refused (${sent.error}); kept, the chain ${seen === 'known' ? 'has it' : "couldn't say"}`,
+          );
           continue;
         }
         for (const o of outsOfTx) {

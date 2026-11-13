@@ -7,6 +7,7 @@ import { bsv21FieldsFromOutput, ensurePlaintextCi, internalizeBeef } from '@1sat
 import type { OneSatServices } from '@1sat/wallet-browser';
 import { Beef, KeyDeriver, PrivateKey, PublicKey, Script, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import { buildKeySearchSetup, invoicePrefixFor, searchMsKeyIDs } from './tokenKeySearch';
+import { oneSatChainLookups } from './chainSources';
 import {
   normOutpoint,
   recoverTokenOutputs,
@@ -592,6 +593,8 @@ export const runUnseenHeal = async (
       async relinquish(outpoint) {
         await wallet.relinquishOutput({ basket: BSV21_BASKET, output: outpoint });
       },
+      // A refused rebroadcast relinquishes only what the chain has never seen (fix 7); no lookup: nothing goes.
+      txOnChain: oneSatChainLookups(services)?.txKnown,
       log: (m) => console.log(`[tokenUnseenHeal] ${m}`),
     },
     opts,

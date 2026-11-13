@@ -189,6 +189,13 @@ export type InboundVerifier = {
    * status and outputs, each checked. 'wait': not mined yet, or no answer. Absent: the status alone becomes 'unproven'.
    */
   recover?(txid: string): Promise<'restored' | 'done' | 'wait'>;
+  /**
+   * The token overlay's word on one BSV-21 coin "txid.vout" (fix 7, 13 Nov 2026), asked only once the chain has called
+   * the coin unspent. Read through tokenOverlayVerdict: only 'spent' holds the coin back, and it is asked again later.
+   * Any other answer, an error, an overlay that isn't funded or can't be reached, never holds a coin: spendability is
+   * the chain's to decide, and a token's validity is checked when it is sent. Absent: the chain alone decides.
+   */
+  tokenState?(tokenId: string, outpoint: string): Promise<unknown>;
   /** A merge put something on the admission list: run admitPending soon (initWallet schedules it). */
   onQueued?: () => void;
   /** A pass from the start we started paused (a slice used up, or a heal left it): pull again soon (initWallet). */
@@ -676,8 +683,13 @@ export async function verifyInboundChunk(
       if (time(o.updated_at) <= time(filed.updated_at)) {
         // Only a row carrying the backup's own time (an admission given up on). A row the device lowered itself
         // (heal, already-off, orphan, hold) is newer and keeps its own both-lookups undo as the only way back (R1).
+        // Equal times with a different spendable come from a merge that lowered the row on arrival (rule 3: StorageIdb
+        // stamps every local write with its own time). Fix 7, 13 Nov 2026: the extension held the 1-sat BSV-21 coin
+        // 2a5d3e03:0 not spendable at the phone's exact time while the phone held it spendable, and no later pull
+        // asked the chain again. So in every pass (not only one from the start), a row in a basket seen again at the
+        // same time goes back on the admission list: the chain decides, the same way on every device.
         if (
-          opts.requeueHeld &&
+          (opts.requeueHeld || filed.basketId != null) &&
           time(o.updated_at) === time(filed.updated_at) &&
           o.spendable === true &&
           filed.spendable !== true &&
@@ -982,6 +994,7 @@ export type AdmitStore = Omit<DeviceStore, 'getSettings'> & {
   transaction<T>(scope: (trx: Trx) => Promise<T>): Promise<T>;
   updateOutput(id: number, update: Record<string, unknown>, trx?: Trx): Promise<unknown>;
   updateTransaction(id: number, update: Record<string, unknown>, trx?: Trx): Promise<unknown>;
+  findOutputBaskets?(a: { partial: Record<string, unknown> }): Promise<{ basketId?: number; name?: string }[]>;
 };
 
 export type AdmitReport = {
@@ -1285,14 +1298,20 @@ async function admitOnce(
     out.lockingScript.toHex().toLowerCase() === script &&
     (typeof row.satoshis !== 'number' || out.satoshis === row.satoshis);
 
+  /** A coin entry dropped, its row left not spendable: why, in the log (fix 7: the extension's 2a5d3e03:0 left no trace). */
+  const refuse = (e: PendingAdmission, why: string) => {
+    v.log?.(`[inbound-sync] ${e.txid}.${e.vout ?? 0} not admitted: ${why}`);
+    return finish(e, 'refused');
+  };
   const settleCoin = async (e: PendingAdmission) => {
     const vout = e.vout ?? 0;
     const row = await coinRow(e);
-    if (row === 'many') return finish(e, 'refused');
+    if (row === 'many') return refuse(e, 'more than one row for the outpoint');
     // Not there (yet): its page may still be merging (D3). Asked again shortly.
     if (!row || typeof row.outputId !== 'number') return wait(e, 'local', undefined, 'row');
     if (row.spendable === true) return finish(e, 'refused');
-    if (row.basketId == null) return finish(e, 'refused'); // in no basket: a quarantined row, or not the wallet's coin
+    // In no basket: a quarantined row, or not the wallet's coin.
+    if (row.basketId == null) return refuse(e, 'in no basket');
     // An output of a transaction this device holds as failed: WhatsOnChain's 404 is no proof (F4). It waits as long as
     // that transaction is queued to be settled.
     if ((await txStatus(row.transactionId)) === 'failed') return wait(e, txQueued.has(e.txid) ? 'chain' : 'local');
@@ -1300,29 +1319,41 @@ async function admitOnce(
     const spender = row.spentBy != null ? await txStatus(row.spentBy) : undefined;
     if (spender !== undefined && IN_FLIGHT.has(spender)) return wait(e, 'local');
     const script = hex(row.lockingScript);
-    if (!script || (await admissibleRow(v, row, script)) === 'refuse') return finish(e, 'refused'); // C1, D4
+    if (!script) return refuse(e, 'no locking script');
+    if ((await admissibleRow(v, row, script)) === 'refuse')
+      return refuse(e, "its record or key doesn't match its script"); // C1, D4
     // What the output really locks and holds (D5): the device's raw transaction, else the chain's. Never the row's word.
     const local = await deviceTx(e.txid);
-    if (local === null || (local && !sameOutput(local.outputs[vout], row, script))) return finish(e, 'refused');
+    if (local === null) return refuse(e, "the stored transaction doesn't hash to its txid");
+    if (local && !sameOutput(local.outputs[vout], row, script))
+      return refuse(e, 'the row differs from its transaction');
     const st = await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' }));
     if (st.state === 'unclear') {
       report.deferred = true;
       return wait(e, 'chain');
     }
     if (st.state === 'spent') {
-      if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return finish(e, 'refused');
+      if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return refuse(e, 'the chain says spent');
       return wait({ ...e, spentAt: e.spentAt ?? now }, 'chain', (e.spentAt ?? now) + SPENT_RECHECK_MS);
     }
     if (!local) {
       const c = await chainTx(e.txid);
       if (c.state === 'unclear') report.deferred = true;
       if (c.state !== 'found') return wait(e, 'chain');
-      if (!sameOutput(parseRawTx(c.rawTx, e.txid)?.outputs[vout], row, script)) return finish(e, 'refused');
+      if (!sameOutput(parseRawTx(c.rawTx, e.txid)?.outputs[vout], row, script))
+        return refuse(e, "the chain's transaction differs from the row");
     } else {
       // WhatsOnChain answers /spent with 404 for an outpoint it has never seen (F4b): unspent only for a known one.
       const k = await known(e.txid);
       if (k === 'unclear') report.deferred = true;
       if (k !== 'known') return wait(e, 'chain');
+    }
+    // A BSV-21 coin the chain calls unspent: the token overlay is asked last (fix 7). Only its 'spent' holds the coin
+    // back, asked again later (never given up on); an error, 'unknown', 'queued' or an unfunded overlay never does.
+    const token = tokenFacts(script, e.txid, vout);
+    if (token?.kind === 'bsv21' && token.id && v.tokenState) {
+      const said = await v.tokenState(token.id, `${e.txid}.${vout}`).catch(() => undefined);
+      if (tokenOverlayVerdict(said) === 'spent') return wait(e, 'chain');
     }
     const ok = await store.transaction(async (trx) => {
       const [cur] = await store.findOutputs({ partial: { userId, outputId: row.outputId }, trx });
@@ -1353,6 +1384,77 @@ async function admitOnce(
       `[inbound-sync] admitted ${report.admitted} coin(s), settled ${report.applied} transaction(s), gave up on ${report.retired}`,
     );
   return count();
+}
+
+// ── token coins held not spendable: asked of the chain again (fix 7, 13 Nov 2026) ──
+
+/**
+ * What the token overlay's answer about one coin means for its spendability. The overlay
+ * (POST /bsv21/:tokenId/outputs/status) answers valid, spent, queued or unknown; a lookup can also fail, time out, or
+ * find the token's overlay not funded ("not-active"). Only 'spent' is a verdict against the coin. 'valid' and 'queued'
+ * are for it. Everything else (unknown: never submitted, or not indexed yet; an error; an unfunded or unreachable
+ * overlay; a missing answer) is no verdict at all, and never holds a coin back or takes one away.
+ */
+export function tokenOverlayVerdict(state: unknown): 'spent' | 'valid' | 'unclear' {
+  const s = typeof state === 'string' ? state.toLowerCase() : '';
+  if (s === 'spent') return 'spent';
+  if (s === 'valid' || s === 'queued') return 'valid';
+  return 'unclear';
+}
+
+/** The wallet's token basket (@1sat/types BSV21_BASKET). */
+export const TOKEN_BASKETS = ['bsv21'];
+/** Transactions whose outputs can be on the chain now: a coin of any other is left to its own transaction's checks. */
+const SETTLED_TX = new Set(['completed', 'unproven']);
+
+/**
+ * Token coins this device holds as not spendable with no spend recorded, in a token basket, of a transaction that is
+ * completed or unproven, go on the admission list (fix 7). The extension held the 1-sat BSV-21 coin 2a5d3e03:0 (unspent,
+ * paid to the account's primary address) not spendable while the phone held the same row spendable: the row arrived
+ * through the backup merge at the phone's time (most likely: equal times can only come from a merge), lowered on
+ * arrival (rule 3), and its admission entry was gone, so no later pull asked the chain again. admitPending then decides every one exactly as it decides a backup's coin: the
+ * row must match its raw transaction and pass the record checks, the chain must know its transaction and call it
+ * unspent (WhatsOnChain, then the 1Sat stack), and the token overlay must not call it spent. A coin the chain calls
+ * spent stays not spendable; one it can't answer for waits. Lowering still travels by sync (rule 2), raising never
+ * does: each device asks the chain itself, so both arrive at the chain's answer.
+ *
+ * A coin linked to a spending transaction (spentBy) is never touched here: the toolbox frees it if that payment fails.
+ * Entries already on the list keep their back-off. Returns how many coins were listed (new or already waiting).
+ */
+export async function requeueHeldTokenCoins(
+  store: AdmitStore,
+  identityKey: string,
+  opts: { baskets?: string[]; now?: () => number; limit?: number } = {},
+): Promise<number> {
+  const user = (await store.findUsers({ partial: { identityKey } }))[0];
+  if (!user || typeof store.findOutputBaskets !== 'function') return 0;
+  const userId = user.userId;
+  const limit = opts.limit ?? 200;
+  const statusOf = new Map<number, string | undefined>();
+  const held: Admission[] = [];
+  for (const name of opts.baskets ?? TOKEN_BASKETS) {
+    const basket = (await store.findOutputBaskets({ partial: { userId, name } }))[0];
+    if (typeof basket?.basketId !== 'number') continue;
+    const rows = await store.findOutputs({ partial: { userId, basketId: basket.basketId, spendable: false } });
+    for (const r of rows) {
+      if (held.length >= limit) break;
+      if (r.spendable === true || r.spentBy != null || typeof r.transactionId !== 'number') continue;
+      if (!statusOf.has(r.transactionId))
+        statusOf.set(
+          r.transactionId,
+          (await store.findTransactions({ partial: { userId, transactionId: r.transactionId }, noRawTx: true }))[0]
+            ?.status,
+        );
+      const t = statusOf.get(r.transactionId);
+      if (!t || !SETTLED_TX.has(t)) continue;
+      const txid = r.txid ?? undefined;
+      if (!txid) continue;
+      held.push({ kind: 'coin', txid, vout: r.vout });
+    }
+  }
+  if (!held.length) return 0;
+  await admissionListFor(store.getSettings().storageIdentityKey).add(identityKey, held, opts.now?.() ?? Date.now());
+  return held.length;
 }
 
 // ── the wallet's own keys ──
