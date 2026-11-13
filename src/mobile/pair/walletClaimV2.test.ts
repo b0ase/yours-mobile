@@ -216,6 +216,55 @@ describe('v1 sessions upgrade through the site (review 13 Nov 2026)', () => {
     expect(re.searchParams.get('nc')).toBe(claimDigestSync(session));
   });
 
+  test('a channel re-created from a v1 pairing (QR binding): an older claim is refused, the QR claim binds the session claim', async () => {
+    const c = 'WCVUPDDDDDDDDDDDDDDDDD';
+    const { p, S, k, hello } = await scan(c, false);
+    p.confirm();
+    await settle();
+    // A session from before QR-bound claims: its stored claim is a random one.
+    const old = 'randomoldclaimrandomol';
+    mem.set(
+      'bwallet.pair.sessions',
+      JSON.stringify(
+        (JSON.parse(mem.get('bwallet.pair.sessions')!) as { c: string }[]).map((x) =>
+          x.c === c ? { ...x, claim: old } : x,
+        ),
+      ),
+    );
+    const session = sessionWalletClaim(S, hello.k, c);
+    const tried: (string | null)[] = [];
+    sock(c).close();
+    for (let i = 0; i < 3; i++) {
+      sessions.onPairVisibility();
+      await settle();
+      tried.push(new URL(sock(c).url).searchParams.get('claim'));
+      if (i < 2) sock(c).close(); // refused: the relay holds the QR binding only
+    }
+    expect(tried).toEqual([old, session, walletClaimFor(c, k)]);
+    sock(c).deliver({ t: 'relay', verifiedOrigin: HOST, wcv: 2 });
+    await settle();
+    expect(stored(c)).toMatchObject({ claim: session, wcv: 2 });
+  });
+
+  test('a v2 session refused on its session claim tries the QR claim next, and keeps the session claim stored', async () => {
+    const c = 'WCVUPEEEEEEEEEEEEEEEEE';
+    const { p, k, hello, S } = await scan(c, true);
+    p.confirm();
+    await settle();
+    const session = sessionWalletClaim(S, hello.k, c);
+    sock(c).close();
+    sessions.onPairVisibility();
+    await settle();
+    expect(new URL(sock(c).url).searchParams.get('claim')).toBe(session);
+    sock(c).close();
+    sessions.onPairVisibility();
+    await settle();
+    expect(new URL(sock(c).url).searchParams.get('claim')).toBe(walletClaimFor(c, k));
+    sock(c).deliver({ t: 'relay', verifiedOrigin: HOST });
+    await settle();
+    expect(stored(c)).toMatchObject({ claim: session, wcv: 2 });
+  });
+
   test('an older relay on resume (no wcv): the session stays v1 on its claim', async () => {
     const c = 'WCVUPCCCCCCCCCCCCCCCCC';
     const { p, k } = await scan(c, false);

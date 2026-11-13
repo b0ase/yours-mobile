@@ -408,8 +408,8 @@ type Live = {
   relayed?: boolean;
 };
 const live = new Map<string, Live>();
-/** v1 sessions whose next connect sends the session claim as the claim (connect explains why). Memory only. */
-const upgradeWithSession = new Set<string>();
+/** Per channel: which of its candidate claims the next connect brings (connect explains why). Memory only. */
+const claimTry = new Map<string, number>();
 
 /**
  * `ready` with `wcv: 2` and the session claim's digest: the site (if it is new enough) stores that the pairing is v2
@@ -550,6 +550,7 @@ function attach(l: Live) {
       if (v && v !== stored.origin) return forget(stored.c, false); // the channel changed hands: refuse
       if (v && !l.relayed) {
         l.relayed = true;
+        claimTry.delete(stored.c);
         if (l.upgrade && l.session) onUpgradeAnswer(l, l.session, rf.wcv === 2);
       }
       // The site's tab came back (iOS kills its socket while the user is in bWallet, e.g. after a return-to-site):
@@ -590,12 +591,9 @@ function attach(l: Live) {
   ws.onclose = () => {
     if (live.get(stored.c) !== l) return;
     live.delete(stored.c);
-    // Refused before the relay said anything: it may have bound our session claim on an earlier connect whose answer
-    // never arrived, so the next try uses the other claim (connect).
-    if (l.upgrade && !l.relayed) {
-      if (upgradeWithSession.has(stored.c)) upgradeWithSession.delete(stored.c);
-      else upgradeWithSession.add(stored.c);
-    }
+    // Refused before the relay said anything: the relay may hold another of our claims now, so the next try brings
+    // the next one (connect).
+    if (!l.relayed) claimTry.set(stored.c, (claimTry.get(stored.c) ?? 0) + 1);
     // Still paired: try again (the relay holds frames for 60 s while we're away).
     if (load().some((s) => s.c === stored.c) && document.visibilityState === 'visible')
       l.retry = setTimeout(() => connect(stored.c), 3000);
@@ -609,7 +607,6 @@ function attach(l: Live) {
  */
 function onUpgradeAnswer(l: Live, session: string, bound: boolean) {
   const c = l.stored.c;
-  upgradeWithSession.delete(c);
   l.upgrade = false;
   if (bound) {
     l.stored = { ...l.stored, claim: session, wcv: 2 };
@@ -641,16 +638,19 @@ function connect(c: string) {
       const held = stored.claim ?? newClaim();
       if (!stored.claim) update(c, { claim: held });
       // v2: also send the session claim's digest, so a channel the relay re-created stays bound to this phone.
-      // v1 (review 13 Nov 2026): send it too (the relay binds it only on a channel nobody bound, e.g. re-created). The
-      // site re-binds the role to it after our `ready` (readyFor), and the relay then refuses the old claim, so after a
-      // refusal the next connect tries the session claim; the relay's wcv 2 then makes it the stored claim.
+      // v1 (review 13 Nov 2026): send it too (the relay binds it on a channel re-created with the QR binding while that
+      // QR is live, or one nobody bound). The site re-binds the role to it after our `ready` (readyFor).
+      // The relay may hold a different claim of ours than the stored one: the session claim once the site re-bound it,
+      // or the QR claim on a channel a site re-created from a v1 pairing. After a refusal the next connect brings the
+      // next candidate; for a v1 session the relay's wcv 2 then makes the session claim the stored one.
       const session =
         stored.wcv === 2 ? held : sessionWalletClaim(PrivateKey.fromHex(stored.phoneKey), stored.sitePub, c);
-      const claim = stored.wcv !== 2 && upgradeWithSession.has(c) ? session : held;
+      const candidates = [...new Set([held, session, walletClaimFor(c, stored.sitePub)])];
+      const claim = candidates[(claimTry.get(c) ?? 0) % candidates.length];
       attach({
         ws: new WebSocket(relaySocketUrl(stored.r, stored.c, 'wallet', undefined, claim, claimDigestSync(session))),
         sealer,
-        stored: { ...stored, claim },
+        stored: stored.wcv === 2 ? stored : { ...stored, claim },
         resumed: true,
         session,
         upgrade: stored.wcv !== 2,
@@ -674,7 +674,7 @@ export function forget(c: string, notify = true) {
     else done();
   }
   replies.forget(c);
-  upgradeWithSession.delete(c);
+  claimTry.delete(c);
   save(load().filter((s) => s.c !== c));
   if (stored) void flushRevocations([keyOf(stored)]);
 }

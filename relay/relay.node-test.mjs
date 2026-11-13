@@ -403,6 +403,30 @@ test('a site claim pinned after the channel opened holds the site role but canno
   await done();
 });
 
+test('a channel re-created by a v1 pairing with the QR-bound wc: a channel-ID-only attacker is refused; the phone binds', async () => {
+  for (const legacyUntil of [0, Date.now() + 60_000]) {
+    // Fresh relay (deploy, lost state, idle sweep): the site reopens its v1 pairing with its claim and the QR digest.
+    const { base, done } = await boot({ legacyUntil });
+    const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+    // Knows the channel ID only: no claim, or its own claim and nc.
+    const tries = [`nc=${digest(SESS2)}`, `claim=strangerstrangerstrang&nc=${digest(SESS2)}`];
+    if (!legacyUntil) for (const q of tries) await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&${q}`), /403/, q);
+    else {
+      // Inside the compatibility window it gets in, unbound, and is evicted by the phone.
+      const squat = await open(`${base}/v1/c/${C}?role=wallet&${tries[1]}`);
+      await until(() => squat.inbox.length);
+      assert.equal(squat.inbox[0].wcv, undefined);
+    }
+    const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS)}`);
+    await until(() => phone.inbox.length);
+    assert.deepEqual(phone.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol', wcv: 2 });
+    await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=strangerstrangerstrang`), /403/);
+    phone.ws.close();
+    site.ws.close();
+    await done();
+  }
+});
+
 // Relay restarts (review 13 Nov 2026): paired channels come back from the state file.
 const stateDir = mkdtempSync(join(tmpdir(), 'relay-state-'));
 const statePath = (name) => join(stateDir, `${name}.json`);
