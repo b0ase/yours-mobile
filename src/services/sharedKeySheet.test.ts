@@ -52,23 +52,43 @@ const once = (id = 'once:evil.example:1,bitcoin auth:x.1') =>
   req(id, { protocolID: [1, 'bitcoin auth'], usageType: 'signing', oneUse: true });
 
 describe('keys every app shares are never pre-ticked', () => {
-  test("level-1 'bitcoin auth' (standing): pre-ticked again, but never a sign-in, in plain words", () => {
-    // Consent polish (13 Nov 2026): every level-1 signature not made as 'self' asks on its own at signing time, so a
-    // standing level-1 grant can't make a token. The line is an ordinary key use: ticked, CONNECT card.
-    const s = sheet(bitcoinAuth);
-    expect(isSharedKeyRequest(bitcoinAuth)).toBe(false);
-    expect(s.line.checked).toBe(true);
-    expect(s.line.risky).toBe(false);
-    expect(s.line.signIn).toBe(false); // was true before ae664e79
-    expect(s.kind).toBe('connect'); // was 'signin' before ae664e79
-    expect(s.line.text).toBe(`Sign with your "bitcoin auth" keys for ${SITE}`);
-    expect(oneTap(s)[bitcoinAuth.requestID]).toBe(true);
+  test("a level-1 sign-in name ('bitcoin auth', 'acme login'): unticked, never a sign-in, plain words", () => {
+    // Review of fc614295: the same rule as the upgrade's revocation (sharedKeySigning.ts isSignInShapedName).
+    for (const name of ['bitcoin auth', 'acme login', 'message signing']) {
+      const r = req(`proto:${name}`, { protocolID: [1, name], usageType: 'signing' });
+      const s = sheet(r);
+      expect(isSharedKeyRequest(r)).toBe(true);
+      expect(s.line.checked).toBe(false); // pre-ticked in fc614295
+      expect(s.line.risky).toBe(false);
+      expect(s.line.signIn).toBe(false);
+      expect(s.kind).toBe('connect');
+      expect(s.line.text).toBe(`Sign with your "${name}" keys for ${SITE}`);
+      expect(oneTap(s)[r.requestID]).toBe(false);
+    }
   });
 
-  test('unticking it, then Allow, leaves it out', () => {
+  test('ticking it, then Allow, grants it', () => {
     const s = sheet(bitcoinAuth);
-    const d = sheetAnswer(s.model, 'allow', { [bitcoinAuth.requestID]: false }, true, sheetView(s.model, false));
-    expect(d.decisions[bitcoinAuth.requestID]).toBe(false);
+    const d = sheetAnswer(s.model, 'allow', { [bitcoinAuth.requestID]: true }, true, sheetView(s.model, false));
+    expect(d.decisions[bitcoinAuth.requestID]).toBe(true);
+  });
+
+  test('any other level-1 key: pre-ticked (its signatures and HMACs for anyone but self ask on their own)', () => {
+    const r = req('proto:acme api', { protocolID: [1, 'acme api'], usageType: 'signing' });
+    const s = sheet(r);
+    expect(isSharedKeyRequest(r)).toBe(false);
+    expect(s.line.checked).toBe(true);
+    expect(s.kind).toBe('connect');
+    expect(oneTap(s)[r.requestID]).toBe(true);
+  });
+
+  test('a one-use HMAC alone on its sheet says "one code", not a signature', () => {
+    const r = req('once:evil.example:1,acme api:x.1', { protocolID: [1, 'acme api'], usageType: 'hmac', oneUse: true });
+    const s = sheet(r);
+    expect(s.kind).toBe('signonce');
+    expect(s.line.text).toBe(
+      `Make one code as you for ${SITE} ("acme api"). The service it is for could accept it as you`,
+    );
   });
 
   test("level-2 'anyone' outside our sign-ins: unticked, in any spelling of 'anyone'", () => {

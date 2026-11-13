@@ -216,7 +216,9 @@ export const BundleSheet = (props: {
               ? `Allow & pay ${payLabel}`
               : 'Allow posting'
             : kind === 'signonce'
-              ? 'Sign once'
+              ? request.items[0]?.usageType === 'hmac'
+                ? 'Allow once'
+                : 'Sign once'
               : kind === 'private'
                 ? 'Allow'
                 : kind === 'signin'
@@ -650,10 +652,12 @@ export const BundleSheet = (props: {
     // without its scroll gate: still one tap ("Sign once"), with Not now and Block this site beside it. Nothing here
     // says no money moves: a token like BitPlan's can deposit, start a checkout or spend credits (review of 1020b69c).
     const onceProto = String(request.items[0]?.protocolID?.[1] ?? '');
+    // A level-1 HMAC for a named service (services/sharedKeySigning.ts isOneUseHmac): a code, not a signature.
+    const onceCode = request.items[0]?.usageType === 'hmac';
     const soft = (t: string) => <span style={{ color: CARD.redSoft }}>{t}</span>;
     hero = null;
     siteSub = 'One signature, check it';
-    title = <>Sign once as you for {soft(name)}</>;
+    title = onceCode ? <>One code as you for {soft(name)}</> : <>Sign once as you for {soft(name)}</>;
     body = (
       <div className="flex flex-col" style={{ gap: 8, marginTop: 4 }} data-testid="sign-once">
         {signingAs && <span style={{ fontSize: 15 }}>as {signingAs}</span>}

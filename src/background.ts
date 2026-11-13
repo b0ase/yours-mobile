@@ -22,6 +22,7 @@ import { siteThemeFor } from './mobile/theme/connectTheme';
 import {
   isBasketRead,
   ManifestOnce,
+  ONCE_DENIALS_KEY,
   OnceDenials,
   SessionBasketDenials,
   SESSION_DENIALS_KEY,
@@ -1427,11 +1428,20 @@ const basketDenials = new SessionBasketDenials({
 const manifestOnce = new ManifestOnce();
 // A "Not now" to a one-signature request stands for that site for 10 minutes (services/sessionDenials.ts OnceDenials):
 // a site can't wear the user down with SIGN ONCE sheets one after another.
-const onceDenials = new OnceDenials();
+const onceDenials = new OnceDenials({
+  load: async () => {
+    const got = await chrome.storage.session.get(ONCE_DENIALS_KEY);
+    const v = (got as Record<string, unknown>)[ONCE_DENIALS_KEY];
+    return Array.isArray(v) ? (v as [string, number][]) : [];
+  },
+  save: async (entries) => {
+    await chrome.storage.session.set({ [ONCE_DENIALS_KEY]: entries });
+  },
+});
 /** A one-signature request the user refused (services/sharedKeySigning.ts): remember it for the site. */
 const noteOnceDenial = (r: { requestID?: string; originator?: string }) => {
   if (r.originator && r.originator !== ADMIN_ORIGINATOR && isOneUseRequestID(r.requestID))
-    onceDenials.note(normalizeOriginator(r.originator));
+    void onceDenials.note(normalizeOriginator(r.originator));
 };
 /** A basket read the user refused: remember it for the session. */
 const noteBasketDenial = (r: { type?: string; basket?: unknown; usageType?: unknown; originator?: string }) => {
@@ -2263,13 +2273,13 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   const deniedThisSession =
     request.originator && request.originator !== ADMIN_ORIGINATOR && isBasketRead(request)
       ? basketDenials.has(normalizeOriginator(request.originator), request.basket)
-      : // A one-signature request from a site whose last one the user refused minutes ago: no new sheet.
-        Promise.resolve(
-          !!request.originator &&
-            request.originator !== ADMIN_ORIGINATOR &&
-            isOneUseRequestID(request.requestID) &&
-            onceDenials.active(normalizeOriginator(request.originator)),
-        );
+      : // A one-signature request from a site whose last one the user refused minutes ago, or past the per-minute cap
+        // of one-signature sheets: no new sheet (services/sessionDenials.ts OnceDenials).
+        request.originator && request.originator !== ADMIN_ORIGINATOR && isOneUseRequestID(request.requestID)
+        ? onceDenials
+            .active(normalizeOriginator(request.originator))
+            .then((refused) => refused || !onceDenials.allowSheet())
+        : Promise.resolve(false);
   return Promise.all([siteBlocked(request.originator), siteTrustedFor(request), deniedThisSession]).then(
     ([blocked, trusted, denied]) =>
       new Promise<void>((resolve, reject) => {
@@ -3920,7 +3930,7 @@ if (!(
         }
         case 'PERMISSIONS_LIST_ALL':
           // The user opened Permissions in the wallet: a refused SIGN ONCE may ask again (sessionDenials.ts).
-          if (isFromExtension) onceDenials.clear();
+          if (isFromExtension) void onceDenials.clear();
           processPermissionsListAll(sendResponse);
           return true;
         case 'PERMISSIONS_QUERY_SPENT':
