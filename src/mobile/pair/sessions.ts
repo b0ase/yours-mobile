@@ -90,6 +90,8 @@ let agentDeps: {
   feeRate?: () => number;
   /** How many accounts the wallet holds; decides whether pre-binding sessions are adopted (see bindToAccount). */
   accountCount?: number;
+  /** Identity addresses of every account in the wallet: another account's pairings are parked, not dropped (isDormant). */
+  accountIds?: string[];
   /** The open account's Twetch signing key store (twetch/twetchLink.ts), for twetch.* calls. */
   twetch?: TwetchStore;
 } = {
@@ -359,28 +361,66 @@ const peek = (c: string): StoredSession | undefined => {
   }
 };
 
-const load = (): StoredSession[] => {
+/**
+ * A pairing made by another account that is still in this wallet (owner, 13 Nov 2026: switching to the main account and
+ * back wiped the agent account's CLI pairing, and the CLI got no answer). It is parked: kept in storage, but no socket,
+ * no calls, not listed and not mirrored to the background, because calls run on the open account. Switching back to
+ * its account revives it. Only a pairing whose account is gone from the wallet is dropped (bindToAccount).
+ */
+const isDormant = (s: StoredSession) =>
+  !!agentDeps.currentId &&
+  !!s.account &&
+  s.account !== agentDeps.currentId &&
+  !!agentDeps.accountIds?.includes(s.account);
+
+/** Close a parked pairing's socket without telling the site anything: it is still paired, just not answering here. */
+const park = (c: string) => {
+  const l = live.get(c);
+  if (!l) return;
+  if (l.retry) clearTimeout(l.retry);
+  live.delete(c);
+  l.ws.onclose = null;
+  l.ws.onmessage = null;
+  try {
+    l.ws.close();
+  } catch {
+    /* already gone */
+  }
+};
+
+/** The open account's sessions (`kept`) and other accounts' parked ones (`dormant`); drops the rest. */
+const loadSplit = (): { kept: StoredSession[]; dormant: StoredSession[] } => {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
-    if (!Array.isArray(raw)) return [];
+    if (!Array.isArray(raw)) return { kept: [], dormant: [] };
     const now = Date.now();
     const trusted = new Set(dropUntrustedRelays(raw));
     const current = raw.filter((s) => trusted.has(s) && isCurrent(s, now));
     const kept = bindToAccount(current, agentDeps.currentId, agentDeps.accountCount);
-    const adopted = kept.some((s, i) => s !== current[i]);
-    if (kept.length !== raw.length || adopted) {
-      localStorage.setItem(KEY, JSON.stringify(kept));
-      mirrorSessions(kept);
-      const keptChannels = new Set(kept.map((s) => s.c));
+    const dormant = current.filter(isDormant);
+    const persisted = [...kept, ...dormant];
+    const adopted = kept.some((s) => !current.includes(s));
+    if (persisted.length !== raw.length || adopted) {
+      localStorage.setItem(KEY, JSON.stringify(persisted));
+      const keptChannels = new Set(persisted.map((s) => s.c));
       dropLapsed(
         raw.filter((s) => !keptChannels.has(s.c)),
-        kept,
+        persisted,
       );
     }
-    return kept;
+    // Before the open account is known `kept` is every session; mirror only once it is.
+    if (agentDeps.currentId) mirrorSessions(kept);
+    for (const s of dormant) park(s.c);
+    return { kept, dormant };
   } catch {
-    return [];
+    return { kept: [], dormant: [] };
   }
+};
+const load = (): StoredSession[] => loadSplit().kept;
+/** Every stored session, parked ones included: what save() must write back so a change never drops them. */
+const loadAll = (): StoredSession[] => {
+  const { kept, dormant } = loadSplit();
+  return [...kept, ...dormant];
 };
 const save = (all: StoredSession[]) => {
   try {
@@ -388,7 +428,7 @@ const save = (all: StoredSession[]) => {
   } catch {
     /* storage blocked: sessions last until the app closes */
   }
-  mirrorSessions(all);
+  mirrorSessions(all.filter((s) => !isDormant(s)));
   emit();
 };
 export const pairedSites = () => load();
@@ -421,7 +461,7 @@ const readyFor = (l: Live): PairMessage =>
   l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session) } : { t: 'ready' };
 
 const update = (c: string, patch: Partial<StoredSession>) =>
-  save(load().map((s) => (s.c === c ? { ...s, ...patch } : s)));
+  save(loadAll().map((s) => (s.c === c ? { ...s, ...patch } : s)));
 
 /** Answered / in-flight / unsent replies per channel (memory only). See replies.ts. */
 const replies = new ReplyBook();
@@ -564,6 +604,8 @@ function attach(l: Live) {
     // The pairing lapsed while its socket stayed open: answer the call with REPAIR_NEEDED (never run it), then let
     // load() drop the session, which revokes its grants and sends the close frame.
     const own = peek(stored.c);
+    // Another account is open now: this pairing is parked (isDormant), so nothing runs on the wrong account.
+    if (own && isDormant(own)) return park(stored.c);
     if (!own || !isCurrent(own)) {
       if (msg.t === 'req')
         await send(
@@ -675,7 +717,7 @@ export function forget(c: string, notify = true) {
   }
   replies.forget(c);
   claimTry.delete(c);
-  save(load().filter((s) => s.c !== c));
+  save(loadAll().filter((s) => s.c !== c));
   if (stored) void flushRevocations([keyOf(stored)]);
 }
 
@@ -843,7 +885,7 @@ function connectPairing(
             ...(v2 ? { claim: sessionClaim, wcv: 2 as const } : { claim }),
             ...(proven && { proven: true }),
           };
-          save([...load().filter((s) => s.c !== link.c), stored]);
+          save([...loadAll().filter((s) => s.c !== link.c), stored]);
           const l: Live = { ws, sealer: sealer!, stored, relayed: true, session: sessionClaim };
           attach(l);
           void reply(l, readyFor(l));
