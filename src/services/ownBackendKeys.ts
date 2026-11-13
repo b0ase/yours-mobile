@@ -82,6 +82,121 @@ const configuredServer = (
   return [{ key: null, pending: waiting && !isFirstPartyHost(url) }];
 };
 
+// ---- saved store keys (follow-up, 13 Nov 2026) ----
+// Each account's verified store keys live under their own chrome.storage key, never inside `accounts`: a
+// read-merge-write of `accounts` could overlap a storage switch and revert it (activeRemote).
+const STORE_KEYS_PREFIX = 'bwx.ownServerKeys.';
+type ChromeLocal = {
+  get: (k: string) => Promise<Record<string, unknown>>;
+  set: (v: Record<string, unknown>) => Promise<void>;
+};
+const chromeLocal = (): ChromeLocal | null => {
+  try {
+    const l = (globalThis as { chrome?: { storage?: { local?: ChromeLocal } } }).chrome?.storage?.local;
+    return l && typeof l.get === 'function' && typeof l.set === 'function' ? l : null;
+  } catch {
+    return null;
+  }
+};
+const storeKeyCache = new Map<string, Record<string, string>>();
+let storeKeyWrites: Promise<unknown> = Promise.resolve();
+const cleanKeys = (v: unknown): Record<string, string> => {
+  const out: Record<string, string> = {};
+  if (v && typeof v === 'object')
+    for (const [o, k] of Object.entries(v as Record<string, unknown>)) {
+      const key = validKey(k);
+      if (key && originOf(o) === o) out[o] = key;
+    }
+  return out;
+};
+
+/** Read an account's saved store keys into memory (the checks are synchronous). */
+export const loadOwnServerKeys = async (accountId: string): Promise<void> => {
+  const l = chromeLocal();
+  if (!l || !accountId) return;
+  try {
+    const k = STORE_KEYS_PREFIX + accountId;
+    const v = cleanKeys((await l.get(k))?.[k]);
+    storeKeyCache.set(accountId, { ...v, ...(storeKeyCache.get(accountId) ?? {}) });
+  } catch {
+    /* unreadable: nothing saved */
+  }
+};
+export const savedOwnServerKeys = (accountId: string | undefined): Record<string, string> =>
+  (accountId && storeKeyCache.get(accountId)) || {};
+
+/** Save a store key the wallet's own client verified. Writes only this account's own key, one write at a time. */
+export const saveOwnServerKey = (accountId: string | undefined, origin: string, key: string) => {
+  const k = validKey(key);
+  if (!accountId || !k || originOf(origin) !== origin) return;
+  const mem = storeKeyCache.get(accountId) ?? {};
+  if (mem[origin] === k) return;
+  storeKeyCache.set(accountId, { ...mem, [origin]: k });
+  const l = chromeLocal();
+  if (!l) return;
+  const storeKey = STORE_KEYS_PREFIX + accountId;
+  storeKeyWrites = storeKeyWrites
+    .then(async () => {
+      const cur = cleanKeys((await l.get(storeKey))?.[storeKey]);
+      if (cur[origin] !== k) await l.set({ [storeKey]: { ...cur, [origin]: k } });
+    })
+    .catch(() => {});
+};
+/**
+ * Load an account's saved store keys, moving any that one 5.2.56 candidate wrote into `storageConfig.serverKeys` to
+ * the account's own key and dropping that field (`removeLegacy`; only when the field is there).
+ */
+export const migrateServerKeys = async (
+  accountId: string | undefined,
+  legacy: unknown,
+  removeLegacy: () => Promise<unknown>,
+): Promise<void> => {
+  if (!accountId) return;
+  await loadOwnServerKeys(accountId);
+  if (!legacy || typeof legacy !== 'object') return;
+  for (const [origin, key] of Object.entries(cleanKeys(legacy))) saveOwnServerKey(accountId, origin, key);
+  try {
+    await storeKeyWrites;
+    await removeLegacy();
+  } catch {
+    /* tried again next start */
+  }
+};
+
+/** Tests: wait for queued saves. */
+export const _ownServerKeyWrites = () => storeKeyWrites;
+
+type StorageClientLike = { endpointUrl?: string; authClient?: unknown; makeAvailable?: (...a: unknown[]) => unknown };
+const WATCHED = Symbol.for('bwx.ownServerKeys.watch');
+/**
+ * Save each remote store's key as soon as the wallet's own StorageClient connects (makeAvailable runs its BRC-103
+ * handshake), not only when a site's sign-in is checked. `accountId` names the account the wallet is open on.
+ */
+export const watchStoreConnections = (
+  StorageClientClass: { prototype: object },
+  accountId: () => string | undefined,
+) => {
+  const proto = StorageClientClass.prototype as StorageClientLike & { [WATCHED]?: boolean };
+  if (proto[WATCHED] || typeof proto.makeAvailable !== 'function') return;
+  const original = proto.makeAvailable;
+  proto.makeAvailable = async function (this: StorageClientLike, ...a: unknown[]) {
+    const r = await original.apply(this, a);
+    try {
+      const url = this.endpointUrl;
+      const origin = url ? originOf(url) : null;
+      const key = validKey(peerKeyOf(this.authClient, url));
+      if (origin && key) {
+        verified.set(origin, key);
+        saveOwnServerKey(accountId(), origin, key);
+      }
+    } catch {
+      /* never in the way of the connection */
+    }
+    return r;
+  };
+  proto[WATCHED] = true;
+};
+
 /**
  * The storage stores a WalletStorageManager has in use: each remote store's server key once its StorageClient has
  * connected (AuthFetch verified it), or the key saved when it first did (`saved`, origin -> key, kept in the account's
@@ -242,5 +357,6 @@ export const clearLearnedOwnBackends = () => {
 export const _resetOwnBackends = () => {
   sources.clear();
   verified.clear();
+  storeKeyCache.clear();
   trackedSince.clear();
 };

@@ -240,8 +240,10 @@ const authorityHost = (s: string, from: number, lenient: boolean, idx?: Authorit
     end = idx.hard[at];
     // Read through soft ends while what follows each is userinfo: one word at most before the '@' ("evil.com @good",
     // "evil.com x@good"), no new field, and not an opening bracket or quote. "good.com contact bob@x.com" and
-    // "good.com (bob@x.com)" end at the first space (polish, 13 Nov 2026: they named x.com). Admitted gaps: a
-    // userinfo shaped like a field ("evil.com Foo: bar@good"), two words or a bracket ("evil.com (@good").
+    // "good.com (bob@x.com)" end at the first space (polish, 13 Nov 2026: they named x.com). Admitted gaps, where a
+    // parser would read good.com and this reads evil.com: userinfo shaped like a field ("evil.com Foo: bar@good",
+    // "x=@good"), two or more words ("evil.com foo bar@good"), or one starting with a quote or bracket
+    // ("evil.com \"@good", "'@", "[@", "{@", "(@", "(x)@good").
     // At most 64 steps per value (keeps crafted chains linear); past that the whole run is read as userinfo.
     for (let soft = idx.soft[at], steps = 0; soft < end && steps < 64; soft = idx.soft[soft + 1], steps++) {
       const nextAt = idx.nextAt[soft];
