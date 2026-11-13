@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { resolve } from 'path';
 import { brandDefines, extensionBrandPlugins } from './vite.brand';
+import { MOBILE_DEFINES } from './vite.config.mobile';
 
 // Background service worker config - ES module format
 export default defineConfig({
@@ -47,5 +48,10 @@ export default defineConfig({
   define: {
     'process.env': {},
     ...brandDefines(),
+    // The Store/paymail API base (pay.bwallet.space): utils/exchangeRate.ts is in the background's import graph (its
+    // fetch is tree-shaken out today), so if the background ever asks for the price it asks the shared per-minute one
+    // (GET /api/price) first, like the pages. Only the API base: __PAYMAIL_DOMAIN__ stays undefined here,
+    // so paymailEnabled() is still false in the background and no paymail flow changes.
+    __PAYMAIL_API__: MOBILE_DEFINES.__PAYMAIL_API__,
   },
 });

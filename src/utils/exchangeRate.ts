@@ -14,8 +14,16 @@
  * belongs to a wall-clock minute (rateBucket): every device drops it at the same moment, and the wallet screens ask again
  * RATE_FETCH_OFFSET_MS into each minute (startAlignedRateRefresh), so they read the same WhatsOnChain tick (it moves every
  * ~20 s). The balance is turned into cents by one function on every build (utils/balanceUsd.ts).
+ *
+ * One shared price per minute (owner, 13 Nov 2026): reading WhatsOnChain at the same moment still let two devices land
+ * on either side of a WoC tick. So the wallet first asks our own server (pay.bwallet.space GET /api/price?m=<minute>,
+ * site/lib/sharedPrice.js), keyed by this window's wall-clock minute: the first request for a minute fixes its value
+ * and every device asking for that minute gets the identical number. If the server fails, answers out of line with the
+ * last known price, or says its own value is stale, the wallet asks WhatsOnChain directly as before. The source used
+ * is kept with the price (`source: 'shared' | 'woc'`).
  */
 import { WOC_MAINNET_URL } from '@1sat/actions';
+import { BWALLET_PAYMAIL_API } from '../mobile/names/config';
 
 export const RATE_TTL_MS = 60_000;
 export const BACKOFF_START_MS = 2 * 60_000;
@@ -24,8 +32,20 @@ export const STORAGE_KEY = 'bwx.exchangeRate.v1';
 /** Into each minute, the moment the wallet screens ask for the price (every device the same moment). */
 export const RATE_FETCH_OFFSET_MS = 2_000;
 
-/** `timestamp`: when this device fetched it. `sourceTime`: WhatsOnChain's own time for the price (ms), when it said. */
-export type RateEntry = { rate: number; timestamp: number; sourceTime?: number };
+/**
+ * `timestamp`: when this device fetched it. `sourceTime`: WhatsOnChain's own time for the price (ms), when it said.
+ * `source`: 'shared' = our per-minute endpoint, 'woc' = WhatsOnChain asked directly (absent on prices stored before).
+ */
+export type RateEntry = { rate: number; timestamp: number; sourceTime?: number; source?: 'shared' | 'woc' };
+/** How long the shared endpoint gets before the wallet asks WhatsOnChain itself. */
+export const SHARED_TIMEOUT_MS = 4_000;
+/**
+ * A shared price is only taken while it is within this band of a last known price younger than SHARED_BAND_MAX_AGE_MS;
+ * outside it the wallet asks WhatsOnChain directly. The price turns USD amounts into sats for some payments, so one
+ * wrong number from our server (a bug, a bad deploy) must not become what the wallet pays with.
+ */
+export const SHARED_BAND = { low: 0.8, high: 1.25 };
+export const SHARED_BAND_MAX_AGE_MS = 24 * 60 * 60_000;
 
 /** The wall-clock window a price belongs to: RATE_TTL_MS long, starting RATE_FETCH_OFFSET_MS into each minute. */
 export const rateBucket = (ms: number): number => Math.floor((ms - RATE_FETCH_OFFSET_MS) / RATE_TTL_MS);
@@ -34,10 +54,16 @@ export const msToNextRateBucket = (now: number): number =>
   (rateBucket(now) + 1) * RATE_TTL_MS + RATE_FETCH_OFFSET_MS - now;
 const fresh = (c: RateEntry | null, now: number): boolean => !!c && rateBucket(c.timestamp) === rateBucket(now);
 
+/** The shared price URL for the window `now` is in: keyed by that window's wall-clock minute start (ISO). */
+export const sharedPriceUrl = (base: string, now: number): string =>
+  `${base.replace(/\/$/, '')}/api/price?m=${encodeURIComponent(new Date(rateBucket(now) * RATE_TTL_MS).toISOString())}`;
+
 type Deps = {
   fetch: typeof fetch;
   now: () => number;
   storage: Pick<Storage, 'getItem' | 'setItem'> | null;
+  /** Base URL of the shared price endpoint (the Store/paymail API, pay.bwallet.space); '' = ask WhatsOnChain only. */
+  sharedBase: string;
 };
 
 const defaultStorage = (): Deps['storage'] => {
@@ -52,6 +78,7 @@ let deps: Deps = {
   fetch: (...a) => fetch(...a),
   now: () => Date.now(),
   storage: defaultStorage(),
+  sharedBase: BWALLET_PAYMAIL_API,
 };
 
 let cache: RateEntry | null = null;
@@ -118,7 +145,53 @@ export const exchangeRateAgeMs = (now = deps.now()): number | null => {
   return c ? Math.max(0, now - (c.sourceTime ?? c.timestamp)) : null;
 };
 
-/** USD per BSV. Never throws; returns the last known rate (or 0) when WhatsOnChain cannot be asked or fails. */
+type Reading = { rate: number; sourceTime?: number };
+
+const toRate = (v: unknown): number => {
+  const rate = Number(Number(v).toFixed(2));
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error('bad rate');
+  return rate;
+};
+
+/** The shared per-minute price, or null (no endpoint, failure, timeout, out of band). `stale`: the server said so. */
+async function askShared(now: number): Promise<(Reading & { stale: boolean }) | null> {
+  if (!deps.sharedBase) return null;
+  const ctl = typeof AbortController === 'undefined' ? null : new AbortController();
+  const timer = ctl ? setTimeout(() => ctl.abort(), SHARED_TIMEOUT_MS) : undefined;
+  try {
+    const res = await deps.fetch(sharedPriceUrl(deps.sharedBase, now), ctl ? { signal: ctl.signal } : undefined);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { bsvUsd?: unknown; sourceTime?: unknown; stale?: unknown } | null;
+    const rate = toRate(body?.bsvUsd);
+    const ref = cache;
+    if (ref && now - ref.timestamp < SHARED_BAND_MAX_AGE_MS) {
+      const ratio = rate / ref.rate;
+      if (!(ratio >= SHARED_BAND.low && ratio <= SHARED_BAND.high)) return null;
+    }
+    const t = Number(body?.sourceTime);
+    return { rate, ...(Number.isFinite(t) && t > 0 ? { sourceTime: t } : {}), stale: body?.stale === true };
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function askWoc(wocApiKey?: string): Promise<Reading> {
+  const headers: Record<string, string> = {};
+  if (wocApiKey) headers['woc-api-key'] = wocApiKey;
+  const res = await deps.fetch(`${WOC_MAINNET_URL}/exchangerate`, { headers });
+  if (!res.ok) throw new Error(`exchangerate ${res.status}`);
+  const body = (await res.json()) as { rate?: unknown; time?: unknown } | null;
+  const rate = toRate(body?.rate);
+  const t = Number(body?.time);
+  return { rate, ...(Number.isFinite(t) && t > 0 ? { sourceTime: t * 1000 } : {}) };
+}
+
+/**
+ * USD per BSV. Never throws; returns the last known rate (or 0) when no price can be had. Asks the shared per-minute
+ * endpoint first, WhatsOnChain directly when that fails (or only has a stale value, which is used if WoC fails too).
+ */
 export function fetchExchangeRate(_chain?: string, wocApiKey?: string): Promise<number> {
   const c = load();
   const now = deps.now();
@@ -126,17 +199,21 @@ export function fetchExchangeRate(_chain?: string, wocApiKey?: string): Promise<
   if (inFlight) return inFlight;
   if (now < retryAt) return Promise.resolve(c?.rate ?? 0);
 
-  const headers: Record<string, string> = {};
-  if (wocApiKey) headers['woc-api-key'] = wocApiKey;
   inFlight = (async () => {
     try {
-      const res = await deps.fetch(`${WOC_MAINNET_URL}/exchangerate`, { headers });
-      if (!res.ok) throw new Error(`exchangerate ${res.status}`);
-      const body = (await res.json()) as { rate?: unknown; time?: unknown } | null;
-      const rate = Number(Number(body?.rate).toFixed(2));
-      if (!Number.isFinite(rate) || rate <= 0) throw new Error('bad rate');
-      const t = Number(body?.time);
-      save({ rate, timestamp: deps.now(), ...(Number.isFinite(t) && t > 0 ? { sourceTime: t * 1000 } : {}) });
+      const shared = await askShared(now);
+      let got: Reading & { source: 'shared' | 'woc' };
+      if (shared && !shared.stale) got = { ...shared, source: 'shared' };
+      else {
+        try {
+          got = { ...(await askWoc(wocApiKey)), source: 'woc' };
+        } catch (e) {
+          if (!shared) throw e;
+          got = { ...shared, source: 'shared' };
+        }
+      }
+      const { rate, sourceTime, source } = got;
+      save({ rate, timestamp: deps.now(), ...(sourceTime ? { sourceTime } : {}), source });
       failures = 0;
       retryAt = 0;
       return rate;
