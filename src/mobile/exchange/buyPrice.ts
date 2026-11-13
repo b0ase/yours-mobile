@@ -55,3 +55,34 @@ export const forSaleFirst = <T>(rows: readonly T[], state: (r: T) => SaleState):
     .map((r, i) => ({ r, i, k: RANK[state(r)] }))
     .sort((a, b) => a.k - b.k || a.i - b.i)
     .map((x) => x.r);
+
+/**
+ * The board's card order, kept stable (owner, 13 Nov 2026: "flickery/flashy... not stable"). `seen` is every id
+ * the board has placed so far, in place order. A card never moves once placed: ids that arrive later (the
+ * ranking filling in, more tokens) go after the ones already placed, and an id that drops out keeps its place
+ * for when it comes back. `reset` (first paint, or the user changed a filter / search) places `next` afresh,
+ * for sale first by what is already known at that moment, and nothing moves after that as prices load.
+ */
+export const stableOrder = (
+  seen: readonly string[] | null,
+  next: readonly string[],
+  reset: boolean,
+  state: (id: string) => SaleState,
+): string[] => {
+  if (!seen || reset) return forSaleFirst(next, state);
+  const placed = new Set(seen);
+  const added = next.filter((id) => !placed.has(id));
+  return added.length ? [...seen, ...added] : (seen as string[]);
+};
+
+/** The ids to show, in `seen` order, limited to the ones in the current list. */
+export const shownOrder = (seen: readonly string[], next: readonly string[]): string[] => {
+  const present = new Set(next);
+  return seen.filter((id) => present.has(id));
+};
+
+/** Same listings (by outpoint, price and buyability)? Used to skip re-rendering a card on a background refresh. */
+export const sameListings = (a: readonly Listing[] | undefined, b: readonly Listing[]): boolean =>
+  !!a &&
+  a.length === b.length &&
+  a.every((l, i) => l.outpoint === b[i].outpoint && l.priceSats === b[i].priceSats && l.buyable === b[i].buyable);

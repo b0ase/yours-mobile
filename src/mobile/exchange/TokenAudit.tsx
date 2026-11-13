@@ -98,13 +98,16 @@ export const TokenAudit = ({
     };
   }, [tokenId]);
 
-  if (f === undefined)
+  // A fixed-height placeholder while loading, and a line (not nothing) when the chain can't be read, so the
+  // Details panel doesn't jump or collapse to empty.
+  if (f === undefined || f === null)
     return (
-      <p className="text-xs m-0" style={{ color: MUTED }}>
-        Checking the chain…
-      </p>
+      <section className={`${CARD} min-h-[120px] justify-center`} aria-label="Token facts">
+        <p className="text-xs m-0" style={{ color: MUTED }}>
+          {f === undefined ? 'Checking the chain…' : "Couldn't read this token's details right now."}
+        </p>
+      </section>
     );
-  if (f === null) return null;
   const d = derive(f);
   const score = fairScore(f, d);
   const proven = badges(f, d);

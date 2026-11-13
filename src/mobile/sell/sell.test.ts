@@ -37,6 +37,9 @@ import {
   usd,
   perTokenSats,
   validateSell,
+  normDec,
+  qtyInputOk,
+  qtyPlaceholder,
   type ListingRecord,
 } from './sell';
 
@@ -66,6 +69,50 @@ describe('amounts', () => {
     expect(totalPriceSats(1n, 0, 0)).toBe(0);
     expect(totalPriceSats(0n, 0, 10)).toBe(0);
     expect(unitPrice(1500, 150n, 2)).toBe(1000);
+  });
+
+  test('fractional sells (owner, 13 Nov 2026: $BLASTER, dec 8, less than one token held)', () => {
+    const held = 50_000_000n; // 0.5 $BLASTER
+    const qty = toRaw('0.25', 8);
+    expect(qty).toBe(25_000_000n);
+    // 15,000 sats per whole token (its market, Nov 2026): 0.25 token asks 3,750 sats.
+    const total = totalPriceSats(qty!, 8, 15_000);
+    expect(total).toBe(3_750);
+    expect(validateSell(qty, held, total, 15_000)).toBeNull();
+    // Down to one base unit: 0.00000001 token at 15,000 sats/token rounds up to 1 sat, which is allowed.
+    const one = toRaw('0.00000001', 8);
+    expect(one).toBe(1n);
+    expect(validateSell(one, held, totalPriceSats(one!, 8, 15_000), 15_000)).toBeNull();
+    // More than you hold is refused.
+    expect(validateSell(toRaw('0.6', 8), held, 9_000, 15_000)).toBe('over-balance');
+    // A total under 1 sat is refused, with its own error.
+    expect(totalPriceSats(1n, 8, 0.0001)).toBe(0);
+    expect(validateSell(1n, held, 0, 0.0001)).toBe('total');
+    expect(validateSell(1n, held, 0, 0)).toBe('price');
+    // The field takes up to 8 decimals, and suggests your whole (sub-one) balance.
+    expect(qtyInputOk('0.12345678', 8)).toBe(true);
+    expect(qtyInputOk('0.123456789', 8)).toBe(false);
+    expect(qtyPlaceholder(held, 8)).toBe('0.5');
+    expect(qtyPlaceholder(300_000_000n, 8)).toBe('1');
+  });
+
+  test('dec 0 tokens stay whole-only', () => {
+    expect(toRaw('0.5', 0)).toBeNull();
+    expect(toRaw('2', 0)).toBe(2n);
+    expect(qtyInputOk('1.', 0)).toBe(false);
+    expect(qtyInputOk('12', 0)).toBe(true);
+    expect(qtyPlaceholder(3n, 0)).toBe('1');
+  });
+
+  test('normDec: string or junk decimals never break the maths', () => {
+    expect(normDec('8')).toBe(8);
+    expect(normDec(8)).toBe(8);
+    expect(normDec(undefined)).toBe(0);
+    expect(normDec('x')).toBe(0);
+    expect(normDec(-2)).toBe(0);
+    expect(normDec(40)).toBe(18);
+    // What a string dec did before: fromRaw padded to "8" + 1 = 81 places.
+    expect(fromRaw(50_000_000n, normDec('8'))).toBe('0.5');
   });
 
   test('validate', () => {

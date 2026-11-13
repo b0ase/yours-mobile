@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { roomMarket, type HotRoom, type Listing } from '../market/indexer';
@@ -6,7 +6,17 @@ import { RISK_LINE } from '../feed/reels/bexCards';
 import { TokenIcon } from './TokenIcon';
 import { tradeRoute } from './exchangeData';
 import { buyRoute } from './rowActions';
-import { bestBuyable, buyPriceLabel, compactCount, forSaleFirst, listingTokens, saleState } from './buyPrice';
+import {
+  bestBuyable,
+  buyPriceLabel,
+  compactCount,
+  listingTokens,
+  sameListings,
+  saleState,
+  shownOrder,
+  stableOrder,
+  type SaleState,
+} from './buyPrice';
 import { SCORE_RULES, type FairScore } from './boardFacts';
 import { marketTradingEnabled } from '../storeBuild';
 
@@ -114,6 +124,47 @@ export const ScoreSheet = ({
 
 const TRADING = marketTradingEnabled();
 
+/**
+ * Last known listings per token, kept for the app session: a card coming back on screen (back from a token page,
+ * another tab) shows its last price straight away and refreshes quietly, never "Checking price…" again.
+ */
+const knownListings = new Map<string, Listing[]>();
+
+/** How long the board waits for the ranking to finish before placing cards anyway (it never reshuffles after). */
+const SETTLE_MS = 5000;
+
+/** Every card is this tall in every state, so nothing below moves as prices load. */
+const CARD_H = 'h-[72px]';
+/** The button slot: Buy, View and the loading block all take exactly this footprint. */
+const SLOT = 'shrink-0 w-[76px] h-[44px] rounded-xl text-sm font-extrabold';
+
+const CardShell = ({ children, label }: { children: ReactNode; label?: string }) => (
+  <article
+    role="listitem"
+    aria-label={label}
+    className={`relative ${CARD_H} rounded-2xl px-3.5 flex items-center gap-3 min-w-0`}
+    style={{ background: 'var(--bw-surface)', border: `1px solid ${LINE}` }}
+  >
+    {children}
+  </article>
+);
+
+const Bar = ({ w }: { w: string }) => (
+  <span className="block h-[12px] rounded" style={{ width: w, background: 'rgba(255,255,255,0.06)' }} />
+);
+
+/** A card-shaped placeholder (no animation) while the board waits for the ranking. */
+const SkeletonCard = () => (
+  <CardShell>
+    <span className="shrink-0 w-[44px] h-[44px] rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }} />
+    <span className="flex flex-col gap-2 flex-1 min-w-0">
+      <Bar w="45%" />
+      <Bar w="30%" />
+    </span>
+    <span className={SLOT} style={{ background: 'rgba(255,255,255,0.04)' }} aria-hidden />
+  </CardShell>
+);
+
 /** One token: icon, $NAME, the price to buy now, and Buy. Tapping anywhere else opens the token's page. */
 const TokenCard = ({
   r,
@@ -135,24 +186,19 @@ const TokenCard = ({
   const price = best ? buyPriceLabel(best.priceSats, rate) : null;
   const canBuy = !!best && TRADING;
   return (
-    <article
-      role="listitem"
-      aria-label={`$${name}${price ? `, ${price} to buy` : listings ? ', not for sale' : ''}`}
-      className="relative rounded-2xl px-3.5 py-3 flex items-center gap-3 min-w-0 transition-colors"
-      style={{ background: 'var(--bw-surface)', border: `1px solid ${LINE}` }}
-    >
+    <CardShell label={`$${name}${price ? `, ${price} to buy` : listings ? ', not for sale' : ''}`}>
       <button
         type="button"
         onClick={() => onOpen(r)}
         aria-label={`Open $${name}`}
         className="absolute inset-0 rounded-2xl bg-transparent border-0 cursor-pointer hover:bg-white/[0.02]"
       />
-      <span className="pointer-events-none shrink-0">
+      <span className="pointer-events-none shrink-0 w-[44px] h-[44px]">
         <TokenIcon icon={r.icon} sym={r.title} size={44} />
       </span>
       <span className="flex flex-col min-w-0 flex-1 pointer-events-none">
-        <span className="text-base font-extrabold text-white truncate">${name}</span>
-        <span className="text-xs truncate" style={{ color: MUTED }} data-testid="buy-price">
+        <span className="text-base leading-6 font-extrabold text-white truncate">${name}</span>
+        <span className="text-xs leading-[18px] h-[18px] truncate" style={{ color: MUTED }} data-testid="buy-price">
           {!listings ? (
             'Checking price…'
           ) : price ? (
@@ -170,25 +216,25 @@ const TokenCard = ({
           type="button"
           onClick={() => onBuy(r)}
           aria-label={`Buy $${name}${price ? ` from ${price}` : ''}`}
-          className="relative z-10 shrink-0 min-w-[72px] min-h-[44px] px-4 rounded-xl text-sm font-extrabold border-0 cursor-pointer"
+          className={`${SLOT} relative z-10 border-0 cursor-pointer`}
           style={{ background: GOLD, color: '#000' }}
         >
           Buy
         </button>
+      ) : listings ? (
+        <button
+          type="button"
+          onClick={() => onOpen(r)}
+          aria-label={`View $${name}`}
+          className={`${SLOT} relative z-10 bg-transparent cursor-pointer`}
+          style={{ border: `1px solid ${LINE}`, color: MUTED }}
+        >
+          View
+        </button>
       ) : (
-        listings && (
-          <button
-            type="button"
-            onClick={() => onOpen(r)}
-            aria-label={`View $${name}`}
-            className="relative z-10 shrink-0 min-w-[72px] min-h-[44px] px-4 rounded-xl text-sm font-bold bg-transparent cursor-pointer"
-            style={{ border: `1px solid ${LINE}`, color: MUTED }}
-          >
-            View
-          </button>
-        )
+        <span className={SLOT} style={{ background: 'rgba(255,255,255,0.04)' }} aria-hidden />
       )}
-    </article>
+    </CardShell>
   );
 };
 
@@ -197,6 +243,8 @@ export const TokenBoard = ({
   rate,
   onOpen: onOpenIn,
   onBuy: onBuyIn,
+  settled = true,
+  orderKey = '',
 }: {
   list: HotRoom[];
   rate: number;
@@ -204,38 +252,70 @@ export const TokenBoard = ({
   onOpen?: (r: HotRoom) => void;
   /** Buy a token; default: the trade screen at its Buy panel (rowActions.buyRoute), the existing buy flow. */
   onBuy?: (r: HotRoom) => void;
+  /** The list's ranking has finished. Until then (at most SETTLE_MS) the board shows placeholders. */
+  settled?: boolean;
+  /** Changes when the user changes a filter or search: cards are placed afresh. Data updates never move cards. */
+  orderKey?: string;
 }) => {
   const navigate = useNavigate();
   const onOpen = onOpenIn ?? ((r: HotRoom) => navigate(tradeRoute(r.ref.id)));
   const onBuy = onBuyIn ?? ((r: HotRoom) => navigate(buyRoute(r.ref.id)));
-  const [markets, setMarkets] = useState<Record<string, Listing[]>>({});
+  const [markets, setMarkets] = useState<Record<string, Listing[]>>(() => Object.fromEntries(knownListings));
   const [shown, setShown] = useState(PAGE);
-  const page = list.slice(0, shown);
-  const visibleKey = page.map((r) => r.ref.id).join(',');
-  // For sale first (a listing you can buy in-app), then still checking, then not for sale; otherwise the
-  // list's own order (pinned and favourites first on the Exchange).
-  const ordered = useMemo(
-    () => forSaleFirst(page, (r) => saleState(markets[r.ref.id])),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visibleKey, markets],
-  );
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setWaited(true), SETTLE_MS);
+    return () => clearTimeout(t);
+  }, []);
+  const ready = settled || waited;
 
-  // Listings for the cards on screen, four at a time. roomMarket is cached and shared with the token board's
-  // own ranking and the list view, so most cards resolve without a new request.
+  // Card order: placed once (for sale first by what is known then), then never moved (buyPrice.stableOrder).
+  const byId = new Map(list.map((r) => [r.ref.id, r]));
+  const ids = list.map((r) => r.ref.id);
+  const placed = useRef<{ seen: string[] | null; key: string }>({ seen: null, key: orderKey });
+  if (ready && list.length) {
+    const reset = placed.current.seen === null || placed.current.key !== orderKey;
+    const known = (id: string): SaleState => {
+      const l = markets[id];
+      if (l) return saleState(l);
+      return (byId.get(id)?.newListings ?? 0) > 0 ? 'for-sale' : 'checking';
+    };
+    placed.current = { seen: stableOrder(placed.current.seen, ids, reset, known), key: orderKey };
+  }
+  const order = placed.current.seen ? shownOrder(placed.current.seen, ids) : [];
+  const page = order.slice(0, shown).map((id) => byId.get(id)!);
+  const visibleKey = page.map((r) => r.ref.id).join(',');
+
+  // Listings for the cards on screen, four at a time, once per card per visit. A card with a known price keeps
+  // showing it while this refreshes; a card only re-renders when its listings actually changed.
+  const fetched = useRef(new Set<string>());
   useEffect(() => {
     let live = true;
-    const queue = page.filter((r) => !markets[r.ref.id]);
+    const done = fetched.current;
+    const queue = page.filter((r) => !done.has(r.ref.id));
+    queue.forEach((r) => done.add(r.ref.id));
     const worker = async () => {
       for (let r = queue.shift(); r && live; r = queue.shift()) {
         const id = r.ref.id;
         const m = await roomMarket(r.ref).catch(() => null);
-        if (!live) return;
-        setMarkets((x) => ({ ...x, [id]: m?.listings ?? [] }));
+        if (!m) {
+          // A failed read keeps the last known price; with none, the card says "Not for sale" rather than spin.
+          if (!knownListings.has(id)) setMarkets((x) => (x[id] ? x : { ...x, [id]: [] }));
+          continue;
+        }
+        // roomMarket answers an empty market when its read fails: don't let that wipe a price we already showed
+        // (the token page reads the market afresh before any buy).
+        if (!m.listings.length && knownListings.get(id)?.length) continue;
+        knownListings.set(id, m.listings);
+        // Even after a re-run started: this card is marked fetched, so its answer must still land.
+        setMarkets((x) => (sameListings(x[id], m.listings) ? x : { ...x, [id]: m.listings }));
       }
     };
     void Promise.all([worker(), worker(), worker(), worker()]);
     return () => {
       live = false;
+      // Not finished: let the next run pick these up.
+      for (const r of queue) done.delete(r.ref.id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleKey]);
@@ -246,18 +326,20 @@ export const TokenBoard = ({
         {RISK_LINE}
       </p>
       <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" role="list" aria-label="Tokens">
-        {ordered.map((r) => (
-          <TokenCard key={r.ref.id} r={r} listings={markets[r.ref.id]} rate={rate} onOpen={onOpen} onBuy={onBuy} />
-        ))}
+        {!ready || !page.length
+          ? Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} />)
+          : page.map((r) => (
+              <TokenCard key={r.ref.id} r={r} listings={markets[r.ref.id]} rate={rate} onOpen={onOpen} onBuy={onBuy} />
+            ))}
       </div>
-      {list.length > shown && (
+      {ready && order.length > shown && (
         <button
           type="button"
           onClick={() => setShown((n) => n + PAGE)}
           className="w-full min-h-[44px] rounded-xl text-sm font-bold bg-transparent cursor-pointer"
           style={{ border: `1px solid ${LINE}`, color: GOLD }}
         >
-          Show more ({list.length - shown})
+          Show more ({order.length - shown})
         </button>
       )}
     </div>

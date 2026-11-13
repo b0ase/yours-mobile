@@ -2,7 +2,18 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Listing } from '../market/indexer';
-import { bestBuyable, buyPriceLabel, compactCount, forSaleFirst, listingTokens, saleState } from './buyPrice';
+import {
+  bestBuyable,
+  buyPriceLabel,
+  compactCount,
+  forSaleFirst,
+  listingTokens,
+  sameListings,
+  saleState,
+  shownOrder,
+  stableOrder,
+  type SaleState,
+} from './buyPrice';
 
 const L = (priceSats: number, perTokenSats: number, buyable = true): Listing => ({
   outpoint: `${'b'.repeat(64)}_${priceSats}_${perTokenSats}`,
@@ -73,7 +84,10 @@ describe('Exchange token cards stay minimal (owner, 13 Nov 2026)', () => {
     expect(card).toContain('bestBuyable(listings)');
     expect(card).toContain('Not for sale');
     expect(card).toMatch(/>\s*Buy\s*</);
-    expect(card).toContain('min-h-[44px]');
+    // Buy, View and the loading block share one 76×44 slot; the card is one fixed height in every state.
+    expect(src).toContain("const SLOT = 'shrink-0 w-[76px] h-[44px]");
+    expect(src).toContain("const CARD_H = 'h-[72px]'");
+    expect(card.match(/\$\{SLOT\}|className=\{SLOT\}/g)?.length).toBe(3);
   });
   it('carries none of the facts that moved to Details', () => {
     for (const gone of ['ScoreRing', 'badges', 'deployer', 'ageLabel', 'capLabel', 'Supply', 'burned', 'changeLabel'])
@@ -81,5 +95,55 @@ describe('Exchange token cards stay minimal (owner, 13 Nov 2026)', () => {
   });
   it('shows the risk line on the board', () => {
     expect(src).toContain('{RISK_LINE}');
+  });
+});
+
+describe('stable card order (owner, 13 Nov 2026: "flickery/flashy... not stable")', () => {
+  const ids = ['a', 'b', 'c', 'd'];
+  const states = (m: Record<string, SaleState>) => (id: string) => m[id] ?? 'checking';
+
+  it("doesn't move a card when its price resolves", () => {
+    const first = stableOrder(null, ids, true, states({}));
+    expect(first).toEqual(ids);
+    // d turns out to be for sale and a not for sale: nothing moves.
+    const after = stableOrder(first, ids, false, states({ d: 'for-sale', a: 'not-for-sale' }));
+    expect(after).toEqual(ids);
+    expect(after).toBe(first);
+  });
+
+  it('places for sale first only with what is known when placing', () => {
+    expect(stableOrder(null, ids, true, states({ c: 'for-sale', a: 'not-for-sale' }))).toEqual(['c', 'b', 'd', 'a']);
+  });
+
+  it('adds later arrivals after the cards already placed, even when the list ranks them first', () => {
+    const first = stableOrder(null, ['c', 'd'], true, states({}));
+    const next = stableOrder(first, ['a', 'b', 'c', 'd'], false, states({ a: 'for-sale' }));
+    expect(next).toEqual(['c', 'd', 'a', 'b']);
+  });
+
+  it("keeps a dropped card's place for when it comes back", () => {
+    const seen = stableOrder(null, ids, true, states({}));
+    const without = stableOrder(seen, ['a', 'c', 'd'], false, states({}));
+    expect(shownOrder(without, ['a', 'c', 'd'])).toEqual(['a', 'c', 'd']);
+    const back = stableOrder(without, ['d', 'c', 'b', 'a'], false, states({}));
+    expect(shownOrder(back, ['d', 'c', 'b', 'a'])).toEqual(ids);
+  });
+
+  it('places afresh when the user changes a filter (reset)', () => {
+    const seen = stableOrder(null, ids, true, states({}));
+    expect(stableOrder(seen, ['d', 'a'], true, states({}))).toEqual(['d', 'a']);
+  });
+
+  it('skips a re-render when a refresh brings the same listings', () => {
+    const a = [L(1_000, 10), L(2_000, 4)];
+    expect(
+      sameListings(
+        a,
+        a.map((l) => ({ ...l })),
+      ),
+    ).toBe(true);
+    expect(sameListings(undefined, a)).toBe(false);
+    expect(sameListings(a, [L(1_000, 10)])).toBe(false);
+    expect(sameListings(a, [L(1_000, 10), { ...L(2_000, 4), buyable: false }])).toBe(false);
   });
 });
