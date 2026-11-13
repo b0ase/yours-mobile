@@ -13,6 +13,7 @@ import {
   nativeSignAndSeal,
   recoverNativeSeals,
   SEAL_SPENT_MESSAGE,
+  SEAL_TOO_BIG_MESSAGE,
   MAY_HAVE_PAID_MESSAGE,
   signedFieldIds,
   strokesToSvg,
@@ -22,6 +23,16 @@ import {
   type SealApi,
   type SealKeys,
 } from './nativeSeal';
+import { SEAL_HTML, SEAL_KEY, SEAL_TS, composedFor, preparedFor } from './nativeSeal.fixtures';
+import {
+  SEAL_MISMATCH_MESSAGE,
+  SEAL_PREPARE_MISMATCH_MESSAGE,
+  canonicalJson,
+  expectedSealRecord,
+  sealScriptHex,
+  sha256Hex,
+} from './sealCheck';
+import { estimateSealFee, sealScriptFee } from './sealFee';
 
 const memStore = () => {
   const m = new Map<string, PendingSeal>();
@@ -43,6 +54,10 @@ const keys = (log: string[]): SealKeys => ({
     { txid: TX.toUpperCase(), tx: [9, 9] }
   ),
 });
+/** The last prepare's body: compose answers for that document and those blocks (bit-sign's honest answer). */
+let prepared = { documentId: 'D', fieldIds: ['f1'] as string[] };
+/** The honest compose answer for document D, block f1, signature <svg/>. */
+const HONEST = composedFor({ documentId: 'D', fieldIds: ['f1'], svg: '<svg/>', nonce: 'N1' });
 const api =
   (
     log: string[],
@@ -54,17 +69,15 @@ const api =
     log.push(`${path}:${JSON.stringify(body)}`);
     const o = over[path];
     if (o) return o(body);
-    if (path === 'prepare')
-      return { ok: true, status: 200, body: { nonce: 'N1', ref: 'R', title: 'T', identityKey: '02aa', estFeeSats: 3 } };
+    if (path === 'prepare') {
+      prepared = body as typeof prepared;
+      return { ok: true, status: 200, body: preparedFor('N1') };
+    }
     if (path === 'compose')
       return {
         ok: true,
         status: 200,
-        body: {
-          signing: { protocolID: [2, 'bitsign seal'], keyID: 'N1', counterparty: 'anyone' },
-          recordCanonical: 'rec',
-          lockingScriptHex: '006a',
-        },
+        body: composedFor({ ...prepared, svg: String(body.svg), nonce: String(body.nonce) }),
       };
     return { ok: true, status: 200, body: { signatureId: 'S', txid: TX, docHash: 'H', complete: true, sealed: true } };
   };
@@ -75,6 +88,8 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
     const store = memStore();
     const out = await nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: ' <svg/> ',
       api: api(log),
@@ -85,8 +100,8 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
     expect(log).toEqual([
       'prepare:{"documentId":"D","fieldIds":["f1"]}',
       'compose:{"nonce":"N1","svg":"<svg/>"}',
-      'sign:bitsign seal:N1:anyone:3',
-      'pay:0:006a:false',
+      `sign:bitsign seal:N1:anyone:${new TextEncoder().encode(HONEST.recordCanonical).length}`,
+      `pay:0:${HONEST.lockingScriptHex}:false`,
       // The broadcast receipt, right after the payment and before commit, with commit's exact body.
       `receipt:{"nonce":"N1","attestation":"0102ff","txid":"${TX}","beefHex":"0909"}`,
       `commit:{"nonce":"N1","attestation":"0102ff","txid":"${TX}","beefHex":"0909"}`,
@@ -100,6 +115,8 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
     await expect(
       nativeSignAndSeal({
         documentId: 'D',
+        documentHtml: SEAL_HTML,
+        identityKey: SEAL_KEY,
         fieldIds: ['f1'],
         svg: '<svg/>',
         api: api(log),
@@ -116,6 +133,8 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
     let asked = false;
     const e = await nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: '<svg/>',
       store: memStore(),
@@ -135,6 +154,8 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
     const store = memStore();
     const out = await nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: '<svg/>',
       keys: keys(log),
@@ -163,6 +184,8 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
     };
     const e = await nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: '<svg/>',
       api: boom,
@@ -193,6 +216,8 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
     const store = memStore();
     const err = await nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: '<svg/>',
       api: api(log),
@@ -213,6 +238,8 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
     const log: string[] = [];
     const err = await nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: '<svg/>',
       api: api(log),
@@ -231,6 +258,8 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
     const boom = new Error('Not enough spendable BSV for this payment.');
     const err = await nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: '<svg/>',
       api: api(log),
@@ -374,6 +403,8 @@ describe('one press: steps, the pre-tap coin check, the real fee', () => {
     const steps: string[] = [];
     const out = await nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: '<svg/>',
       api: api(log),
@@ -452,6 +483,8 @@ describe('the broadcast receipt and in-progress (bit-sign fix/seal-receipt-sweep
     const store = memStore();
     const p = nativeSignAndSeal({
       documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
       fieldIds: ['f1'],
       svg: '<svg/>',
       api: extra.rawApi ?? api(log, over),
@@ -643,5 +676,179 @@ describe('warmSealRoutes (7 Nov 2026: prepare and commit each paid a ~1 s cold s
     warmSealRoutes(() => new Promise(() => undefined));
     resolved = true;
     expect(resolved).toBe(true);
+  });
+});
+
+describe('the wallet decides what it signs (chat/sealCheck.ts)', () => {
+  const run = async (over: Parameters<typeof api>[1], extra: { identityKey?: string } = {}) => {
+    const log: string[] = [];
+    let asked = false;
+    const store = memStore();
+    const e = await nativeSignAndSeal({
+      documentId: 'D',
+      documentHtml: SEAL_HTML,
+      identityKey: SEAL_KEY,
+      fieldIds: ['f1'],
+      svg: '<svg/>',
+      api: api(log, over),
+      keys: keys(log),
+      store,
+      approve: async () => (asked = true),
+      ...extra,
+    }).catch((x) => x);
+    return { e, log, asked, store };
+  };
+  const honestCompose = (patch: Record<string, unknown>) => () => ({
+    ok: true,
+    status: 200,
+    body: { ...HONEST, ...patch },
+  });
+  const nothingSignedOrPaid = (r: Awaited<ReturnType<typeof run>>) => {
+    expect(r.e).toBeInstanceOf(NativeSealError);
+    expect(r.e.code).toBe('refused');
+    expect(r.log.filter((l) => /^(sign|pay|receipt|commit)/.test(l))).toEqual([]);
+    expect(r.log.filter((l) => l.startsWith('cancel'))).toEqual(['cancel:{"nonce":"N1"}']);
+    expect(r.store.m.size).toBe(0);
+  };
+
+  for (const [name, patch] of [
+    [
+      'another protocol',
+      { signing: { protocolID: [2, 'auth message signature'], keyID: 'N1', counterparty: 'anyone' } },
+    ],
+    ['another key id', { signing: { protocolID: [2, 'bitsign seal'], keyID: '1', counterparty: 'anyone' } }],
+    ['another counterparty', { signing: { protocolID: [2, 'bitsign seal'], keyID: 'N1', counterparty: 'self' } }],
+    ['data that is not the record of this document', { recordCanonical: 'rec' }],
+    [
+      'a record of another document',
+      { recordCanonical: HONEST.recordCanonical.replace(/"doc":"[0-9a-f]+"/, `"doc":"${'00'.repeat(32)}"`) },
+    ],
+    ['an output that pays someone', { lockingScriptHex: `76a914${'00'.repeat(20)}88ac` }],
+    ['another data output', { lockingScriptHex: '006a' }],
+  ] as const) {
+    test(`compose asks for ${name}: refused, nothing signed or paid, the session cancelled`, async () => {
+      const r = await run({ compose: honestCompose(patch as Record<string, unknown>) });
+      nothingSignedOrPaid(r);
+      expect(r.e.message).toBe(SEAL_MISMATCH_MESSAGE);
+    });
+  }
+
+  test('prepare names another version of the document: refused before the approval is even asked', async () => {
+    const r = await run({
+      prepare: () => ({ ok: true, status: 200, body: { ...preparedFor('N1'), origHash: 'ab'.repeat(32) } }),
+    });
+    nothingSignedOrPaid(r);
+    expect(r.asked).toBe(false);
+    expect(r.e.message).toBe(SEAL_PREPARE_MISMATCH_MESSAGE);
+    expect(r.log.some((l) => l.startsWith('compose'))).toBe(false);
+  });
+
+  test('prepare names another wallet: refused before the approval', async () => {
+    const r = await run({
+      prepare: () => ({ ok: true, status: 200, body: preparedFor('N1', `03${'cd'.repeat(32)}`) }),
+    });
+    nothingSignedOrPaid(r);
+    expect(r.asked).toBe(false);
+  });
+
+  test("this wallet's identity key unknown: never signed", async () => {
+    const r = await run({}, { identityKey: '' });
+    nothingSignedOrPaid(r);
+  });
+
+  test('the honest seal signs exactly the rebuilt record and pays for exactly the rebuilt output', async () => {
+    const r = await run({});
+    expect(r.e.txid).toBe(TX);
+    expect(r.log).toContain(`pay:0:${HONEST.lockingScriptHex}:false`);
+  });
+});
+
+describe('the fee: the sheet shows what the document costs, and the seal never pays for more', () => {
+  const base = (log: string[], over: Parameters<typeof api>[1] = {}) => ({
+    documentId: 'D',
+    documentHtml: SEAL_HTML,
+    identityKey: SEAL_KEY,
+    fieldIds: ['f1'],
+    svg: '<svg/>',
+    api: api(log, over),
+    keys: keys(log),
+    store: memStore(),
+  });
+  const normalLog = async () => {
+    const log: string[] = [];
+    await nativeSignAndSeal({ ...base(log), approve: async () => true });
+    return log;
+  };
+
+  test("a normal seal: the sheet's fee is the wallet's model over its own output, at the wallet's rate", async () => {
+    for (const rate of [undefined, 500]) {
+      const log: string[] = [];
+      const shown: number[] = [];
+      await nativeSignAndSeal({
+        ...base(log),
+        ...(rate ? { satsPerKb: rate } : {}),
+        approve: async (_p, fee) => (shown.push(fee), true),
+      });
+      expect(shown).toEqual([estimateSealFee(['f1'], 'R', rate ?? 100)]);
+      expect(shown[0]).toBe(sealScriptFee(HONEST.lockingScriptHex, rate ?? 100));
+      expect(log).toContain(`pay:0:${HONEST.lockingScriptHex}:false`);
+    }
+  });
+
+  test("prepare's ref differs from the document's: the sheet uses the document's, and nothing signed or paid changes", async () => {
+    const want = await normalLog();
+    for (const ref of ['short', 'Z'.repeat(500_000)]) {
+      const log: string[] = [];
+      const shown: number[] = [];
+      await nativeSignAndSeal({
+        ...base(log, { prepare: () => ({ ok: true, status: 200, body: { ...preparedFor('N1'), ref } }) }),
+        approve: async (_p, fee) => (shown.push(fee), true),
+      });
+      expect(shown).toEqual([estimateSealFee(['f1'], 'R', 100)]);
+      expect(log.filter((l) => /^(sign|pay)/.test(l))).toEqual(want.filter((l) => /^(sign|pay)/.test(l)));
+    }
+  });
+
+  test("a huge reference in the document's own manifest: refused before the sheet, nothing signed or paid", async () => {
+    const html = SEAL_HTML.replace('"documentRef":"R"', `"documentRef":"${'X'.repeat(500_000)}"`);
+    const record = expectedSealRecord(
+      { documentId: 'D', documentHtml: html, svg: '<svg/>', fieldIds: ['f1'], identityKey: SEAL_KEY, nonce: 'N1' },
+      'boase',
+      SEAL_TS,
+    );
+    const log: string[] = [];
+    let asked = false;
+    const e = await nativeSignAndSeal({
+      ...base(log, {
+        prepare: () => ({ ok: true, status: 200, body: { ...preparedFor('N1'), origHash: sha256Hex(html) } }),
+        // bit-sign's exact seal of that document: still never signed or paid for.
+        compose: () => ({
+          ok: true,
+          status: 200,
+          body: {
+            ...HONEST,
+            recordCanonical: canonicalJson(record),
+            lockingScriptHex: sealScriptHex(HONEST.docHash, record),
+          },
+        }),
+      }),
+      documentHtml: html,
+      approve: async () => (asked = true),
+    }).catch((x) => x);
+    expect(e).toBeInstanceOf(NativeSealError);
+    expect(e.message).toBe(SEAL_TOO_BIG_MESSAGE);
+    expect(asked).toBe(false);
+    expect(log.some((l) => /^(compose|sign|pay)/.test(l))).toBe(false);
+  });
+
+  test('a fee rate that would take a seal over SEAL_MAX_SATS: refused before the sheet', async () => {
+    const log: string[] = [];
+    let asked = false;
+    const e = await nativeSignAndSeal({ ...base(log), satsPerKb: 100_000, approve: async () => (asked = true) }).catch(
+      (x) => x,
+    );
+    expect(e.message).toBe(SEAL_TOO_BIG_MESSAGE);
+    expect(asked).toBe(false);
+    expect(log.some((l) => /^(sign|pay)/.test(l))).toBe(false);
   });
 });
