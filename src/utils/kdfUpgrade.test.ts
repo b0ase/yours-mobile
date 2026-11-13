@@ -71,6 +71,11 @@ let failSet = false;
  * only these keys of the next write that carries both `accounts` and `salt` land, then nothing else is written.
  */
 let killMidWrite: 'salt-only' | 'accounts-only' | undefined;
+/**
+ * The app killed during the unlock's repair write, the worst way round: if one write carries both `salt` and
+ * `kdfPending` (two secure items on phones), only the note's clearing lands, then nothing else is written.
+ */
+let killRepair = false;
 
 const pick = (s: Store, keys: string | string[] | null) => {
   if (keys === null) return structuredClone(s);
@@ -95,7 +100,16 @@ afterAll(() => {
         cb(pick(local, keys));
       },
       set: (obj: Store, cb?: () => void) => {
-        if (!failSet && killMidWrite && 'accounts' in obj && 'salt' in obj) {
+        if (!failSet && killRepair && 'salt' in obj && 'kdfPending' in obj && !('accounts' in obj)) {
+          Object.assign(local, structuredClone({ kdfPending: obj.kdfPending }));
+          killRepair = false;
+          failSet = true;
+        } else if (!failSet && killRepair && 'salt' in obj && !('accounts' in obj)) {
+          // Salt written in its own write: the kill comes right after it, before the note is cleared.
+          Object.assign(local, structuredClone(obj));
+          killRepair = false;
+          failSet = true;
+        } else if (!failSet && killMidWrite && 'accounts' in obj && 'salt' in obj) {
           const part = killMidWrite === 'salt-only' ? { salt: obj.salt } : { accounts: obj.accounts };
           Object.assign(local, structuredClone(part));
           killMidWrite = undefined;
@@ -131,6 +145,7 @@ beforeEach(async () => {
   inFlight = undefined;
   failSet = false;
   killMidWrite = undefined;
+  killRepair = false;
   session = {};
   const oldKey = await deriveKey(PW, LEGACY_SALT);
   local = {
@@ -324,5 +339,46 @@ describe('changePassword: a swap cut off halfway is repaired at the next unlock 
     expect(local).toEqual(snap);
     const again = await restart();
     expect(await again.verifyPassword(PW)).toBe(true);
+  });
+});
+
+describe('the unlock repair itself cut off (reviewer probe): the note is cleared last, in its own write', () => {
+  const NEW_PW = 'a brand new password';
+  const restart = async () => {
+    failSet = false;
+    session = {};
+    const svc = new ChromeStorageService();
+    (svc as any).getAndSetStorage = async () => undefined;
+    (svc as any).storage = local;
+    return svc;
+  };
+
+  for (const half of ['salt-only', 'accounts-only'] as const)
+    kdfTest(`${half} half-write, then the repairing unlock killed mid-write: the next unlock still opens`, async () => {
+      local.selectedAccount = '1A';
+      const svc = await service();
+      (svc as any).storage = local;
+      killMidWrite = half;
+      await expect(svc.changePassword(NEW_PW, { currentPassword: PW })).rejects.toThrow();
+      const password = half === 'salt-only' ? PW : NEW_PW; // the password the stored keys are under
+      const r1 = await restart();
+      killRepair = true;
+      await r1.verifyPassword(password).catch(() => undefined); // the app dies inside the repair
+      expect(local.kdfPending).toBeTruthy(); // the note survived the kill
+      const r2 = await restart();
+      expect(await r2.verifyPassword(password)).toBe(true);
+      expect(await decrypt(local.accounts['1A'].encryptedKeys, await r2.getPassKey())).toBe(plainA);
+      // Forward (new keys, new salt landed): the note is done with and cleared. Back to the old salt: the note is
+      // kept (harmless: only a failed unlock reads it).
+      if (half === 'accounts-only') expect(local.kdfPending).toBeNull();
+      expect(await (await restart()).verifyPassword(password)).toBe(true);
+    });
+
+  test('every write that clears kdfPending clears nothing else', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../services/ChromeStorage.service.ts', import.meta.url), 'utf8');
+    const clears = src.match(/this\.set\(\{[^}]*kdfPending: null[^}]*\}/g) ?? [];
+    expect(clears.length).toBeGreaterThanOrEqual(3);
+    for (const c of clears) expect(c.replace(/\s+/g, ' ')).toBe('this.set({ kdfPending: null }');
   });
 });

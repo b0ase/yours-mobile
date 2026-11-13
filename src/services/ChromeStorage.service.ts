@@ -750,8 +750,16 @@ export class ChromeStorageService {
     // re-key; the unauthenticated legacy path must not be reachable.
     if (usbSecurity?.enabled && !account.encryptedKeys.startsWith('v2:')) return false;
     const ok = await this.tryPassword(password, salt, account, selectedAccount, usbSecurity, material);
+    // Opened with the salt the note moved to: the swap fully landed (a repair cut off after its salt write), so the
+    // note is no longer needed. A note naming another salt is kept: a change may be about to write it.
+    if (ok && !usbSecurity?.enabled) await this.clearKdfNote(salt);
     if (ok || usbSecurity?.enabled) return ok;
     return this.repairInterruptedKdfUpgrade(password, salt, account, selectedAccount);
+  };
+
+  private clearKdfNote = async (openedWith: string) => {
+    const { kdfPending } = await this.get(['kdfPending']).catch(() => ({ kdfPending: undefined }));
+    if (kdfPending?.salt === openedWith) await this.set({ kdfPending: null }).catch(() => undefined);
   };
 
   /**
@@ -769,7 +777,11 @@ export class ChromeStorageService {
     for (const candidate of [kdfPending.salt, kdfPending.prevSalt]) {
       if (!candidate || candidate === salt) continue;
       if (await this.tryPassword(password, candidate, account, selectedAccount, undefined, undefined)) {
-        await this.set({ salt: candidate, kdfPending: null } as Partial<ChromeStorageObject>);
+        // Two writes, salt first, the note cleared LAST in its own write: phones store each key as its own secure
+        // item, and an app kill between them must still leave the note for the next unlock (cleared first, a kill
+        // left the wrong salt and no note: neither password opened the wallet, only the 12 words).
+        await this.set({ salt: candidate } as Partial<ChromeStorageObject>);
+        await this.set({ kdfPending: null }).catch(() => undefined); // the salt is right now: a left note is harmless
         return true;
       }
     }
