@@ -150,21 +150,62 @@ const SHARED_HOSTING = [
   'ngrok.io',
   'ngrok-free.app',
   'trycloudflare.com',
+  'myshopify.com',
+  'webflow.io',
+  'neocities.org',
+  // Whole host kept (below): buckets and services sit at different depths (bucket.s3.amazonaws.com,
+  // bucket.s3.us-east-1.amazonaws.com, x.execute-api.eu-west-1.amazonaws.com).
+  'amazonaws.com',
   'paired.invalid',
 ];
+
+/** Shared-hosting suffixes whose hosts are each kept whole (phone pairings, AWS). */
+const WHOLE_HOST = new Set(['paired.invalid', 'amazonaws.com']);
+
+/**
+ * Second-level public suffixes, where a registrable domain has three labels ("example.co.uk"). A short, hand-kept
+ * subset of the public suffix list (none is bundled): the common commercial, organisation and network suffixes of
+ * the larger country domains. A suffix missing here groups too broadly (example.xx.yy under xx.yy): siblings are
+ * refused for a few minutes, never allowed (review of 276ee663: a rule "any 2-letter suffix after a short label"
+ * let x.ev.io and y.ev.io rotate past a Not now).
+ */
+const SECOND_LEVEL = new Set([
+  ...['co', 'org', 'me', 'ltd', 'plc', 'net', 'ac', 'gov', 'nhs', 'sch'].map((x) => `${x}.uk`),
+  ...['com', 'net', 'org', 'edu', 'gov', 'asn', 'id'].map((x) => `${x}.au`),
+  ...['co', 'net', 'org', 'ac', 'govt', 'school', 'geek', 'kiwi'].map((x) => `${x}.nz`),
+  ...['co', 'ne', 'or', 'ac', 'go', 'ad', 'ed', 'gr', 'lg'].map((x) => `${x}.jp`),
+  ...['co', 'or', 'ne', 'ac', 'go', 're'].map((x) => `${x}.kr`),
+  ...['com', 'net', 'org', 'gov', 'edu'].flatMap((x) =>
+    ['br', 'cn', 'hk', 'sg', 'tw', 'mx', 'ar', 'tr', 'my', 'ph', 'vn', 'pk', 'ng', 'eg', 'ua', 'sa', 'co', 'pe'].map(
+      (cc) => `${x}.${cc}`,
+    ),
+  ),
+  ...['co', 'net', 'org', 'firm', 'gen', 'ind', 'ac', 'gov', 'edu'].map((x) => `${x}.in`),
+  ...['co', 'org', 'net', 'ac', 'gov', 'web'].map((x) => `${x}.za`),
+  ...['co', 'org', 'net', 'ac', 'gov'].map((x) => `${x}.il`),
+  ...['co', 'or', 'ac', 'go', 'in', 'mi', 'net'].map((x) => `${x}.th`),
+  ...['co', 'or', 'ac', 'go', 'web', 'my'].map((x) => `${x}.id`),
+  ...['co', 'or'].map((x) => `${x}.at`),
+  ...['com', 'org', 'nom'].map((x) => `${x}.es`),
+  ...['com', 'net', 'org'].map((x) => `${x}.pl`),
+  'gov.ie',
+  'co.ke',
+  'or.ke',
+]);
 
 /**
  * The key a one-signature "Not now" is kept under: the site's registrable domain, so a site can't escape it by moving
  * to another subdomain of its own (a.evil.example, b.evil.example). Without a public suffix list: two labels, or three
- * under a short two-letter country suffix ("example.co.uk"); a host on a shared-hosting suffix (or a phone pairing)
- * keeps its full name; an IP address or a single label is kept whole.
+ * under a known second-level suffix (SECOND_LEVEL: "example.co.uk"); a host on a shared-hosting suffix keeps its own
+ * label under it (one.vercel.app), a phone pairing or an AWS host its full name; an IP address or a single label is
+ * kept whole.
  */
 export const onceSiteKey = (originator: string): string => {
   const host = site(originator).replace(/:\d+$/, '').replace(/\.$/, '');
   if (!host || /^\d+(\.\d+){3}$/.test(host) || host.startsWith('[')) return host;
   if (SHARED_HOSTING.some((s) => host === s || host.endsWith(`.${s}`))) {
     const base = SHARED_HOSTING.find((s) => host === s || host.endsWith(`.${s}`))!;
-    if (base === 'paired.invalid') return host;
+    if (WHOLE_HOST.has(base)) return host;
     const own = host
       .slice(0, host.length - base.length - 1)
       .split('.')
@@ -173,8 +214,7 @@ export const onceSiteKey = (originator: string): string => {
   }
   const parts = host.split('.');
   if (parts.length <= 2) return host;
-  const [sld, tld] = parts.slice(-2);
-  const n = tld.length === 2 && sld.length <= 3 ? 3 : 2;
+  const n = SECOND_LEVEL.has(parts.slice(-2).join('.')) ? 3 : 2;
   return parts.slice(-n).join('.');
 };
 

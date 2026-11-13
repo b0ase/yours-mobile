@@ -1364,8 +1364,29 @@ const pendingPermissionRequests = new Map<
 // merged into one bundle and shown as one sheet. Each request stays in pendingPermissionRequests and is
 // still answered through the manager's grantPermission / denyPermission.
 type BundledRequest = PermissionRequest & { requestID: string };
+/**
+ * A sheet is about to show (the bundler's onReady: new, carried or promoted from the site's queue). One with
+ * one-signature lines takes a slot of the per-minute cap (services/sessionDenials.ts ONCE_SHEETS_PER_MINUTE); past
+ * the cap its one-signature lines are refused without a sheet (the standard "Permission denied."). Counted here, after
+ * the blocked and trusted checks and only for what is really shown, so a blocked site or a long queue can't use the
+ * cap up for everyone (review of 276ee663). True when the sheet still has lines to show.
+ */
+const onceSheetAllowed = (bundle: { id: string; items: { requestID: string }[] }): boolean => {
+  const once = bundle.items.filter((i) => isOneUseRequestID(i.requestID));
+  if (once.length === 0 || onceDenials.allowSheet()) return true;
+  for (const r of once) {
+    const pending = pendingPermissionRequests.get(r.requestID);
+    pendingPermissionRequests.delete(r.requestID);
+    permissionBundler.removeRequest(r.requestID);
+    accountContext?.wallet.denyPermission(r.requestID).catch(() => undefined);
+    pending?.reject(userDeniedError());
+  }
+  return (permissionBundler.get(bundle.id)?.items.length ?? 0) > 0;
+};
 const permissionBundler = new PermissionBundler<BundledRequest & BundleRequest>({
-  onReady: (bundle) => showPromptUi('bundle', bundle.id),
+  onReady: (bundle) => {
+    if (onceSheetAllowed(bundle)) showPromptUi('bundle', bundle.id);
+  },
   // Requests that waited behind the site's last sheet get their own sheet now, with their companions.
   onPromote: (bundle) => askCompanionsFor(bundle),
   // Live sheet: a line joined the open sheet; it reloads, marks it "New" and holds its button for a moment.
@@ -2273,12 +2294,11 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   const deniedThisSession =
     request.originator && request.originator !== ADMIN_ORIGINATOR && isBasketRead(request)
       ? basketDenials.has(normalizeOriginator(request.originator), request.basket)
-      : // A one-signature request from a site whose last one the user refused minutes ago, or past the per-minute cap
-        // of one-signature sheets: no new sheet (services/sessionDenials.ts OnceDenials).
+      : // A one-signature request from a site whose last one the user refused minutes ago: no new sheet
+        // (services/sessionDenials.ts OnceDenials). The per-minute cap is counted only when a sheet really shows
+        // (onceSheetAllowed, the bundler's onReady), never for a blocked site or a queued request.
         request.originator && request.originator !== ADMIN_ORIGINATOR && isOneUseRequestID(request.requestID)
-        ? onceDenials
-            .active(normalizeOriginator(request.originator))
-            .then((refused) => refused || !onceDenials.allowSheet())
+        ? onceDenials.active(normalizeOriginator(request.originator))
         : Promise.resolve(false);
   return Promise.all([siteBlocked(request.originator), siteTrustedFor(request), deniedThisSession]).then(
     ([blocked, trusted, denied]) =>

@@ -97,6 +97,26 @@ describe('a "Not now" to a one-signature request stands for 3 minutes', () => {
     expect(onceSiteKey('localhost:3000')).toBe('localhost');
     expect(onceSiteKey('10.0.0.5')).toBe('10.0.0.5');
   });
+  test('review of 276ee663: a short label under a 2-letter suffix is not a second-level suffix', () => {
+    // x.ev.io and y.ev.io are one site (ev.io), so a Not now covers both; the same for a.abc.co / b.abc.co.
+    expect(onceSiteKey('x.ev.io')).toBe('ev.io');
+    expect(onceSiteKey('y.ev.io')).toBe('ev.io');
+    expect(onceSiteKey('a.abc.co')).toBe('abc.co');
+    expect(onceSiteKey('b.abc.co')).toBe('abc.co');
+    // Known second-level suffixes keep three labels.
+    expect(onceSiteKey('a.evil.co.uk')).toBe('evil.co.uk');
+    expect(onceSiteKey('b.evil.com.au')).toBe('evil.com.au');
+    expect(onceSiteKey('shop.evil.co.jp')).toBe('evil.co.jp');
+    expect(onceSiteKey('x.evil.com.br')).toBe('evil.com.br');
+  });
+  test('more shared hosting: myshopify.com, webflow.io, neocities.org one site each; AWS hosts whole', () => {
+    expect(onceSiteKey('x.myshopify.com')).toBe('x.myshopify.com');
+    expect(onceSiteKey('y.myshopify.com')).toBe('y.myshopify.com');
+    expect(onceSiteKey('a.x.webflow.io')).toBe('x.webflow.io');
+    expect(onceSiteKey('u1.neocities.org')).toBe('u1.neocities.org');
+    expect(onceSiteKey('bucket1.s3.amazonaws.com')).toBe('bucket1.s3.amazonaws.com');
+    expect(onceSiteKey('bucket2.s3.amazonaws.com')).toBe('bucket2.s3.amazonaws.com');
+  });
   test('at most ONCE_SHEETS_PER_MINUTE one-signature sheets a minute, all sites together', () => {
     let now = 0;
     const d = new OnceDenials(undefined, () => now);
@@ -123,9 +143,23 @@ describe('a "Not now" to a one-signature request stands for 3 minutes', () => {
     const check = prompt.slice(prompt.indexOf('const deniedThisSession ='), prompt.indexOf('if (denied) {'));
     expect(check).toContain('isOneUseRequestID(request.requestID)');
     expect(check).toContain('.active(normalizeOriginator(request.originator))');
-    expect(check).toContain('!onceDenials.allowSheet()');
+    // The cap is not counted here (a blocked site or a queued request would use it up): only when a sheet shows.
+    expect(check).not.toContain('allowSheet');
     const branch = prompt.slice(prompt.indexOf('if (denied) {'), prompt.indexOf('if (blocked) {'));
     expect(branch).toContain('reject(userDeniedError())');
+  });
+  test('background: the cap is counted when a sheet really shows (onReady), after the blocked check', () => {
+    const ready = bg.slice(bg.indexOf('const permissionBundler = new PermissionBundler'));
+    expect(ready.slice(0, ready.indexOf('onPromote'))).toContain(
+      "if (onceSheetAllowed(bundle)) showPromptUi('bundle', bundle.id);",
+    );
+    const fn = bg.slice(bg.indexOf('const onceSheetAllowed = '), bg.indexOf('const permissionBundler = new'));
+    expect(fn).toContain('onceDenials.allowSheet()');
+    expect(fn).toContain('pending?.reject(userDeniedError());');
+    // The blocked check happens before any request reaches the bundler.
+    const prompt = bg.slice(bg.indexOf('const showPermissionPrompt'));
+    expect(prompt.indexOf('if (blocked) {')).toBeLessThan(prompt.indexOf('permissionBundler.add('));
+    expect(prompt.slice(0, prompt.indexOf('permissionBundler.add('))).not.toContain('allowSheet');
   });
   test('background: Forget site and opening Permissions (from the wallet only) clear it', () => {
     expect(bg).toContain("['one-signature answers', () => onceDenials.forget(site)]");
