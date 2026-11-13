@@ -35,8 +35,8 @@ know about and issues listed under "Known and accepted" on the b-Aware page earn
 pool is spent, valid reports still get credit and are paid from the next quarter's pool, in order. Severity is ours to
 set, by impact on users' money and keys; we explain the reasoning in writing.
 
-Rewards are paid in BSV to an address you give us, within 14 days of the fix going live, or within 30 days of triage
-if the fix takes longer, whichever is sooner. These are the same terms as the b-Aware page. Where two published terms
+Rewards are paid in BSV to an address you give us, within 14 days of the fix going live or 30 days of triage,
+whichever is first. These are the same terms as the b-Aware page. Where two published terms
 conflicted, the better one is honoured for everyone who reported while both were up.
 
 We pay people we can name, and we record every payout: who, which address, how much, and the transaction. Under
@@ -77,8 +77,8 @@ listed, dated, on https://bwalletx.com/b-Aware#advisories.
 
 ## Changes to this policy
 
-- 13 November 2026: payout timing is now within 14 days of the fix going live, or within 30 days of triage if the
-  fix takes longer, whichever is sooner. This replaces "30 days after the fix is live on every channel / 60 days after
+- 13 November 2026: payout timing is now within 14 days of the fix going live or 30 days of triage, whichever is
+  first. This replaces "30 days after the fix is live on every channel / 60 days after
   we confirm your report" and the monthly payment batch (policy versions 3 and 4), and applies to every open report,
   whenever it was made.
 - 13 November 2026: version 5. Payment no longer waits for programme funding: the programme has a fixed budget, we
