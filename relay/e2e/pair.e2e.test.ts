@@ -120,9 +120,19 @@ test('QR → scan → same code → connect → request reaches the wallet and t
     sitePub: string;
   }[];
   expect(stored.wcv).toBe(2);
-  expect(stored.claim).toBe(proto.sessionWalletClaim((await import('@bsv/sdk')).PrivateKey.fromHex(stored.phoneKey), stored.sitePub, stored.c));
+  expect(stored.claim).toBe(
+    proto.sessionWalletClaim((await import('@bsv/sdk')).PrivateKey.fromHex(stored.phoneKey), stored.sitePub, stored.c),
+  );
   const refused = await new Promise<boolean>((res) => {
-    const w = new Native(proto.relaySocketUrl(`localhost:${port}`, stored.c, 'wallet', undefined, proto.walletClaimFor(stored.c, stored.sitePub)));
+    const w = new Native(
+      proto.relaySocketUrl(
+        `localhost:${port}`,
+        stored.c,
+        'wallet',
+        undefined,
+        proto.walletClaimFor(stored.c, stored.sitePub),
+      ),
+    );
     w.onopen = () => (w.close(), res(false));
     w.onerror = () => res(true);
   });

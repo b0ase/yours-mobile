@@ -66,7 +66,7 @@ const refused = (url: string) =>
     w.onerror = () => res(true);
   });
 
-test('open on computer works with the compatibility window closed, and the QR claim cannot take the phone\'s socket', async () => {
+test("open on computer works with the compatibility window closed, and the QR claim cannot take the phone's socket", async () => {
   const { startOpenSession, beginOpenHere, parseOpenUrl } = await import('../../src/mobile/passkey/openHere');
   let joined = false;
   let wallet: { words: string } | null = null;
@@ -93,9 +93,8 @@ test('open on computer works with the compatibility window closed, and the QR cl
 }, 20000);
 
 test('"your phone has it" ping works with the compatibility window closed', async () => {
-  const { listenForRestore, armRestorePing, sendRestoredPing, walletFingerprint, pingQuery } = await import(
-    '../../src/mobile/passkey/openHere'
-  );
+  const { listenForRestore, armRestorePing, sendRestoredPing, walletFingerprint, pingQuery } =
+    await import('../../src/mobile/passkey/openHere');
   const words = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
   let restored = false;
   const l = listenForRestore(await walletFingerprint(words), () => (restored = true));

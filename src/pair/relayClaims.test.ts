@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { PrivateKey } from '@bsv/sdk';
-import { claimDigest, claimDigestSync, newChannel, relaySocketUrl, sessionWalletClaim, walletClaimFor } from './protocol';
+import {
+  claimDigest,
+  claimDigestSync,
+  newChannel,
+  relaySocketUrl,
+  sessionWalletClaim,
+  walletClaimFor,
+} from './protocol';
 
 // b-Aware 26 Oct 2026 (N3-2): the wallet's first claim comes from the QR, and the site registers its digest.
 describe('QR-bound wallet claim', () => {
