@@ -45,8 +45,13 @@ export function trackSpendsInFlight<T extends object>(wallet: T): T {
       try {
         return await (original as (...a: unknown[]) => Promise<unknown>).apply(wallet, args);
       } finally {
-        running--;
-        changed();
+        // Off the count only after the caller's own continuation ran (a macrotask later): the write that records the
+        // payment's result (an outbox entry, a grant hold) is then already on its way to storage before a handover
+        // that waited for this payment fences the hub (re-review B).
+        setTimeout(() => {
+          running--;
+          changed();
+        }, 0);
       }
     };
   };

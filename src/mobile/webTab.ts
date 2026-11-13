@@ -43,6 +43,9 @@ export const WEB_TAB_CHANNEL = 'bwx-web-tab';
 export const MOVED_ERROR = 'bWalletX is open in another tab';
 /** How long the old tab lets a running payment finish before it hands over anyway. */
 export const PAYMENT_HANDOVER_WAIT_MS = 20_000;
+/** After the payments: how long storage must be quiet before the hub is fenced, and the cap on that wait. */
+export const QUIET_MS = 500;
+export const QUIET_CAP_MS = 3000;
 
 /**
  * storage.local keys re-read from localStorage on every get/set in the web wallet (Hub freshLocalKeys), so a
@@ -110,7 +113,7 @@ export interface WebTabEnv {
 
 type Msg =
   | { t: 'takeover'; from: string }
-  | { t: 'busy'; by: string; to: string; reason: 'payment' }
+  | { t: 'busy'; by: string; to: string; reason: 'payment' | 'saving' }
   | { t: 'released'; by: string; to: string; marker: string };
 
 export type WebTabState = 'inactive' | 'active' | 'releasing' | 'lost';
@@ -133,7 +136,10 @@ export class WebTab {
   /** Locks mode: the owner record could not be written (localStorage full); retried on later writes. */
   recordPending = false;
   private channel?: ChannelLike;
-  private releaseHook: (tell: (p: HandoverProgress) => void) => Promise<void> = async () => undefined;
+  private releaseHook: (tell: (p: HandoverProgress) => void, stolen: boolean) => Promise<void> = async () => undefined;
+  /** The query() fence: 'unknown' until the self-check after the claim; 'off' falls back to the owner record. */
+  queryFence: 'unknown' | 'on' | 'off' = 'unknown';
+  private myClientId?: string;
   private lostHooks: Array<() => void> = [];
   private letGo?: () => void;
   private waiters = new Set<(m: Msg) => void>();
@@ -164,7 +170,7 @@ export class WebTab {
    * main.ts, once its hub and worker exist: let a running payment finish (calling `tell('payment')` first), fence
    * the hub, flush its writes and stop the worker.
    */
-  onRelease(fn: (tell: (p: HandoverProgress) => void) => Promise<void>) {
+  onRelease(fn: (tell: (p: HandoverProgress) => void, stolen: boolean) => Promise<void>) {
     this.releaseHook = fn;
   }
 
@@ -212,23 +218,19 @@ export class WebTab {
     if (this.state !== 'active') return false;
     const locks = this.env.locks;
     if (locks) {
-      if (locks.query && (await this.marker)) {
-        let held: Array<{ name?: string; clientId?: string }>;
-        try {
-          held = (await locks.query()).held ?? [];
-        } catch {
-          return false;
+      if (this.queryFence === 'unknown') await this.selfCheck();
+      if (this.queryFence === 'on') {
+        const verdict = await this.queryVerdict();
+        if (verdict === 'mine') {
+          if (this.recordPending) this.recordPending = !this.writeOwner();
+          return true;
         }
-        if (this.state !== 'active') return false;
-        const me = held.find((l) => l.name === this.markerName)?.clientId;
-        const holder = held.find((l) => l.name === WEB_TAB_LOCK)?.clientId;
-        if (me === undefined) return false; // can't tell: refuse this write, don't retire
-        if (holder !== me) {
+        if (verdict === 'other-tab') {
           this.lose();
           return false;
         }
-        if (this.recordPending) this.recordPending = !this.writeOwner();
-        return true;
+        if (verdict === 'unsure') return false; // refuse this write (the next one asks again); never retire on it
+        // 'unusable': fall through to the owner record.
       }
       // No query(): only an owner record newer than this tab's own start means another tab took over.
       const rec = this.readRecordSafe();
@@ -304,8 +306,11 @@ export class WebTab {
           if (m.t === 'released') released = m;
           else if (m.t === 'busy') {
             // A payment is finishing there: keep waiting for it rather than cutting it off.
-            onProgress?.(m.reason);
-            deadline = Math.max(deadline, this.env.now() + (this.env.busyWaitMs ?? PAYMENT_HANDOVER_WAIT_MS + 5000));
+            if (m.reason === 'payment') onProgress?.('payment');
+            deadline = Math.max(
+              deadline,
+              this.env.now() + (this.env.busyWaitMs ?? PAYMENT_HANDOVER_WAIT_MS + QUIET_CAP_MS + 5000),
+            );
           }
         }
       }
@@ -351,6 +356,61 @@ export class WebTab {
         /* expires by itself */
       }
     };
+  }
+
+  /**
+   * Once, after the claim: can query() tell this page apart from other clients? Usable only when the marker lock and
+   * the wallet lock report the same, non-empty clientId, and no other tab's marker shares it. Otherwise (browsers that
+   * report a different clientId per lock, an empty one, or the same one for every client) the query fence is turned
+   * off and the owner record is used: a clientId mismatch alone must never retire a tab (re-review, clientId cases).
+   */
+  private async selfCheck() {
+    const locks = this.env.locks;
+    if (!locks?.query || !(await this.marker)) {
+      this.queryFence = 'off';
+      return;
+    }
+    let held: Array<{ name?: string; clientId?: string }>;
+    try {
+      held = (await locks.query()).held ?? [];
+    } catch {
+      return; // stays 'unknown': this write uses the owner record, the next one checks again
+    }
+    const me = held.find((l) => l.name === this.markerName)?.clientId;
+    const holder = held.find((l) => l.name === WEB_TAB_LOCK)?.clientId;
+    const sharedWithAnotherTab = this.otherMarkers(held).some((l) => l.clientId === me);
+    const usable = typeof me === 'string' && me !== '' && holder === me && !sharedWithAnotherTab;
+    this.queryFence = usable ? 'on' : 'off';
+    this.myClientId = usable ? me : undefined;
+  }
+
+  private otherMarkers(held: Array<{ name?: string; clientId?: string }>) {
+    return held.filter((l) => l.name?.startsWith(WEB_TAB_MARKER_LOCK_PREFIX) && l.name !== this.markerName);
+  }
+
+  /**
+   * The browser's answer: 'mine' (this page holds the wallet lock), 'other-tab' (positive evidence: another tab's
+   * marker shares the holder's clientId), 'unsure' (refuse this write, keep the tab), or 'unusable' (fall back).
+   */
+  private async queryVerdict(): Promise<'mine' | 'other-tab' | 'unsure' | 'unusable'> {
+    let held: Array<{ name?: string; clientId?: string }>;
+    try {
+      held = (await this.env.locks!.query!()).held ?? [];
+    } catch {
+      return 'unsure';
+    }
+    if (this.state !== 'active') return 'unsure';
+    const me = held.find((l) => l.name === this.markerName)?.clientId;
+    const holder = held.find((l) => l.name === WEB_TAB_LOCK)?.clientId;
+    const others = this.otherMarkers(held);
+    if (me !== this.myClientId || others.some((l) => l.clientId === me)) {
+      // This page's id changed or another tab reports the same one: the fence can't tell tabs apart any more.
+      this.queryFence = 'off';
+      return 'unusable';
+    }
+    if (holder === me) return 'mine';
+    if (holder !== undefined && holder !== '' && others.some((l) => l.clientId === holder)) return 'other-tab';
+    return 'unsure';
   }
 
   /** A lock only this tab holds, so query() can tell which client holds the wallet lock. */
@@ -474,8 +534,8 @@ export class WebTab {
 
   private runRelease(tell: (p: HandoverProgress) => void = () => undefined): Promise<void> {
     this.released ??= Promise.race([
-      this.releaseHook(tell).catch(() => undefined),
-      sleep(this.env.releaseWaitMs ?? PAYMENT_HANDOVER_WAIT_MS + (this.env.flushWaitMs ?? 3000)),
+      this.releaseHook(tell, false).catch(() => undefined),
+      sleep(this.env.releaseWaitMs ?? PAYMENT_HANDOVER_WAIT_MS + QUIET_CAP_MS + (this.env.flushWaitMs ?? 3000)),
     ]);
     return this.released;
   }
@@ -484,6 +544,8 @@ export class WebTab {
   private async handOver(to: string) {
     if (this.handingOver) return; // a second asker gets no answer (and is held back by the takeover lock)
     this.handingOver = true;
+    // Tell the new tab at once that this tab is finishing its writes, so it waits instead of taking over after 3 s.
+    this.channel?.postMessage({ t: 'busy', by: this.id, to, reason: 'saving' } satisfies Msg);
     // Still 'active' while the hook runs: the hub is fenced (no new writes), and the writes it already accepted
     // must still pass the owner check on their way to localStorage.
     await this.runRelease((reason) => this.channel?.postMessage({ t: 'busy', by: this.id, to, reason } satisfies Msg));
@@ -503,10 +565,17 @@ export class WebTab {
 
   private lose() {
     if (this.state === 'lost') return;
-    const wasActive = this.state === 'active';
+    const was = this.state;
     this.state = 'lost';
-    // Stolen without a handshake: stop whatever still runs (its writes are already refused).
-    const stopped = wasActive ? this.runRelease() : Promise.resolve();
+    // Retired: fence and stop the worker at once, like closing the tab: no payment wait, so the old worker never runs
+    // beside the new tab's (re-review C). After a normal handover this only repeats what already happened.
+    const stopped =
+      was === 'inactive'
+        ? Promise.resolve()
+        : Promise.race([
+            this.releaseHook(() => undefined, true).catch(() => undefined),
+            sleep(this.env.flushWaitMs ?? 3000),
+          ]);
     void stopped.then(() => {
       this.letGo?.();
       this.letGo = undefined;
@@ -575,6 +644,38 @@ export class SpendGauge {
     });
   }
 }
+
+/**
+ * The active tab's release (main.ts onRelease), in one place so the tests run the same steps:
+ * - handover asked for: let a running payment finish (up to 20 s, the other tab is told), then wait for storage to go
+ *   quiet (the payment's caller records its result right after it returns), then fence, flush and stop the worker;
+ * - retired (stolen, or replaced): fence and stop the worker at once, like closing the tab.
+ */
+export const releaseWallet = async (p: {
+  hub: { fence(): void; flush(): Promise<void>; quiet(quietMs: number, capMs: number): Promise<void> };
+  spends: SpendGauge;
+  stopWorker: () => void;
+  tell: (progress: HandoverProgress) => void;
+  stolen: boolean;
+  paymentWaitMs?: number;
+  quietMs?: number;
+  quietCapMs?: number;
+}) => {
+  if (p.stolen) {
+    p.hub.fence();
+    p.stopWorker();
+    await p.hub.flush();
+    return;
+  }
+  if (p.spends.count > 0) {
+    p.tell('payment');
+    await p.spends.idle(p.paymentWaitMs ?? PAYMENT_HANDOVER_WAIT_MS);
+  }
+  await p.hub.quiet(p.quietMs ?? QUIET_MS, p.quietCapMs ?? QUIET_CAP_MS);
+  p.hub.fence();
+  await p.hub.flush();
+  p.stopWorker();
+};
 
 /** The web edition: not a native phone (Capacitor) and not Desktop (Tauri). The extension never loads main.ts. */
 export const isWebEdition = (flags: { native: boolean; tauri: boolean }) => !flags.native && !flags.tauri;

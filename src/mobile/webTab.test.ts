@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Hub, type LocalBackend } from './hub';
+import { __resetSpendsInFlightForTests, onSpendsInFlight, trackSpendsInFlight } from '../services/spendsInFlight';
 import {
   fencedBackend,
   freeDisposableCaches,
@@ -16,6 +17,7 @@ import {
   isFreshWebKey,
   isWebEdition,
   MOVED_ERROR,
+  releaseWallet,
   SpendGauge,
   startWebTab,
   storageChannel,
@@ -31,7 +33,17 @@ const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 const quotaError = () => Object.assign(new Error('The quota has been exceeded.'), { name: 'QuotaExceededError' });
 
 /** One browser profile: one localStorage, one lock manager, one channel bus, shared by every tab. */
-const fakeBrowser = (opts: { locks?: boolean; query?: boolean; channel?: boolean; quotaFull?: boolean } = {}) => {
+const fakeBrowser = (
+  opts: {
+    locks?: boolean;
+    query?: boolean;
+    channel?: boolean;
+    quotaFull?: boolean;
+    /** How query() reports clientIds: per tab (Chrome), per lock, empty, or one id for every client. */
+    clientIds?: 'per-tab' | 'per-lock' | 'empty' | 'same';
+  } = {},
+) => {
+  let lockSeq = 0;
   const items = new Map<string, string>();
   const quota = { full: !!opts.quotaFull };
   type TabIo = {
@@ -46,7 +58,15 @@ const fakeBrowser = (opts: { locks?: boolean; query?: boolean; channel?: boolean
   const tabs: TabIo[] = [];
   const deliver = (io: TabIo, fn: () => void) => setTimeout(() => (io.frozen ? io.deferred.push(fn) : fn()), 0);
 
-  type Held = { name: string; io: TabIo; reject: (e: Error) => void; done: boolean };
+  type Held = { name: string; io: TabIo; reject: (e: Error) => void; done: boolean; seq: number };
+  const clientIdOf = (h: Held) =>
+    opts.clientIds === 'per-lock'
+      ? `lock-${h.seq}`
+      : opts.clientIds === 'empty'
+        ? ''
+        : opts.clientIds === 'same'
+          ? 'one-client'
+          : h.io.clientId;
   const held = new Map<string, Held>();
 
   const makeTab = () => {
@@ -88,7 +108,7 @@ const fakeBrowser = (opts: { locks?: boolean; query?: boolean; channel?: boolean
           deliver(cur.io, () => cur.reject(err));
         }
         return new Promise((resolve, reject) => {
-          const entry: Held = { name, io, reject, done: false };
+          const entry: Held = { name, io, reject, done: false, seq: ++lockSeq };
           held.set(name, entry);
           void Promise.resolve(cb({ name })).then((v) => {
             if (entry.done) return;
@@ -103,7 +123,7 @@ const fakeBrowser = (opts: { locks?: boolean; query?: boolean; channel?: boolean
         ? {}
         : {
             query: async () => ({
-              held: [...held.values()].filter((h) => !h.done).map((h) => ({ name: h.name, clientId: h.io.clientId })),
+              held: [...held.values()].filter((h) => !h.done).map((h) => ({ name: h.name, clientId: clientIdOf(h) })),
             }),
           }),
     };
@@ -230,16 +250,23 @@ const bootTab = (tab: FakeTab, opts: { fresh?: boolean } = {}) => {
     out.hub = hub;
     out.client = hubClient(hub);
     out.worker = 'running';
-    webTab.onRelease(async (tell) => {
-      if (spends.count > 0) {
-        tell('payment');
-        await spends.idle(1000);
-      }
-      hub.fence();
-      await hub.flush();
-      out.worker = 'stopped';
-      out.stoppedAt = Date.now();
-    });
+    // The same release main.ts runs (releaseWallet), with short test waits.
+    webTab.onRelease((tell, stolen) =>
+      releaseWallet({
+        hub,
+        spends,
+        tell,
+        stolen,
+        paymentWaitMs: 1000,
+        quietMs: 40,
+        quietCapMs: 300,
+        stopWorker: () => {
+          if (out.worker === 'stopped') return;
+          out.worker = 'stopped';
+          out.stoppedAt = Date.now();
+        },
+      }),
+    );
     webTab.onLost(() => void out.reloads++);
   };
   return {
@@ -572,9 +599,10 @@ describe('web wallet: one active tab', () => {
     test('main.ts waits for running payments before fencing; the worker reports them; initWallet counts them', () => {
       const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
       const hook = main.slice(main.indexOf('webTab?.onRelease('));
-      expect(hook.indexOf('await spends.idle(PAYMENT_HANDOVER_WAIT_MS)')).toBeGreaterThan(0);
-      expect(hook.indexOf('await spends.idle(')).toBeLessThan(hook.indexOf('hub.fence()'));
-      expect(hook.indexOf('hub.fence()')).toBeLessThan(hook.indexOf('worker.terminate()'));
+      expect(hook).toMatch(
+        /^webTab\?\.onRelease\(\(tell, stolen\) =>\s+releaseWallet\(\{\s+hub,\s+spends,\s+tell,\s+stolen,/,
+      );
+      expect(hook.slice(0, hook.indexOf('webTab?.onLost'))).toContain('worker.terminate()');
       expect(main).toContain("e.data?.t === 'spends'");
       const worker = readFileSync(new URL('./background.worker.ts', import.meta.url), 'utf8');
       expect(worker).toContain("onSpendsInFlight((n) => self.postMessage({ t: 'spends', n }))");
@@ -708,6 +736,132 @@ describe('web wallet: one active tab', () => {
     await a.out.client!.set('k', 1);
     expect(browser.local('k')).toBe(1);
     expect(a.out.webTab.state).toBe('active');
+  });
+
+  describe('re-review: clientId self-check (query() must tell this page apart, or the owner record is used)', () => {
+    test('a different clientId per lock (one page): the fence turns off, the tab is never retired, writes save', async () => {
+      const browser = fakeBrowser({ clientIds: 'per-lock' });
+      const a = bootTab(browser.makeTab());
+      expect(await a.claim()).toBe(true);
+      await a.out.client!.set('k', 1);
+      await a.out.client!.set('k', 2);
+      await tick(20);
+      expect(a.out.webTab.state).toBe('active');
+      expect(a.out.reloads).toBe(0);
+      expect(a.out.webTab.queryFence).toBe('off');
+      expect(browser.local('k')).toBe(2);
+      // The owner record still fences a takeover.
+      const b = bootTab(browser.makeTab());
+      expect(await b.takeOver()).toBe(true);
+      await expect(a.out.client!.set('k', 'stale')).rejects.toThrow(MOVED_ERROR);
+      expect(browser.local('k')).toBe(2);
+    });
+
+    test('an empty clientId for every client: the fence turns off; the record fences a frozen old tab', async () => {
+      const browser = fakeBrowser({ clientIds: 'empty' });
+      const aTab = browser.makeTab();
+      const a = bootTab(aTab);
+      expect(await a.claim()).toBe(true);
+      await a.out.client!.set('k', 1);
+      expect(a.out.webTab.queryFence).toBe('off');
+      aTab.freeze();
+      const b = bootTab(browser.makeTab());
+      expect(await b.takeOver()).toBe(true);
+      await b.out.client!.set('k', 'b');
+      await expect(a.out.client!.set('k', 'stale')).rejects.toThrow(MOVED_ERROR);
+      expect(browser.local('k')).toBe('b');
+    });
+
+    test('the same clientId for every client: once another tab shows it, the fence turns off (no false "mine")', async () => {
+      const browser = fakeBrowser({ clientIds: 'same' });
+      const aTab = browser.makeTab();
+      const a = bootTab(aTab);
+      expect(await a.claim()).toBe(true);
+      await a.out.client!.set('k', 1);
+      expect(a.out.webTab.queryFence).toBe('on'); // alone, it can't know yet
+      aTab.freeze();
+      const b = bootTab(browser.makeTab());
+      expect(await b.takeOver()).toBe(true);
+      await b.out.client!.set('k', 'b');
+      // query() would say the holder is "one-client" = A's id: A must not take that as "mine".
+      await expect(a.out.client!.set('k', 'stale')).rejects.toThrow(MOVED_ERROR);
+      expect(a.out.webTab.queryFence).toBe('off');
+      expect(browser.local('k')).toBe('b');
+    });
+
+    test('a transient query() failure refuses one write, never retires the tab, and later writes save', async () => {
+      const browser = fakeBrowser();
+      const t = browser.makeTab();
+      let fail = false;
+      const locks = t.env.locks!;
+      const a = bootTab({
+        ...t,
+        env: {
+          ...t.env,
+          locks: {
+            request: locks.request.bind(locks),
+            query: async () => {
+              if (fail) throw new Error('query unavailable');
+              return locks.query!();
+            },
+          },
+        },
+      });
+      await a.claim();
+      await a.out.client!.set('k', 1);
+      fail = true;
+      await expect(a.out.client!.set('k', 2)).rejects.toThrow(MOVED_ERROR);
+      fail = false;
+      await a.out.client!.set('k', 3); // re-review A: the queue isn't poisoned
+      expect(browser.local('k')).toBe(3);
+      expect(await a.out.client!.get('k')).toBe(3);
+      expect(a.out.webTab.state).toBe('active');
+      expect(a.out.reloads).toBe(0);
+    });
+  });
+
+  test('re-review B: a payment, then the write that records its result, then the handover: the result write lands', async () => {
+    __resetSpendsInFlightForTests();
+    const browser = fakeBrowser();
+    const a = bootTab(browser.makeTab());
+    await a.claim();
+    onSpendsInFlight((n) => a.out.spends.set(n));
+    const wallet = trackSpendsInFlight({
+      createAction: async () => {
+        await tick(80);
+        return { txid: 'abc' };
+      },
+    });
+    // The worker's code: pay, then record the result (a noSend store payment's outbox entry).
+    const pay = (async () => {
+      const r = await wallet.createAction();
+      await a.out.client!.set('outbox', { txid: r.txid, state: 'signed' });
+    })();
+    await tick(10);
+    const b = bootTab(browser.makeTab());
+    const takeover = b.takeOver();
+    await pay; // must not throw
+    expect(await takeover).toBe(true);
+    expect(browser.local('outbox')).toEqual({ txid: 'abc', state: 'signed' });
+    expect(await b.out.client!.get('outbox')).toEqual({ txid: 'abc', state: 'signed' });
+    __resetSpendsInFlightForTests();
+  });
+
+  test('re-review C: a tab stolen from stops its worker at once, without the payment wait', async () => {
+    const browser = fakeBrowser();
+    const aTab = browser.makeTab();
+    const a = bootTab(aTab);
+    await a.claim();
+    a.out.spends.set(1); // a payment that would hold a normal handover for up to 1000 ms here
+    aTab.freeze();
+    const b = bootTab(browser.makeTab());
+    expect(await b.takeOver()).toBe(true); // no answer from A: stolen after the wait
+    const thawedAt = Date.now();
+    aTab.thaw(); // the lock-stolen notice arrives
+    await tick(50);
+    expect(a.out.webTab.state).toBe('lost');
+    expect(a.out.worker).toBe('stopped');
+    expect(a.out.stoppedAt - thawedAt).toBeLessThan(200);
   });
 
   describe('extension, phones and Desktop are unaffected', () => {

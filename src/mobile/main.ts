@@ -5,14 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
 import { Hub, nativeLocalBackend } from './hub';
-import {
-  fencedBackend,
-  isFreshWebKey,
-  isWebEdition,
-  PAYMENT_HANDOVER_WAIT_MS,
-  SpendGauge,
-  startWebTab,
-} from './webTab';
+import { fencedBackend, isFreshWebKey, isWebEdition, releaseWallet, SpendGauge, startWebTab } from './webTab';
 import { IS_TAURI, invoke as tauriInvoke } from './desktop/ipc';
 import { tauriLocalBackend } from './desktop/storage';
 import type { PlatformHooks } from '../platform';
@@ -141,8 +134,7 @@ worker.addEventListener('message', (e) => {
   else if (e.data?.t === 'ready') {
     markBootStage('background: ready');
     hub.markBackgroundReady();
-  }
-  else if (e.data?.t === 'spends') spends.set(Number(e.data.n));
+  } else if (e.data?.t === 'spends') spends.set(Number(e.data.n));
   else if (e.data?.t === 'error') {
     // Release held messages anyway: listeners registered before the throw still answer, and without this every
     // runtime.sendMessage waited forever (owner, 6 Oct 2026: balance, tokens and sync all timing out).
@@ -168,20 +160,23 @@ worker.addEventListener('message', (e) => {
   }
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));
-// Web: another tab asked for the wallet. A payment running here finishes first (up to 20 s; the other tab shows
-// "Finishing a payment in the other tab…"); then refuse new writes, flush the accepted ones, stop the worker; then
-// this tab reloads into the "open in another tab" screen. Set in the same synchronous run as the hub and worker, so
-// no takeover can arrive before them.
-webTab?.onRelease(async (tell) => {
-  if (spends.count > 0) {
-    tell('payment');
-    await spends.idle(PAYMENT_HANDOVER_WAIT_MS);
-  }
-  hub.fence();
-  await hub.flush();
-  worker.terminate();
-  hub.unregister('background');
-});
+// Web: another tab asked for the wallet (webTab.ts releaseWallet). A payment running here finishes first (up to 20 s;
+// the other tab shows "Finishing a payment in the other tab…"), storage goes quiet (its result is recorded), then
+// new writes are refused, the accepted ones flushed and the worker stopped; then this tab reloads into the "open in
+// another tab" screen. Retired without a handover (stolen): fenced and stopped at once. Set in the same synchronous
+// run as the hub and worker, so no takeover can arrive before them.
+webTab?.onRelease((tell, stolen) =>
+  releaseWallet({
+    hub,
+    spends,
+    tell,
+    stolen,
+    stopWorker: () => {
+      worker.terminate();
+      hub.unregister('background');
+    },
+  }),
+);
 webTab?.onLost(() => location.reload());
 worker.postMessage({ t: 'init', rootUrl, version: __MOBILE_VERSION__ });
 markBootStage('background: worker started');

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { __resetSpendsInFlightForTests, onSpendsInFlight, spendsInFlight, trackSpendsInFlight } from './spendsInFlight';
 
+const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+
 describe('spendsInFlight (web one-tab handover waits for running payments)', () => {
   afterEach(() => __resetSpendsInFlightForTests());
 
@@ -29,6 +31,7 @@ describe('spendsInFlight (web one-tab handover waits for running payments)', () 
     gates.forEach((g) => g());
     expect(await a).toBe('done');
     await b;
+    await tick(1);
     expect(spendsInFlight()).toBe(0);
     expect(seen).toEqual([1, 2, 1, 0]);
   });
@@ -41,6 +44,7 @@ describe('spendsInFlight (web one-tab handover waits for running payments)', () 
     };
     trackSpendsInFlight(w);
     await expect(w.createAction()).rejects.toThrow('refused');
+    await tick(1);
     expect(spendsInFlight()).toBe(0);
   });
 
@@ -53,8 +57,27 @@ describe('spendsInFlight (web one-tab handover waits for running payments)', () 
     await w.createSignature({ data: [1] });
     expect(seen).toEqual([]);
     await w.createSignature({ hashToDirectlySign: [1] });
+    await tick(1);
     expect(seen).toEqual([1, 0]);
     await w.listOutputs();
     expect(seen).toEqual([1, 0]);
+  });
+
+  test('reviewer probe: the count reaches 0 only after the caller has recorded the result', async () => {
+    const log: string[] = [];
+    const w = trackSpendsInFlight({
+      createAction: async () => {
+        await tick(5);
+        return { txid: 'x' };
+      },
+    });
+    onSpendsInFlight((n) => log.push(`spends ${n}`));
+    const pay = (async () => {
+      await w.createAction();
+      log.push('caller records result');
+    })();
+    await pay;
+    await tick(1);
+    expect(log).toEqual(['spends 1', 'caller records result', 'spends 0']);
   });
 });

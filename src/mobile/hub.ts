@@ -160,6 +160,36 @@ export class Hub {
     await this.persistQueue.catch(() => undefined);
   }
 
+  /** Storage ops running now, and when the last one ended (quiet()). */
+  private storageBusy = 0;
+  private storageIdleSince = 0;
+
+  /**
+   * Resolves once no storage op has run for `quietMs` (or after `capMs`). Web one-tab handover: a payment's caller
+   * records its result (outbox entry, grant hold, reservation) right after the payment returns; the hub is fenced only
+   * once those writes have landed (re-review B).
+   */
+  async quiet(quietMs: number, capMs: number) {
+    const until = Date.now() + capMs;
+    for (;;) {
+      const now = Date.now();
+      if (now >= until) return;
+      if (this.storageBusy === 0 && now - this.storageIdleSince >= quietMs) return;
+      await new Promise((r) => setTimeout(r, Math.min(50, quietMs)));
+    }
+  }
+
+  /** Counts a storage op as running until it settles (quiet()). */
+  private async tracked<T>(op: Promise<T>): Promise<T> {
+    this.storageBusy++;
+    try {
+      return await op;
+    } finally {
+      this.storageBusy--;
+      this.storageIdleSince = Date.now();
+    }
+  }
+
   register(id: string, endpoint: Endpoint) {
     this.endpoints.set(id, endpoint);
   }
@@ -208,7 +238,7 @@ export class Hub {
         return;
       }
       case 'storage':
-        return this.onStorage(from, msg);
+        return this.tracked(this.onStorage(from, msg));
       case 'connect':
         this.portOwners.set(msg.portId, from);
         await this.backgroundReady;
@@ -376,7 +406,22 @@ export class Hub {
     try {
       const { result, changes } = this.applyStorageOp(store, msg.op, msg.arg);
       if (msg.area === 'local' && changes) {
-        await this.persist(Object.entries(changes).map(([key, change]) => [key, change.newValue]));
+        try {
+          const write = this.persist(Object.entries(changes).map(([key, change]) => [key, change.newValue]));
+          // The queue never holds a failure: one refused write (the one-tab fence could not confirm, a full
+          // localStorage) must not fail every later write until a reload (re-review A). This write still fails.
+          this.persistQueue = write.catch(() => undefined);
+          await write;
+        } catch (error) {
+          // Not saved: take it back out of this hub's copy too (unless a later op changed the key since), so the copy
+          // never holds a value localStorage doesn't.
+          for (const [key, change] of Object.entries(changes)) {
+            if (JSON.stringify(store.get(key)) !== JSON.stringify(change.newValue)) continue;
+            if (change.oldValue === undefined) store.delete(key);
+            else store.set(key, change.oldValue);
+          }
+          throw error;
+        }
       } else if (changes) {
         if (this.persistSession) sessionStorage.setItem(SESSION_KEY, JSON.stringify(Object.fromEntries(this.session)));
         this.markUnlocked();
