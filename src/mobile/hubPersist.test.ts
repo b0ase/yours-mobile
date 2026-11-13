@@ -102,4 +102,91 @@ describe('hub: one refused write never breaks the next', () => {
     clearInterval(busy);
     expect(Date.now() - t2).toBeLessThan(400);
   });
+
+  describe('re-review R1: a rollback never undoes a later write of the same key', () => {
+    const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+    /** A backend whose writes take 5 ms; `refuse` decides per write (1-based) whether it is refused. */
+    const slow = (refuse: (n: number) => boolean) => {
+      const disk = new Map<string, string>([['chrome.storage.local:x', '"a"']]);
+      let n = 0;
+      const written: string[] = [];
+      const hub = new Hub(
+        async () => undefined,
+        {
+          load: async () => Object.fromEntries(disk),
+          apply: async (sets) => {
+            await tick(5);
+            if (refuse(++n)) throw new Error('refused (unsure)');
+            written.push(...Object.keys(sets));
+            for (const [k, v] of Object.entries(sets)) disk.set(k, v);
+          },
+        },
+        { persistSession: false },
+      );
+      const results = new Map<number, string>();
+      let lastGet: unknown;
+      hub.register('bg', {
+        sender: { id: 'x', url: 'u', origin: 'o' },
+        post: (j) => {
+          const m = JSON.parse(j) as { t: string; reqId: number; error?: string; result?: Record<string, unknown> };
+          if (m.t !== 'storageResult') return;
+          results.set(m.reqId, m.error ?? 'ok');
+          if (m.result) lastGet = m.result.x;
+        },
+      });
+      let id = 0;
+      const op = (o: 'get' | 'set', arg: unknown) => {
+        const r = ++id;
+        return { r, p: hub.handle('bg', { t: 'storage', reqId: r, area: 'local', op: o, arg } as never) };
+      };
+      const read = async () => {
+        await op('get', 'x').p;
+        return lastGet;
+      };
+      return { disk, results, op, read, written };
+    };
+
+    test('reviewer probe: write 1 (x=v) refused, an identical write 2 answered ok: x=v is really stored', async () => {
+      const h = slow((n) => n === 1);
+      const a = h.op('set', { x: 'v' });
+      await tick(1);
+      const b = h.op('set', { x: 'v' });
+      await Promise.all([a.p, b.p]);
+      expect(h.results.get(a.r)).toContain('refused');
+      expect(h.results.get(b.r)).toBe('ok');
+      expect(h.disk.get('chrome.storage.local:x')).toBe('"v"');
+      expect(await h.read()).toBe('v');
+    });
+
+    test('both refused: the copy goes back to what is stored, not to the unsaved value', async () => {
+      const h = slow(() => true);
+      const a = h.op('set', { x: 'v' });
+      await tick(1);
+      const b = h.op('set', { x: 'v' });
+      await Promise.all([a.p, b.p]);
+      expect(h.results.get(b.r)).toContain('refused');
+      expect(h.disk.get('chrome.storage.local:x')).toBe('"a"');
+      expect(await h.read()).toBe('a');
+    });
+
+    test('write 1 (x=v1) refused while write 2 (x=v2) is going out: the copy keeps v2', async () => {
+      const h = slow((n) => n === 1);
+      const a = h.op('set', { x: 'v1' });
+      await tick(1);
+      const b = h.op('set', { x: 'v2' });
+      await Promise.all([a.p, b.p]);
+      expect(h.results.get(b.r)).toBe('ok');
+      expect(h.disk.get('chrome.storage.local:x')).toBe('"v2"');
+      expect(await h.read()).toBe('v2');
+    });
+
+    test('a set equal to the saved value is still a no-op (nothing written)', async () => {
+      const h = slow(() => false);
+      const a = h.op('set', { x: 'a' });
+      await a.p;
+      expect(h.results.get(a.r)).toBe('ok');
+      expect(h.written).toEqual([]); // x already stored as "a": not written again
+      expect(h.disk.get('chrome.storage.local:x')).toBe('"a"');
+    });
+  });
 });
