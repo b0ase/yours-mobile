@@ -439,7 +439,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Balance as a membership card (src/mobile/wallet/WalletCard); the old balance block below it is hidden.
     [
       '        {/* ── USD balance ── */}',
-      '<SectionBoundary name="Card"><WalletCard usd={balanceUsd(satsOf(bsvBalance), exchangeRate, services.mnee ? mneeBalance : 0)} sats={satsOf(bsvBalance)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={showSyncRetry({ failed: balanceFailed, known: balanceKnown })} stale={staleHint} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} onRefresh={(manual) => void refreshUtxos({ notifyIfUnchanged: manual, quiet: !manual })} upToDate={upToDate} refreshing={isRefreshing} rate={exchangeRate} /></SectionBoundary>\n        {/* ── USD balance ── */}',
+      '<SectionBoundary name="Card"><WalletCard usd={balanceUsd(satsOf(bsvBalance), headlineRate, services.mnee ? mneeBalance : 0)} sats={satsOf(bsvBalance)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={showSyncRetry({ failed: balanceFailed, known: balanceKnown })} stale={staleHint} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} onRefresh={(manual) => void refreshUtxos({ notifyIfUnchanged: manual, quiet: !manual })} upToDate={upToDate} refreshing={isRefreshing} rate={headlineRate} /></SectionBoundary>\n        {/* ── USD balance ── */}',
     ],
     [
       'className="text-4xl font-bold tracking-tight select-none"',
@@ -560,8 +560,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     ['<SectionBoundary name="Card"><WalletCard ', '<SectionBoundary name="Card"><HomeTop><WalletCard '],
     [
-      'refreshing={isRefreshing} rate={exchangeRate} /></SectionBoundary>',
-      'refreshing={isRefreshing} rate={exchangeRate} /></HomeTop></SectionBoundary>',
+      'refreshing={isRefreshing} rate={headlineRate} /></SectionBoundary>',
+      'refreshing={isRefreshing} rate={headlineRate} /></HomeTop></SectionBoundary>',
     ],
     [
       '<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
