@@ -20,7 +20,7 @@
  */
 
 import { bareHost, scanSignData } from './signDataScan';
-import { noteOwnBackendCall, ownBackendRefusal, ownBackendsReady } from './ownBackendKeys';
+import { ownBackendRefusal } from './ownBackendKeys';
 
 // The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
 export { bareHost, boundHosts, normaliseKey } from './signDataScan';
@@ -154,13 +154,9 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
     const original = m[method];
     if (typeof original !== 'function') continue;
     m[method] = async (args: unknown, originator?: string) => {
-      if (!originator || originator === adminOriginator) {
-        // The wallet's own BRC-103 calls (bMail, Spaces doors) teach which servers are its own.
-        noteOwnBackendCall(args);
-      } else {
-        // No site signs in as the user to the wallet's own servers (follow-up review, 13 Nov 2026): wait for the
-        // remembered keys first, so a call right after a restart is checked against them too.
-        await ownBackendsReady();
+      if (originator && originator !== adminOriginator) {
+        // No site signs in as the user to the wallet's own servers (ownBackendKeys.ts: seeded first-party keys and the
+        // configured stores' keys; refused while a configured one hasn't connected yet).
         const own = ownBackendRefusal(args);
         if (own) throw new Error(own);
       }

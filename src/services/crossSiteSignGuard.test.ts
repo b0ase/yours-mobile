@@ -865,3 +865,29 @@ describe('follow-up F2: Unicode and numeric hosts in data that is not text', () 
     );
   });
 });
+
+// Review of 46be94c9 (B1): a soft end (space, & or ;) ends a URL's authority only when a new field starts before the
+// next '@'; otherwise the parser reads through it as userinfo.
+describe('B1: userinfo with a space, & or ; still names the host after the @', () => {
+  test.each([
+    'URI: https://evil.com @good.com/login\nNonce: 1',
+    'uri: https://evil.com @good.com/login',
+    'uri=https://evil.com @good.com/',
+    'redirect_uri=https://evil.com&@good.com/cb',
+    'redirect_uri=https://evil.com;@good.com/cb',
+    'redirect_uri=https://evil.com%26@good.com/cb',
+    'redirect_uri=https%3A%2F%2Fevil.com%26%40good.com',
+    'url=>https://evil.com&@good.com',
+    'uri:https://evil.com&@good.com/',
+    'uri: https://evil.com x:y@good.com/login',
+    'url=blob:https://evil.com&@good.com/x',
+  ])('%s: refused for evil.com', (msg) => {
+    expect(crossSiteSignRefusal('https://evil.com', { data: bytes(msg) })).toContain('good.com');
+  });
+  test('a long run of soft ends and @s stays fast', () => {
+    const data = bytes('@x_url=https:a '.repeat(4500));
+    const t = performance.now();
+    crossSiteSignRefusal('https://app.example', { data });
+    expect(performance.now() - t).toBeLessThan(250);
+  });
+});
