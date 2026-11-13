@@ -119,7 +119,7 @@ export const CliPairConfirm = ({
         can call itself the CLI; a website or a stranger asking you to scan this is a scam.
       </p>
       <p className="mt-5 text-sm" style={{ color: MUTED }}>
-        Check the terminal shows the same code:
+        Does the terminal show this code?
       </p>
       <p
         className={`mt-2 whitespace-nowrap font-mono font-bold ${code.length > 4 ? 'text-3xl tracking-[0.15em]' : 'text-4xl tracking-[0.3em]'}`}
@@ -192,7 +192,7 @@ export const CliPairConfirm = ({
           className="flex-1 rounded-xl py-3 font-semibold text-white"
           style={{ background: PANEL }}
         >
-          Cancel
+          No
         </button>
         <button
           disabled={!canPair || !id}
@@ -204,7 +204,7 @@ export const CliPairConfirm = ({
           className="flex-1 rounded-xl py-3 font-bold"
           style={{ background: GOLD, color: '#000', opacity: canPair ? 1 : 0.4 }}
         >
-          Pair
+          Yes, pair
         </button>
       </div>
     </div>

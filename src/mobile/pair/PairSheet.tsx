@@ -180,7 +180,7 @@ export default function PairSheet({
               </>
             )}
             <p className="mt-6 text-sm" style={{ color: MUTED }}>
-              Check the website shows the same code:
+              Does the website show this code?
             </p>
             <p
               className={`mt-2 whitespace-nowrap font-mono font-bold ${stage.p.code.length > 4 ? 'text-3xl tracking-[0.15em]' : 'text-4xl tracking-[0.3em]'}`}
@@ -199,7 +199,7 @@ export default function PairSheet({
                 className="flex-1 rounded-xl py-3 font-semibold text-white"
                 style={{ background: PANEL }}
               >
-                Cancel
+                No
               </button>
               <button
                 onClick={() => {
@@ -213,7 +213,7 @@ export default function PairSheet({
                 className="flex-1 rounded-xl py-3 font-bold"
                 style={{ background: GOLD, color: '#000' }}
               >
-                Connect
+                Yes, connect
               </button>
             </div>
           </div>
