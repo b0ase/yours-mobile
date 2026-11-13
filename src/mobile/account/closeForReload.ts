@@ -13,7 +13,9 @@ import { settleWithin, type Settled } from '../../utils/settleWithin';
 export { settleWithin };
 
 /** Longest the switch waits for the wallet to close before reloading anyway. */
-export const CLOSE_FOR_RELOAD_CAP_MS = 3000;
+// 10 s (was 3 s): a close cut short by the cap reloaded into a frozen page (owner's iPhone, 13 Nov 2026, boot trace:
+// cap hit → black screen; the close that finished in ~1 s reloaded fine). A slower switch beats a black screen.
+export const CLOSE_FOR_RELOAD_CAP_MS = 10_000;
 
 /** The background action that closes the in-page wallet and keeps it closed until the reload. */
 export const CLOSE_FOR_RELOAD_ACTION = 'WALLET_CLOSE_FOR_RELOAD';

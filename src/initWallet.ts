@@ -186,6 +186,12 @@ import { settleWithin } from './utils/settleWithin';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
 const WATCH_STORES_CLOSE_CAP_MS = 2000;
+/**
+ * The last wallet close's steps with their times (ms from the start of the close). An account-switch reload sends them
+ * to the page's boot trace (background.ts CLOSE_FOR_RELOAD), so a close that hangs shows which step it hung on
+ * (owner's iPhone, 13 Nov 2026: a switch whose close hit the cap reloaded into a black screen).
+ */
+export const lastCloseSteps: string[] = [];
 
 // Admin originator for the extension (bypasses all permission checks). The bare
 // extension ID, as ChromeCWI sends it: toolbox permission checks reject a URL
@@ -1869,6 +1875,10 @@ export const initWallet = async (
     });
 
   const close = async () => {
+    const c0 = Date.now();
+    lastCloseSteps.length = 0;
+    const step = (name: string) => void lastCloseSteps.push(`${Date.now() - c0}ms ${name}`);
+    step('start');
     walletClosed = true;
     admitClosed = true;
     receiveWatch.stop();
@@ -1887,9 +1897,12 @@ export const initWallet = async (
     admitTimer = undefined;
     if (moreTimer) clearTimeout(moreTimer);
     moreTimer = undefined;
+    step('destroy: monitor tasks + wallet');
     await destroyWallet();
+    step('destroy done');
     stopBackupCheck();
     await watchStoresClosed;
+    step('watch stores closed');
   };
 
   return {
