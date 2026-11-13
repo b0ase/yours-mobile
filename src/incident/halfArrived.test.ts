@@ -26,6 +26,7 @@ import {
   type SyncStateRow,
 } from '../services/fullPass';
 import {
+  BACKUP_CALL_MS,
   EMPTY_OK_DAYS,
   MAX_EMPTY_OK,
   MAX_HEAL_TRIES,
@@ -620,6 +621,10 @@ describe('review of 6737dd2c: the coin check stays out of the way', () => {
         const late = await payment(d.backup, d.kd.identityKey, 3 * HOUR, [9_000, 1_000], 1);
         d.known.add(late.txid);
         await mined(d.backup, late.transactionId);
+        // A second one waiting too: the budget, not the list, is what ends the backup requests below.
+        const late2 = await payment(d.backup, d.kd.identityKey, 3 * HOUR, [8_000, 2_000], 1);
+        d.known.add(late2.txid);
+        await mined(d.backup, late2.transactionId);
         await d.pullOnlyToEnd();
         await updateMark(d.phone as never, await d.state(), { scanAt: undefined });
         const stopped = await afterPull({
@@ -634,17 +639,30 @@ describe('review of 6737dd2c: the coin check stays out of the way', () => {
         });
         expect(stopped.checked).toBe(0);
         expect(markOf(await d.state()).scanAt).toBeUndefined(); // the scan waits for a pull with no push waiting
-        // A backup that never answers: the check ends within its budget (no per-call floor past it).
-        const t0 = Date.now();
+        // A backup that never answers: the check's backup requests end within its budget (no per-call floor past it).
+        // The budget covers the backup requests only (pullIntegrity.ts: t0 is taken after the device reads and the
+        // daily scan), so what is timed here is the wait on the backup, from the request to its deadline firing, not
+        // the whole check: on a loaded machine the local reads alone took longer than the old 200 ms margin (13 Nov
+        // 2026, 578 ms). The deadline is a real timer, so it is timed in milliseconds, against the per-call cap it must
+        // not fall back to: 300 ms of budget fires long before BACKUP_CALL_MS (10 s); half of that is the slack.
+        const asked: number[] = [];
+        const deadlines: number[] = [];
         const slow = await afterPull({
           manager: d.sm as never,
           store: d.phone as never,
           identityKey: d.kd.identityKey,
           readerSik: d.backupSik,
-          backupOutputs: () => new Promise(() => undefined),
+          backupOutputs: () => {
+            asked.push(Date.now());
+            return new Promise(() => undefined);
+          },
           budgetMs: 300,
+          log: (m) => void (m.includes('did not answer in time') && deadlines.push(Date.now())),
         });
-        expect(Date.now() - t0).toBeLessThan(300 + 200);
+        expect(asked.length).toBe(1); // the budget spent on one request: no second one past it
+        expect(deadlines.length).toBe(1);
+        expect(deadlines[0] - asked[0]).toBeLessThan(BACKUP_CALL_MS / 2);
+        expect(slow.checked).toBe(1);
         expect(slow.plan).not.toBe('healing');
         expect(markOf(await d.state()).awaitOutputs?.[String(late.transactionId)]?.nextAt).toBeGreaterThan(Date.now());
       } finally {

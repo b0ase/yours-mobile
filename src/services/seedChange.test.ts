@@ -622,6 +622,7 @@ function sim(o: {
   maxRuns?: number;
   maxAgeMs?: number;
   tapGapMs?: number;
+  runMs?: number;
 }) {
   let clock = 1_000_000;
   const kd = new KeyDeriver(PrivateKey.fromRandom());
@@ -688,6 +689,7 @@ function sim(o: {
     kv,
     maxRuns: o.maxRuns,
     maxAgeMs: o.maxAgeMs,
+    runMs: o.runMs,
   };
   const run = async () => {
     const r = await recoverSeedChange(deps);
@@ -715,8 +717,15 @@ describe('re-review fixes: liveness on big wallets and long walks', () => {
     expect(done).toBeLessThanOrEqual(14);
   }, 120000);
 
+  // The two walks below need many runs, not many hops. A hop is 500 ms on the simulated clock but ~14 ms of real CPU
+  // (two BRC-42 derivations: building the chain, then recognising its change), so 1,500 hops in 4-minute runs (384 hops
+  // a run, ~4 runs) took ~19 s alone and over 120 s on a loaded machine (13 Nov 2026: 928 s and 1,050 s, reported as
+  // timeouts once the microtask-only walk finished). 20-second runs (32 hops each) make 160 hops a 5-run walk: more runs
+  // and expiries than before, at a tenth of the CPU.
+  const WALK = { hops: 160, runMs: 20_000 };
+
   test('a walk longer than maxRuns runs keeps its progress through expiry and claims the tail', async () => {
-    const s = sim({ open: 0, hops: 1500, maxRuns: 2 });
+    const s = sim({ open: 0, ...WALK, maxRuns: 2 });
     let done = 0;
     let examinedBefore = 0;
     for (let i = 1; i <= 30 && !done; i++) {
@@ -726,15 +735,16 @@ describe('re-review fixes: liveness on big wallets and long walks', () => {
       examinedBefore = ex;
       if (r.done) done = i;
     }
-    expect(done).toBeGreaterThan(2); // took more runs than maxRuns
+    expect(done).toBeGreaterThan(2 * 2); // took more than twice maxRuns runs: it expired at least twice
     expect(s.claimed).toEqual([s.tail]);
   }, 120000);
 
   test('a walk spread over more than maxAgeMs keeps its progress too', async () => {
-    const s = sim({ open: 0, hops: 1500, maxAgeMs: 60_000, tapGapMs: 3600_000 });
+    const s = sim({ open: 0, ...WALK, maxAgeMs: 60_000, tapGapMs: 3600_000 });
     let done = 0;
     for (let i = 1; i <= 30 && !done; i++) if ((await s.run()).done) done = i;
-    expect(done).toBeGreaterThan(1);
+    expect(done).toBeGreaterThan(2); // expired (an hour between taps, over maxAgeMs) on every run after the first
+
     expect(s.claimed).toEqual([s.tail]);
   }, 120000);
 
@@ -954,7 +964,9 @@ describe('re-review 07c F2: open coins before settled history; the limit is repo
     const raw = new Map<string, number[]>();
     const settled: [string, string][] = [];
     let prev = `${txid(9)}.0`;
-    for (let i = 0; i < 300; i++) {
+    // Settled history longer than the cap: 75 payments, cap 50 (was 300 and 200: the same shape at a quarter of the
+    // CPU; each payment examined is a BRC-42 derivation, ~7 ms, and the first test reads it on three taps).
+    for (let i = 0; i < 75; i++) {
       const t = new Transaction();
       const [p, v] = prev.split('.');
       t.addInput({ sourceTXID: p, sourceOutputIndex: Number(v), unlockingScript: stranger });
@@ -972,7 +984,7 @@ describe('re-review 07c F2: open coins before settled history; the limit is repo
       keyDeriver: kd as never,
       now: () => clock,
       kv: memKV(),
-      maxTxs: 200, // stands in for the default 20 000
+      maxTxs: 50, // stands in for the default 20 000
       storageOutpoints: async () => ({ open: lossFromReceived ? [received] : [], settled }),
       seedAddresses: async () => [],
       addressHistory: async () => [],
