@@ -25,7 +25,15 @@ import {
   withFullPassMode,
   type SyncStateRow,
 } from '../services/fullPass';
-import { MAX_HEAL_TRIES, afterPull, type IntegrityReport } from '../services/pullIntegrity';
+import {
+  EMPTY_OK_DAYS,
+  MAX_EMPTY_OK,
+  MAX_HEAL_TRIES,
+  afterPull,
+  emptyOkOf,
+  emptyOkRecord,
+  type IntegrityReport,
+} from '../services/pullIntegrity';
 
 const T = 120_000;
 const MIN = 60_000;
@@ -552,6 +560,93 @@ describe('a pull that brings a payment without its coins heals itself (fix 3)', 
         expect(await d.balance(d.phone)).toBe(await d.balance(d.backup));
         // The next scan is a day away.
         expect(typeof markOf(await d.state()).scanAt).toBe('number');
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
+});
+
+describe('review of 6737dd2c: the coin check stays out of the way', () => {
+  test(
+    'a payment the backup holds no coins for is remembered by day, re-asked after EMPTY_OK_DAYS; never more than MAX_EMPTY_OK',
+    async () => {
+      const d = await device(2);
+      try {
+        await d.pullToEnd();
+        const bare = await payment(d.backup, d.kd.identityKey, 0, [1_000], 0); // a raw tx with an output, no rows
+        d.known.add(bare.txid);
+        const r = await d.pullToEnd();
+        expect(r.awaiting).toBe(0);
+        const day = Math.floor(Date.now() / 86_400_000);
+        const kept = markOf(await d.state()).emptyOk as Record<string, number>;
+        expect(kept[String(bare.transactionId)]).toBe(day);
+        // The daily scan skips it while remembered, and asks again once EMPTY_OK_DAYS have passed.
+        const asked: number[] = [];
+        const counting = async (id: number) => {
+          asked.push(id);
+          return [];
+        };
+        await updateMark(d.phone as never, await d.state(), { scanAt: undefined });
+        await d.check(Date.now() + 86_400_000, { backupOutputs: counting as never });
+        expect(asked).toEqual([]);
+        await updateMark(d.phone as never, await d.state(), { scanAt: undefined });
+        await d.check(Date.now() + (EMPTY_OK_DAYS + 1) * 86_400_000, { backupOutputs: counting as never });
+        expect(asked).toEqual([bare.transactionId]);
+        // The list keeps the newest MAX_EMPTY_OK.
+        const many = new Map(
+          Array.from({ length: MAX_EMPTY_OK + 10 }, (_, i) => [String(1e6 + i), day - (i < 10 ? 5 : 0)]),
+        );
+        const stored = emptyOkRecord(many)!;
+        expect(Object.keys(stored).length).toBe(MAX_EMPTY_OK);
+        expect(stored[String(1e6)]).toBeUndefined(); // an older one went first
+        expect(stored[String(1e6 + MAX_EMPTY_OK + 9)]).toBe(day);
+        expect(emptyOkOf({ emptyOk: { '1': day - EMPTY_OK_DAYS } }, Date.now()).size).toBe(0);
+        expect(emptyOkOf({ emptyOk: [7, 8] }, Date.now()).size).toBe(2); // the first form reads as checked today
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
+
+  test(
+    "a Store payment's push waiting: the check stops and the daily scan is skipped; a slow backup never overruns the budget",
+    async () => {
+      const d = await device(2);
+      try {
+        await d.pullToEnd();
+        const late = await payment(d.backup, d.kd.identityKey, 3 * HOUR, [9_000, 1_000], 1);
+        d.known.add(late.txid);
+        await mined(d.backup, late.transactionId);
+        await d.pullOnlyToEnd();
+        await updateMark(d.phone as never, await d.state(), { scanAt: undefined });
+        const stopped = await afterPull({
+          manager: d.sm as never,
+          store: d.phone as never,
+          identityKey: d.kd.identityKey,
+          readerSik: d.backupSik,
+          backupOutputs: async () => {
+            throw new Error('not asked');
+          },
+          stop: () => true,
+        });
+        expect(stopped.checked).toBe(0);
+        expect(markOf(await d.state()).scanAt).toBeUndefined(); // the scan waits for a pull with no push waiting
+        // A backup that never answers: the check ends within its budget (no per-call floor past it).
+        const t0 = Date.now();
+        const slow = await afterPull({
+          manager: d.sm as never,
+          store: d.phone as never,
+          identityKey: d.kd.identityKey,
+          readerSik: d.backupSik,
+          backupOutputs: () => new Promise(() => undefined),
+          budgetMs: 300,
+        });
+        expect(Date.now() - t0).toBeLessThan(300 + 200);
+        expect(slow.plan).not.toBe('healing');
+        expect(markOf(await d.state()).awaitOutputs?.[String(late.transactionId)]?.nextAt).toBeGreaterThan(Date.now());
       } finally {
         d.off();
       }

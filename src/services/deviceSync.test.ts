@@ -118,6 +118,49 @@ describe('device sync: the owner’s devices stay in step through the backup (2 
     expect(calls).toEqual(['pull', 'push', 'push']);
   });
 
+  test('review of 6737dd2c (HIGH): a pull that fails every time never keeps this device off the backup: each run still pushes', async () => {
+    const { sync, calls, c } = harness({
+      pull: async () => {
+        calls.push('pull');
+        throw new Error(
+          'A page from your backup names a payment this device has no record of, so none of it was taken.',
+        );
+      },
+    });
+    expect((await sync.syncNow()).ok).toBe(false);
+    sync.changed();
+    for (let i = 0; i < 12; i++) await c.advance(30 * 60_000);
+    const pulls = calls.filter((x) => x === 'pull').length;
+    const pushes = calls.filter((x) => x === 'push').length;
+    expect(pulls).toBeGreaterThan(1); // retried as pulls
+    expect(pushes).toBe(pulls); // and every run pushed after its failed pull
+    expect(calls.slice(0, 2)).toEqual(['pull', 'push']);
+    expect(sync.state()).toMatchObject({ pendingFull: true, pendingPush: false });
+    expect(sync.state().lastPushOkAt).toBeGreaterThan(0);
+  });
+
+  test('review of 6737dd2c: a pushNow waiting for the running run is visible (the coin check steps aside)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const seen: boolean[] = [];
+    const { sync } = harness({
+      pull: async () => {
+        await gate;
+        seen.push(sync.pushWaiting());
+      },
+    });
+    const full = sync.syncNow();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sync.pushWaiting()).toBe(false);
+    const pushing = sync.pushNow();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sync.pushWaiting()).toBe(true);
+    release();
+    await Promise.all([full, pushing]);
+    expect(seen).toEqual([true]);
+    expect(sync.pushWaiting()).toBe(false);
+  });
+
   test('review of fix 5: pullIfStale pulls when the last good pull is old, paced, never past a back-off', async () => {
     let t = 1_000_000;
     let up = true;

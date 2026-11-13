@@ -102,6 +102,8 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   let lastPullOkAt: number | undefined;
   let lastPullAttemptAt = 0;
   let lastStaleAskAt = -Infinity;
+  /** pushNow calls waiting for the running run (a Store payment's backup-before-send): the pull's extras step aside. */
+  let pushWaiting = 0;
 
   const retryLater = (capMs = Infinity) => {
     const wait = Math.min(capMs, BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)]);
@@ -130,26 +132,37 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     };
     const first = notNow(mode);
     if (first) return first;
+    let pulled = false;
     try {
       // An own payment running now goes first: this run takes the storage queue after it.
       const before = await myTurn();
       if (before) return before;
       if (!(await deps.ensureBackup())) throw new Error('backup storage is not connected');
-      let pulled = false;
       const t0 = now();
       let yields = 0;
+      /**
+       * A failed pull doesn't stop this run's push (review of 6737dd2c, HIGH): with retries now pulls, a pull that keeps
+       * failing (an unfiled page until its 24 h limit, an unchecked page, slow mobile timeouts) would otherwise keep this
+       * device's sends and change derivations off the backup for good. The push goes out; the failure is counted after it.
+       */
+      let pullError: unknown;
       if (mode === 'full') {
         lastPullAttemptAt = now();
-        // A pull that yielded to an own payment (after a merged page) carries on here, after it, from its checkpoint.
-        while ((await deps.pull()) === 'yielded') {
-          yields++;
-          const stop = await myTurn();
-          if (stop) return stop;
+        try {
+          // A pull that yielded to an own payment (after a merged page) carries on here, after it, from its checkpoint.
+          while ((await deps.pull()) === 'yielded') {
+            yields++;
+            const stop = await myTurn();
+            if (stop) return stop;
+          }
+          pulled = true;
+          pendingFull = false;
+          lastPullOkAt = now();
+        } catch (e) {
+          pullError = e;
+          pendingFull = true; // the retry pulls again
         }
-        pulled = true;
-        pullDone = true;
-        pendingFull = false;
-        lastPullOkAt = now();
+        pullDone = true; // tried: from here on a deferral is the push's
       }
       const t1 = now();
       pendingPush = false;
@@ -168,13 +181,24 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
         log(
           `[deviceSync] ${mode} took ${t2 - t0} ms (${pulled ? `pull ${t1 - t0} ms, ` : ''}push ${t2 - t1} ms${yields ? `, let own payments go first ${yields}×` : ''})`,
         );
-      failures = 0;
       if (!pendingPush) lastPushOkAt = Date.now();
+      if (pullError !== undefined) {
+        // The push went through; the pull is retried (as a full sync) on the back-off.
+        failures++;
+        const wait = retryLater(isBackupTimeout(pullError) ? TIMEOUT_BACKOFF_CAP_MS : Infinity);
+        pendingPush = false; // schedule() marks one waiting; the retry is a full sync and pushes anyway
+        log(
+          `[deviceSync] pull failed (pushed anyway; retry in ${Math.round(wait / 60_000)} min):`,
+          syncErrorDetail(pullError),
+        );
+        return { ok: false, error: errText(pullError) };
+      }
+      failures = 0;
       return { ok: true, pulled, pushed: true };
     } catch (e) {
       failures++;
       pendingPush = true;
-      if (mode === 'full' && !pullDone) pendingFull = true; // the retry pulls again
+      if (mode === 'full' && !pulled) pendingFull = true; // the retry pulls again
       // A backup that answered too slowly (or is still answering): retry within TIMEOUT_BACKOFF_CAP_MS, never at the
       // 30-minute end of the ladder. A push that waits for a transaction to move on: within WAIT_BACKOFF_MS. A Store
       // payment's pushNow never waits for the back-off either way.
@@ -240,7 +264,12 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       await sleep(wait);
     }
     if (deps.busy?.()) return { ok: false, error: 'a site action is in progress' } as DeviceSyncResult;
-    while (running) await running.catch(() => undefined);
+    pushWaiting++;
+    try {
+      while (running) await running.catch(() => undefined);
+    } finally {
+      pushWaiting--;
+    }
     return start('push');
   };
 
@@ -269,6 +298,11 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       lastStaleAskAt = t;
       return once('full');
     },
+    /**
+     * A pushNow (a Store payment's backup-before-send) is waiting for the running run: work that can wait (the coin check
+     * after a pull, services/pullIntegrity.ts) stops so the push starts sooner.
+     */
+    pushWaiting: () => pushWaiting > 0,
     /** For tests and diagnostics. */
     state: () => ({
       failures,

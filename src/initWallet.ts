@@ -97,7 +97,7 @@ import {
   withFullPassMode,
   type FullPassPlan,
 } from './services/fullPass';
-import { afterPull } from './services/pullIntegrity';
+import { afterPull, recordedPullOkAt } from './services/pullIntegrity';
 import { createPullRecord, createSyncHealth, registerSyncHealth, type SyncHealth } from './services/syncHealth';
 import { ownPayments } from './services/ownPayments';
 import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
@@ -722,7 +722,29 @@ export const initWallet = async (
   });
   // How the pulls are doing, for a one-line status (services/syncHealth.ts): the last pull that caught up, stuck.
   const pullHealth = createSyncHealth();
-  registerSyncHealth(pullHealth);
+  const unregisterPullHealth = registerSyncHealth(pullHealth);
+  /** The backup's storage identity key, once it is connected. */
+  const backupSikNow = (): string | undefined => {
+    try {
+      return (
+        managed._backups?.[0]?.storage as { getSettings?: () => { storageIdentityKey?: string } } | undefined
+      )?.getSettings?.()?.storageIdentityKey;
+    } catch {
+      return undefined; // not connected yet
+    }
+  };
+  /** The last caught-up pull as recorded in this device store: lastPullOkAt isn't 0 until the first pull ends. */
+  const hydratePullHealth = async (readerSik = backupSikNow()) => {
+    const own = ownStore();
+    if (!own || !readerSik) return;
+    try {
+      const { identityKey } = await storage.getAuth();
+      pullHealth.hydrate(await recordedPullOkAt(own as never, identityKey, readerSik));
+    } catch {
+      // a status line only
+    }
+  };
+  void hydratePullHealth();
   // The same, per account, where the home screen's sync line reads it (chrome.storage.local deviceSyncPull:<address>).
   const pullRecord = createPullRecord(
     {
@@ -772,6 +794,7 @@ export const initWallet = async (
           // a pass runs in slices so payments never wait on it (services/fullPass.ts).
           const backupSik = (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
             ?.storageIdentityKey;
+          if (pullHealth.get().lastPullOkAt === 0) await hydratePullHealth(backupSik);
           pullHealth.plan(await fullPassIfDue(backupSik));
           // Rows another copy pushed late, with times older than the cursor (extension, 6 Nov 2026: 8734977f never
           // arrived): every TAIL_CHECK_EVERY_MS, found by the backup's insert order with one-row probes, and pulled from
@@ -804,7 +827,7 @@ export const initWallet = async (
               identityKey,
               readerSik: backupSik,
               backupOutputs: backupOutputsOf,
-              stop: ownPayments.waiting,
+              stop: () => ownPayments.waiting() || deviceSync.pushWaiting(),
             }).catch((e: unknown) => {
               console.warn('[sync-integrity] the coin check after the pull did not run:', e);
               return undefined;
@@ -1955,7 +1978,7 @@ export const initWallet = async (
     walletClosed = true;
     admitClosed = true;
     clearInterval(stalePullTimer);
-    registerSyncHealth(undefined);
+    unregisterPullHealth();
     receiveWatch.stop();
     void watchKit
       ?.then(async (k) => {

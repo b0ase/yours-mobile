@@ -138,14 +138,20 @@ let current: SyncHealthTracker | undefined;
 const listeners = new Set<(h: SyncHealth) => void>();
 let unsubCurrent: (() => void) | undefined;
 
-/** The open wallet registers its tracker (initWallet); undefined on close. */
-export function registerSyncHealth(t: SyncHealthTracker | undefined) {
+/**
+ * The open wallet registers its tracker (initWallet). Returns its unregister, which clears only that tracker: an account
+ * switch can open the next wallet (registering its own) before the old one closes.
+ */
+export function registerSyncHealth(t: SyncHealthTracker | undefined): () => void {
   unsubCurrent?.();
   unsubCurrent = undefined;
   current = t;
   if (t) unsubCurrent = t.subscribe((h) => listeners.forEach((cb) => cb(h)));
   const h = syncHealth();
   listeners.forEach((cb) => cb(h));
+  return () => {
+    if (t && current === t) registerSyncHealth(undefined);
+  };
 }
 
 /** The open wallet's pull health (EMPTY_SYNC_HEALTH when no wallet with a backup is open). */

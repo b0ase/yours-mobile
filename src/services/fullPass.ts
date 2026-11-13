@@ -123,8 +123,12 @@ export type FullPassMark = {
    * times older than the cursor) can leave the row here without them.
    */
   awaitOutputs?: Record<string, AwaitOutputs>;
-  /** Backup transactions the backup itself holds no outputs for (checked once; never asked about again). */
-  emptyOk?: number[];
+  /**
+   * Backup transactions the backup itself holds no outputs for, by backup id → the day (ms / 86 400 000) it said so: not
+   * asked about again until EMPTY_OK_DAYS later (services/pullIntegrity.ts). An array (an unreleased first form) reads as
+   * checked today.
+   */
+  emptyOk?: Record<string, number> | number[];
   /** The last scan of this device for transactions from the backup with no outputs at all (ms). */
   scanAt?: number;
   /** The last device-sync pull that caught up with this backup: every page merged, no pass under way (ms). */

@@ -108,4 +108,16 @@ describe('syncHealth: what the UI line reads', () => {
     await createPullRecord(kv, undefined)({ attemptAt: 1 }); // no account: nothing written
     expect(Object.keys(store)).toEqual(['deviceSyncPull:1Abc']);
   });
+
+  test("closing an old wallet after the next one opened leaves the new wallet's tracker", () => {
+    const a = createSyncHealth({ now: () => 1 });
+    const b = createSyncHealth({ now: () => 2 });
+    const offA = registerSyncHealth(a);
+    const offB = registerSyncHealth(b); // an account switch: the new wallet opened first
+    b.plan('stuck');
+    offA(); // the old one closes
+    expect(syncHealth().stuck).toBe(true);
+    offB();
+    expect(syncHealth()).toEqual(EMPTY_SYNC_HEALTH);
+  });
 });

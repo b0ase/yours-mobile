@@ -61,7 +61,27 @@ export const GIVEN_UP_RETRY_MS = 6 * HOUR;
 export const SCAN_EVERY_MS = 24 * HOUR;
 /** At most this many transactions noted (the weekly full pass covers anything beyond). */
 export const MAX_AWAITING = 5_000;
-const MAX_EMPTY_OK = 500;
+/** Output-less transactions remembered (oldest dropped first), and how long one stays remembered (days). */
+export const MAX_EMPTY_OK = 5_000;
+export const EMPTY_OK_DAYS = 30;
+const DAY_MS = 24 * 3_600_000;
+const dayOf = (ms: number) => Math.floor(ms / DAY_MS);
+/** The remembered output-less transactions still within EMPTY_OK_DAYS, as backup id → day. */
+export const emptyOkOf = (mark: FullPassMark, now: number): Map<string, number> => {
+  const raw = mark.emptyOk;
+  const today = dayOf(now);
+  const out = new Map<string, number>();
+  if (Array.isArray(raw)) for (const id of raw) out.set(String(id), today);
+  else if (raw && typeof raw === 'object')
+    for (const [k, d] of Object.entries(raw)) if (typeof d === 'number' && today - d < EMPTY_OK_DAYS) out.set(k, d);
+  return out;
+};
+/** As stored: the newest MAX_EMPTY_OK (by day). */
+export const emptyOkRecord = (m: Map<string, number>): Record<string, number> | undefined => {
+  if (!m.size) return undefined;
+  const kept = [...m.entries()].sort((a, b) => a[1] - b[1]).slice(-MAX_EMPTY_OK);
+  return Object.fromEntries(kept);
+};
 /** A caught-up pull is recorded at most this often when nothing else changed. */
 export const PULL_OK_WRITE_MS = 60_000;
 /** Each backup request in the check gets at most this long. */
@@ -71,6 +91,8 @@ export const BACKUP_CALL_MS = 10_000;
  * the push a Store payment's backup-before-send waits for.
  */
 export const CHECK_BUDGET_MS = 8_000;
+/** Less budget left than this: no new backup request (each one's deadline is what is left, so the budget holds). */
+const MIN_CALL_MS = 250;
 
 type TxRow = { transactionId?: number; txid?: string | null; rawTx?: ArrayLike<number> | null; status?: string };
 type OutRow = { vout: number; updated_at?: unknown };
@@ -118,11 +140,11 @@ export async function noteAwaiting(
   if (!row || typeof row.syncStateId !== 'number' || !backupTxIds.length) return;
   const mark = markOf(row);
   const awaiting: Record<string, AwaitOutputs> = { ...(mark.awaitOutputs ?? {}) };
-  const empty = new Set(mark.emptyOk ?? []);
+  const empty = emptyOkOf(mark, now);
   let added = 0;
   for (const id of backupTxIds) {
     const k = String(id);
-    if (awaiting[k] || empty.has(id)) continue;
+    if (awaiting[k] || empty.has(k)) continue;
     if (Object.keys(awaiting).length >= MAX_AWAITING) break;
     awaiting[k] = { at: now };
     added++;
@@ -174,7 +196,10 @@ export type AfterPull = {
   limit?: number;
   /** The check's time budget (ms, wall clock); CHECK_BUDGET_MS by default. */
   budgetMs?: number;
-  /** Stop checking now (an own payment is waiting: services/ownPayments.ts); the rest waits for the next pull. */
+  /**
+   * Stop checking now (an own payment is waiting, services/ownPayments.ts; a Store payment's push waits for this run,
+   * deviceSync pushWaiting); the rest waits for the next pull, and the daily scan is skipped.
+   */
   stop?: () => boolean;
   log?: (m: string) => void;
 };
@@ -246,11 +271,12 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
   const userId = user.userId;
   const txMap = idMapOf(row0, 'transaction'); // backup id → device id
   const awaiting: Record<string, AwaitOutputs> = { ...(mark0.awaitOutputs ?? {}) };
-  const emptyOk = new Set(mark0.emptyOk ?? []);
+  const emptyOk = emptyOkOf(mark0, now);
 
-  // Damage from before this check: transactions from the backup with no outputs here at all (daily).
+  // Damage from before this check: transactions from the backup with no outputs here at all (daily). Not while a Store
+  // payment's push waits for this run (it reads every output row).
   let scanned = false;
-  if (typeof mark0.scanAt !== 'number' || now - mark0.scanAt >= SCAN_EVERY_MS) {
+  if ((typeof mark0.scanAt !== 'number' || now - mark0.scanAt >= SCAN_EVERY_MS) && !o.stop?.()) {
     scanned = true;
     const withOutputs = new Set<number>();
     for (const r of (await o.store.findOutputs({ partial: { userId }, noScript: true })) as {
@@ -259,7 +285,7 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
       if (typeof r.transactionId === 'number') withOutputs.add(r.transactionId);
     for (const [backupId, deviceId] of Object.entries(txMap)) {
       if (Object.keys(awaiting).length >= MAX_AWAITING) break;
-      if (withOutputs.has(deviceId) || awaiting[backupId] || emptyOk.has(Number(backupId))) continue;
+      if (withOutputs.has(deviceId) || awaiting[backupId] || emptyOk.has(backupId)) continue;
       awaiting[backupId] = { at: now };
     }
   }
@@ -273,7 +299,7 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
   const budget = o.budgetMs ?? CHECK_BUDGET_MS;
   for (const [backupId] of due) {
     const left = budget - (Date.now() - t0);
-    if (left <= 0 || o.stop?.()) break; // the rest at the next pull
+    if (left < MIN_CALL_MS || o.stop?.()) break; // the rest at the next pull
     report.checked++;
     const deviceId = txMap[backupId];
     if (typeof deviceId !== 'number') {
@@ -296,7 +322,7 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
     }
     let theirs: OutRow[];
     try {
-      theirs = await withTimeout(o.backupOutputs(Number(backupId)), Math.max(1_000, Math.min(BACKUP_CALL_MS, left)));
+      theirs = await withTimeout(o.backupOutputs(Number(backupId)), Math.min(BACKUP_CALL_MS, left));
     } catch (e) {
       log(`[sync-integrity] the backup couldn't say which coins payment ${tx.txid ?? backupId} has: ${String(e)}`);
       verdicts.set(backupId, { kind: 'unclear' });
@@ -328,7 +354,7 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
     // Merges since the reads above may have noted more: start from what is stored now, add the scan's.
     const next: Record<string, AwaitOutputs> = { ...(mark.awaitOutputs ?? {}) };
     for (const [k, e] of Object.entries(awaiting)) if (!next[k] && !verdicts.has(k)) next[k] = e;
-    const empty = new Set(mark.emptyOk ?? []);
+    const empty = emptyOkOf(mark, now);
     let oldest = Infinity;
     let healable = 0;
     let exhausted = false;
@@ -339,7 +365,7 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
         report.resolved++;
       } else if (v.kind === 'empty') {
         delete next[k];
-        empty.add(Number(k));
+        empty.set(k, dayOf(now));
         report.resolved++;
       } else if (v.kind === 'unclear') {
         next[k] = { ...e, nextAt: now + UNCLEAR_RETRY_MS };
@@ -359,7 +385,7 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
     }
     const patch: FullPassMark = {
       awaitOutputs: Object.keys(next).length ? next : undefined,
-      emptyOk: empty.size ? [...empty].slice(-MAX_EMPTY_OK) : undefined,
+      emptyOk: emptyOkRecord(empty),
       pullOkAt: now,
       ...(scanned ? { scanAt: now } : {}),
     };
@@ -385,4 +411,13 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
     if (exhausted) return { ...report, plan: 'full-due' as const };
     return { ...report, plan: verdicts.size || report.awaiting ? ('ok' as const) : ('none' as const) };
   });
+}
+
+/** The last pull that caught up with this backup, as recorded (syncHealth at open, before the first pull ends). */
+export async function recordedPullOkAt(
+  store: SyncStateStore,
+  identityKey: string,
+  readerSik: string,
+): Promise<number | undefined> {
+  return markOf(await syncStateFor(store, identityKey, readerSik)).pullOkAt;
 }
