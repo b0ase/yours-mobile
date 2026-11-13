@@ -163,25 +163,54 @@ const LENIENT_TLD = /(?:\.(?:[a-z]{2,}|xn--[a-z0-9-]+)|^localhost|^(?:\d{1,3}\.)
  * '@'. Everything else in the authority (& | < , ; space quotes...) is userinfo. Null when `s` doesn't start one.
  */
 const isAuthorityEnd = (c: number) => c === 47 || c === 92 || c === 63 || c === 35 || c === 10 || c === 13; // / \ ? # LF CR
-// Unquoted values (follow-up F1): a text line also ends at white space (tabs are dropped by the parser, so they don't
-// end it), and a form value (key=value) at a raw & or ; as well, so "redirect_uri=https://good.com&email=bob@x.com"
-// doesn't read bob's mail domain as the host.
-const isLineEnd = (c: number) => isAuthorityEnd(c) || c === 32 || c === 11 || c === 12 || c === 0xa0 || c === 0x85;
-const isFormEnd = (c: number) => isLineEnd(c) || c === 38 || c === 59;
-/** Per string and rule, built once: where each authority would end, and the last '@' before each position. */
-type AuthorityIndex = { end: Int32Array; lastAt: Int32Array };
-const authorityIndex = (s: string, isEnd: (c: number) => boolean): AuthorityIndex => {
+// Unquoted values (follow-ups F1 and B1): white space (a text line), or a raw & or ; (form syntax, key=value), ends the
+// authority only when what follows starts a new field before the next '@' ("&email=bob@x.com", " Paymail: bob@x.com").
+// Otherwise the parser reads through it as userinfo: "https://evil.com&@good.com" and "https://evil.com @good.com"
+// name good.com. Tabs are dropped by the parser, so they never end it.
+const isSoftLineEnd = (c: number) => c === 32 || c === 11 || c === 12 || c === 0xa0 || c === 0x85;
+const isSoftFormEnd = (c: number) => isSoftLineEnd(c) || c === 38 || c === 59;
+/** Per string and rule, built once, so every lookup is constant time. */
+type AuthorityIndex = {
+  hard: Int32Array; // next / \ ? # LF CR
+  soft: Int32Array; // next soft end
+  nextAt: Int32Array; // next '@'
+  lastAt: Int32Array; // last '@' before
+  nextField: Int32Array; // next start of a field: a key after a soft end, followed by '=' or ': '
+};
+const authorityIndex = (s: string, isSoft: (c: number) => boolean): AuthorityIndex => {
   const n = s.length;
-  const end = new Int32Array(n + 1);
-  end[n] = n;
-  for (let i = n - 1; i >= 0; i--) end[i] = isEnd(s.charCodeAt(i)) ? i : end[i + 1];
+  const hard = new Int32Array(n + 1);
+  const soft = new Int32Array(n + 1);
+  const nextAt = new Int32Array(n + 1);
+  const nextField = new Int32Array(n + 1);
+  hard[n] = soft[n] = nextAt[n] = nextField[n] = n;
+  const c = (i: number) => s.charCodeAt(i);
+  const keyChar = (k: number) =>
+    (k >= 65 && k <= 90) || (k >= 97 && k <= 122) || (k >= 48 && k <= 57) || k === 95 || k === 45;
+  // A field starts at a key run that begins right after a soft end and is followed by '=' or ': '.
+  const fieldAt = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!keyChar(c(i)) || (i > 0 && !isSoft(c(i - 1)))) continue;
+    let j = i;
+    while (j < n && keyChar(c(j))) j++;
+    let k = j;
+    while (k < n && c(k) === 32) k++;
+    if (k < n && (c(k) === 61 || (c(k) === 58 && k + 1 < n && isSpace(c(k + 1))))) fieldAt[i] = 1;
+    i = j - 1;
+  }
+  for (let i = n - 1; i >= 0; i--) {
+    hard[i] = isAuthorityEnd(c(i)) ? i : hard[i + 1];
+    soft[i] = isSoft(c(i)) ? i : soft[i + 1];
+    nextAt[i] = c(i) === 64 ? i : nextAt[i + 1];
+    nextField[i] = fieldAt[i] ? i : nextField[i + 1];
+  }
   const lastAt = new Int32Array(n + 1);
   let la = -1;
   for (let i = 0; i <= n; i++) {
     lastAt[i] = la;
-    if (i < n && s.charCodeAt(i) === 64) la = i;
+    if (i < n && c(i) === 64) la = i;
   }
-  return { end, lastAt };
+  return { hard, soft, nextAt, lastAt, nextField };
 };
 const authorityHost = (s: string, from: number, lenient: boolean, idx?: AuthorityIndex): string | null => {
   let head = s.slice(from, from + 48);
@@ -204,7 +233,18 @@ const authorityHost = (s: string, from: number, lenient: boolean, idx?: Authorit
   let end: number;
   let lastAt: number;
   if (idx) {
-    end = idx.end[at];
+    end = idx.hard[at];
+    // Read through soft ends while what follows each is userinfo (an '@' comes before any new field).
+    // At most 64 steps per value (keeps crafted chains linear); past that the whole run is read as userinfo.
+    for (let soft = idx.soft[at], steps = 0; soft < end && steps < 64; soft = idx.soft[soft + 1], steps++) {
+      const nextAt = idx.nextAt[soft];
+      if (nextAt >= end || idx.nextField[soft] < nextAt) {
+        end = soft;
+        break;
+      }
+      // Jump to the '@': the soft ends before it are userinfo too.
+      soft = nextAt;
+    }
     lastAt = idx.lastAt[end];
   } else {
     end = at;
@@ -300,8 +340,8 @@ const fieldHosts = (s: string, lenient: boolean, out: Set<string>): number => {
     const asUrl = q
       ? authorityHost(jsonUnescape(quoted(s, v, q)), 0, lenient)
       : form
-        ? authorityHost(s, v, lenient, (formIdx ??= authorityIndex(s, isFormEnd)))
-        : authorityHost(s, v, lenient, (lineIdx ??= authorityIndex(s, isLineEnd)));
+        ? authorityHost(s, v, lenient, (formIdx ??= authorityIndex(s, isSoftFormEnd)))
+        : authorityHost(s, v, lenient, (lineIdx ??= authorityIndex(s, isSoftLineEnd)));
     if (q && asUrl) {
       out.add(asUrl);
       i = Math.max(j, i);

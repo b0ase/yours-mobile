@@ -125,7 +125,7 @@ import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
-import { learnOwnBackends, ownBackendsReady } from './services/ownBackendKeys';
+import { clearLearnedOwnBackends, setOwnServerSource, storageServers } from './services/ownBackendKeys';
 import { normalizeOriginator, parsePrivateKey, type StoragePaymentHook } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
@@ -465,10 +465,10 @@ export interface InitWalletOptions {
 
 // A backup call that fails names itself and its page in the sync log (services/syncErrorDetail.ts, 6 Nov 2026).
 tagStorageClientErrors(StorageClient);
-// The servers the wallet itself signs in to over BRC-103 (online storage, bMail) are remembered, so no site can sign
-// in to them as the user (services/ownBackendKeys.ts; refused in services/crossSiteSignGuard.ts).
-learnOwnBackends(Wallet, ADMIN_ORIGINATOR);
-void ownBackendsReady();
+// No site signs in as the user to the wallet's own servers (services/ownBackendKeys.ts: seeded first-party keys, plus
+// the stores in use, registered below; refused in services/crossSiteSignGuard.ts). Keys saved by the learning in
+// earlier 5.2.56 candidates are dropped, so no certifier's key stays refused.
+clearLearnedOwnBackends();
 
 /**
  * Storage top-ups (HTTP 507) are never paid without a check (services/storagePaymentGuard.ts, b-Aware 12 Nov 2026).
@@ -557,6 +557,8 @@ export const openAccountStorageForBackup = async (
   const { storage, destroy, monitor, wallet: backupWallet } = await createWebWallet(backupConfig);
   if (!refuseStorageAuthFetchPayments(backupWallet, storageUrls(storage, { activeRemote, backups })))
     console.error('[initWallet] storage 402 payments are not refused');
+  // Another account's stores, opened for a backup: their keys count, but never "pending" (this storage may be closed).
+  setOwnServerSource('backup-storage', () => storageServers(storage).map((x) => ({ ...x, pending: false })));
 
   // Stop monitor work so BackupSync/runOnce does not contend with getSyncChunk.
   try {
@@ -641,6 +643,8 @@ export const initWallet = async (
   // The factory's own storage calls (/account/status, /account/payment) never pay a 402 (storagePaymentGuard.ts).
   if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups })))
     console.error('[initWallet] storage 402 payments are not refused');
+  // The stores this wallet signs in to (its online storage and backups): no site may sign in to them as the user.
+  setOwnServerSource('storage', () => storageServers(storage));
   // This device's store stays the enabled active store for its payments, receipts and backup pushes, whatever another
   // device wrote into the backup (P0, 5 Nov 2026: the owner's 1p test was refused with WERR_NOT_ACTIVE after the backup
   // connected late; services/deviceActive.ts). First on the manager, so the later wrappers (the coin check) run over it.

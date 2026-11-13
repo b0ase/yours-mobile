@@ -18,6 +18,7 @@
  */
 import type { WalletInterface } from '@bsv/sdk';
 import { MessageBoxClient } from '@bsv/message-box-client';
+import { trackOwnAuthFetch } from '../../services/ownBackendKeys';
 import { bmailHost, payPostage, verifyPostage } from '../bmail/client';
 import { newMessageId, parsePostage, type Envelope, type Postage } from '../bmail/envelope';
 
@@ -195,7 +196,14 @@ export const checkDoorRequest = (
 
 // ── wallet + message box ──
 
-const mbox = (wallet: WalletInterface) => new MessageBoxClient({ walletClient: wallet, host: bmailHost() });
+const mbox = (wallet: WalletInterface) => {
+  const host = bmailHost();
+  const client = new MessageBoxClient({ walletClient: wallet, host });
+  // Its server is the wallet's own: no site may sign in to it as the user (services/ownBackendKeys.ts). The default
+  // host's key is seeded; an override host's counts once this client has connected.
+  trackOwnAuthFetch('door', (client as unknown as { authFetch?: unknown }).authFetch, host);
+  return client;
+};
 
 export type DoorPay = { id: string; txid: string; sats: number };
 

@@ -5,6 +5,7 @@
  *  - open: BRC-2 decrypt.
  */
 import { MessageBoxClient } from '@bsv/message-box-client';
+import { trackOwnAuthFetch } from '../../services/ownBackendKeys';
 import { assertNotPaused } from '../config/killSwitch';
 import {
   refusedBeforeBroadcast,
@@ -61,7 +62,14 @@ export const bmailHost = (): string => {
   return pick(stored) || pick((globalThis as { __BMAIL_HOST__?: unknown }).__BMAIL_HOST__) || BMAIL_DEFAULT_HOST;
 };
 
-const mbox = (wallet: WalletInterface) => new MessageBoxClient({ walletClient: wallet, host: bmailHost() });
+const mbox = (wallet: WalletInterface) => {
+  const host = bmailHost();
+  const client = new MessageBoxClient({ walletClient: wallet, host });
+  // Its server is the wallet's own: no site may sign in to it as the user (services/ownBackendKeys.ts). The default
+  // host's key is seeded; an override host's counts once this client has connected.
+  trackOwnAuthFetch('bmail', (client as unknown as { authFetch?: unknown }).authFetch, host);
+  return client;
+};
 
 export const myKey = async (wallet: WalletInterface) =>
   (await wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();

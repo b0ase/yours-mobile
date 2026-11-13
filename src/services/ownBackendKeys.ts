@@ -1,26 +1,65 @@
 /**
- * The identity keys of the servers the wallet itself signs in to over BRC-103 (follow-up review, 13 Nov 2026).
+ * The identity keys of the servers the wallet itself signs in to over BRC-103 (follow-up reviews, 13 Nov 2026).
  *
- * The wallet's own clients (StorageClient for remote/backup storage, MessageBoxClient for bMail and Spaces doors)
- * authenticate as the user with BRC-103 signatures: protocol [2, 'auth message signature'], counterparty = that
- * server's identity key. BRC-42 keys don't depend on who asks, so a site granted the same protocol with one of those
- * keys as counterparty gets the same keys, and could open its own BRC-103 session with our storage server or bMail
- * inbox and act there as the user (read or rewrite the backup, read or send mail). The permission sheet only shows
- * 'Sign and encrypt with your "auth message signature" keys, shared with one named person or service', which no one
- * can judge.
+ * The wallet's own clients authenticate as the user with BRC-103 signatures: protocol [2, 'auth message signature'],
+ * counterparty = that server's identity key. StorageClient does it for online storage (wallet.1sat.app), the
+ * MessageBoxClient for bMail and Spaces doors (messagebox.bwalletx.com) and syncMessages for 1Sat's message box. BRC-42
+ * keys don't depend on who asks, so a site granted the same protocol with one of those keys as counterparty would get
+ * the same keys, open its own session with that server and act there as the user (read or rewrite the backup, read or
+ * send mail). crossSiteSignGuard refuses that protocol from outside callers for these keys.
  *
- * So every counterparty the wallet itself uses under that protocol is remembered here (persisted, so it holds after a
- * restart before the wallet has talked to the server again), and crossSiteSignGuard refuses that protocol from outside
- * callers for those counterparties. Learning can only add refusals, never remove one, so a key noted by mistake costs
- * a site that one counterparty and nothing else.
+ * The keys are NOT learned from signing calls (review A1: a site can make the wallet sign in to a server of its choice,
+ * e.g. an acquireCertificate issuance certifier, which then picks the key the wallet would remember). They are:
+ * - seeded: the first-party servers' keys below, read from their own BRC-103 handshakes;
+ * - read at runtime from the wallet's own clients for the hosts it is configured with (the storage stores in use, a
+ *   bMail host override), never from a host a site names.
+ * Before one of those configured clients has connected, its key isn't known yet, so the protocol is refused for sites
+ * until it has (fails closed).
  */
 
 export const AUTH_MESSAGE_PROTOCOL = 'auth message signature';
-const STORE_KEY = 'bwx-own-backend-keys';
-const MAX_KEYS = 256;
 const PUBKEY = /^0[23][0-9a-f]{64}$/;
 
-const known = new Set<string>();
+/**
+ * First-party server identity keys, read 13 Nov 2026 from each host's BRC-103 handshake (an AuthFetch with a throwaway
+ * key; the key is what the server signs its initialResponse with). Public keys. If a server rotates its key, the
+ * runtime sources below still cover it once the wallet has connected, and this list should be updated.
+ */
+export const FIRST_PARTY_SERVER_KEYS: Readonly<Record<string, string>> = {
+  // messagebox.bwalletx.com: bMail and Spaces doors (src/mobile/bmail/client.ts BMAIL_DEFAULT_HOST).
+  '021a8c3e9649e43fbc981aaf9cc366ccf0955df11bd79ef97b86c27387c5ca6723': 'messagebox.bwalletx.com',
+  // 1Sat: one key for wallet.1sat.app (online storage, DEFAULT_STORAGE_REMOTE_URL), messagebox.1sat.app
+  // (MESSAGEBOX_URL, syncMessages) and accounts.1sat.app.
+  '0326a9865e5ec9809b72c92b82c86e5a39ca00c2fd215920e96f42477721425d4b': '1Sat (wallet / messagebox / accounts)',
+};
+
+/** Hosts whose keys are seeded above: their clients are never "pending". */
+export const FIRST_PARTY_HOSTS: ReadonlySet<string> = new Set([
+  'messagebox.bwalletx.com',
+  'wallet.1sat.app',
+  'messagebox.1sat.app',
+  'accounts.1sat.app',
+]);
+export const isFirstPartyHost = (url: string | undefined) => {
+  try {
+    return !!url && FIRST_PARTY_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The storage stores a WalletStorageManager has in use: each remote store's server key once its StorageClient has
+ * connected (AuthFetch verified it); a remote on a host not seeded above is pending until then.
+ */
+export const storageServers = (storage: unknown): OwnServer[] =>
+  ((storage as { _stores?: { storage?: { endpointUrl?: string; authClient?: unknown } }[] } | null)?._stores ?? [])
+    .map((m) => m.storage)
+    .filter((c): c is { endpointUrl?: string; authClient?: unknown } => !!c && typeof c.endpointUrl === 'string')
+    .map((c) => {
+      const key = peerKeyOf(c.authClient, c.endpointUrl);
+      return { key, pending: !key && !isFirstPartyHost(c.endpointUrl) };
+    });
 
 /** Protocol [2, 'auth message signature']: every @bsv/sdk Peer (BRC-103) signature. */
 export const isAuthMessageArgs = (args: unknown): boolean => {
@@ -33,123 +72,100 @@ export const isAuthMessageArgs = (args: unknown): boolean => {
   );
 };
 
-type ChromeLocal = {
-  get: (k: string) => Promise<Record<string, unknown>>;
-  set: (v: Record<string, unknown>) => Promise<void>;
+/** One configured server: its key once the wallet's own client has connected; `pending` until then. */
+export type OwnServer = { key?: string | null; pending?: boolean };
+const sources = new Map<string, () => OwnServer[]>();
+
+/** Register (or replace) a runtime source of first-party server keys, read on every check. */
+export const setOwnServerSource = (name: string, source: (() => OwnServer[]) | null) => {
+  if (source) sources.set(name, source);
+  else sources.delete(name);
 };
-const chromeLocal = (): ChromeLocal | null => {
+
+type PeerHolder = { peers?: Record<string, { identityKey?: string } | undefined> };
+const originOf = (url: string) => {
   try {
-    const l = (globalThis as { chrome?: { storage?: { local?: ChromeLocal } } }).chrome?.storage?.local;
-    return l && typeof l.get === 'function' && typeof l.set === 'function' ? l : null;
+    return new URL(url).origin;
   } catch {
     return null;
   }
 };
-const webStorage = (): Storage | null => {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    return null;
-  }
+/** The identity key an AuthFetch learned from `url`'s origin (verified in its handshake), or null. */
+export const peerKeyOf = (authFetch: unknown, url: string | undefined): string | null => {
+  const origin = url ? originOf(url) : null;
+  const key = origin ? (authFetch as PeerHolder | null)?.peers?.[origin]?.identityKey : undefined;
+  return typeof key === 'string' ? key : null;
 };
 
-const add = (list: unknown) => {
-  if (!Array.isArray(list)) return;
-  for (const k of list) if (typeof k === 'string' && PUBKEY.test(k) && known.size < MAX_KEYS) known.add(k);
+/**
+ * Track the wallet's own client for a configured host (bMail, Spaces doors): its server key counts once connected. A
+ * host other than the seeded first-party ones is pending until then.
+ */
+export const trackOwnAuthFetch = (name: string, authFetch: unknown, url: string) => {
+  setOwnServerSource(name, () => {
+    const key = peerKeyOf(authFetch, url);
+    return [{ key, pending: !key && !isFirstPartyHost(url) }];
+  });
 };
 
-const persist = () => {
-  const list = [...known];
+const ownKeys = (): { keys: Set<string>; pending: boolean } => {
+  const keys = new Set(Object.keys(FIRST_PARTY_SERVER_KEYS));
+  let pending = false;
+  for (const source of sources.values()) {
+    let list: OwnServer[] = [];
+    try {
+      list = source();
+    } catch {
+      pending = true; // a source that can't answer can't say a key isn't ours
+    }
+    for (const s of list) {
+      if (typeof s.key === 'string' && PUBKEY.test(s.key.toLowerCase())) keys.add(s.key.toLowerCase());
+      else if (s.pending) pending = true;
+    }
+  }
+  return { keys, pending };
+};
+
+export const isOwnBackend = (counterparty: unknown): boolean =>
+  typeof counterparty === 'string' && ownKeys().keys.has(counterparty.trim().toLowerCase());
+
+export const OWN_BACKEND_REFUSAL = "Sites cannot sign in as you to the wallet's own servers (online storage or bMail)";
+export const OWN_BACKEND_PENDING =
+  'The wallet is still connecting to its own servers, so it cannot check this sign-in yet. Try again in a moment';
+
+/**
+ * Why an outside caller's call must be refused: BRC-103 signing towards one of the wallet's own servers, or towards
+ * any server while a configured one hasn't connected yet (its key unknown).
+ */
+export const ownBackendRefusal = (args: unknown): string | null => {
+  if (!isAuthMessageArgs(args)) return null;
+  const cp = (args as { counterparty?: unknown }).counterparty;
+  if (typeof cp !== 'string' || !PUBKEY.test(cp.trim().toLowerCase())) return null;
+  const { keys, pending } = ownKeys();
+  if (keys.has(cp.trim().toLowerCase())) return OWN_BACKEND_REFUSAL;
+  return pending ? OWN_BACKEND_PENDING : null;
+};
+
+/**
+ * 5.2.56 candidate builds (46be94c9) learned keys from signing calls and saved them; some may be a certifier's or a
+ * site's own server (review A1b). Drop that saved list once, so none of them stays refused.
+ */
+export const LEGACY_STORE_KEY = 'bwx-own-backend-keys';
+export const clearLearnedOwnBackends = () => {
   try {
-    webStorage()?.setItem(STORE_KEY, JSON.stringify(list));
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(LEGACY_STORE_KEY);
   } catch {
-    /* private mode / no storage: kept in memory */
+    /* no storage */
   }
   try {
-    void chromeLocal()
-      ?.set({ [STORE_KEY]: list })
-      ?.catch?.(() => {});
+    const local = (globalThis as { chrome?: { storage?: { local?: { remove?: (k: string) => unknown } } } }).chrome
+      ?.storage?.local;
+    const r = local?.remove?.(LEGACY_STORE_KEY);
+    void (r as Promise<unknown> | undefined)?.catch?.(() => {});
   } catch {
     /* no chrome.storage */
   }
 };
 
-let loading: Promise<void> | null = null;
-/** Resolves once the remembered keys are read back (at most once; a failed read counts as read). */
-export const ownBackendsReady = (): Promise<void> => {
-  if (!loading) {
-    try {
-      add(JSON.parse(webStorage()?.getItem(STORE_KEY) ?? '[]'));
-    } catch {
-      /* unreadable: start from what we learn */
-    }
-    const l = chromeLocal();
-    loading = l
-      ? Promise.race([
-          Promise.resolve()
-            .then(() => l.get(STORE_KEY))
-            .then((v) => add(v?.[STORE_KEY]))
-            .catch(() => {}),
-          new Promise<void>((r) => setTimeout(r, 2000)),
-        ])
-      : Promise.resolve();
-  }
-  return loading;
-};
-
-/** Remember a counterparty the wallet itself signs in to under the BRC-103 protocol. */
-export const noteOwnBackend = (counterparty: unknown) => {
-  if (typeof counterparty !== 'string') return;
-  const k = counterparty.trim().toLowerCase();
-  if (!PUBKEY.test(k) || known.has(k) || known.size >= MAX_KEYS) return;
-  known.add(k);
-  persist();
-};
-
-/** Note the counterparty of a BRC-103 call the wallet itself makes (createSignature / verifySignature args). */
-export const noteOwnBackendCall = (args: unknown) => {
-  if (isAuthMessageArgs(args)) noteOwnBackend((args as { counterparty?: unknown }).counterparty);
-};
-
-export const isOwnBackend = (counterparty: unknown): boolean =>
-  typeof counterparty === 'string' && known.has(counterparty.trim().toLowerCase());
-
-export const OWN_BACKEND_REFUSAL = "Sites cannot sign in as you to the wallet's own servers (online storage or bMail)";
-
-/** Why an outside caller's call must be refused: BRC-103 signing towards one of the wallet's own servers. */
-export const ownBackendRefusal = (args: unknown): string | null =>
-  isAuthMessageArgs(args) && isOwnBackend((args as { counterparty?: unknown }).counterparty)
-    ? OWN_BACKEND_REFUSAL
-    : null;
-
-type SignerProto = {
-  createSignature?: (args: unknown, originator?: string) => Promise<unknown>;
-  verifySignature?: (args: unknown, originator?: string) => Promise<unknown>;
-};
-const PATCHED = Symbol.for('bwx.ownBackendLearning');
-
-/**
- * Learn from the wallet's own BRC-103 calls: patch a wallet class (the toolbox Wallet that StorageClient and every
- * manager call end in) so createSignature / verifySignature under the protocol note their counterparty when the
- * caller is the wallet itself (no originator, or the admin originator). Calls a site makes through the permissions
- * manager carry the site's originator and teach nothing.
- */
-export const learnOwnBackends = (WalletClass: { prototype: object }, adminOriginator: string) => {
-  const proto = WalletClass.prototype as SignerProto & { [PATCHED]?: boolean };
-  if (proto[PATCHED]) return;
-  for (const method of ['createSignature', 'verifySignature'] as const) {
-    const original = proto[method];
-    if (typeof original !== 'function') continue;
-    proto[method] = function (this: unknown, args: unknown, originator?: string) {
-      if (!originator || originator === adminOriginator) noteOwnBackendCall(args);
-      return original.call(this, args, originator);
-    };
-  }
-  proto[PATCHED] = true;
-};
-
 /** Tests only. */
-export const _resetOwnBackends = () => {
-  known.clear();
-  loading = null;
-};
+export const _resetOwnBackends = () => sources.clear();
