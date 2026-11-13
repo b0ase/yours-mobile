@@ -6,6 +6,7 @@
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { OneSatContext } from '@1sat/actions';
+import { PrivateKey } from '@bsv/sdk';
 import { stubGlobals } from '../../testing/stubGlobals';
 import {
   getAgentLog,
@@ -13,7 +14,9 @@ import {
   setAgentStopped,
   setAllAgentsStopped,
 } from '../agents/agentAccounts';
+import { appendAgentLog, MAX_SPENDS_PER_HOUR } from '../agents/agentAccounts';
 import { runAgentAction, type AgentTradeIo } from '../agents/agentTrade';
+import { checkedPurchaseContext } from '../p2p/checkedPurchase';
 import { serialSpend } from '../agents/spendQueue';
 import { AgentCallError, handleAgentCall, makeGrant, type AgentDeps, type AgentGrant } from './agentPairing';
 import { makeMintLimits } from './mintScope';
@@ -31,6 +34,7 @@ class FakeWS {
 }
 const mem = new Map<string, string>();
 let storageBlocked = false;
+let visibility = 'visible';
 stubGlobals({
   WebSocket: FakeWS,
   localStorage: {
@@ -41,7 +45,12 @@ stubGlobals({
     },
     removeItem: (k: string) => void mem.delete(k),
   },
-  document: { visibilityState: 'visible', addEventListener: () => undefined },
+  document: {
+    get visibilityState() {
+      return visibility;
+    },
+    addEventListener: () => undefined,
+  },
 });
 
 // A private copy of sessions.ts (bun shares one module registry across test files).
@@ -62,6 +71,7 @@ const LISTING = {
   buyable: true,
 };
 const TXID = 'ef'.repeat(32);
+const PUBKEY = PrivateKey.fromRandom().toPublicKey().toString(); // throwaway, for checkedPurchaseContext
 const SESSIONS_KEY = 'bwallet.pair.sessions';
 
 /** Counts what actually reached the wallet's signing call. */
@@ -72,7 +82,7 @@ const wallet = {
     signed++;
     return { txid: TXID };
   },
-  getPublicKey: async () => ({ publicKey: '02' + '11'.repeat(32) }),
+  getPublicKey: async () => ({ publicKey: PUBKEY }),
 };
 const ctx = { wallet } as unknown as OneSatContext;
 
@@ -96,6 +106,7 @@ const io = (over: Partial<AgentTradeIo> = {}): Partial<AgentTradeIo> => ({
   checkedPurchaseContext: (async (c: OneSatContext) => c) as never,
   buy: viaWallet() as never,
   send: viaWallet() as never,
+  spendingPaused: async () => paused,
   ...over,
 });
 
@@ -151,6 +162,7 @@ const tick = () => new Promise<void>((r) => setTimeout(r, 5));
 beforeEach(() => {
   mem.clear();
   storageBlocked = false;
+  visibility = 'visible';
   signed = 0;
   paused = false;
   markAgentAccount(ID, []);
@@ -234,7 +246,7 @@ describe('unpair while a spend waits in the queue (report a)', () => {
     const c = 'LISTINGLISTINGLISTINGL';
     const isLive = pairChannel(c, g);
     const d = deps(g, { isLive, tradeIo: io({ assertOrdLockV2: async () => sessions.forget(c, false) }) });
-    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('REFUSED');
+    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('UNPAIRED');
     expect(signed).toBe(0);
   });
 
@@ -244,7 +256,7 @@ describe('unpair while a spend waits in the queue (report a)', () => {
     const isLive = pairChannel(c, g);
     const send = viaWallet(() => sessions.forget(c, false));
     const d = deps(g, { isLive, tradeIo: io({ send: send as never }) });
-    expect(await callCode(g, 'send', { to: 'someone@bwalletx.com', usd: 0.5 }, d)).toBe('REFUSED');
+    expect(await callCode(g, 'send', { to: 'someone@bwalletx.com', usd: 0.5 }, d)).toBe('UNPAIRED');
     expect(signed).toBe(0);
   });
 
@@ -291,7 +303,7 @@ describe('Stop pressed after the spend passed its check (report b)', () => {
   test('Stop all during the listing check: refused, nothing signed', async () => {
     const g = grantFor();
     const d = deps(g, { tradeIo: io({ assertOrdLockV2: async () => setAllAgentsStopped(true) }) });
-    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('REFUSED');
+    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('STOPPED');
     expect(signed).toBe(0);
   });
 
@@ -305,21 +317,21 @@ describe('Stop pressed after the spend passed its check (report b)', () => {
         }) as never,
       }),
     });
-    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('REFUSED');
+    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('STOPPED');
     expect(signed).toBe(0);
   });
 
   test('Stop pressed inside the buy, before the wallet signs: createAction refuses', async () => {
     const g = grantFor();
     const d = deps(g, { tradeIo: io({ buy: viaWallet(() => setAllAgentsStopped(true)) as never }) });
-    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('REFUSED');
+    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('STOPPED');
     expect(signed).toBe(0);
   });
 
   test('Stop pressed while a paymail is resolved inside send: refused before createAction', async () => {
     const g = grantFor();
     const d = deps(g, { tradeIo: io({ send: viaWallet(() => setAgentStopped(ID, true)) as never }) });
-    expect(await callCode(g, 'send', { to: 'someone@bwalletx.com', usd: 0.5 }, d)).toBe('REFUSED');
+    expect(await callCode(g, 'send', { to: 'someone@bwalletx.com', usd: 0.5 }, d)).toBe('STOPPED');
     expect(signed).toBe(0);
     expect(getAgentLog(ID).some((e) => e.action === 'refused' && /stopped/i.test(e.detail))).toBe(true);
   });
@@ -350,6 +362,167 @@ describe('Stop pressed after the spend passed its check (report b)', () => {
       },
     });
     expect(r).toEqual({ ok: false, text: 'Refused: liveness unknown' });
+    expect(signed).toBe(0);
+  });
+});
+
+describe('review fixes (13 Nov 2026)', () => {
+  test('a paymail send that broadcast but failed delivery is logged and answered ok (no retry, caps count it)', async () => {
+    const g = grantFor();
+    const send = async () => ({ txid: TXID, error: 'delivery-failed: P2P send failed: 500' });
+    const d = deps(g, { tradeIo: io({ send: send as never }) });
+    const r = (await handleAgentCall(g, 'send', { to: 'someone@bwalletx.com', usd: 0.5 }, d)) as {
+      text: string;
+      txid: string;
+    };
+    expect(r.txid).toBe(TXID);
+    expect(r.text).toMatch(/delivery-failed/);
+    const sent = getAgentLog(ID).filter((e) => e.action === 'send');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].usd).toBe(0.5);
+  });
+
+  test('a send with no txid is still a failure and not logged as spent', async () => {
+    const g = grantFor();
+    const send = async () => ({ error: 'no-txid-returned' });
+    expect(await callCode(g, 'send', { to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', usd: 0.5 }, deps(g, { tradeIo: io({ send: send as never }) }))).toBe('REFUSED');
+    expect(getAgentLog(ID).filter((e) => e.action === 'send')).toHaveLength(0);
+  });
+
+  test('b agent chat send: the spending pause refuses it (fail closed when the status read throws)', async () => {
+    const block = { kind: 'send' as const, token: 'BSV', usd: 0.5, to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' };
+    paused = true;
+    expect((await runAgentAction(ctx, ID, block, RATE, { io: io() })).ok).toBe(false);
+    const r = await runAgentAction(ctx, ID, block, RATE, {
+      io: io({ spendingPaused: async () => Promise.reject(new Error('offline')) }),
+    });
+    expect(r.ok).toBe(false);
+    expect(signed).toBe(0);
+    paused = false;
+    expect((await runAgentAction(ctx, ID, block, RATE, { io: io() })).ok).toBe(true);
+    expect(signed).toBe(1);
+  });
+
+  test('pause turned on during the listing check reaches the computer as PAUSED', async () => {
+    const g = grantFor();
+    const isLive = pairChannel('PAUSE2PAUSE2PAUSE2PAUS', g);
+    const d = deps(g, {
+      isLive,
+      tradeIo: io({
+        assertOrdLockV2: async () => {
+          paused = true;
+        },
+      }),
+    });
+    expect(await callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, d)).toBe('PAUSED');
+    expect(signed).toBe(0);
+  });
+
+  test('pairingLiveCheck only reads storage: no write, and a failing write cannot refuse a live pairing', () => {
+    const g = grantFor();
+    const isLive = pairChannel('READONLYREADONLYREADON', g);
+    // Another, lapsed pairing in storage: load() would rewrite storage to drop it (and, with the write failing,
+    // answer "no sessions" and refuse this live one).
+    pairChannel('LAPSEDLAPSEDLAPSEDLAPS', { ...g, expiresAt: Date.now() - 1 });
+    const before = mem.get(SESSIONS_KEY);
+    storageBlocked = true;
+    expect(isLive()).toBe(true);
+    storageBlocked = false;
+    expect(mem.get(SESSIONS_KEY)).toBe(before);
+  });
+
+  test('an expired grant or an unpinned relay is not live', () => {
+    const g = grantFor();
+    const c = 'EXPIREDEXPIREDEXPIREDE';
+    const isLive = pairChannel(c, g);
+    const edit = (patch: Record<string, unknown>) =>
+      mem.set(
+        SESSIONS_KEY,
+        JSON.stringify(
+          (JSON.parse(mem.get(SESSIONS_KEY)!) as Array<Record<string, unknown>>).map((x) =>
+            x.c === c ? { ...x, ...patch } : x,
+          ),
+        ),
+      );
+    edit({ r: 'relay.attacker.invalid' });
+    expect(isLive()).toBe(false);
+    edit({ r: 'relay.bwallet.space', agent: { ...g, expiresAt: Date.now() - 1 } });
+    expect(sessions.pairingLiveCheck(c, { ...g, expiresAt: Date.now() - 1 }, ctx)()).toBe(false);
+  });
+
+  // Reviewer's probes.
+  test('a socket reconnect (wake) and a same-account deps refresh leave queued work alone', async () => {
+    const g = grantFor();
+    const isLive = pairChannel('WAKEWAKEWAKEWAKEWAKEWA', g);
+    const q = holdQueue();
+    const buy = callCode(g, 'buy', { tokenId: TOKEN, usd: 1 }, deps(g, { isLive }));
+    await tick();
+    visibility = 'hidden';
+    sessions.onPairVisibility();
+    await new Promise((r) => setTimeout(r, 10));
+    visibility = 'visible';
+    sessions.onPairVisibility();
+    sessions.setAgentPairDeps({ ctx, currentId: ID, accountCount: 1, accountIds: [ID] });
+    expect(isLive()).toBe(true);
+    await q.release();
+    expect(await buy).toBe('OK');
+    expect(signed).toBe(1);
+  });
+
+  test('hourly limit boundary: with 29 spends this hour the 30th still signs (the last look does not double count)', async () => {
+    const g = grantFor();
+    const isLive = pairChannel('HOURHOURHOURHOURHOURHO', g);
+    for (let i = 0; i < MAX_SPENDS_PER_HOUR - 1; i++)
+      appendAgentLog(ID, { at: Date.now() - 1000, action: 'send', detail: 'x', usd: 0.01 });
+    const d = deps(g, { isLive });
+    expect(await callCode(g, 'send', { to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', usd: 0.5 }, d)).toBe('OK');
+    expect(signed).toBe(1);
+    expect(await callCode(g, 'send', { to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', usd: 0.5 }, d)).toBe('REFUSED');
+    expect(signed).toBe(1);
+  });
+
+  // Through the real wrappers, not io stubs: gatedContext over the real purchaseContext + checkedPurchaseContext
+  // (checkedContext), and the real guardedSendBsv → upstream sendBsv → createAction.
+  test('real guardedSendBsv: a refusal inside createAction comes back Refused and the wallet never signs', async () => {
+    let looks = 0;
+    const r = await runAgentAction(
+      ctx,
+      ID,
+      { kind: 'send', token: 'BSV', usd: 0.5, to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },
+      RATE,
+      {
+        io: { spendingPaused: async () => false }, // the real send
+        // Passes the look before sendBsv, refuses the one inside createAction.
+        beforeSign: () => (++looks === 1 ? null : 'Pressed Stop while sending'),
+      },
+    );
+    expect(looks).toBe(2);
+    expect(r).toEqual({ ok: false, text: 'Refused: Pressed Stop while sending' });
+    expect(signed).toBe(0);
+    expect(getAgentLog(ID).filter((e) => e.action === 'send')).toHaveLength(0);
+  });
+
+  test('real guardedSendBsv: the normal path reaches the wallet once', async () => {
+    const r = await runAgentAction(
+      ctx,
+      ID,
+      { kind: 'send', token: 'BSV', usd: 0.5, to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },
+      RATE,
+      { io: { spendingPaused: async () => false } },
+    );
+    expect(r.ok).toBe(true);
+    expect(signed).toBe(1);
+  });
+
+  test('real purchaseContext + checkedPurchaseContext: Stop inside the buy is refused before their createAction', async () => {
+    const r = await runAgentAction(ctx, ID, { kind: 'buy', token: TOKEN, usd: 1 }, RATE, {
+      io: io({
+        checkedPurchaseContext, // the real one (checkedContext)
+        buy: viaWallet(() => setAgentStopped(ID, true)) as never,
+      }),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/^Refused: .*stopped/i);
     expect(signed).toBe(0);
   });
 });

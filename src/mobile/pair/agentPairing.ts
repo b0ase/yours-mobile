@@ -234,6 +234,8 @@ export async function handleAgentCall(
       // Serialised like mint: checkAgentAction reads the log and the spend is logged only after it is
       // signed, so two parallel requests could both pass the daily cap (18 Oct 2026 review).
       const rate = await deps.bsvUsd();
+      // The last look's own error (UNPAIRED, STOPPED, PAUSED…), so the computer is told why, not just REFUSED.
+      let lastLookError: AgentCallError | undefined;
       const r = await serial(async () => {
         // The job may have waited behind a slow mint: unpaired, expired or Stopped meanwhile → nothing runs.
         await assertSpendJob(grant, action, deps);
@@ -244,13 +246,14 @@ export async function handleAgentCall(
               await assertSpendJob(grant, action, deps);
               return null;
             } catch (e) {
-              return e instanceof Error ? e.message : 'Refused';
+              if (e instanceof AgentCallError) lastLookError ??= e;
+              throw e;
             }
           },
-          io: deps.tradeIo,
+          io: { ...(deps.spendingPaused && { spendingPaused: deps.spendingPaused }), ...deps.tradeIo },
         });
       });
-      if (!r.ok) throw new AgentCallError('REFUSED', r.text);
+      if (!r.ok) throw lastLookError ?? new AgentCallError('REFUSED', r.text);
       return { text: r.text, txid: r.txid ?? null };
     }
     case 'mint_quote': {

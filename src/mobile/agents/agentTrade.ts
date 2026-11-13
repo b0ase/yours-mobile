@@ -24,6 +24,7 @@ import { parseRoom, roomMarket as indexerRoomMarket, roomMeta as indexerRoomMeta
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { marketFeeOptions } from '../market/fee';
 import { checkedPurchaseContext as realCheckedPurchaseContext } from '../p2p/checkedPurchase';
+import { isPaused } from '../config/killSwitch';
 
 export type AgentActionBlock = { kind: StrategyAction; token: string; usd: number; to?: string; amount?: number };
 
@@ -136,6 +137,8 @@ export type AgentTradeIo = {
   checkedPurchaseContext: typeof realCheckedPurchaseContext;
   buy: typeof buyBsv21.execute;
   send: typeof sendBsv.execute;
+  /** The `spending` kill switch (config/killSwitch.ts). */
+  spendingPaused: () => Promise<boolean>;
 };
 const realIo: AgentTradeIo = {
   roomMarket: indexerRoomMarket,
@@ -144,13 +147,16 @@ const realIo: AgentTradeIo = {
   checkedPurchaseContext: realCheckedPurchaseContext,
   buy: (ctx, input) => buyBsv21.execute(ctx, input),
   send: (ctx, input) => sendBsv.execute(ctx, input),
+  spendingPaused: () => isPaused('spending'),
 };
 
 export type AgentActionHooks = {
   /**
    * The caller's own last look, run with the account's (lastLook below) after every listing / destination check and
    * again inside the wallet's createAction, right before anything is signed. Return a reason to refuse, or null.
-   * Paired computers use it for "still paired" and the spending pause (pair/agentPairing.ts).
+   * It runs first, so its reason is the one shown. It may also throw: the error refuses (fail closed), and the caller
+   * can keep its own error (paired computers keep the AgentCallError code: UNPAIRED, STOPPED, PAUSED).
+   * Paired computers use it for "still paired", Stop and the spending pause (pair/agentPairing.ts).
    */
   beforeSign?: () => Promise<string | null> | string | null;
   io?: Partial<AgentTradeIo>;
@@ -202,21 +208,23 @@ export const runAgentAction = async (
 
   /**
    * b-Aware report (13 Nov 2026): a Stop pressed (or a pairing removed) after checkAgentAction passed but while the
-   * listing or destination was being checked must still win. Re-run the account gate (Stop all, the account's Stop,
-   * hourly limit, daily cap), refuse a strategy switched to paper meanwhile, then the caller's own look. Fails closed:
-   * a look that throws refuses. The first refusal is logged once.
+   * listing or destination was being checked must still win. The caller's own look first, then the account gate (Stop
+   * all, the account's Stop, hourly limit, daily cap), a strategy switched to paper meanwhile, and the `spending` pause
+   * (b agent chat sends had no pause check: guardedSendBsv has none). Fails closed: a look that throws, or a pause
+   * status that can't be read, refuses. The first refusal is logged once.
    */
   let refusal: string | null = null;
   const lastLook = async (kind: string, usd: number): Promise<string | null> => {
     if (refusal) return refusal;
     let why: string | null;
     try {
-      const s = checkAgentSpend(id, usd);
-      why = !s.ok
-        ? s.reason
-        : getLoadedStrategy(id)?.mode === 'paper'
-          ? 'The strategy was switched to paper mode'
-          : ((await hooks.beforeSign?.()) ?? null);
+      why = (await hooks.beforeSign?.()) ?? null;
+      if (!why) {
+        const s = checkAgentSpend(id, usd);
+        if (!s.ok) why = s.reason;
+        else if (getLoadedStrategy(id)?.mode === 'paper') why = 'The strategy was switched to paper mode';
+        else if (await io.spendingPaused().catch(() => true)) why = 'Spending is paused in bWalletX right now';
+      }
     } catch (e) {
       why = e instanceof Error && e.message ? e.message : 'The last check before signing failed';
     }
@@ -231,8 +239,9 @@ export const runAgentAction = async (
   const signing = async <R extends { txid?: string; error?: unknown }>(run: () => Promise<R>): Promise<R | null> => {
     try {
       const res = await run();
-      // Money moved (txid, no error) is always reported and logged, even if a look refused afterwards.
-      if (refusal && (!res.txid || res.error)) return null;
+      // A txid means the payment went out (a paymail send can come back { txid, error: 'delivery-failed…' }): it is
+      // always reported and logged so the caps count it, even if a look refused afterwards. No txid: nothing went out.
+      if (refusal && !res.txid) return null;
       return res;
     } catch (e) {
       if (e instanceof SpendRefused || refusal) return null;
@@ -260,16 +269,19 @@ export const runAgentAction = async (
       } as Parameters<typeof sendBsv.execute>[1]),
     );
     if (!res) return refused();
-    if (!res.txid || res.error) return { ok: false, text: `Send failed: ${String(res.error ?? 'unknown error')}` };
+    if (!res.txid) return { ok: false, text: `Send failed: ${String(res.error ?? 'unknown error')}` };
+    // Review 13 Nov 2026: a txid with an error (paymail delivery failed after broadcast) is still money sent. Log it
+    // so the caps see it, and answer ok so the caller doesn't retry and pay twice.
+    const note = res.error ? ` (broadcast, but ${String(res.error)}; the payment was sent, don't send it again)` : '';
     appendAgentLog(id, {
       at: Date.now(),
       action: 'send',
-      detail: `Sent $${a.usd.toFixed(2)} to ${a.to}`,
+      detail: `Sent $${a.usd.toFixed(2)} to ${a.to}${note}`,
       usd: a.usd,
       txid: res.txid,
       rule: getLoadedStrategy(id)?.strategy.name,
     });
-    return { ok: true, text: `Sent $${a.usd.toFixed(2)} to ${a.to}`, txid: res.txid };
+    return { ok: true, text: `Sent $${a.usd.toFixed(2)} to ${a.to}${note}`, txid: res.txid };
   }
 
   // buy
@@ -315,16 +327,18 @@ export const runAgentAction = async (
     }),
   );
   if (!res) return refused();
-  if (!res.txid || res.error) return { ok: false, text: `Buy failed: ${String(res.error ?? 'unknown error')}` };
+  if (!res.txid) return { ok: false, text: `Buy failed: ${String(res.error ?? 'unknown error')}` };
+  // As for send: a txid means it went out, so it is logged against the caps even if an error came with it.
+  const note = res.error ? ` (broadcast, but ${String(res.error)})` : '';
   appendAgentLog(id, {
     at: Date.now(),
     action: 'buy',
-    detail: `Bought ${pick.label}`,
+    detail: `Bought ${pick.label}${note}`,
     usd,
     txid: res.txid,
     rule: getLoadedStrategy(id)?.strategy.name,
   });
-  return { ok: true, text: `Bought ${pick.label} for $${usd.toFixed(2)}`, txid: res.txid };
+  return { ok: true, text: `Bought ${pick.label} for $${usd.toFixed(2)}${note}`, txid: res.txid };
 };
 
 /**

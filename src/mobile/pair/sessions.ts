@@ -511,15 +511,20 @@ function flush(c: string) {
 
 /**
  * isLive for a paired-computer call: the channel wasn't revoked since the request came in, its stored session still
- * holds the same agent grant (not lapsed or parked), and the same account and wallet are still open.
+ * holds the same agent grant (not lapsed, parked or on an unpinned relay), and the same account and wallet are open.
+ * A socket reconnect (wake, network) replaces only the socket, so queued work carries on.
  */
 export const pairingLiveCheck = (c: string, grant: AgentGrant, ctx: OneSatContext) => {
   const gen = revokedGen.get(c) ?? 0;
   return () => {
     if ((revokedGen.get(c) ?? 0) !== gen) return false;
     if (agentDeps.ctx !== ctx || agentDeps.currentId !== grant.agentId) return false;
-    const s = load().find((x) => x.c === c);
-    return !!s?.agent && s.agent.agentId === grant.agentId && s.agent.expiresAt === grant.expiresAt;
+    // Read only (peek), never load(): this runs inside createAction, and load() rewrites storage (and on a write error
+    // would answer "no sessions"). The same filters load() keeps a session by, applied to this one session.
+    const s = peek(c);
+    if (!s?.agent || s.agent.agentId !== grant.agentId || s.agent.expiresAt !== grant.expiresAt) return false;
+    if (!isCurrent(s) || isDormant(s) || !dropUntrustedRelays([s]).length) return false;
+    return bindToAccount([s], agentDeps.currentId, agentDeps.accountCount).length === 1;
   };
 };
 
