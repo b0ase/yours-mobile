@@ -585,7 +585,7 @@ export type PageKind = {
 };
 
 /** For the guard, before a page: 'stop' ends this sync here, the page not merged. A pull starts its slice's clock. */
-export function beforePage(deviceSik: string, page: PageKind, now = Date.now()): 'stop' | 'go' {
+export function beforePage(deviceSik: string, page: PageKind, now = sliceClock()): 'stop' | 'go' {
   if (restoring > 0) return 'go';
   const mode = modes.get(deviceSik);
   if (mode === 'defer' && (page.fromStart || page.ours)) return 'stop';
@@ -610,7 +610,7 @@ export function beforePage(deviceSik: string, page: PageKind, now = Date.now()):
  */
 export function afterPage(
   deviceSik: string,
-  now = Date.now(),
+  now = sliceClock(),
   payments: Pick<OwnPaymentGate, 'waiting'> = ownPayments,
 ): 'yield' | 'go' {
   if (restoring > 0 || !modes.get(deviceSik)) return 'go';
@@ -629,6 +629,14 @@ export const paymentYields = () => paymentYieldCount;
 let sliceMs = FULL_PASS_SLICE_MS;
 /** Test hook: the slice length (ms); no argument restores the default. */
 export const _setFullPassSlice = (ms?: number) => void (sliceMs = ms ?? FULL_PASS_SLICE_MS);
+
+let sliceClock: () => number = Date.now;
+/**
+ * Test hook: the clock a pull's slice is measured on (beforePage / afterPage); no argument restores Date.now. A test
+ * can give each backup page a fixed cost on it, so what it checks is the yield decision, not how fast a loaded machine
+ * merges a page.
+ */
+export const _setFullPassClock = (clock?: () => number) => void (sliceClock = clock ?? Date.now);
 
 // ── a deadline on the device-sync pull (review 23, M2) ──
 
