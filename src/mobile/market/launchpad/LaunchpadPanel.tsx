@@ -127,13 +127,13 @@ export const LaunchpadPanel = () => {
       </button>
       <OurLaunches onOpen={(id) => navigate(tradeRoute(id))} />
       <h3 className="text-xs font-bold uppercase tracking-wide text-[#98A2B3] m-0 mt-2">
-        {order === 'new' ? 'New on TokenBlaster' : 'Trending on TokenBlaster'}
+        {order === 'new' ? 'New on TokenBlaster' : 'TokenBlaster by 24h volume'}
       </h3>
       <div className="grid grid-cols-2 gap-2" role="group" aria-label="Sort TokenBlaster coins">
         {(
           [
             ['new', 'Newest'],
-            ['trending', 'Trending'],
+            ['trending', '24h volume'],
           ] as const
         ).map(([k, label]) => (
           <button

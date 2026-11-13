@@ -231,7 +231,7 @@ const Markets = ({
     [all, albums],
   );
   const nHidden = useMemo(() => hiddenCount(all, (r) => r.ref.id, prefs), [all, prefs]);
-  // The list view loads its own row stats; the card board loads its facts (TokenBoard), so none here.
+  // The list view loads its own row stats; the card board loads its own prices (TokenBoard), so none here.
   const visible = useMemo(() => (cardsView ? [] : list.slice(0, shown)), [cardsView, list, shown]);
   // Tickers more than one token uses: those rows show their short token id so copies can be told apart.
   const shared = useMemo(() => {

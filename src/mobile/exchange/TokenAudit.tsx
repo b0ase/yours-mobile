@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
 import { BadgeCheck, Copy, ExternalLink } from 'lucide-react';
 import { openExternal } from './useTokenRowActions';
-import { bsvLabel, chainTip, fiatLabel, tokenTrades, unitPriceLabel, type Trade } from './exchangeData';
+import {
+  bsvLabel,
+  chainTip,
+  changeLabel,
+  dayStats,
+  fiatLabel,
+  tokenTrades,
+  unitPriceLabel,
+  type Trade,
+} from './exchangeData';
 import { ScoreRing, ScoreSheet } from './TokenBoard';
 import {
   ageLabel,
   capLabel,
   marketCap,
+  showChange,
   badges,
   boardFacts,
   derive,
@@ -100,6 +110,7 @@ export const TokenAudit = ({
   const proven = badges(f, d);
   const last = trades.length ? trades[trades.length - 1].satsPerToken : null;
   const cap = marketCap(trades, tip, d.circulating, f.dec);
+  const day = dayStats(trades, tip);
   const txid = tokenId.split('_')[0];
   const recent = [...trades].reverse().slice(0, 20);
   const copyId = () => {
@@ -152,7 +163,7 @@ export const TokenAudit = ({
             ))}
           </ul>
         )}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <Fact k="Deployer" v={f.deployer ? short(f.deployer) : 'Contract'} ok={!!f.deployer} />
           <Fact k="Launched" v={f.height && tip ? `${ageLabel(tip - f.height)} ago` : '—'} sub={`block ${f.height}`} />
           <Fact
@@ -178,6 +189,11 @@ export const TokenAudit = ({
             k="Price per 1M"
             v={last === null ? '—' : unitPriceLabel(last * 1e6)}
             sub={last === null ? '' : `${unitPriceLabel(last)} / token`}
+          />
+          <Fact
+            k="24h change"
+            v={showChange(day.change, day.trades) ? changeLabel(day.change) : '—'}
+            sub={day.trades ? `${day.trades} trades · ${bsvLabel(day.volume)}` : 'no trades in 24h'}
           />
         </div>
       </section>
