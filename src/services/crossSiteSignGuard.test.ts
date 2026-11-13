@@ -698,11 +698,21 @@ describe('re-review 13 Nov: a URL host is read as a URL parser reads it (N1)', (
     const json = bytes(JSON.stringify({ uri: url, nonce: 'n' }));
     expect(crossSiteSignRefusal(`https://${host}`, { data: json })).toBeNull();
     expect(crossSiteSignRefusal('https://other.example', { data: json })).toContain(host);
-    // Unquoted (a form, a text line): the parser's host always counts; a form parser's split may name another too.
-    for (const data of [bytes(`redirect_uri=${encodeURIComponent(url)}&state=1`), bytes(`uri=${url}`)]) {
-      expect(scanSignData(new Uint8Array(data)).hosts).toContain(host);
-      expect(crossSiteSignRefusal('https://other.example', { data })).not.toBeNull();
-    }
+    // A percent-encoded form value: split at the raw & first, then decoded and read in full, so the parser's host.
+    const encoded = bytes(`redirect_uri=${encodeURIComponent(url)}&state=1`);
+    expect(scanSignData(new Uint8Array(encoded)).hosts).toContain(host);
+    expect(crossSiteSignRefusal('https://other.example', { data: encoded })).not.toBeNull();
+    // Raw in a form (uri=...): what a form parser hands on, the value up to the first raw &, ; or space (F1).
+    const formValue = url.split(/[&;\s]/)[0]; // raw white space ends a value too
+    const formHost = (() => {
+      try {
+        return new URL(formValue.startsWith('//') ? `https:${formValue}` : formValue).hostname;
+      } catch {
+        return null;
+      }
+    })();
+    if (formHost && formHost.includes('.'))
+      expect(scanSignData(new Uint8Array(bytes(`uri=${url}`))).hosts).toContain(formHost);
   });
   test('an escaped quote in the userinfo: the parser host is named (the decoded pass also names evil.com)', () => {
     const data = bytes(JSON.stringify({ uri: 'https://evil.com"@good.com/', nonce: 'n' }));
@@ -806,5 +816,52 @@ describe('re-review 13 Nov: random binary is not read as naming a site (N4)', ()
     ).toContain('too much encoded data');
     const log = new TextEncoder().encode('log line number something happened ok\n'.repeat(5500));
     expect(crossSiteSignRefusal('https://app.example', { data: Array.from(gzipSync(log)) })).toBeNull();
+  });
+});
+
+// Follow-up review (13 Nov 2026): F1 (no false refusals from a later email), F2 (Unicode hosts in binary).
+describe('follow-up F1: a later email or paymail on the line is not the URL host', () => {
+  test.each([
+    [
+      'encoded redirect_uri + login_hint paymail',
+      'redirect_uri=https%3A%2F%2Fgood.com&login_hint=bob%40bwalletx.com&nonce=1',
+    ],
+    ['raw redirect_uri + email', 'redirect_uri=https://good.com&email=bob@gmail.com&nonce=1'],
+    ['one line, space-separated fields', 'domain=good.com uri=https://good.com user=bob@bwalletx.com nonce=123'],
+    ['Origin then a paymail', 'Login to good.com. Origin: https://good.com Paymail: bob@bwalletx.com Nonce: 7'],
+    ['JSON + paymail', JSON.stringify({ uri: 'https://good.com', paymail: 'bob@bwalletx.com' })],
+    [
+      'multi-line + paymail',
+      'good.com wants you to sign in\nURI: https://good.com\nPaymail: bob@bwalletx.com\nNonce: 1',
+    ],
+    ['a URL with a slash, then an email', 'uri=https://good.com/ email=bob@gmail.com'],
+  ])('%s: signs for good.com', (_name, msg) => {
+    expect(crossSiteSignRefusal('https://good.com', { data: bytes(msg) })).toBeNull();
+  });
+  test('N1 stays fixed: %26@ in an encoded form value names the host after it', () => {
+    const data = bytes('redirect_uri=https%3A%2F%2Fevil.com%26%40good.com%2Fcb&state=1');
+    expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('good.com');
+  });
+});
+
+describe('follow-up F2: Unicode and numeric hosts in data that is not text', () => {
+  const bin = (o: object) => [0xff, ...bytes(JSON.stringify(o))];
+  test.each([
+    ['fullwidth letters', bin({ uri: 'https://ｇｏｏｄ.com/' })],
+    ['an ideographic full stop', bin({ uri: 'https://good。com/' })],
+    ['a blob: URL', bin({ uri: 'blob:https://good.com/1234' })],
+  ])('%s: refused for evil.com', (_name, data) => {
+    expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('good.com');
+    expect(crossSiteSignRefusal('https://good.com', { data })).toBeNull();
+  });
+  test('a hex IPv4 host is read as the parser reads it (0x7f.1 is 127.0.0.1)', () => {
+    const data = bin({ uri: 'https://0x7f.1/' });
+    expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('127.0.0.1');
+    expect(crossSiteSignRefusal('http://127.0.0.1', { data })).toBeNull();
+  });
+  test('a blob: URL in text names the site inside it', () => {
+    expect(crossSiteSignRefusal('https://evil.com', { data: bytes('uri: blob:https://good.com/1') })).toContain(
+      'good.com',
+    );
   });
 });
