@@ -15,10 +15,9 @@ const KINDS: [WalletKind, string][] = walletKindsFor<[WalletKind, string]>([
 // Views with no chip that a balance card opens (tickets, shares; 15 Oct 2026). Store builds drop them.
 const SHOWN = new Set<WalletKind>([
   ...KINDS.map(([k]) => k),
-  ...walletKindsFor<[WalletKind]>([
-    ['tickets'],
-    ...(PLACEMENT_ENABLED ? [['shares'] as [WalletKind]] : []),
-  ]).map(([k]) => k),
+  ...walletKindsFor<[WalletKind]>([['tickets'], ...(PLACEMENT_ENABLED ? [['shares'] as [WalletKind]] : [])]).map(
+    ([k]) => k,
+  ),
 ]);
 
 /** Tokens | NFTs (sized so four fit a 320px phone), styled like Market's type switch (market/MarketPage.tsx). */
