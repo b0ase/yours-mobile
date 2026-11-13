@@ -658,6 +658,19 @@ export const initWallet = async (
   const deviceStore = (): AdmitStore | undefined =>
     managed._stores?.map((m) => m.storage).find((s): s is StorageIdb => s instanceof StorageIdb) as never;
   stopBackupCheck.useSecondSource(oneSatChainLookups(toolboxServices));
+  // A held BSV-21 coin the chain calls unspent: the token overlay's word, read through tokenOverlayVerdict (fix 7). Only
+  // its 'spent' holds the coin back; an error or an unfunded overlay never does. Set before the first admission run
+  // is scheduled (onQueued below), from the factory's 1Sat services.
+  stopBackupCheck.verifier.tokenState = async (tokenId, outpoint) => {
+    const bsv21 = (
+      toolboxServices as unknown as {
+        bsv21?: { getOutputStatus?: (id: string, ops: string[]) => Promise<{ outpoint: string; state: string }[]> };
+      }
+    ).bsv21;
+    if (typeof bsv21?.getOutputStatus !== 'function') return undefined;
+    const [s] = await bsv21.getOutputStatus(tokenId, [outpoint]);
+    return s?.state;
+  };
   let admitClosed = false;
   let admitTimer: ReturnType<typeof setTimeout> | undefined;
   let admitAt = Infinity;
@@ -1837,18 +1850,6 @@ export const initWallet = async (
     const r = await recoverTxidImpl(txid);
     if (r.result === 'restored') return 'restored';
     return r.result === 'not-mined' || r.result === 'error' ? 'wait' : 'done';
-  };
-  // A held BSV-21 coin the chain calls unspent: the token overlay's word, read through tokenOverlayVerdict (fix 7). Only
-  // its 'spent' holds the coin back; an error or an unfunded overlay never does.
-  stopBackupCheck.verifier.tokenState = async (tokenId, outpoint) => {
-    const bsv21 = (
-      syncContext.services as unknown as {
-        bsv21?: { getOutputStatus?: (id: string, ops: string[]) => Promise<{ outpoint: string; state: string }[]> };
-      }
-    ).bsv21;
-    if (typeof bsv21?.getOutputStatus !== 'function') return undefined;
-    const [s] = await bsv21.getOutputStatus(tokenId, [outpoint]);
-    return s?.state;
   };
 
   // Settings › Troubleshooting › Recover change from my 12 words (services/seedChange.ts).

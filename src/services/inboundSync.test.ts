@@ -49,13 +49,15 @@ import {
   PROMPT_RETRY_MS,
   requeueHeldTokenCoins,
   tokenOverlayVerdict,
+  HELD_TOKEN_DELAY_MS,
+  TOKEN_BASKETS,
   type InboundVerifier,
 } from './inboundSync';
 import { bsv21FieldsFromOutput } from '@1sat/actions';
 import { bsv21 } from '../mobile/market/launchpad/tokens';
 import { ASSET_ID_MISMATCH, assetIdIsOnly, guardAssetIdLoads } from './assetIdCheck';
 import { loadBasketOutput } from '@1sat/actions';
-import { eitherChainSource } from './chainSources';
+import { eitherChainSource, unknownToAll } from './chainSources';
 import type { SpendState } from './unsentExpiry';
 
 const HEIGHT = 971_004;
@@ -2386,7 +2388,13 @@ describe('6 Nov 2026: an admission entry that waited for its row is not held bac
  * phone; the extension's Repair Sync had logged an overlay error for it ("Unable to process submitted transaction").
  */
 describe('fix 7: a token coin is spendable or not the same way on every device', () => {
-  const TOKENS = { baskets: ['tokens-test'] };
+  const TOKENS = { baskets: ['tokens-test'], now };
+  /** The held-token check, then the test clock past the wait its new entries start with. */
+  const requeue = async (d: { phone: StorageIdb; kd: KeyDeriver }, opts: { limit?: number } = {}) => {
+    const n = await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, { ...TOKENS, ...opts });
+    tick(HELD_TOKEN_DELAY_MS + 1_000);
+    return n;
+  };
   /** The overlay can't be reached (or refuses the submit): its lookups all fail. */
   const overlayDown = (v: InboundVerifier): InboundVerifier => ({
     ...v,
@@ -2422,7 +2430,7 @@ describe('fix 7: a token coin is spendable or not the same way on every device',
     // Before the recheck, admission has nothing to do: the coin stays held (the extension, 8 Nov onwards).
     expect((await admit(d.phone, d.kd.identityKey, v)).admitted).toBe(0);
     expect((await d.row(d.phone, d.token)).spendable).toBe(false);
-    expect(await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, TOKENS)).toBe(1);
+    expect(await requeue(d)).toBe(1);
     expect(await waiting(d.phone, d.kd.identityKey)).toEqual([`${d.token}.0`]);
     expect((await admit(d.phone, d.kd.identityKey, v)).admitted).toBe(1);
     expect((await d.row(d.phone, d.token)).spendable).toBe(true);
@@ -2443,7 +2451,7 @@ describe('fix 7: a token coin is spendable or not the same way on every device',
     const d = await phoneWithBackup();
     await heldAtBackupTime(d);
     d.chain.answer = 'spent';
-    await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, TOKENS);
+    await requeue(d);
     await admit(d.phone, d.kd.identityKey, d.verifier);
     tick(HOUR + MIN);
     const r = await admit(d.phone, d.kd.identityKey, d.verifier);
@@ -2463,7 +2471,7 @@ describe('fix 7: a token coin is spendable or not the same way on every device',
         return 'spent';
       },
     };
-    await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, TOKENS);
+    await requeue(d);
     const r = await admit(d.phone, d.kd.identityKey, v);
     expect(r.admitted).toBe(0);
     expect((await d.row(d.phone, d.token)).spendable).toBe(false);
@@ -2477,10 +2485,10 @@ describe('fix 7: a token coin is spendable or not the same way on every device',
     const row = await d.row(d.phone, d.token);
     const [t] = await d.phone.findTransactions({ partial: { txid: d.coin } });
     await d.phone.updateOutput(row.outputId, { spentBy: t.transactionId, updated_at: row.updated_at } as never);
-    expect(await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, TOKENS)).toBe(0);
+    expect(await requeue(d)).toBe(0);
     await d.phone.updateOutput(row.outputId, { spentBy: null, updated_at: row.updated_at } as never);
     await d.phone.updateTransaction(row.transactionId, { status: 'failed' } as never);
-    expect(await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, TOKENS)).toBe(0);
+    expect(await requeue(d)).toBe(0);
   });
 
   test('two devices converge: the held copy and a fresh copy both end spendable, or both not, as the chain says', async () => {
@@ -2489,7 +2497,7 @@ describe('fix 7: a token coin is spendable or not the same way on every device',
       await heldAtBackupTime(d); // this device: the extension's held row
       d.chain.answer = answer;
       const other = await d.restore(overlayDown(d.verifier)); // the other device: the same row from the backup
-      await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, TOKENS);
+      await requeue(d);
       for (let i = 0; i < 2; i++) {
         await admit(d.phone, d.kd.identityKey, overlayDown(d.verifier));
         await admit(other.fresh, d.kd.identityKey, overlayDown(d.verifier));
@@ -2509,10 +2517,120 @@ describe('fix 7: a token coin is spendable or not the same way on every device',
     await d.forge(d.token, { spendable: false });
     await d.pull();
     expect((await d.row(d.phone, d.token)).spendable).toBe(false);
-    await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, TOKENS);
+    await requeue(d);
     await admit(d.phone, d.kd.identityKey, d.verifier);
     tick(HOUR + MIN);
     await admit(d.phone, d.kd.identityKey, d.verifier);
     expect((await d.row(d.phone, d.token)).spendable).toBe(false);
+  });
+  test('the legacy token basket is covered too', () => {
+    expect(TOKEN_BASKETS).toEqual(['bsv21', 'p 1sat bsv21']);
+  });
+
+  test("listed entries wait a minute first: a pull's own entries and fresh change are asked about before them", async () => {
+    const d = await phoneWithBackup();
+    await heldAtBackupTime(d);
+    d.chain.answer = 'unspent';
+    expect(await requeueHeldTokenCoins(d.phone as never, d.kd.identityKey, TOKENS)).toBe(1);
+    expect((await admit(d.phone, d.kd.identityKey, d.verifier)).admitted).toBe(0);
+    expect(d.chain.asked).toEqual([]);
+    tick(HELD_TOKEN_DELAY_MS + 1_000);
+    expect((await admit(d.phone, d.kd.identityKey, d.verifier)).admitted).toBe(1);
+  });
+
+  /** A payment of this device's not yet on the network that spends `outpoint` (txid.vout), its link on the coin lost. */
+  const inFlightSpend = async (d: Awaited<ReturnType<typeof phoneWithBackup>>, status: string, withBytes: boolean) => {
+    const [txidIn] = [d.token];
+    const spend = new Transaction();
+    spend.addInput({ sourceTXID: txidIn, sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+    spend.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 1 });
+    const [base] = await d.phone.findTransactions({ partial: { txid: d.coin } });
+    const parent = (await d.phone.getProvenOrRawTx(d.token)) as { rawTx?: number[]; proven?: { rawTx?: number[] } };
+    const inputBeef = new Beef();
+    inputBeef.mergeRawTx(Array.from(parent.rawTx ?? parent.proven!.rawTx!));
+    const now = new Date();
+    await d.phone.insertTransaction({
+      ...base,
+      transactionId: 0,
+      created_at: now,
+      updated_at: now,
+      status,
+      reference: Utils.toBase64(Random(12)),
+      txid: withBytes ? spend.id('hex') : undefined,
+      rawTx: withBytes ? spend.toBinary() : undefined,
+      inputBEEF: withBytes ? undefined : inputBeef.toBinary(),
+      provenTxId: undefined,
+      isOutgoing: true,
+      description: 'the other device reserved this token',
+    } as never);
+  };
+
+  test('finding 1: a token coin a nosend (or unsigned) payment spends, its link dropped on the way, is never raised', async () => {
+    for (const [status, withBytes] of [
+      ['nosend', true],
+      ['unsigned', false],
+      ['sending', true],
+    ] as const) {
+      const d = await phoneWithBackup();
+      await heldAtBackupTime(d);
+      await inFlightSpend(d, status, withBytes);
+      d.chain.answer = 'unspent'; // the chain hasn't seen that spend
+      expect(await requeue(d)).toBe(0);
+      // Even if it is on the list (an older entry, or a backup page), admission doesn't raise it.
+      const list = (await import('./inboundSync')).admissionListFor(d.phone.getSettings().storageIdentityKey);
+      await list.add(d.kd.identityKey, [{ kind: 'coin', txid: d.token, vout: 0 }], now());
+      for (let i = 0; i < 3; i++) {
+        await admit(d.phone, d.kd.identityKey, d.verifier);
+        tick(HOUR);
+      }
+      expect((await d.row(d.phone, d.token)).spendable).toBe(false);
+    }
+  });
+
+  test('finding 2: more than 200 dead rows do not starve a live held coin (cursor + refused memo)', async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const tokenRow = await d.row(d.phone, d.token);
+    // 205 dead rows: outputs the token's transaction doesn't have (refused: "the row differs from its transaction").
+    for (let vout = 1; vout <= 205; vout++)
+      await d.phone.insertOutput({
+        ...tokenRow,
+        outputId: 0,
+        vout,
+        spendable: false,
+        spentBy: undefined,
+        created_at: new Date(),
+        updated_at: new Date(),
+      } as never);
+    // The live coin comes after all of them (a higher output id), held not spendable.
+    const live = await receiveToken(d.wallet, d.kd);
+    const liveRow = await d.row(d.phone, live);
+    await d.phone.updateOutput(liveRow.outputId, { spendable: false } as never);
+    for (let round = 0; round < 6 && !(await d.row(d.phone, live)).spendable; round++) {
+      await requeue(d);
+      for (let i = 0; i < 12; i++) {
+        await admit(d.phone, d.kd.identityKey, d.verifier);
+        tick(2 * MIN);
+      }
+    }
+    expect((await d.row(d.phone, live)).spendable).toBe(true);
+    // The dead rows are remembered as refused: the next check lists none of them.
+    expect(await requeue(d)).toBe(0);
+  });
+
+  test('unknownToAll: removal needs every source to say unknown', async () => {
+    const k = (a: 'known' | 'unknown' | 'unclear') => async () => a;
+    expect(await unknownToAll([k('unknown'), k('unknown')])('t')).toBe('unknown');
+    expect(await unknownToAll([k('unknown'), k('known')])('t')).toBe('known');
+    expect(await unknownToAll([k('unknown'), k('unclear')])('t')).toBe('unclear');
+    expect(await unknownToAll([k('unknown'), undefined])('t')).toBe('unclear');
+    expect(
+      await unknownToAll([
+        k('unknown'),
+        async () => {
+          throw new Error('429');
+        },
+      ])('t'),
+    ).toBe('unclear');
   });
 });
