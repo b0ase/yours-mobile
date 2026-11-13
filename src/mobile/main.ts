@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
 import { Hub } from './hub';
+import { ENVELOPES_KEY_PREFIX } from '../services/envelopes';
 import { IS_TAURI, invoke as tauriInvoke } from './desktop/ipc';
 import { tauriLocalBackend } from './desktop/storage';
 import type { PlatformHooks } from '../platform';
@@ -61,8 +62,12 @@ const defineChrome = (target: any, chrome: unknown) =>
 
 // Desktop (Tauri): storage.local lives in an owner-only file on the Rust side, not in the webview (desktop/storage.ts).
 // Web + Desktop keep storage.session (the unlock key) in memory only; phones mirror it to the in-process WebView.
+// Web wallet: every tab runs its own hub and background over one localStorage, so envelope balances are re-read on
+// every use, under a cross-tab lock (services/envelopes.ts withEnvelopeLock), never trusted from this tab's copy.
 const hub = new Hub(handleHostOp, IS_TAURI ? tauriLocalBackend(tauriInvoke) : undefined, {
   persistSession: Capacitor.isNativePlatform(),
+  freshLocalKeys:
+    !Capacitor.isNativePlatform() && !IS_TAURI ? (key) => key.startsWith(ENVELOPES_KEY_PREFIX) : undefined,
 });
 
 // Frames (overlay iframes) register here; swept when their overlay closes.
@@ -144,7 +149,13 @@ worker.addEventListener('message', (e) => {
   }
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));
-worker.postMessage({ t: 'init', rootUrl, version: __MOBILE_VERSION__ });
+// sharedEnvelopeLock: web tabs each run a worker over one localStorage (services/envelopes.ts withEnvelopeLock).
+worker.postMessage({
+  t: 'init',
+  rootUrl,
+  version: __MOBILE_VERSION__,
+  sharedEnvelopeLock: !Capacitor.isNativePlatform() && !IS_TAURI,
+});
 markBootStage('background: worker started');
 
 // This window's own chrome (the "popup").

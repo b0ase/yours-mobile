@@ -42,12 +42,12 @@ const early: string[] = [];
 let receive: ((json: string) => void) | undefined;
 
 self.addEventListener('message', (event: MessageEvent) => {
-  const data = event.data as string | { t?: string; rootUrl?: string; version?: string };
+  const data = event.data as string | { t?: string; rootUrl?: string; version?: string; sharedEnvelopeLock?: boolean };
   if (typeof data === 'string') return receive ? receive(data) : void early.push(data);
-  if (data?.t === 'init' && !receive) void init(data.rootUrl!, data.version!);
+  if (data?.t === 'init' && !receive) void init(data.rootUrl!, data.version!, data.sharedEnvelopeLock === true);
 });
 
-const init = async (rootUrl: string, version: string) => {
+const init = async (rootUrl: string, version: string, sharedEnvelopeLock: boolean) => {
   const shim = createChromeShim({
     post: (json) => self.postMessage(json),
     parse: JSON.parse,
@@ -64,6 +64,8 @@ const init = async (rootUrl: string, version: string) => {
   early.splice(0).forEach(receive);
 
   try {
+    // Web wallet: other tabs run their own worker over the same storage; envelopes then need navigator.locks.
+    if (sharedEnvelopeLock) (await import('../services/envelopes')).requireSharedEnvelopeLock();
     await import('./syncStateRaceFix');
     await import('../background');
     self.postMessage({ t: 'ready' });
