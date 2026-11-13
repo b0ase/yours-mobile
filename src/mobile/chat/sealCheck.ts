@@ -1,5 +1,5 @@
 import { Hash, Utils } from '@bsv/sdk';
-import { SEAL_FIELDS_MAX, SEAL_REF_MAX_CHARS, SEAL_TEXT_MAX_CHARS, shortText } from '../../services/sealPass';
+import { SEAL_FIELDS_MAX, SEAL_REF_MAX_CHARS, SEAL_TEXT_MAX_CHARS, shortText } from '../../services/sealLimits';
 
 /**
  * THE WALLET DECIDES WHAT IT SIGNS (native seal, chat/nativeSeal.ts). bit-sign's compose step answers with how to sign

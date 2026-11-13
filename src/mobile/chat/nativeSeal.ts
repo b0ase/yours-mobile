@@ -8,7 +8,7 @@ import {
 } from '../../utils/sendErrors';
 import { browserWakeClock, waitForCoinCheck, type WakeClock } from './coinWait';
 import { WALL_TIMEOUT, withinWallClock } from '../../services/wallClock';
-import { SEAL_MAX_SATS, SEAL_REF_MAX_CHARS, shortText } from '../../services/sealPass';
+import { SEAL_MAX_SATS, SEAL_REF_MAX_CHARS, shortText } from '../../services/sealLimits';
 import {
   SEAL_MISMATCH_MESSAGE,
   SEAL_PREPARE_MISMATCH_MESSAGE,

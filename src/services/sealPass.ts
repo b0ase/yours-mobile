@@ -31,20 +31,15 @@
  * Pure (no chrome APIs, clock injected) so it can be unit tested.
  */
 import { Hash, Utils } from '@bsv/sdk';
+import { SEAL_FIELDS_MAX, SEAL_MAX_SATS, SEAL_REF_MAX_CHARS, SEAL_TEXT_MAX_CHARS, shortText } from './sealLimits';
 
 /** The seal protocol bit-sign signs under (bit-sign src/lib/nds-seal-record.ts BITSIGN_SEAL_PROTOCOL). */
 export const SEAL_PROTOCOL: readonly [2, string] = [2, 'bitsign seal'];
 export const SEAL_RECORD_VERSION = 'bitsign-seal-2';
 /** The pay step must follow the signature within this long, or it asks again. */
 export const SEAL_PASS_MS = 60_000;
-/** The most a seal may spend without its own sheet (a seal pays only the network fee, a few hundred sats at most). */
-export const SEAL_MAX_SATS = 1_000;
-/** The longest reference a seal record may carry (it goes on chain in the seal's output, so it sets the fee). */
-export const SEAL_REF_MAX_CHARS = 200;
-/** The longest handle, block id, party or role a seal record may carry. */
-export const SEAL_TEXT_MAX_CHARS = 100;
-/** The most blocks one seal may cover. */
-export const SEAL_FIELDS_MAX = 50;
+/** The most a seal may spend without its own sheet (sealLimits.ts, shared with the native seal). */
+export { SEAL_MAX_SATS };
 /** Synthetic sheet line id prefix: never sent to the permissions manager. */
 export const SEAL_REQUEST_PREFIX = 'seal-';
 /** Feature flag sites read from `bitsign.capabilities`. */
@@ -55,8 +50,6 @@ export const isSealRequestId = (id: string | undefined): boolean => !!id && id.s
 const HEX64 = /^[0-9a-f]{64}$/;
 const IDENTITY_KEY = /^0[23][0-9a-f]{64}$/;
 const NONCE = /^[A-Za-z0-9_-]{16,128}$/;
-// eslint-disable-next-line no-control-regex
-const CTRL = /[\u0000-\u001f\u007f‪-‮⁦-⁩]/;
 
 export type SealRecordField = { id: string; party: string; role: string };
 
@@ -106,10 +99,6 @@ const isProtocol = (p: unknown): boolean =>
 export const isSealProtocol = isProtocol;
 /** A seal-protocol signature asked for while an approved seal's own is being made (SealPasses.signing). */
 export const SEAL_BUSY_REFUSAL = 'A seal is being signed for this site. Try again once it is done.';
-
-/** A string of at most `max` characters with no control or direction-override characters. */
-export const shortText = (v: unknown, max: number): v is string =>
-  typeof v === 'string' && v.length <= max && !CTRL.test(v);
 
 const bytesOf = (data: unknown): number[] | null => {
   if (!Array.isArray(data) || data.length === 0 || data.length > 8192) return null;
