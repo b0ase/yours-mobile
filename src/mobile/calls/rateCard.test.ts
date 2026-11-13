@@ -119,6 +119,11 @@ describe('token cards: decimals come from the caller wallet, not the card', () =
     expect(checkCardToken(card(0), details('0', 'BOB', `${'c'.repeat(64)}_0`)).ok).toBe(false);
     expect(checkCardToken(card(0), details('x')).ok).toBe(false);
     expect(checkCardToken(card(0), details('19')).ok).toBe(false);
+    // An answer that doesn't name the token, or names another one at either level, is refused.
+    const { tokenId: _t, ...noTop } = details('0');
+    expect(checkCardToken(card(0), { ...noTop, token: { ...noTop.token, id: undefined } }).ok).toBe(false);
+    expect(checkCardToken(card(0), { ...details('0'), tokenId: `${'c'.repeat(64)}_0` }).ok).toBe(false);
+    expect(checkCardToken(card(0), noTop).ok).toBe(true);
   });
   test('matching decimals pass, with the looked-up symbol; absent decimals mean 0', () => {
     const r = checkCardToken(card(2, 'MNEE'), details('2', 'BOB'));

@@ -140,7 +140,10 @@ export const checkCardToken = (card: RateCard, details: unknown): CheckedCard =>
   if (asset.kind !== 'bsv21') return { ok: true, card };
   const d = details && typeof details === 'object' ? (details as Record<string, unknown>) : null;
   const token = d?.token && typeof d.token === 'object' ? (d.token as Record<string, unknown>) : null;
-  if (!token || (typeof token.id === 'string' && token.id.replace('.', '_').toLowerCase() !== asset.id))
+  // The answer must name this token: at least one id, and every id it gives must match.
+  const ids = [token?.id, d?.tokenId].filter((x) => x != null);
+  const same = (x: unknown) => typeof x === 'string' && x.replace('.', '_').toLowerCase() === asset.id;
+  if (!token || !ids.length || !ids.every(same))
     return { ok: false, error: `Couldn't look up ${asset.sym} to check the price. Try again later.` };
   const raw = token.dec == null ? '0' : String(token.dec);
   const dec = /^\d{1,2}$/.test(raw) ? Number(raw) : NaN;
