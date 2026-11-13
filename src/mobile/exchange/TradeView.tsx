@@ -20,7 +20,7 @@ import { IndexerFundPanel } from '../tokens/IndexerFundPanel';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SellSheet, type SellTarget } from '../sell/SellSheet';
-import { SELL_ENABLED } from '../sell/sell';
+import { SELL_ENABLED, fromRaw } from '../sell/sell';
 import { marketTradingEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { purchaseError } from './purchase';
@@ -442,7 +442,12 @@ export const TradeView = ({
           <div id={SELL_ANCHOR} className={`${CARD} p-4 flex flex-col gap-3 scroll-mt-4`}>
             <div className="text-sm font-bold text-white">Sell ${sym}</div>
             <div className="text-xs" style={{ color: MUTED }}>
-              You hold <span className="text-white">{held === null ? '…' : `${formatAmount(held, dec)} $${sym}`}</span>
+              You hold{' '}
+              <span className="text-white">
+                {held === null
+                  ? '…'
+                  : `${held > 0n && held < 10n ** BigInt(dec) ? fromRaw(held, dec) : formatAmount(held, dec)} $${sym}`}
+              </span>
             </div>
             {SELL_ENABLED && TRADING && held !== null && held > 0n ? (
               <button

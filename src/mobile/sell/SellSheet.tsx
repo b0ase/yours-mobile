@@ -14,7 +14,10 @@ import {
   indexingFeeSats,
   listingTxBytes,
   networkFeeSats,
+  normDec,
   perTokenSats,
+  qtyInputOk,
+  qtyPlaceholder,
   toRaw,
   totalPriceSats,
   validateSell,
@@ -23,6 +26,7 @@ import { fmtSats, hasRate, money, satsNote } from '../money/money';
 import { checkListable, type CustodyVerdict } from './custodyGuard';
 import { curvePriceUsd, tokenCurve, type TokenCurve } from '../market/tokenPage';
 import { usd as usdLabel } from '../../lib/curves';
+import { roomMeta } from '../market/indexer';
 import { FUND_FEE_RATE, fetchFund, fundFeeSats, hasFundFee, type Fund } from '../p2p/fundFee';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -46,7 +50,8 @@ export type SellTarget = {
 const ERR: Record<string, string> = {
   quantity: 'Enter how many to sell',
   'over-balance': "That's more than you hold",
-  price: 'Enter a price (at least 1 sat in total)',
+  price: 'Enter a price per token',
+  total: 'The total must be at least 1 sat: raise the price or sell more',
 };
 
 /** Bottom sheet: list some of a BSV-21 token (a ticket, a $NAME token, any token) for sale. */
@@ -61,8 +66,21 @@ export const SellSheet = ({
 }) => {
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
+  // The token's decimals: the caller's, unless the token's own deploy (roomMeta) says more. A wallet output
+  // filed without its `dec` reads as 0, which made every fraction invalid ("the minimum sale is 1 token").
+  const [dec, setDec] = useState(() => normDec(target.dec));
+  useEffect(() => {
+    let live = true;
+    void roomMeta('bsv21', target.tokenId).then((m) => {
+      const d = m ? normDec(m.dec) : 0;
+      if (live && d > normDec(target.dec)) setDec(d);
+    });
+    return () => {
+      live = false;
+    };
+  }, [target.tokenId, target.dec]);
   const [qty, setQty] = useState(
-    target.heldRaw === 1n * 10n ** BigInt(target.dec) ? fromRaw(target.heldRaw, target.dec) : '',
+    target.heldRaw === 1n * 10n ** BigInt(normDec(target.dec)) ? fromRaw(target.heldRaw, normDec(target.dec)) : '',
   );
   const [price, setPrice] = useState('');
   const [rate, setRate] = useState(0);
@@ -89,7 +107,7 @@ export const SellSheet = ({
   const curveNow = curve ? curvePriceUsd(curve.curve, null) : null;
 
   const unit = target.isTicket ? 'ticket' : `$${target.symbol}`;
-  const qtyRaw = toRaw(qty, target.dec);
+  const qtyRaw = toRaw(qty, dec);
   // USD-first: the price field is dollars and cents when the rate is known, sats otherwise.
   const usdMode = hasRate(rate);
   const perToken = perTokenSats(price, rate);
@@ -99,9 +117,9 @@ export const SellSheet = ({
   const n = Math.max(1, Math.min(20, Math.floor(Number(lots) || 1)));
   const lotRaw = qtyRaw && qtyRaw % BigInt(n) === 0n ? qtyRaw / BigInt(n) : null;
   const lotsError = !!qtyRaw && n > 1 && !lotRaw;
-  const lotPrice = lotRaw ? totalPriceSats(lotRaw, target.dec, perToken) : 0;
+  const lotPrice = lotRaw ? totalPriceSats(lotRaw, dec, perToken) : 0;
   const total = lotPrice * n;
-  const error = qty || price ? validateSell(qtyRaw, target.heldRaw, total) : null;
+  const error = qty || price ? validateSell(qtyRaw, target.heldRaw, total, perToken) : null;
   const perOut = fpo ?? DEFAULT_FEE_PER_OUTPUT;
   const indexing = qtyRaw ? indexingFeeSats(qtyRaw, target.heldRaw, perOut) + (n - 1) * perOut : 0;
   const losesRoom = !!target.room && !!qtyRaw && qtyRaw >= target.heldRaw;
@@ -114,7 +132,7 @@ export const SellSheet = ({
     !!qtyRaw &&
     !!lotRaw &&
     lotPrice >= 1 &&
-    !validateSell(qtyRaw, target.heldRaw, total) &&
+    !validateSell(qtyRaw, target.heldRaw, total, perToken) &&
     custody?.ok === true &&
     (!fundFee || !!fund);
 
@@ -125,7 +143,7 @@ export const SellSheet = ({
       await createListing(apiContext, {
         tokenId: target.tokenId,
         symbol: target.symbol,
-        dec: target.dec,
+        dec,
         amount: lotRaw,
         priceSats: lotPrice,
         maxOverlayFee: indexing,
@@ -180,16 +198,16 @@ export const SellSheet = ({
               type="button"
               className="font-bold"
               style={{ color: GOLD }}
-              onClick={() => setQty(fromRaw(target.heldRaw, target.dec))}
+              onClick={() => setQty(fromRaw(target.heldRaw, dec))}
             >
-              Max {fromRaw(target.heldRaw, target.dec)}
+              Max {fromRaw(target.heldRaw, dec)}
             </button>
           </span>
           <input
-            inputMode={target.dec > 0 ? 'decimal' : 'numeric'}
+            inputMode={dec > 0 ? 'decimal' : 'numeric'}
             value={qty}
-            onChange={(e) => /^\d*\.?\d*$/.test(e.target.value) && setQty(e.target.value)}
-            placeholder="1"
+            onChange={(e) => qtyInputOk(e.target.value, dec) && setQty(e.target.value)}
+            placeholder={qtyPlaceholder(target.heldRaw, dec)}
             className={input}
             style={{ borderColor: LINE }}
           />
@@ -237,7 +255,7 @@ export const SellSheet = ({
 
         <div className="flex flex-col gap-1.5 rounded-xl p-3" style={{ background: '#0F1013' }}>
           {row('You receive when sold', money(total, rate), satsNote(total, rate))}
-          {n > 1 && !!lotRaw && row('Lots', `${n} × ${fromRaw(lotRaw, target.dec)}`, `${money(lotPrice, rate)} each`)}
+          {n > 1 && !!lotRaw && row('Lots', `${n} × ${fromRaw(lotRaw, dec)}`, `${money(lotPrice, rate)} each`)}
           {fundFee &&
             total > 0 &&
             row(
