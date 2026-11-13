@@ -14,8 +14,10 @@
  *    markSpent/markUnspent writes, txo.getSpends, a copy of its private wocSpendStatus over the fake fetch);
  *  - the Store's release (settleStorePayments → releaseNeverSent, memoryOutbox, signStorePayment) behind the
  *    background's abort guard (abortTargetKnownOnChain + knownOnChain over chainLookups);
- *  - unsentExpiry (expireOnce) with initWallet's deps (listNoSendActions, abortAction, sendWith, expiryLookups,
- *    wocSpent, wocHeight);
+ *  - unsentExpiry (expireOnce) with initWallet's deps: the app's own wiring (services/unsentExpiryWiring.ts
+ *    makeExpiryDeps: conflict check, detach/re-mark on the device's store, storage gate, Store kind) where the build
+ *    has it, else a copy of the older inline deps (listNoSendActions, abortAction, sendWith, expiryLookups, wocSpent,
+ *    wocHeight);
  *  - the toolbox Monitor's proof task (TaskCheckForProofs), on demand only (prove());
  *  - the balance the wallet shows (depositBalance.balanceSplit over wallet.balance()).
  * FAKED:
@@ -67,6 +69,7 @@ import {
   AUTO_RESYNC_GAP_MS,
   OWN_PENDING_STATUSES,
   readAutoResyncCoins,
+  recordAutoCleared,
   runAutoResyncIfDue,
   type AutoResyncReader,
   type AutoResyncReport,
@@ -105,6 +108,8 @@ export type Device = {
   verifier: IS.InboundVerifier;
   outbox: Outbox;
   expiry: { state: ExpiryState | null; reports: ExpiryReport[] };
+  /** The "Store payments made here" record unsentExpiry reads (storeHeard.ts; chrome.storage.local in the app). */
+  created: Record<string, { quoteId: string; at: number }>;
   posted: string[];
   /** Store opens (settleStorePayments) and their reports. */
   storeReports: unknown[];
@@ -374,6 +379,7 @@ export class World {
       verifier,
       outbox: memoryOutbox(),
       expiry: { state: null, reports: [] },
+      created: {},
       posted,
       storeReports: [],
       syncs: [],
@@ -750,9 +756,54 @@ export class World {
     return r;
   }
 
-  /** unsentExpiry at a wallet open, with initWallet's deps (expireUnsent). */
+  /**
+   * unsentExpiry at a wallet open, with initWallet's deps (expireUnsent): the app's own wiring
+   * (services/unsentExpiryWiring.ts makeExpiryDeps) on builds that have it, else the hand copy below (builds before
+   * 13 Nov 2026, e.g. origin/bwallet 5.2.54, wired these deps inline in initWallet).
+   */
   async expire(d: Device) {
     const f = this.chain.fetch;
+    const kv = {
+      load: async () => (d.expiry.state ? structuredClone(d.expiry.state) : emptyState()),
+      save: async (s: ExpiryState) => void (d.expiry.state = structuredClone(s)),
+    };
+    const timing = {
+      nowS: () => Math.floor(Date.now() / 1000),
+      delaysMs: [0, 0, 0],
+      sleep: noSleep,
+      log: (m: string) => this.log(`[${d.name}]`, m),
+    };
+    const wiring = await expiryWiring();
+    if (wiring) {
+      const resyncKV = {
+        get: async (k: string) => ({ [k]: structuredClone(d.resync.kv[k]) }),
+        set: async (items: Record<string, unknown>) => void Object.assign(d.resync.kv, structuredClone(items)),
+      };
+      const r = await expireOnce(
+        wiring.makeExpiryDeps({
+          wallet: d.wallet,
+          storage: d.sm,
+          services: d.svc,
+          identityKey: this.kd.identityKey,
+          kv,
+          fetch: f,
+          woc: { minIntervalMs: 0, attempts: 2, timeoutMs: 1_000, sleep: noSleep },
+          // The coin check's cleared list, in this device's autoCoinResync state (chrome.storage.local in the app).
+          recordCleared: (outpoint: string, spender: string) =>
+            recordAutoCleared(resyncKV, this.kd.identityKey, { [outpoint]: spender }),
+          // This device's "Store payments made here" record (chrome.storage.local in the app).
+          createdKV: {
+            get: async () => structuredClone(d.created),
+            set: async (v: Record<string, { quoteId: string; at: number }>) => void (d.created = structuredClone(v)),
+          },
+          // The sim's Store payments carry no memo, so the Store is never asked (as on a build that sells nothing).
+          storePaid: false,
+          extra: timing,
+        }),
+      );
+      d.expiry.reports.push(r);
+      return r;
+    }
     const r = await expireOnce({
       listNoSend: async () => {
         const out: NoSendAction[] = [];
@@ -976,3 +1027,21 @@ const sum = (m: Map<string, number | { sats: number }>) =>
 const fmt = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 export const inputsOf = (tx: Transaction) =>
   tx.inputs.map((i) => op((i.sourceTXID ?? i.sourceTransaction!.id('hex')).toLowerCase(), i.sourceOutputIndex));
+
+/**
+ * The app's unsentExpiry wiring (services/unsentExpiryWiring.ts makeExpiryDeps), when the build under test has it.
+ * Loaded by URL, like postPullStep, so the harness still runs on builds without it.
+ */
+type ExpiryWiringModule = { makeExpiryDeps: (o: Record<string, unknown>) => Parameters<typeof expireOnce>[0] };
+let expiryWiringMod: Promise<ExpiryWiringModule | undefined> | undefined;
+const expiryWiring = (): Promise<ExpiryWiringModule | undefined> =>
+  (expiryWiringMod ??= import(
+    /* @vite-ignore */ new URL('../../services/unsentExpiryWiring.ts', import.meta.url).href
+  ).then(
+    (m: Partial<ExpiryWiringModule>) =>
+      typeof m.makeExpiryDeps === 'function' ? (m as ExpiryWiringModule) : undefined,
+    (e: unknown) => {
+      if (/cannot find module|module not found/i.test(String((e as Error)?.message ?? e))) return undefined;
+      throw e;
+    },
+  ));

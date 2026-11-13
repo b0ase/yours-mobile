@@ -14,10 +14,12 @@
  * KNOWN BUGS (reproduced on origin/bwallet = 5.2.54): marked with `bug(<fix branch>, …)`, which runs them as
  * `test.failing` (the suite stays green while the bug is there, and goes red, "expected to fail", once it is fixed;
  * a known-bug case that breaks for any reason other than the invariant also goes red). On a fix branch run them as
- * plain tests: SIM_FIXED=<branch>[,<branch>…] or SIM_FIXED=all.
- *   - fix/unsent-auto-release: a noSend whose input the other device spent is held for ever by unsentExpiry
- *     ('input-spent-elsewhere'), and its change counts in the balance (+change sats on that device);
+ * plain tests: SIM_FIXED=<branch>[,<branch>…] or SIM_FIXED=all. None open right now.
  * FIXED (plain tests now):
+ *   - fix/unsent-auto-release: a noSend whose input the other device spent was held for ever by unsentExpiry
+ *     ('input-spent-elsewhere'), and its change counted in the balance (+change sats on that device). unsentExpiry now
+ *     cancels it once the spend is conclusive and the noSend is unknown to the network (world.ts runs the app's own
+ *     wiring, services/unsentExpiryWiring.ts);
  *   - fix/sync-atomic-pull: a push that lands late (row times older than the other device's cursor beyond the
  *     15-minute overlap), then the tx is proven: the incremental pull merged the 'completed' tx with none of its
  *     outputs; only the 6-hourly tail pass / daily deep pull brought the change in (hours later). The app's post-pull
@@ -72,8 +74,11 @@ const FIXED = new Set(
     .map((s) => s.trim())
     .filter(Boolean),
 );
-/** A scenario that reproduces a known bug a fix branch is working on: test.failing until that branch lands. */
-const bug = (branch: string, name: string, fn: () => Promise<unknown>) =>
+/**
+ * A scenario that reproduces a known bug a fix branch is working on: test.failing until that branch lands. None open
+ * right now; kept for the next one.
+ */
+export const bug = (branch: string, name: string, fn: () => Promise<unknown>) =>
   FIXED.has('all') || FIXED.has(branch)
     ? test(`[${branch}] ${name}`, fn, T)
     : test.failing(
@@ -173,9 +178,9 @@ describe('two devices, one seed: named cases', () => {
     },
   );
 
-  bug(
-    'fix/unsent-auto-release',
-    'the other device spends an input of a noSend with no outbox entry: unsentExpiry keeps it for ever ("input-spent-elsewhere")',
+  // Fixed by fix/unsent-auto-release (services/unsentExpiry.ts 1): a plain test from here on.
+  sim(
+    '[fix/unsent-auto-release] the other device spends an input of a noSend with no outbox entry: unsentExpiry cancels it (once kept for ever, "input-spent-elsewhere")',
     async () => {
       const w = await threeCoins();
       const p = await w.storePay('B', 20_000, { outbox: false });
@@ -185,9 +190,9 @@ describe('two devices, one seed: named cases', () => {
     },
   );
 
-  bug(
-    'fix/unsent-auto-release',
-    'incident shape: an older Store entry (no intentAt), the other device spends an input, the page holding the outbox is gone: only unsentExpiry is left',
+  // Fixed by fix/unsent-auto-release (services/unsentExpiry.ts 1): a plain test from here on.
+  sim(
+    '[fix/unsent-auto-release] incident shape: an older Store entry (no intentAt), the other device spends an input, the page holding the outbox is gone: only unsentExpiry is left',
     async () => {
       const w = await threeCoins();
       const p = await w.storePay('B', 20_000, { intentAt: undefined });

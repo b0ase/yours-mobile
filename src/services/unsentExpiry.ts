@@ -33,8 +33,9 @@
  *     extension for days after his phone spent one of its three coins): an input spent by a DIFFERENT transaction the
  *     chain has conclusively (WhatsOnChain calls the spend confirmed, or WhatsOnChain and the 1Sat spend index name
  *     the same spender: autoCoinResync's clearingSpender rule) means this payment can never be mined. With every
- *     other input cleanly unspent, AT LEAST ONE input cleanly unspent (when every input is spent elsewhere the
- *     "spender" may be a re-broadcast or malleated copy of this very payment: kept), and the same ~30 s "missing
+ *     other input cleanly unspent, and either at least one input cleanly unspent or, when every input is spent
+ *     elsewhere, a spender that is NOT a copy of this payment (spenderOutputs: its outputs don't carry all of ours; a
+ *     malleated or re-signed copy would, and is kept; a spender that can't be read is kept), and the same ~30 s "missing
  *     everywhere" check, it is cancelled: each such input is first taken out of the action and left unspendable
  *     (detachInput, so the abort does not hand back a coin the chain spent), then the abort frees the rest and drops
  *     its never-to-exist change from the balance, and the detached coins are set unspendable once more after it
@@ -247,7 +248,7 @@ export type NoSendAction = {
   inputs?: { sourceOutpoint: string }[];
   /** For storeAsk: the action's description and its outputs' locking scripts (the Store memo). */
   description?: string;
-  outputs?: { lockingScript?: string }[];
+  outputs?: { lockingScript?: string; satoshis?: number }[];
 };
 
 /**
@@ -281,6 +282,12 @@ export type ExpiryDeps = {
    * re-reads its rawTx inputs, say) can have made it spendable. A failure is logged; the release stands.
    */
   reaffirmSpent?: (outpoint: string, spender: string) => Promise<void>;
+  /**
+   * The outputs (locking script hex + satoshis) of a transaction the chain has, or undefined when it can't be read.
+   * Needed to cancel a payment whose EVERY input is spent elsewhere (1): only a spender that doesn't carry all of this
+   * payment's outputs counts. Absent: such a payment is kept.
+   */
+  spenderOutputs?: (txid: string) => Promise<{ lockingScript: string; satoshis: number }[] | undefined>;
   /**
    * The active store's identity when detach + abort may run (this device's store active, no storage switch under way),
    * else null. Read inside the lock before the detach and again before the abort; any change keeps the action.
@@ -458,7 +465,7 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
       keep(a.txid, 'no-inputs');
       continue;
     }
-    const verdict = await checkInputs(a.txid, ins, listed);
+    const verdict = await checkInputs(a, ins, listed);
     if (verdict === 'seen') {
       await settle(a.txid);
       continue;
@@ -478,7 +485,7 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
       }
       for (const [o, by] of verdict.foreign)
         log(
-          `[bwx-expiry] ${a.txid}: input ${o} was spent on chain by ${by} (confirmed); this payment can never be mined`,
+          `[bwx-expiry] ${a.txid}: input ${o} was spent on chain by ${by} (confirmed, or named by both sources); this payment can never be mined`,
         );
     }
     due.push({ a, ownParents: verdict.ownParents, foreign: verdict.foreign, storeEarly, conflictOnly, ttlS });
@@ -554,7 +561,7 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
   async function finalCheckAndRelease(d: Due): Promise<boolean> {
     const t = d.a.txid;
     const ins = (d.a.inputs ?? []).map((i) => i.sourceOutpoint);
-    const again = await checkInputs(t, ins, listed);
+    const again = await checkInputs(d.a, ins, listed);
     if (again === 'seen') {
       await settle(t);
       return false;
@@ -608,7 +615,7 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
     report.released.push(t);
     log(
       again.foreign.size
-        ? `[bwx-expiry] ${t}: ${again.foreign.size} input(s) spent on chain by another confirmed transaction and no copy of this one anywhere after retries; cancelled (aborted), the other inputs are spendable again`
+        ? `[bwx-expiry] ${t}: ${again.foreign.size} input(s) conclusively spent on chain by another transaction and no copy of this one anywhere after retries; cancelled (aborted), the other inputs are spendable again`
         : d.storeEarly
           ? `[bwx-expiry] ${t}: Store payment the Store never heard of, inputs unspent on chain and no copy anywhere after retries; released (aborted)`
           : `[bwx-expiry] ${t}: deadline passed, inputs unspent on chain and no copy anywhere after retries; released (aborted)`,
@@ -637,10 +644,11 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
    * outpoint → spender; deps.conflict). Every other input must be cleanly unspent with a parent the chain has.
    */
   async function checkInputs(
-    txid: string,
+    a: NoSendAction,
     ins: string[],
     own: Set<string>,
   ): Promise<'seen' | KeepReason | { ownParents: Set<string>; foreign: Map<string, string> }> {
+    const txid = a.txid;
     const ownParents = new Set<string>();
     const foreign = new Map<string, string>();
     let clean = 0;
@@ -666,9 +674,35 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
       if (!(await anySeen(parent, lookups))) return 'parent-unknown';
       clean++;
     }
-    // Every input spent elsewhere: the "spender" may be a re-broadcast or malleated copy of this very payment. Kept.
-    if (foreign.size && !clean) return 'input-spent-elsewhere';
+    // Every input spent elsewhere: the "spender" may be a malleated or re-signed copy of this very payment. Kept unless
+    // each spender is readable and doesn't carry all of this payment's outputs.
+    if (foreign.size && !clean && !(await spendersAreOthers(a, new Set(foreign.values()))))
+      return 'input-spent-elsewhere';
     return { ownParents, foreign };
+  }
+
+  /** True only when every spender's outputs can be read and none of them carries all of `a`'s outputs. */
+  async function spendersAreOthers(a: NoSendAction, spenders: Set<string>): Promise<boolean> {
+    const mine = (a.outputs ?? []).map((o) => ({ s: (o.lockingScript ?? '').toLowerCase(), v: o.satoshis }));
+    if (!deps.spenderOutputs || !mine.length || mine.some((o) => !o.s || typeof o.v !== 'number')) return false;
+    for (const by of spenders) {
+      const theirs = await deps.spenderOutputs(by).catch(() => undefined);
+      if (!theirs) return false;
+      const left = theirs.map((o) => `${o.lockingScript.toLowerCase()}:${o.satoshis}`);
+      const carriesAll = mine.every((o) => {
+        const i = left.indexOf(`${o.s}:${o.v}`);
+        if (i < 0) return false;
+        left.splice(i, 1);
+        return true;
+      });
+      if (carriesAll) {
+        log(
+          `[bwx-expiry] ${a.txid}: every input spent by ${by}, which pays all of this payment's outputs (a copy?); kept`,
+        );
+        return false;
+      }
+    }
+    return true;
   }
 }
 
