@@ -4,7 +4,8 @@ import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
-import { Hub } from './hub';
+import { Hub, nativeLocalBackend } from './hub';
+import { fencedBackend, isFreshWebKey, isWebEdition, releaseWallet, SpendGauge, startWebTab } from './webTab';
 import { ENVELOPES_KEY_PREFIX } from '../services/envelopes';
 import { IS_TAURI, invoke as tauriInvoke } from './desktop/ipc';
 import { tauriLocalBackend } from './desktop/storage';
@@ -35,6 +36,15 @@ import './look/chamfer.css';
 import { applyBootAccent } from './theme/accent';
 import { markBootStage, startBootWatchdog } from './bootWatchdog';
 
+// Web (web.bwalletx.com): ONE active tab (webTab.ts). Every tab used to run its own hub, serving storage from a copy
+// loaded at start, and its own background worker, so two tabs wrote stale copies over each other (lost accounts, a
+// password change undone into a lockout, doubled spending caps). A second tab waits here, showing "bWalletX is open
+// in another tab", and builds no hub, starts no worker and loads no UI until the user takes over. Phones (Capacitor)
+// and Desktop (Tauri) run one hub per app and skip this; the extension never loads this file.
+const webTab = isWebEdition({ native: Capacitor.isNativePlatform(), tauri: IS_TAURI })
+  ? await startWebTab()
+  : undefined;
+
 // Boot trace + 15 s "taking longer than usual" notice (bootWatchdog.ts; owner, 13 Nov 2026: black screen on switch).
 startBootWatchdog();
 
@@ -62,13 +72,17 @@ const defineChrome = (target: any, chrome: unknown) =>
 
 // Desktop (Tauri): storage.local lives in an owner-only file on the Rust side, not in the webview (desktop/storage.ts).
 // Web + Desktop keep storage.session (the unlock key) in memory only; phones mirror it to the in-process WebView.
-// Web wallet: every tab runs its own hub and background over one localStorage, so envelope balances are re-read on
-// every use, under a cross-tab lock (services/envelopes.ts withEnvelopeLock), never trusted from this tab's copy.
-const hub = new Hub(handleHostOp, IS_TAURI ? tauriLocalBackend(tauriInvoke) : undefined, {
-  persistSession: Capacitor.isNativePlatform(),
-  freshLocalKeys:
-    !Capacitor.isNativePlatform() && !IS_TAURI ? (key) => key.startsWith(ENVELOPES_KEY_PREFIX) : undefined,
-});
+// Web: storage.local is fresh from localStorage here (this tab only just became the active one), every write checks
+// this tab still holds the wallet (webTab.ts fencedBackend), and the key material (accounts, salt, re-key markers) and
+// envelope balances are re-read from localStorage on every get/set.
+const hub = new Hub(
+  handleHostOp,
+  IS_TAURI ? tauriLocalBackend(tauriInvoke) : webTab ? fencedBackend(nativeLocalBackend, webTab) : undefined,
+  {
+    persistSession: Capacitor.isNativePlatform(),
+    freshLocalKeys: webTab ? (key) => isFreshWebKey(key) || key.startsWith(ENVELOPES_KEY_PREFIX) : undefined,
+  },
+);
 
 // Frames (overlay iframes) register here; swept when their overlay closes.
 const frames = new Map<string, Window>();
@@ -116,6 +130,7 @@ let frameSeq = 0;
 };
 
 // Background worker.
+const spends = new SpendGauge();
 const worker = new Worker(new URL('./background.worker.ts', import.meta.url), { type: 'module' });
 hub.register('background', { post: (json) => worker.postMessage(json), sender: senderFor(rootUrl + 'background.js') });
 worker.addEventListener('message', (e) => {
@@ -123,7 +138,7 @@ worker.addEventListener('message', (e) => {
   else if (e.data?.t === 'ready') {
     markBootStage('background: ready');
     hub.markBackgroundReady();
-  }
+  } else if (e.data?.t === 'spends') spends.set(Number(e.data.n));
   else if (e.data?.t === 'error') {
     // Release held messages anyway: listeners registered before the throw still answer, and without this every
     // runtime.sendMessage waited forever (owner, 6 Oct 2026: balance, tokens and sync all timing out).
@@ -149,6 +164,24 @@ worker.addEventListener('message', (e) => {
   }
 });
 worker.addEventListener('error', (e) => console.error('[background worker]', e.message, e));
+// Web: another tab asked for the wallet (webTab.ts releaseWallet). A payment running here finishes first (up to 20 s;
+// the other tab shows "Finishing a payment in the other tab…"), storage goes quiet (its result is recorded), then
+// new writes are refused, the accepted ones flushed and the worker stopped; then this tab reloads into the "open in
+// another tab" screen. Retired without a handover (stolen): fenced and stopped at once. Set in the same synchronous
+// run as the hub and worker, so no takeover can arrive before them.
+webTab?.onRelease((tell, stolen) =>
+  releaseWallet({
+    hub,
+    spends,
+    tell,
+    stolen,
+    stopWorker: () => {
+      worker.terminate();
+      hub.unregister('background');
+    },
+  }),
+);
+webTab?.onLost(() => location.reload());
 // sharedEnvelopeLock: web tabs each run a worker over one localStorage (services/envelopes.ts withEnvelopeLock).
 worker.postMessage({
   t: 'init',

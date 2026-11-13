@@ -157,7 +157,7 @@ describe('web wallet: two tabs never spend one envelope balance twice', () => {
   test('main.ts re-reads envelope keys on the web only (phones and Desktop have one hub)', () => {
     const src = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
     expect(src).toContain(
-      'freshLocalKeys:\n    !Capacitor.isNativePlatform() && !IS_TAURI ? (key) => key.startsWith(ENVELOPES_KEY_PREFIX) : undefined',
+      'freshLocalKeys: webTab ? (key) => isFreshWebKey(key) || key.startsWith(ENVELOPES_KEY_PREFIX) : undefined',
     );
   });
 
