@@ -49,11 +49,29 @@ export function Scanner({ onCode }: { onCode: (text: string) => void }) {
       canvas.width = w;
       canvas.height = h;
       ctx.drawImage(v, sx, sy, sw, sh, 0, 0, w, h);
-      return jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'attemptBoth' })?.data || null;
+      const px = ctx.getImageData(0, 0, w, h).data;
+      // jsQR can throw on its inverted pass (seen on real frames): one bad frame must not stop the scanner.
+      try {
+        return jsQR(px, w, h, { inversionAttempts: 'attemptBoth' })?.data || null;
+      } catch {
+        try {
+          return jsQR(px, w, h, { inversionAttempts: 'dontInvert' })?.data || null;
+        } catch {
+          return null;
+        }
+      }
     };
     const tick = async () => {
       const v = video.current;
       if (done || !v) return;
+      try {
+        await look(v);
+      } catch {
+        /* a frame that failed to read: try the next one */
+      }
+      if (!done) timer = setTimeout(() => void tick(), 60);
+    };
+    const look = async (v: HTMLVideoElement) => {
       if (v.readyState >= 2 && v.videoWidth) {
         const vw = v.videoWidth;
         const vh = v.videoHeight;
@@ -71,9 +89,8 @@ export function Scanner({ onCode }: { onCode: (text: string) => void }) {
             hit = read(v, (vw - side) / 2, (vh - side) / 2, side, side, 1080);
           } else hit = read(v, 0, 0, vw, vh, 960);
         }
-        if (hit) return found(hit);
+        if (hit) found(hit);
       }
-      if (!done) timer = setTimeout(() => void tick(), 60);
     };
     if (!navigator.mediaDevices?.getUserMedia) setErr('Camera not available here. Paste it below instead.');
     else
