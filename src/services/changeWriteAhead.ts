@@ -10,20 +10,33 @@
  *
  * Where: every broadcast the wallet-toolbox makes goes through `services.postBeef` (attemptToPostReqsToNetwork), and the
  * rows are committed before it: createAction / signAction (storage processAction: commitNewTxToStorage, then
- * shareReqsWithWorld), a later sendWith of noSend payments, internalizeAction of a payment the network hasn't seen, the
- * Monitor's SendWaiting (acceptDelayedBroadcast: big transactions). Each of those callers holds the storage manager's
- * writer lock (processAction / internalizeAction: runAsWriter; the Monitor: runAsStorageProvider) while it posts. So:
- *  - `watchStorage` marks ("arms") the txids a processAction / internalizeAction / commitActionBatch is about to send,
- *    for as long as the call runs (a delayed send stays armed until the Monitor posts it);
+ * shareReqsWithWorld), a later sendWith of noSend payments, the Monitor's SendWaiting (acceptDelayedBroadcast: big
+ * transactions). Each of those callers holds the storage manager's writer lock (processAction / commitActionBatch:
+ * runAsWriter; the Monitor: runAsStorageProvider) while it posts. So:
+ *  - `watchStorage` marks ("arms") the txids a processAction / commitActionBatch is about to send, for as long as the
+ *    call runs (a delayed send stays armed until the Monitor posts it). internalizeAction is not armed (review, 13 Nov
+ *    2026, LOW): the toolbox writes a received payment's outputs in a second transaction AFTER its broadcast, so a push
+ *    before it carries none of them; the device sync's push takes them later, as before.
  *  - `onBroadcast` wraps services.postBeef: a post naming an armed txid first pushes this device's changes to the backup
  *    (`beforeBroadcast`), then posts. A post naming none (a rebroadcast of an old transaction by a heal) is untouched.
  *  - The push is the device sync's own push cycle (syncToWriter through pushView, per-request deadlines, no request to a
  *    backup still answering a timed-out one), run with the caller's lock (`activeSync`): taking the manager's sync lock
  *    here would wait for the writer lock the caller holds, for ever. With that lock held nothing else writes to this
- *    device's store, so the cycle runs whole, as pushView requires. When no writer lock is held at all (an unknown
- *    caller) the cycle takes the locks itself.
- *  - One deadline for the whole cycle, WRITE_AHEAD_MS (8 s): each request gets what is left of it and none starts after
- *    it, so the payment waits at most that long and the cycle has ended (whole or failed) before the broadcast.
+ *    device's store, so the cycle runs whole, as pushView requires. The caller is known to hold it when the post names a
+ *    txid armed by a running processAction / commitActionBatch (both run inside runAsWriter), or a delayed send while a
+ *    storage-provider lock is held (the Monitor). No writer lock held at all: the cycle takes the locks itself. A writer
+ *    lock held by someone the caller can't be shown to be (review, LOW): no push at all (running inside another call's
+ *    lock would let it write mid-cycle; waiting for it could be waiting on ourselves): flagged, the urgent retry pushes.
+ *  - A deadline, WRITE_AHEAD_MS (8 s), up to and including the cycle's first data page (each request gets what is left
+ *    of it; none starts after it). Once a page is committed the cycle finishes under the device sync's ordinary
+ *    per-request limits (review, MEDIUM): a cycle cut after a committed page leaves the backup's checkpoint mid-cycle,
+ *    the "push cycle is never paused" hazard (pushView.ts): a coin updated before the next cycle sorts before the saved
+ *    position, is never sent, and the backup keeps it spendable. So a payment waits at most ~8 s for a backup that is
+ *    slow from the start, longer only while a big backlog (more than one page, 64 rows) drains to an answering backup.
+ *  - A backup still answering an earlier timed-out request: no wait at all (review, MEDIUM-LOW: the wait held the writer
+ *    lock, which blocks reads too, so every payment took 8 s more and screens froze, for up to IN_FLIGHT_MAX_AGE_MS).
+ *    After a failed push the write-ahead is skipped for COOL_OFF_MS (each payment flagged at once) until a push goes
+ *    through again.
  *
  * POLICY (flag for the owner): the backup being down never stops a payment. If the push fails or runs out of time, the
  * payment is still broadcast, its txids are recorded as "change not backed up yet" (count shown on the balance card and
@@ -39,11 +52,18 @@
  * a good line; at most WRITE_AHEAD_MS). The device sync's debounced push 20 s later still runs: it carries what the
  * broadcast wrote after this push (request and transaction status), usually one small page.
  *
- * Caveat: the backup is told the payment is 'sending' (asSending). The toolbox never changes a proof request's status in
- * a store once it is there (EntityProvenTxReq.mergeExisting), so the backup's request stays 'unsent' after later pushes
- * (the transaction row does follow: unproven, completed, failed). A copy that pulls it sends it once more: "already
- * known" for one that went out, refused again for one that was refused. The 20 s push already freezes whatever request
- * state it catches the same way.
+ * The backup's copy of the payment (asSending): transaction 'sending', proof request 'nosend'. The toolbox never changes
+ * a proof request's status in a store once it is there (EntityProvenTxReq.mergeExisting), so whatever this push writes
+ * is what the backup and every copy restored or pulled from it keep (the transaction row does follow later pushes:
+ * unproven, completed, failed). It was 'unsent' (review, 13 Nov 2026, MEDIUM-HIGH, shown in the two-device sim): every
+ * copy's Monitor (SendWaiting) broadcast it, so a payment this device had given up on (refused for a while, inputs
+ * freed, perhaps paid again) could go out from another device. 'nosend' = "not this store's to send": no copy ever
+ * sends it; the toolbox's 'nosend' proof task (CheckNoSends) collects its proof once mined, and gives up after its
+ * attempt limit ('invalid': failed, inputs freed) for one that never was; the stuck-send release (stuckSends.ts) covers
+ * a copy's 'sending' payment the network never had. 'unknown' (also never sent) was not used: the toolbox reads a
+ * payment's bytes from its request only in a known set of states (getRawTxForSlice / getProvenOrRawTx: 'unsent',
+ * 'sending', 'nosend', 'unmined', 'completed'…, never 'unknown'), so no copy could read its change's scripts or build a
+ * spend of it until mined; the sim shows the restored device refusing all its change.
  */
 import type { DeviceSyncResult } from './deviceSync';
 import { pushView, type InFlight } from './pushView';
@@ -54,6 +74,8 @@ export const WRITE_AHEAD_MS = 8_000;
 export const DELAYED_ARM_MS = 24 * 3_600_000;
 /** After a failed write-ahead push: retry the push after these waits (the last repeats) until it goes through. */
 export const URGENT_RETRY_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
+/** After a failed write-ahead push, payments skip it (flagged at once) this long, or until a push goes through. */
+export const COOL_OFF_MS = 60_000;
 
 type Auth = unknown;
 
@@ -63,8 +85,10 @@ export type WriteAheadStorage = {
   /** The active store, passed as `activeSync` so syncToWriter takes no lock. */
   getActive(): unknown;
   syncToWriter(auth: Auth, writer: object, activeSync?: unknown): Promise<unknown>;
-  /** The manager's writer-lock queue (non-empty: a writer, the caller posting, holds it). */
+  /** The manager's writer-lock queue (non-empty: a writer holds it, or one is waiting). */
   writerLocks?: unknown[];
+  /** The manager's storage-provider-lock queue (non-empty: a runAsStorageProvider call, e.g. the Monitor, holds it). */
+  spLocks?: unknown[];
 };
 
 export type UnbackedRecord = { txids: string[]; since: number };
@@ -81,6 +105,7 @@ export type WriteAheadDeps = {
   pushNow: () => Promise<DeviceSyncResult>;
   budgetMs?: number;
   retryMs?: number[];
+  coolOffMs?: number;
   /** Called with the number of payments whose change is not backed up yet, whenever it changes. */
   onChange?: (n: number) => void;
   /** Where the unbacked list is kept across restarts (chrome.storage.local per account); optional. */
@@ -114,6 +139,9 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
   const retryTimers = d.retryTimer ?? { set: setTimer, clear: clearTimer };
   const budgetMs = d.budgetMs ?? WRITE_AHEAD_MS;
   const retryMs = d.retryMs?.length ? d.retryMs : URGENT_RETRY_MS;
+  const coolOffMs = d.coolOffMs ?? COOL_OFF_MS;
+  /** Until when payments skip the write-ahead after a failed one (0: not cooling off). */
+  let coolUntil = 0;
   /** txid → how many running calls armed it. */
   const armed = new Map<string, number>();
   /** Delayed sends (the Monitor posts them later): txid → when armed; armed until posted (or DELAYED_ARM_MS old). */
@@ -160,6 +188,7 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
 
   /** Pushes that started at sequence `cap` went through: what was marked by then is in the backup. */
   const pushed = (cap: number) => {
+    coolUntil = 0; // the backup answered: the next payment pushes first again
     let n = 0;
     for (const [t, u] of unbacked)
       if (u.seq <= cap) {
@@ -205,7 +234,8 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
     return !unbacked.size;
   };
 
-  const flag = (txids: string[], error: string): WriteAheadOutcome => {
+  const flag = (txids: string[], error: string, o: { coolOff?: boolean } = {}): WriteAheadOutcome => {
+    if (o.coolOff !== false) coolUntil = now() + coolOffMs;
     const s = ++seq;
     for (const t of txids) unbacked.set(t, { at: now(), seq: s });
     log(
@@ -223,12 +253,17 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
   const beforeBroadcast = async (txids: readonly string[]): Promise<WriteAheadOutcome> => {
     const mine = [...new Set((txids ?? []).map(norm))].filter(isArmed);
     if (!mine.length) return { how: 'not-ours' };
+    // Posted from inside a running processAction / commitActionBatch (runAsWriter), or a delayed send (the Monitor).
+    const byRunningCall = mine.some((t) => armed.has(t));
+    const byDelayed = mine.some((t) => delayed.has(t));
     for (const t of mine) delayed.delete(t);
     try {
       if (!d.applies()) return { how: 'no-backup' };
     } catch {
       return { how: 'no-backup' };
     }
+    // Just failed: not waited for again (each payment flagged at once) until a push goes through or the cool-off ends.
+    if (now() < coolUntil) return flag(mine, 'the backup failed moments ago: not waited for', { coolOff: false });
     const t0 = now();
     const deadlineAt = t0 + budgetMs;
     // Every push that starts from here on carries these rows; a mark made after this is the next payment's.
@@ -236,26 +271,23 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
     try {
       const list = d.backups();
       if (!list.length) throw new Error('the backup is not connected');
-      const locks = d.storage.writerLocks;
-      if (!Array.isArray(locks)) throw new Error('storage locks not readable');
-      // The caller (processAction, internalizeAction, the Monitor) holds the writer lock: run inside it. None held: the
-      // cycle takes the locks itself (nothing of ours is waiting on them).
       const active = d.storage.getActive();
-      const activeSync = locks.length > 0 ? active : undefined;
+      const activeSync = lockToUse(d.storage, active, byRunningCall, byDelayed);
       const auth = await d.storage.getAuth(true);
       const rawTxOf = proofRequestRawTx(active);
       for (const b of list) {
         const backup = b.storage as object;
         const inFlight = d.inFlightFor(backup);
-        if (!(await inFlight.settled(Math.max(0, deadlineAt - now()))))
-          throw new Error('network: the backup is still answering an earlier request');
+        // Never waited for while the caller holds the writer lock (it blocks reads too): fail at once.
+        if (!(await inFlight.settled(0))) throw new Error('network: the backup is still answering an earlier request');
         const view = pushView(backup, { inFlight, deadlineAt, now, setTimer, clearTimer });
         await d.storage.syncToWriter(auth, asSendingView(view, new Set(mine), rawTxOf), activeSync);
       }
       pushed(cap);
       return { how: 'pushed', ms: now() - t0 };
     } catch (e) {
-      return flag(mine, errText(e));
+      // A busy lock says nothing about the backup: no cool-off for it.
+      return flag(mine, errText(e), { coolOff: !(e instanceof LockBusy) });
     }
   };
 
@@ -289,6 +321,23 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
 
 export type ChangeWriteAhead = ReturnType<typeof createChangeWriteAhead>;
 
+/**
+ * The `activeSync` the write-ahead's cycle runs with: the active store when the caller posting is known to hold the
+ * writer lock (syncToWriter then takes no lock: taking it would wait on the caller for ever), undefined when no writer
+ * lock is held (the cycle takes the locks itself). A writer lock held by a call the caller can't be shown to be throws
+ * (no push): running inside another call's lock would let it write mid-cycle, and waiting for it could deadlock.
+ */
+function lockToUse(storage: WriteAheadStorage, active: unknown, byRunningCall: boolean, byDelayed: boolean) {
+  const writers = storage.writerLocks;
+  if (!Array.isArray(writers)) throw new Error('storage locks not readable');
+  if (writers.length === 0) return undefined;
+  if (byRunningCall) return active; // processAction / commitActionBatch post inside their own runAsWriter
+  const sp = storage.spLocks;
+  if (byDelayed && Array.isArray(sp) && sp.length > 0) return active; // the Monitor: runAsStorageProvider
+  throw new LockBusy('the storage lock is held by another call');
+}
+class LockBusy extends Error {}
+
 // ── what the backup is told about a payment that is about to go out ──
 
 type Row = Record<string, unknown>;
@@ -309,12 +358,13 @@ function proofRequestRawTx(store: unknown): (txid: string) => Promise<unknown> {
  * At this point the toolbox holds it as 'unprocessed' (proof request 'unprocessed'), the state of a payment that never
  * went anywhere: the wallet-open TaskFailAbandoned on any copy that holds it fails it after 5 minutes and frees its
  * inputs (services/pushParents.ts never sends a parent in that state for the same reason), and a backup holding it so
- * would keep it that way if this device never pushes again. It goes as the toolbox's own "handed to the sender" state
- * instead, 'sending' (request 'unsent', as acceptDelayedBroadcast writes it): a copy restored from the backup tracks it
- * and its Monitor sends it again (the network answers "already known" for one that went out), and its stuck-send release
- * still applies to one that never lands. Its raw bytes go on the transaction row (from this device's proof request), so
- * the other copies' intake can check its outputs (services/inboundSync.ts scriptOf; the bytes must hash to the txid).
- * This device's next push carries the real outcome (unproven, failed…) and replaces it.
+ * would keep it that way if this device never pushes again. The transaction goes as 'sending' ("handed to the sender":
+ * copies track it, the abandoned sweep leaves it, the stuck-send release still applies to one that never lands); its
+ * proof request as 'nosend', which no copy's Monitor ever sends and which keeps its bytes readable on every copy (see
+ * the file header for why not 'unsent' or 'unknown'). Its raw bytes go on the transaction row too (from this device's
+ * proof request), so the other copies' intake can check its outputs (services/inboundSync.ts scriptOf; the bytes must
+ * hash to the txid). This device's next push carries the transaction's real outcome (unproven, failed…); the request's
+ * status stays as written here (the toolbox never merges it).
  */
 export async function asSending(
   chunk: Chunk,
@@ -342,7 +392,7 @@ export async function asSending(
       }),
     );
   if (anyReq)
-    out.provenTxReqs = chunk.provenTxReqs!.map((q) => (ours(q) && q.status === 'unprocessed' ? { ...q, status: 'unsent' } : q));
+    out.provenTxReqs = chunk.provenTxReqs!.map((q) => (ours(q) && q.status === 'unprocessed' ? { ...q, status: 'nosend' } : q));
   return out;
 }
 
@@ -382,23 +432,13 @@ export function processActionSends(args: ProcessArgs | undefined): string[] {
   return out;
 }
 
-/** The subject txid of an Atomic BEEF (BRC-95: 0x01010101, then the txid reversed), or undefined. */
-export function atomicBeefTxid(tx: unknown): string | undefined {
-  const b = tx as ArrayLike<number> | undefined;
-  if (!b || typeof b.length !== 'number' || b.length < 36) return undefined;
-  if (b[0] !== 1 || b[1] !== 1 || b[2] !== 1 || b[3] !== 1) return undefined;
-  let hex = '';
-  for (let i = 35; i >= 4; i--) hex += (b[i] & 0xff).toString(16).padStart(2, '0');
-  return hex;
-}
-
 const WATCHED = Symbol.for('bwx.changeWriteAhead');
 type Watchable = Record<string, unknown> & { [WATCHED]?: { current?: ChangeWriteAhead } };
 
 /**
  * Arm what the storage manager's sending calls will post, for as long as each runs: processAction (createAction,
- * signAction, sendWith), internalizeAction (a payment the network hasn't seen), commitActionBatch (non-legacy
- * batches). Re-installing points the same wrappers at the new write-ahead. Returns false when there is nothing to wrap.
+ * signAction, sendWith), commitActionBatch (non-legacy batches). Not internalizeAction (see the file header).
+ * Re-installing points the same wrappers at the new write-ahead. Returns false when there is nothing to wrap.
  */
 export function watchStorage(manager: unknown, wa: ChangeWriteAhead): boolean {
   const m = manager as Watchable | null;
@@ -433,10 +473,6 @@ export function watchStorage(manager: unknown, wa: ChangeWriteAhead): boolean {
     txids: processActionSends(args as ProcessArgs),
     delayed: (args as ProcessArgs | undefined)?.isDelayed === true,
   }));
-  wrap('internalizeAction', (args) => {
-    const t = atomicBeefTxid((args as { tx?: unknown } | undefined)?.tx);
-    return { txids: t ? [t] : [], delayed: false };
-  });
   wrap('commitActionBatch', (manifest) => {
     const mf = manifest as { sendWith?: unknown; isDelayed?: unknown } | undefined;
     const txids = Array.isArray(mf?.sendWith) ? (mf.sendWith as unknown[]).filter((t) => typeof t === 'string') : [];

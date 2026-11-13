@@ -101,8 +101,10 @@ export function createInFlight(t: Timers & { maxAgeMs?: number } = {}): InFlight
 
 /**
  * The backup with a deadline on each push request; a request that timed out is recorded in `inFlight`. `deadlineAt`
- * (ms, on `now`): one deadline for the whole cycle as well (services/changeWriteAhead.ts, the push before a broadcast):
- * each request gets what is left of it, and a request asked for after it has passed fails at once, never sent.
+ * (ms, on `now`; services/changeWriteAhead.ts, the push before a broadcast): a deadline up to and including the cycle's
+ * first data page (processSyncChunk): each request gets what is left of it, and one asked for after it has passed
+ * fails at once, never sent. Once a page has been committed the rest of the cycle runs under the ordinary per-request
+ * limits only: cutting a cycle after a committed page leaves the backup's checkpoint mid-cycle (the hazard above).
  */
 export function pushView<T extends object>(
   writer: T,
@@ -112,6 +114,8 @@ export function pushView<T extends object>(
   const smallCallMs = o.smallCallMs ?? PUSH_SMALL_CALL_MS;
   const { setTimer, clearTimer } = timersOf(o);
   const now = o.now ?? Date.now;
+  /** A data page of this cycle has been committed by the backup: `deadlineAt` no longer applies. */
+  let committed = false;
   return new Proxy(writer, {
     get(target, p) {
       const v = Reflect.get(target, p, target) as unknown;
@@ -120,8 +124,9 @@ export function pushView<T extends object>(
       const name = String(p);
       if (!PUSH_CALLS.has(name)) return fn.bind(target);
       return (...a: unknown[]) => {
-        const perCall = name === 'processSyncChunk' ? callMs : smallCallMs;
-        const ms = o.deadlineAt === undefined ? perCall : Math.min(perCall, o.deadlineAt - now());
+        const page = name === 'processSyncChunk';
+        const perCall = page ? callMs : smallCallMs;
+        const ms = o.deadlineAt === undefined || committed ? perCall : Math.min(perCall, o.deadlineAt - now());
         if (ms <= 0) return Promise.reject(new Error(`network: the backup did not answer in time (${name})`));
         const call = Promise.resolve().then(() => fn.apply(target, a));
         call.catch(() => undefined);
@@ -137,7 +142,12 @@ export function pushView<T extends object>(
               ms,
             );
           }),
-        ]).finally(() => clearTimer(timer));
+        ])
+          .then((r) => {
+            if (page) committed = true; // before syncToWriter asks for its next request
+            return r;
+          })
+          .finally(() => clearTimer(timer));
       };
     },
   });

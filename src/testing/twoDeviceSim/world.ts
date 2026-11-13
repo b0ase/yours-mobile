@@ -136,7 +136,12 @@ export function teardownSim() {
   _setPullOverlap();
 }
 
-export type WorldOptions = { seed?: number; log?: boolean };
+export type WorldOptions = {
+  seed?: number;
+  log?: boolean;
+  /** The push before a broadcast's deadline (changeWriteAhead budgetMs; the app's is WRITE_AHEAD_MS, 8 s). */
+  writeAheadBudgetMs?: number;
+};
 
 export class World {
   readonly chain = new FakeChain();
@@ -159,6 +164,14 @@ export class World {
   lastCut?: { transactions: number; outputs: number };
   /** Devices with no network to the backup (their pulls and pushes fail). */
   readonly offline = new Set<string>();
+  /**
+   * A slow backup: each push page it is sent (processSyncChunk) waits the next delay in this list (ms) before it is
+   * merged, and is merged even when the device gave up waiting (as a real backup would). Empty: no delay.
+   */
+  readonly backupPageDelays: number[] = [];
+  /** Push pages the backup has merged, in order (their row counts). */
+  readonly backupPages: number[] = [];
+  readonly writeAheadBudgetMs?: number;
   private storeKey: PrivateKey;
   private n = 0;
   private offs: (() => void)[] = [];
@@ -170,6 +183,7 @@ export class World {
     this.identityKey = this.kd.identityKey;
     this.storeKey = new PrivateKey(this.rand.bytes(32));
     this.chain.external.add(new P2PKH().lock(this.storeKey.toAddress()).toHex());
+    this.writeAheadBudgetMs = o.writeAheadBudgetMs;
     if (o.log) this.log = (...a: unknown[]) => console.log('[sim]', ...a);
   }
   log: (...a: unknown[]) => void = (...a: unknown[]) =>
@@ -190,6 +204,7 @@ export class World {
     w.backup = await w.store(`sim-backup-${++dbn}`);
     w.wireBackupFaults();
     IS._mergeUnchecked(w.backup); // wallet.1sat.app: in the app a StorageClient, never a guarded device store
+    w.slowBackupPages();
     w.devices.push(await w.device('phone'));
     w.devices.push(await w.device('extension'));
     return w;
@@ -210,6 +225,36 @@ export class World {
     await s.makeAvailable();
     s.setServices(this.chain.services() as never);
     return s;
+  }
+
+  /** Push pages wait backupPageDelays (a slow backup), then merge whether or not the device is still waiting. */
+  private slowBackupPages() {
+    const b = this.backup as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+    const merge = b.processSyncChunk.bind(this.backup);
+    b.processSyncChunk = async (args: unknown, chunk: unknown) => {
+      const ms = this.backupPageDelays.shift() ?? 0;
+      if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+      const r = await merge(args, chunk);
+      this.backupPages.push(
+        Object.values((chunk ?? {}) as Record<string, unknown>).reduce<number>(
+          (n, v) => n + (Array.isArray(v) ? v.length : 0),
+          0,
+        ),
+      );
+      return r;
+    };
+  }
+
+  /** The backup's row for a coin (`txid.vout`): spendable, and what spent it. */
+  async backupCoin(outpoint: string) {
+    const [txid, vout] = outpoint.split('.');
+    const [t] = await this.backup.findTransactions({ partial: { txid }, noRawTx: true });
+    if (!t) return undefined;
+    const [o] = await this.backup.findOutputs({
+      partial: { transactionId: t.transactionId, vout: Number(vout) },
+      noScript: true,
+    });
+    return o ? { spendable: !!o.spendable, spentBy: o.spentBy ?? undefined } : undefined;
   }
 
   /** wallet.1sat.app's sync calls can fail ('backup' faults), and a pull can be cut between pages. */
@@ -391,6 +436,7 @@ export class World {
         backups: () => (this.offline.has(name) ? [{ storage: OFFLINE_BACKUP }] : (managed._backups ?? [])),
         storage: sm as never,
         inFlightFor,
+        ...(this.writeAheadBudgetMs !== undefined ? { budgetMs: this.writeAheadBudgetMs } : {}),
         pushNow: () => sync.pushNow({ busyWaitMs: [] }),
         // Tests run the urgent retry themselves (retryNow) or through a sync: no real timers.
         retryTimer: { set: () => null, clear: () => undefined },
@@ -618,8 +664,12 @@ export class World {
     return { result: r, cut };
   }
 
-  /** The Monitor's proof task on `on` (TaskCheckForProofs): mined transactions get their proofs and go 'completed'. */
-  async prove(on: Device | 'A' | 'B') {
+  /**
+   * The Monitor's proof task on `on` (TaskCheckForProofs): mined transactions get their proofs and go 'completed'.
+   * `noSends`: its 'nosend' proof task too (TaskCheckNoSends), as its daily scheduled run (every 'nosend' request; the
+   * new-block run's age tiers read rows' created_at, which the harness clock does not move).
+   */
+  async prove(on: Device | 'A' | 'B', o: { noSends?: boolean } = {}) {
     const d = this.dev(on);
     this.step(`${d.name} collects proofs for what was mined`);
     const m = d.monitor as unknown as {
@@ -628,11 +678,16 @@ export class World {
       runTask: (n: string) => Promise<string>;
     };
     m.lastNewHeader = { height: this.chain.height };
-    const task = m._tasks.find((t) => t.name === 'CheckForProofs');
-    if (!task) throw new Error('no CheckForProofs task');
-    task.constructor.checkNow = true;
-    const out = await m.runTask('CheckForProofs');
-    this.log(`[${d.name}] CheckForProofs: ${out.replace(/\n/g, ' | ').slice(0, 300)}`);
+    const names = o.noSends ? ['CheckForProofs', 'CheckNoSends'] : ['CheckForProofs'];
+    let out = '';
+    for (const name of names) {
+      const task = m._tasks.find((t) => t.name === name);
+      if (!task) throw new Error(`no ${name} task`);
+      task.constructor.checkNow = name === 'CheckForProofs';
+      const r = await m.runTask(name);
+      this.log(`[${d.name}] ${name}: ${r.replace(/\n/g, ' | ').slice(0, 300)}`);
+      out += r;
+    }
     return out;
   }
 
@@ -660,6 +715,45 @@ export class World {
     } finally {
       m.options.abandonedMsecs = was;
     }
+  }
+
+  /**
+   * The Monitor's send task on `on` (TaskSendWaiting: posts every 'unsent' / 'sending' proof request, as each copy's
+   * Monitor does every few seconds in the app), with every request old enough. Returns what `on` broadcast in it.
+   */
+  async sendWaiting(on: Device | 'A' | 'B') {
+    const d = this.dev(on);
+    this.step(`${d.name}'s Monitor sends what is waiting`);
+    const m = d.monitor as unknown as { _tasks: { name: string }[]; runTask: (n: string) => Promise<string> };
+    if (!m._tasks.some((t) => t.name === 'SendWaiting')) throw new Error('no SendWaiting task');
+    this.advance(10 * 60_000); // past its 7 s age and 5 min 'sending' limits
+    const before = d.posted.length;
+    // What it posted counts even when the task then fails (e.g. updating a payment this device holds as failed).
+    const out = await m.runTask('SendWaiting').catch((e: unknown) => `failed after posting: ${String(e)}`);
+    if (out) this.log(`[${d.name}] SendWaiting: ${out.replace(/\n/g, ' | ').slice(0, 300)}`);
+    return d.posted.slice(before);
+  }
+
+  /** `on` gives up on a payment (as the stuck-send release does): request 'invalid', payment failed, inputs freed. */
+  async giveUp(on: Device | 'A' | 'B', txid: string) {
+    const d = this.dev(on);
+    this.step(`${d.name} gives up on ${txid.slice(0, 8)}… (failed, inputs freed)`);
+    const sm = d.sm as unknown as { runAsStorageProvider: <T>(f: (sp: StorageIdb) => Promise<T>) => Promise<T> };
+    await sm.runAsStorageProvider(async (sp) => {
+      const [q] = await sp.findProvenTxReqs({ partial: { txid } });
+      if (q) await sp.updateProvenTxReq(q.provenTxReqId, { status: 'invalid' });
+      const [t] = await sp.findTransactions({ partial: { txid } });
+      if (!t) throw new Error(`no transaction ${txid}`);
+      await sp.updateTransactionStatus('failed', t.transactionId);
+    });
+  }
+
+  /** The status of `txid`'s transaction and proof request in `on`'s store (or the backup's). */
+  async statusOf(on: Device | 'A' | 'B' | 'backup', txid: string) {
+    const s = on === 'backup' ? this.backup : this.dev(on).s;
+    const [t] = await s.findTransactions({ partial: { txid }, noRawTx: true });
+    const [q] = await s.findProvenTxReqs({ partial: { txid } });
+    return { tx: t?.status as string | undefined, req: q?.status as string | undefined };
   }
 
   /**

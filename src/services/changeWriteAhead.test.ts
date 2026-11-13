@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   asSending,
-  atomicBeefTxid,
+  COOL_OFF_MS,
   createChangeWriteAhead,
   onBroadcast,
   processActionSends,
@@ -29,6 +29,7 @@ function harness(o: Partial<WriteAheadDeps> & { push?: (view: Record<string, (..
   const syncCalls: { activeSync: unknown }[] = [];
   const storage = {
     writerLocks: [] as unknown[],
+    spLocks: [] as unknown[],
     getActive: () => active,
     getAuth: async () => ({ identityKey: 'id', userId: 1, isActive: true }),
     async syncToWriter(_auth: unknown, writer: object, activeSync?: unknown) {
@@ -102,11 +103,11 @@ function harness(o: Partial<WriteAheadDeps> & { push?: (view: Record<string, (..
         storage.writerLocks.shift();
       }
     },
-    internalizeAction: async (args: { tx: number[] }) => {
+    // internalizeAction of a payment the network hasn't seen: posts it under the writer lock (outputs written after).
+    internalizeAction: async (args: { tx: number[]; txid: string }) => {
       storage.writerLocks.push('held');
       try {
-        const t = atomicBeefTxid(args.tx);
-        if (t) await services.postBeef({}, [t]);
+        await services.postBeef({}, [args.txid]);
       } finally {
         storage.writerLocks.shift();
       }
@@ -145,19 +146,6 @@ describe('which txids a storage call sends (the toolbox rule)', () => {
     ]);
     expect(processActionSends(undefined)).toEqual([]);
   });
-
-  test('atomicBeefTxid reads the subject txid (BRC-95: prefix, then the txid reversed)', () => {
-    const id = Array.from({ length: 32 }, (_, i) => i);
-    const bytes = [1, 1, 1, 1, ...id, 0xef, 0xbe];
-    const want = [...id]
-      .reverse()
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-    expect(atomicBeefTxid(bytes)).toBe(want);
-    expect(atomicBeefTxid(new Uint8Array(bytes))).toBe(want);
-    expect(atomicBeefTxid([2, 0, 0, 0, ...id])).toBeUndefined(); // plain BEEF: no subject
-    expect(atomicBeefTxid([1, 1])).toBeUndefined();
-  });
 });
 
 describe('the push before a broadcast', () => {
@@ -169,11 +157,19 @@ describe('the push before a broadcast', () => {
     expect(h.wa.count()).toBe(0);
   });
 
-  test('the backup is told "sending" (request "unsent"), with the raw bytes, never "unprocessed"', async () => {
-    const h = harness();
+  test('the backup is told "sending" (request "nosend": no copy ever sends it), with the raw bytes, never "unprocessed"', async () => {
+    const h = harness({
+      push: async (view) => {
+        await view.processSyncChunk(
+          {},
+          { transactions: [{ txid: TX, status: 'unprocessed' }], provenTxReqs: [{ txid: TX, status: 'unprocessed' }] },
+        );
+      },
+    });
     await h.pa({ txid: TX });
-    const chunk = h.backup.chunks[0] as { transactions: { status: string; rawTx?: number[] }[] };
+    const chunk = h.backup.chunks[0] as { transactions: { status: string; rawTx?: number[] }[]; provenTxReqs: unknown[] };
     expect(chunk.transactions[0]).toMatchObject({ status: 'sending', rawTx: [1, 2, 3] });
+    expect(chunk.provenTxReqs[0]).toMatchObject({ status: 'nosend' });
   });
 
   test('a post of a txid no running call armed (a heal rebroadcasting an old tx) is untouched', async () => {
@@ -200,19 +196,23 @@ describe('the push before a broadcast', () => {
     expect(await h.pa({ txid: TX, isDelayed: true })).toBe('queued');
     expect(h.events).toEqual([]);
     h.storage.writerLocks.push('monitor'); // runAsStorageProvider
+    h.storage.spLocks.push('monitor');
     await h.services.postBeef({}, [TX]);
     h.storage.writerLocks.shift();
+    h.storage.spLocks.shift();
     expect(h.events).toEqual(['push', `post ${TX.slice(0, 2)}`]);
+    expect(h.syncCalls[0].activeSync).toBe(h.active);
     h.events.length = 0;
     await h.services.postBeef({}, [TX]); // a later rebroadcast: no longer armed
     expect(h.events).toEqual([`post ${TX.slice(0, 2)}`]);
   });
 
-  test('internalizeAction of a payment the network has not seen pushes before it posts it', async () => {
+  test('internalizeAction is not armed: its outputs are written after the broadcast, so a push before it has none', async () => {
     const h = harness();
-    const id = Array.from({ length: 32 }, () => 0xab);
-    await h.manager.internalizeAction({ tx: [1, 1, 1, 1, ...id] });
-    expect(h.events).toEqual(['push', 'post ab']);
+    // Atomic BEEF naming TX (BRC-95: 0x01010101, then the txid reversed; TX reads the same both ways).
+    await h.manager.internalizeAction({ tx: [1, 1, 1, 1, ...new Array(32).fill(0xaa)], txid: TX });
+    expect(h.events).toEqual([`post ${TX.slice(0, 2)}`]);
+    expect(h.wa.count()).toBe(0); // a receive is never reported as "change not backed up yet"
   });
 
   test('no writer lock held (an unknown caller): the cycle takes the locks itself', async () => {
@@ -220,6 +220,21 @@ describe('the push before a broadcast', () => {
     h.wa.arm([TX]);
     await h.services.postBeef({}, [TX]);
     expect(h.syncCalls[0].activeSync).toBeUndefined();
+  });
+
+  test('a writer lock held by a call the poster cannot be shown to be: no push (never inside another call), flagged', async () => {
+    const h = harness();
+    h.wa.arm([TX], { delayed: true }); // a delayed send…
+    h.storage.writerLocks.push('someone else'); // …posted while a writer that is not the Monitor holds the lock
+    await h.services.postBeef({}, [TX]);
+    h.storage.writerLocks.shift();
+    expect(h.syncCalls).toEqual([]);
+    expect(h.services.posted).toEqual([[TX]]);
+    expect(h.wa.count()).toBe(1);
+    // A busy lock says nothing about the backup: the next payment still pushes first.
+    await h.pa({ txid: TX2 });
+    expect(h.syncCalls.length).toBe(1);
+    expect(h.wa.count()).toBe(0);
   });
 
   test('no backup configured, or the remote store active: nothing pushed, nothing flagged', async () => {
@@ -289,14 +304,49 @@ describe('policy: the backup never stops a payment', () => {
     expect(await h.inFlights.get(h.backup)!.settled(0)).toBe(false);
   });
 
-  test('a backup still answering an earlier timed-out request: no new request, flagged at once', async () => {
-    const h = harness({ budgetMs: 30 });
+  test('a backup still answering an earlier timed-out request: no new request and no wait (the lock is held), flagged at once', async () => {
+    const h = harness({ budgetMs: 5_000 });
     const f = createInFlight();
     f.add(new Promise(() => undefined));
     h.inFlights.set(h.backup, f);
+    const t0 = Date.now();
     await h.pa({ txid: TX });
+    expect(Date.now() - t0).toBeLessThan(500); // was: the whole budget, holding the writer lock
     expect(h.syncCalls).toEqual([]);
+    expect(h.services.posted).toEqual([[TX]]);
     expect(h.wa.count()).toBe(1);
+  });
+
+  test('after a failed push, payments skip the write-ahead for the cool-off (flagged at once) until a push goes through', async () => {
+    let t = 1_000_000;
+    let up = false;
+    const h = harness({
+      now: () => t,
+      push: async (view) => {
+        if (!up) throw new Error('network: the backup is down');
+        await view.makeAvailable();
+      },
+    });
+    await h.pa({ txid: TX }); // fails: cool-off starts
+    expect(h.syncCalls.length).toBe(1);
+    up = true;
+    t += 1_000;
+    await h.pa({ txid: TX2 }); // inside the cool-off: not pushed, flagged
+    expect(h.syncCalls.length).toBe(1);
+    expect(h.services.posted).toEqual([[TX], [TX2]]);
+    expect(h.wa.count()).toBe(2);
+    // The cool-off ends with its time…
+    t += COOL_OFF_MS;
+    await h.pa({ txid: OLD });
+    expect(h.syncCalls.length).toBe(2);
+    expect(h.wa.count()).toBe(0); // that push carried the earlier two
+    // …or as soon as a push goes through (the urgent retry, or the device sync's).
+    up = false;
+    await h.pa({ txid: TX });
+    up = true;
+    expect(await h.wa.retryNow()).toBe(true);
+    await h.pa({ txid: TX2 });
+    expect(h.syncCalls.length).toBe(4);
   });
 
   test('backup configured but not connected: flagged (and the urgent retry reconnects through pushNow)', async () => {
@@ -354,7 +404,7 @@ describe('what the backup is told (asSending)', () => {
     const chunk = { transactions: [tx, other], provenTxReqs: [req], outputs: [{ vout: 0 }] };
     const out = await asSending(chunk, new Set([TX]), async () => [7, 7]);
     expect(out.transactions).toEqual([{ txid: TX, status: 'sending', rawTx: [7, 7] }, other]);
-    expect(out.provenTxReqs).toEqual([{ txid: TX, status: 'unsent', rawTx: [9] }]);
+    expect(out.provenTxReqs).toEqual([{ txid: TX, status: 'nosend', rawTx: [9] }]);
     expect(out.outputs).toBe(chunk.outputs);
     expect(tx).toEqual({ txid: TX, status: 'unprocessed' }); // the device's copy untouched
     expect(req.status).toBe('unprocessed');
@@ -382,7 +432,7 @@ describe('what the backup is told (asSending)', () => {
   });
 });
 
-describe('pushView: one deadline for the whole cycle', () => {
+describe('pushView: the write-ahead deadline, up to the first committed page', () => {
   test('each request gets what is left; one asked for after the deadline fails without being sent', async () => {
     let t = 1_000;
     let sent = 0;
@@ -395,6 +445,35 @@ describe('pushView: one deadline for the whole cycle', () => {
     t = 1_050;
     await expect(v.getSyncCheckpoint()).rejects.toThrow('did not answer in time');
     expect(sent).toBe(1);
+  });
+
+  test('the first data page is still held to it', async () => {
+    const backup = { processSyncChunk: () => new Promise(() => undefined) };
+    const v = pushView(backup, { inFlight: createInFlight(), deadlineAt: Date.now() + 30 });
+    await expect(v.processSyncChunk({}, {})).rejects.toThrow('did not answer in time');
+  });
+
+  test('once a page is committed the cycle is never cut by it (a cycle cut mid-way is the never-paused hazard)', async () => {
+    let t = 1_000;
+    const pages: number[] = [];
+    const backup = {
+      processSyncChunk: async (_a: unknown, n: number) => {
+        pages.push(n);
+        t += 5_000; // a slow backup: each page takes 5 s
+        return { done: false };
+      },
+    };
+    const v = pushView(backup, { inFlight: createInFlight(), deadlineAt: 1_000 + 8_000, now: () => t });
+    await v.processSyncChunk({}, 1); // committed at 6 s
+    await v.processSyncChunk({}, 2); // asked at 6 s, answered at 11 s: past the deadline, finished anyway
+    await v.processSyncChunk({}, 3); // asked after the deadline: sent all the same
+    expect(pages).toEqual([1, 2, 3]);
+  });
+
+  test('without deadlineAt nothing changes (the device sync push)', async () => {
+    const backup = { makeAvailable: async () => 'ok' };
+    const v = pushView(backup, { inFlight: createInFlight() });
+    expect(await v.makeAvailable()).toBe('ok');
   });
 });
 
