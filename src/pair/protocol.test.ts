@@ -10,6 +10,10 @@ import {
   pairUrl,
   parsePairUrl,
   relaySocketUrl,
+  base32,
+  fromBase32,
+  expandCompactPair,
+  QR_LIFETIME_S,
 } from './protocol';
 
 describe('pairing protocol', () => {
@@ -121,5 +125,42 @@ describe('pairing protocol', () => {
   test('formatPairCode groups 8 digits, leaves 4 alone', () => {
     expect(formatPairCode('12345678')).toBe('1234 5678');
     expect(formatPairCode('0042')).toBe('0042');
+  });
+});
+
+describe('compact pairing code (the CLI QR)', () => {
+  // Shared vector with bitcoin-corp/bwalletx-cli src/pair/protocol.ts compactPairCode.
+  const CODE = 'BWX1:AAAQEAYEAUDAOCAJBIFQYDIOB4:AKV2XK5LVOV2XK5LVOV2XK5LVOV2XK5LVOV2XK5LVOV2XK5LVOV2W';
+  const NOW = 1_800_000_000;
+
+  test('base32 round-trips (RFC 4648, no padding)', () => {
+    const c = Uint8Array.from({ length: 16 }, (_, i) => i);
+    expect(base32(c)).toBe('AAAQEAYEAUDAOCAJBIFQYDIOB4');
+    expect(Array.from(fromBase32('AAAQEAYEAUDAOCAJBIFQYDIOB4'))).toEqual(Array.from(c));
+  });
+
+  test('expands to the CLI pairing link: default relay, CLI origin, usual lifetime', () => {
+    const l = parsePairUrl(CODE, NOW);
+    expect(l).toMatchObject({
+      v: '1',
+      r: 'relay.bwallet.space',
+      c: 'AAECAwQFBgcICQoLDA0ODw',
+      k: '02' + 'ab'.repeat(32),
+      o: 'https://cli.bwalletx.com',
+      e: NOW + QR_LIFETIME_S,
+    });
+    expect(parsePairUrl(CODE.toLowerCase(), NOW).c).toBe('AAECAwQFBgcICQoLDA0ODw');
+  });
+
+  test('malformed compact codes are refused', () => {
+    for (const bad of [
+      'BWX1:',
+      'BWX1:AAAA:BBBB',
+      CODE + ':X',
+      'BWX1:AAAQEAYEAUDAOCAJBIFQYDIOB4:AKV2!',
+      'BWX1:AAAQEAYEAUDAOCAJBIFQYDIOB4',
+    ])
+      expect(() => parsePairUrl(bad, NOW)).toThrow();
+    expect(expandCompactPair('https://www.bwallet.space/pair?v=1', NOW)).toBeNull();
   });
 });
