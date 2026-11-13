@@ -3628,26 +3628,24 @@ if (!(
           }
           sendResponse({ type: 'STORAGE_MOVE_STATUS', success: true, data: moveStatus() });
           return true;
-        case 'BALANCE_TRUTH': {
+        case 'BALANCE_TRUTH':
           // Unsent payments holding coins, coins arriving from the other device, the last device-sync pull. Reads
-          // only; not before the wallet is open (the card shows nothing until it knows).
-          const ctx = accountContext;
-          if (!ctx) {
-            sendResponse({ type: 'BALANCE_TRUTH', success: false, error: 'The wallet is still opening' });
-            return true;
-          }
-          ctx
-            .balanceTruth()
-            .then((data) => sendResponse({ type: 'BALANCE_TRUTH', success: true, data }))
-            .catch((error: unknown) =>
+          // only. Waits for the wallet to open, as GET_BALANCE does (the card shows nothing until it knows).
+          (async () => {
+            try {
+              await ensureWallet(true);
+              const ctx = accountContext;
+              if (!ctx) throw new Error('Wallet not initialized');
+              sendResponse({ type: 'BALANCE_TRUTH', success: true, data: await ctx.balanceTruth() });
+            } catch (error) {
               sendResponse({
                 type: 'BALANCE_TRUTH',
                 success: false,
                 error: error instanceof Error ? error.message : String(error),
-              }),
-            );
+              });
+            }
+          })();
           return true;
-        }
         case 'STORAGE_MOVE_TO_DEVICE':
           // "Retry moving this account to this device": now, whatever the backoff says (review F4).
           (async () => {

@@ -88,7 +88,7 @@ import {
 import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
 import {
   FULL_PASS_NEXT_SLICE_MS,
-  markOf,
+  passLooksStuck,
   paymentYields,
   requestFullPass,
   requestTailPass,
@@ -796,8 +796,8 @@ export const initWallet = async (
           const backupSik = reader?.getSettings?.()?.storageIdentityKey;
           if (own && backupSik) {
             const { identityKey } = await storage.getAuth();
-            const mark = markOf(await syncStateFor(own as never, identityKey, backupSik));
-            stuck = typeof mark.startedAt === 'number' && (mark.stuckMs ?? 0) >= STUCK_SHOW_MS;
+            // Read after the pull: a pull that moved the pass's offsets is progress, whatever the mark said before it.
+            stuck = passLooksStuck(await syncStateFor(own as never, identityKey, backupSik), STUCK_SHOW_MS);
           }
         } catch {
           // can't tell: the pull went through, so it counts
@@ -1959,20 +1959,21 @@ export const initWallet = async (
       const now = Date.now();
       const r = await deviceReads().catch(() => undefined);
       const store = r?.store as unknown as TruthStore | undefined;
+      // What the headline already counts as arriving (receive guard): never counted again in either line.
+      const arriving = arrivingOutputs();
+      const arrivingOutpoints = arriving.map((o) => o.outpoint);
       // Each part on its own: one that can't be read shows nothing, never hides the others.
-      const held = store && r ? await heldPayments(store, r.userId, now).catch(() => []) : [];
+      const held = store && r ? await heldPayments(store, r.userId, now, arrivingOutpoints).catch(() => []) : [];
       let arrivingSats = 0;
       const device = deviceStore();
       if (store && r && device) {
         try {
           const { identityKey } = await storage.getAuth();
           const entries = await pendingAdmissions(device, identityKey);
-          arrivingSats = await arrivingFromAdmissions(
-            store,
-            r.userId,
-            entries,
-            arrivingOutputs().map((o) => o.spender),
-          );
+          arrivingSats = await arrivingFromAdmissions(store, r.userId, entries, {
+            outpoints: arrivingOutpoints,
+            spenders: arriving.map((o) => o.spender),
+          });
         } catch {
           arrivingSats = 0;
         }
