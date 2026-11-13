@@ -121,6 +121,45 @@ const decodeText = (data: unknown): string | null => {
   }
 };
 
+/** The text without control characters (C0 except tab/newline/return, DEL, C1) and U+FFFD. */
+const dropControls = (t: string) => {
+  let out = '';
+  for (const ch of t) {
+    const c = ch.charCodeAt(0);
+    if ((c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) || (c >= 0x7f && c <= 0x9f) || c === 0xfffd) continue;
+    out += ch;
+  }
+  return out;
+};
+/**
+ * b-Aware triage 13 Nov 2026: data that is not readable text (invalid UTF-8, or under 90% printable) was signed for
+ * any caller without a look, so 400 padding bytes or one 0xff byte before `{"domain":"good.com"}` hid the site name.
+ * The receiving site's verifier may well read such bytes leniently (lossy UTF-8, Latin-1, control bytes dropped, or
+ * UTF-16), so the guard reads them every one of those ways. Genuine binary (BRC-103 nonces, hashes, serialised
+ * requests) names no site in any of them and signs as before.
+ */
+const lossyTexts = (data: unknown): string[] => {
+  if (!Array.isArray(data) || data.length === 0 || data.length > MAX_SIGN_DATA) return [];
+  if (!data.every((b) => typeof b === 'number' && b >= 0 && b <= 255)) return [];
+  const bytes = new Uint8Array(data as number[]);
+  let latin1 = '';
+  for (let i = 0; i < bytes.length; i += 8192)
+    latin1 += String.fromCharCode(...bytes.subarray(i, Math.min(i + 8192, bytes.length)));
+  const utf8Lossy = new TextDecoder('utf-8').decode(bytes);
+  // Dropping control bytes also reads ASCII text sent as UTF-16 ("d\0o\0m\0a\0i\0n\0").
+  return [...new Set([latin1, utf8Lossy, dropControls(latin1), dropControls(utf8Lossy)])].filter(Boolean);
+};
+
+/** Every site the data names, and whether the wallet had to read it leniently (it wasn't plain text). */
+const namedHosts = (data: unknown): { hosts: string[]; lenient: boolean } => {
+  const text = decodeText(data);
+  if (text !== null) return { hosts: [...new Set(textVariants(text).flatMap(boundHosts))], lenient: false };
+  const hosts = new Set<string>();
+  for (const t of lossyTexts(data)) for (const v of textVariants(t)) for (const h of boundHosts(v)) hosts.add(h);
+  return { hosts: [...hosts], lenient: true };
+};
+const NOT_TEXT = 'inside data that is not plain text';
+
 /** Every site the text says it is meant for. */
 export const boundHosts = (text: string): string[] => {
   const out = new Set<string>();
@@ -228,7 +267,7 @@ export const setProvenPairingCheck = (fn: (originator: string) => boolean) => {
   provenPairing = fn;
 };
 
-/** Why this outside call must be refused, or null. Only text data that names a site is checked. */
+/** Why this outside call must be refused, or null. Only data that names a site (read as text, or leniently) is checked. */
 export const crossSiteSignRefusal = (originator: string | undefined, args: unknown): string | null => {
   if (!originator || !args || typeof args !== 'object') return null;
   // b-Aware 25 Oct 2026 (yudhaekasaputra1, widiaaw382): the guard failed open on what it couldn't read. For an outside
@@ -244,31 +283,29 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
   // any site, and blind hashes, are refused; data naming no site signs as before.
   if (isPairedOriginator(originator) && !provenPairing(originator)) {
     if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
-    const t = decodeText((args as { data?: unknown }).data);
-    const named = t === null ? [] : [...new Set(textVariants(t).flatMap(boundHosts))];
-    return named.length ? `${CROSS_SITE_REFUSAL} (${named[0]}; this pairing did not prove its site)` : null;
+    const { hosts: named, lenient } = namedHosts(data);
+    return named.length
+      ? `${CROSS_SITE_REFUSAL} (${named[0]}${lenient ? `, ${NOT_TEXT}` : ''}; this pairing did not prove its site)`
+      : null;
   }
   const caller = bareHost(originator);
   if (!caller) {
     // A caller with no parsable host (a single-label name, an extension id) can't be any site a message names: refuse
     // a blind hash or data that names a site; data naming no site signs as before.
     if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
-    const t = decodeText(data);
-    const named = t === null ? [] : [...new Set(textVariants(t).flatMap(boundHosts))];
-    return named.length ? `${CROSS_SITE_REFUSAL} (${named[0]})` : null;
+    const { hosts: named, lenient } = namedHosts(data);
+    return named.length ? `${CROSS_SITE_REFUSAL} (${named[0]}${lenient ? `, ${NOT_TEXT}` : ''})` : null;
   }
   // A bare hash can't be read, so it can't be checked: an outside caller must send the data itself. Our own
   // chat sites are the exception: bChatX AIP-signs every post over a BSM digest, which `data` can't stand in for
   // (owner, 25 Oct 2026: posting broke after the blind-sign refusal).
   if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined && !blindHashAllowed(caller))
     return BLIND_SIGN_REFUSAL;
-  const text = decodeText((args as { data?: unknown }).data);
-  if (text === null) return null;
-  const hosts = [...new Set(textVariants(text).flatMap(boundHosts))];
-  if (hosts.length === 0) return null;
-  // Every site the message names must be the caller's: one matching field must not launder another.
+  // Text or not (b-Aware triage 13 Nov 2026), every site the data names must be the caller's: one matching field must
+  // not launder another, and bytes that aren't valid text are read leniently rather than waved through.
+  const { hosts, lenient } = namedHosts(data);
   const other = hosts.find((h) => !sameSite(h, caller));
-  return other ? `${CROSS_SITE_REFUSAL} (${other})` : null;
+  return other ? `${CROSS_SITE_REFUSAL} (${other}${lenient ? `, ${NOT_TEXT}` : ''})` : null;
 };
 
 const SIGNING_METHODS = ['createSignature', 'createHmac'] as const;

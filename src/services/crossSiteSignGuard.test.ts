@@ -331,3 +331,82 @@ describe('login wordings and camelCase keys (b-Aware 29 Oct, squ11z1)', () => {
       expect(crossSiteSignRefusal('evil.com', sig(msg))).toBeNull();
   });
 });
+
+describe('b-Aware triage 13 Nov: data that is not plain text is read leniently, not waved through', () => {
+  const login = JSON.stringify({ domain: 'good.com', nonce: 'n1' });
+  const padded = [...Array(400).fill(0x01), ...bytes(login)];
+  const badUtf8 = [0xff, ...bytes(login)];
+  const utf16 = (s: string) => Array.from(s).flatMap((c) => [c.charCodeAt(0), 0]);
+  const unproven = `good.com.c${'ab'.repeat(22)}.paired.invalid`;
+
+  test('control-byte padding or an invalid UTF-8 byte no longer hides the site (fails on the old guard)', () => {
+    for (const data of [padded, badUtf8, utf16(login), [0x00, 0xc3, ...bytes('good.com wants you to sign in')]]) {
+      const r = crossSiteSignRefusal('evil.com', { data });
+      expect(r).toContain('different site');
+      expect(r).toContain('good.com');
+      expect(r).toContain('not plain text');
+      // The site it names may still sign it, and so may a subdomain.
+      expect(crossSiteSignRefusal('good.com', { data })).toBeNull();
+      expect(crossSiteSignRefusal('https://app.good.com', { data })).toBeNull();
+    }
+  });
+
+  test('base64 inside binary, an unparsable caller and an unproven pairing are covered too', () => {
+    const b64 = [0xfe, 0x00, ...bytes(btoa('good.com wants you to sign in'))];
+    expect(crossSiteSignRefusal('evil.com', { data: b64 })).toContain('good.com');
+    expect(crossSiteSignRefusal('intranet', { data: padded })).toContain('different site');
+    setProvenPairingCheck(() => false);
+    expect(crossSiteSignRefusal(unproven, { data: badUtf8 })).toContain('did not prove its site');
+  });
+
+  test('one matching name does not launder a foreign one in binary data', () => {
+    const data = [0xff, ...bytes(JSON.stringify({ origin: 'good.com', domain: 'evil.com' }))];
+    expect(crossSiteSignRefusal('good.com', { data })).toContain('evil.com');
+  });
+
+  // Callers that sign genuine binary must keep working.
+  const rand = (n: number, seed: number) => {
+    let x = seed;
+    return Array.from({ length: n }, () => ((x = (x * 1103515245 + 12345) >>> 0) >>> 16) & 0xff);
+  };
+  const varint = (n: number) => (n < 0xfd ? [n] : [0xfd, n & 0xff, n >> 8]);
+  const str = (s: string) => [...varint(bytes(s).length), ...bytes(s)];
+
+  test('BRC-103/104 mutual-auth signatures (nonce bytes, serialised AuthFetch requests) still sign', () => {
+    // initialResponse: the two 32-byte nonces concatenated.
+    for (let seed = 1; seed <= 200; seed++)
+      expect(crossSiteSignRefusal('https://app.example', { data: rand(64, seed) })).toBeNull();
+    // general message: request nonce + method + path + search + headers + JSON body.
+    const req = [
+      ...rand(32, 7),
+      ...str('POST'),
+      ...str('/api/v1/post'),
+      ...varint(0),
+      ...varint(1),
+      ...str('content-type'),
+      ...str('application/json'),
+      ...str(JSON.stringify({ text: 'hello, see https://news.example/a', amount: 1000 })),
+    ];
+    expect(
+      crossSiteSignRefusal('https://app.example', { protocolID: [2, 'auth message signature'], data: req }),
+    ).toBeNull();
+  });
+
+  test('hashes, keys and other high-entropy binary still sign', () => {
+    for (let seed = 1; seed <= 50; seed++)
+      expect(crossSiteSignRefusal('https://app.example', { data: rand(4096, seed) })).toBeNull();
+    expect(crossSiteSignRefusal('https://app.example', { data: [0x02, ...rand(32, 99)] })).toBeNull();
+  });
+
+  test("bit-sign's seal record and an e2e envelope over binary still sign for bit-sign", () => {
+    const record = JSON.stringify({
+      v: 1,
+      kind: 'nds-seal',
+      docHash: 'ab'.repeat(32),
+      signedAt: '2026-11-13T10:00:00Z',
+    });
+    expect(crossSiteSignRefusal('https://bit-sign.online', { data: bytes(record) })).toBeNull();
+    expect(crossSiteSignRefusal('https://bit-sign.online', { data: [0xff, ...bytes(record)] })).toBeNull();
+    expect(crossSiteSignRefusal('https://bit-sign.online', { data: [...rand(33, 3), ...rand(200, 4)] })).toBeNull();
+  });
+});
