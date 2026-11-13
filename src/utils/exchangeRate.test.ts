@@ -5,8 +5,13 @@ import {
   cachedExchangeRate,
   fetchExchangeRate,
   isExchangeRateStale,
+  RATE_FETCH_OFFSET_MS,
   RATE_TTL_MS,
   STORAGE_KEY,
+  exchangeRateAgeMs,
+  msToNextRateBucket,
+  rateBucket,
+  subscribeExchangeRate,
 } from './exchangeRate';
 
 let now = 1_000_000;
@@ -14,7 +19,8 @@ let calls = 0;
 let next: () => Response;
 const mem = new Map<string, string>();
 const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
-const ok = (rate: number) => () => new Response(JSON.stringify({ rate }), { status: 200 });
+const ok = (rate: number, time?: number) => () =>
+  new Response(JSON.stringify(time === undefined ? { rate } : { rate, time }), { status: 200 });
 const tooMany = () => new Response('', { status: 429 });
 
 // bun runs every test file in one process and this module keeps the price in memory: don't hand the next file a
@@ -43,7 +49,8 @@ describe('exchange rate', () => {
     expect(calls).toBe(1);
   });
 
-  test('reuses the price within the TTL and refetches after', async () => {
+  test('reuses the price within its minute and refetches after', async () => {
+    now = 17 * RATE_TTL_MS + RATE_FETCH_OFFSET_MS; // the first moment of a window
     await fetchExchangeRate('main');
     now += RATE_TTL_MS - 1;
     expect(await fetchExchangeRate('main')).toBe(50);
@@ -99,5 +106,51 @@ describe('exchange rate', () => {
       throw new Error('offline');
     };
     expect(await fetchExchangeRate('main')).toBe(0);
+  });
+});
+
+describe('the same price on every device (owner, 13 Nov 2026: extension and iPhone one cent apart)', () => {
+  const W = 1_000 * RATE_TTL_MS + RATE_FETCH_OFFSET_MS; // a window's first moment
+
+  test('a price belongs to a wall-clock window, not to when this device asked', async () => {
+    // Device A asks at the window's start, device B 50 s later: both drop it at the same moment.
+    expect(rateBucket(W)).toBe(rateBucket(W + RATE_TTL_MS - 1));
+    expect(rateBucket(W + RATE_TTL_MS)).toBe(rateBucket(W) + 1);
+    expect(msToNextRateBucket(W)).toBe(RATE_TTL_MS);
+    expect(msToNextRateBucket(W + 50_000)).toBe(RATE_TTL_MS - 50_000);
+    expect(msToNextRateBucket(W - 1)).toBe(1);
+
+    now = W + 50_000;
+    await fetchExchangeRate('main');
+    now = W + RATE_TTL_MS - 1;
+    expect(isExchangeRateStale()).toBe(false);
+    now = W + RATE_TTL_MS; // 10 s after B asked, but a new window: stale on every device at once
+    expect(isExchangeRateStale()).toBe(true);
+  });
+
+  test('the same answers give the same price; the selection never depends on fetch order or timing', async () => {
+    const seen: number[] = [];
+    for (const at of [W + 1, W + 30_000, W + 59_000]) {
+      __resetExchangeRateForTests({
+        now: () => now,
+        storage: { getItem: () => null, setItem: () => undefined },
+        fetch: (async () => ok(15.1745)()) as unknown as typeof fetch,
+      });
+      now = at;
+      seen.push(await fetchExchangeRate('main'));
+    }
+    expect(seen).toEqual([15.17, 15.17, 15.17]);
+  });
+
+  test("keeps WhatsOnChain's own time for the price age, and tells listeners about a new price", async () => {
+    now = W + 5_000;
+    next = ok(15.17, Math.floor((W - 20_000) / 1000));
+    let told = 0;
+    const off = subscribeExchangeRate(() => told++);
+    await fetchExchangeRate('main');
+    off();
+    expect(told).toBe(1);
+    expect(exchangeRateAgeMs(W + 5_000)).toBe(25_000);
+    expect(JSON.parse(mem.get(STORAGE_KEY)!).sourceTime).toBe(Math.floor((W - 20_000) / 1000) * 1000);
   });
 });

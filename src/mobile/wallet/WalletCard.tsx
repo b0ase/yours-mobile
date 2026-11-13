@@ -57,6 +57,8 @@ import { usePictureReturn } from './pictureReturn';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
+import { bsvCents, rateLine, usdCents } from '../../utils/balanceUsd';
+import { exchangeRateAgeMs } from '../../utils/exchangeRate';
 import { pendingSatsNow, subscribePendingSats } from '../../utils/pendingBalance';
 import { PendingLine } from './PendingLine';
 import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
@@ -175,7 +177,10 @@ const WalletCardInner = ({
   const shownSats = known ? sats - pendingSats : sats;
   const count = useCountUp(shownSats, known);
   const animSats = known ? count.value : sats;
-  const animUsd = rate > 0 ? usd + ((animSats - sats) * rate) / 100_000_000 : usd;
+  // Settled, the card shows `usd` exactly as given (utils/balanceUsd.ts, the extension's figure too); counting up, the
+  // difference is added in whole cents by the same rule.
+  const animUsd =
+    rate > 0 && animSats !== sats ? (usdCents(usd) + bsvCents(animSats, rate) - bsvCents(sats, rate)) / 100 : usd;
 
   // Quiet refresh: every 5 s while something is happening (a spend, a live session, just opened), else every
   // 20 s; never while hidden (balances otherwise only loaded once: owner, 4 Oct 2026). Battery/rate: the fast
@@ -622,7 +627,7 @@ const WalletCardInner = ({
                 <span
                   key={`flash-${count.flashKey}`}
                   className={`bw-wcard-usd${unit === 'bsv' ? ' is-bsv' : ''}${count.dir && count.flashKey ? ` bw-live-flash-${count.dir}` : ''}`}
-                  title={syncing ? 'Syncing…' : 'Balance'}
+                  title={syncing ? 'Syncing…' : rateLine(rate, exchangeRateAgeMs()) || 'Balance'}
                   style={(() => {
                     // Same size as the $ balance; long amounts shrink to stay on one line.
                     const len = (unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats, MAIN_CARD_UNIT)).length;

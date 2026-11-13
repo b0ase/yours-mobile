@@ -21,28 +21,20 @@ import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-reac
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
+import { startAlignedRateRefresh } from '../../utils/exchangeRate';
 import { HistoryButton } from './HistoryButton';
 import { formatUSD } from '../../utils/format';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 
-/** Live BSV price for the bar (re-read every minute while shown). */
+/**
+ * Live BSV price for the bar: re-read at the same moment of every minute as the balance and every other device, so the
+ * tile and the balance never use two different prices (utils/exchangeRate.ts startAlignedRateRefresh).
+ */
 const useLivePrice = () => {
   const [rate, setRate] = useState(cachedExchangeRate);
-  useEffect(() => {
-    let live = true;
-    const read = () =>
-      fetchExchangeRate('main')
-        .then((r) => live && r > 0 && setRate(r))
-        .catch(() => undefined);
-    void read();
-    const t = setInterval(read, 60_000);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, []);
+  useEffect(() => startAlignedRateRefresh(setRate, () => fetchExchangeRate('main')), []);
   return rate;
 };
 
