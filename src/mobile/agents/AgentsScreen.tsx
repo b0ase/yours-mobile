@@ -21,6 +21,7 @@ import {
   spentToday,
   unmarkAgentAccount,
 } from './agentAccounts';
+import { accountNamesFor } from '../names/accountNames';
 import { sweepBack, sweepBackTarget } from './sweepBack';
 import { StrategySection } from './StrategySection';
 import { ExportForCli } from './ExportForCli';
@@ -131,6 +132,12 @@ export const AgentsScreen = ({ onClose }: { onClose: () => void }) => {
         )}
         {agents.map((a) => {
           const acct = accounts.find((x) => x.addresses.identityAddress === a.identityAddress);
+          // The paymail first, as the account switcher shows it (owner, 13 Nov 2026: "Account 2" wasn't recognisable).
+          const n = accountNamesFor(
+            a.identityAddress,
+            acct?.name ?? '',
+            acct?.settings?.socialProfile?.displayName ?? '',
+          );
           return (
             <button
               key={a.identityAddress}
@@ -142,7 +149,9 @@ export const AgentsScreen = ({ onClose }: { onClose: () => void }) => {
               <Bot size={20} color="#BDB4FE" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-white">{acct?.name || 'Agent account'}</span>
+                  <span className="text-sm font-bold text-white truncate">
+                    {n.paymail || acct?.name || 'Agent account'}
+                  </span>
                   <AgentBadge stopped={a.stopped || stopAll} />
                 </div>
                 <div className="text-[11px]" style={{ color: MUTED }}>
