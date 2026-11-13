@@ -26,8 +26,14 @@ import {
 } from './unsentExpiry';
 import { expiryLookups } from './unsentGuard';
 import { deadline } from '../utils/abortTimeout';
+// The Store's own code (signed "heard of it?" requests to api/theme-orders, the memo parser, the payment lock) is used
+// only behind the literal THEME_STORE_PAID_ENABLED below, so Rollup drops these imports from a store build (13 Nov
+// 2026: they had put api/theme-orders and bwx-theme-order into build-mobile's background bundle, which the store audit
+// forbids). A store build recognises a synced Store payment by its description alone (storePaymentDesc.ts).
+import { THEME_STORE_PAID_ENABLED } from '../mobile/storeBuild';
 import { createdHereKV, storeAskFor, storeKindFor } from '../mobile/themeOrder/storeHeard';
 import { withPayLock } from '../mobile/themeOrder/storePay';
+import { storeKindSynced } from '../mobile/themeOrder/storePaymentDesc';
 
 type F = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -66,7 +72,10 @@ export type ExpiryWiring = {
   recoverLate?: (txid: string) => Promise<unknown>;
   /** The background's storage switch is under way. */
   storageBusy?: () => boolean;
-  /** This build sells Store items (THEME_STORE_PAID_ENABLED): ask the Store, under the payment's lock. */
+  /**
+   * Ask the Store, under the payment's lock (initWallet passes THEME_STORE_PAID_ENABLED). Ignored in a store build,
+   * which has no Store code at all.
+   */
   storePaid: boolean;
   /** Overrides for the Store question and "made here" record (tests). */
   storeAsk?: ExpiryDeps['storeAsk'];
@@ -165,11 +174,14 @@ export function makeExpiryDeps(w: ExpiryWiring): ExpiryDeps {
     // again between the two, so both land on the same store.
     storageGate: () => (w.storageBusy?.() || !w.storage.isActiveStorageProvider() ? null : w.storage.getActiveStore()),
     // Whose Store payment (this device's record of the ones it made), in every build: a payment synced from another
-    // device is held 3 days, never released under that device's "Pay again".
-    storeKind: storeKindFor(w.createdKV ?? createdHereKV(w.identityKey)),
+    // device is held 3 days, never released under that device's "Pay again". A store build can't make one, so every
+    // Store payment there is another device's (by its description: a wider match, so only ever a longer hold).
+    storeKind: THEME_STORE_PAID_ENABLED ? storeKindFor(w.createdKV ?? createdHereKV(w.identityKey)) : storeKindSynced,
     // This device's own Store payments the Store never heard of: released at the first run after STORE_MIN_AGE_S, on
-    // every chain check, under the payment's lock (which this device's Pay takes too).
-    ...(w.storePaid ? { storeAsk: w.storeAsk ?? storeAskFor(w.wallet as never, f), lock: withPayLock } : {}),
+    // every chain check, under the payment's lock (which this device's Pay takes too). Never in a store build.
+    ...(THEME_STORE_PAID_ENABLED && w.storePaid
+      ? { storeAsk: w.storeAsk ?? storeAskFor(w.wallet as never, f), lock: withPayLock }
+      : {}),
     sendWith: (txid) =>
       w.wallet.createAction({
         description: 'Payment the network has',

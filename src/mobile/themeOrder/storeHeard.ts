@@ -17,6 +17,7 @@ import type { Fetch } from '../names/names';
 import { signRequest } from '../names/signRequest';
 import { storeMemo, type StorePayKind } from './storePay';
 import type { NoSendAction, StoreKind, StoreWord } from '../../services/unsentExpiry';
+import { STORE_PAYMENT_DESC } from './storePaymentDesc';
 
 /**
  * The Store's address. Read here, lazily, from the same build-time defines names/config.ts reads (not imported: that
@@ -32,8 +33,8 @@ declare const __STORE_API__: string;
  * intent. Sent in every signed quote and claim; the server answers 426 update_required to clients without it.
  */
 export const STORE_PROTOCOL = '2';
-/** The descriptions payQuote / payBuyQuote give their payments (wallet/txHistory.ts labels them by these). */
-export const STORE_PAYMENT_DESC = /^(Theme purchase · |bWalletX theme edition$)/;
+// The descriptions payQuote / payBuyQuote give their payments: storePaymentDesc.ts (also read by a store build).
+export { STORE_PAYMENT_DESC };
 /** A "heard of it?" question is answered within this, or it is 'unclear'. */
 export const STORE_HEARD_TIMEOUT_MS = 15_000;
 
