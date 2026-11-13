@@ -12,6 +12,11 @@ import {
   setOwnServerSource,
   storageServers,
   trackOwnAuthFetch,
+  _ownServerKeyWrites,
+  migrateServerKeys,
+  saveOwnServerKey,
+  savedOwnServerKeys,
+  watchStoreConnections,
 } from './ownBackendKeys';
 
 const ADMIN = 'wallet-admin';
@@ -231,5 +236,91 @@ describe('polish (13 Nov 2026): "pending" never sticks', () => {
     } finally {
       Date.now = realNow;
     }
+  });
+});
+
+describe('saved store keys live under their own chrome.storage key, never in `accounts` (13 Nov 2026)', () => {
+  const g = globalThis as Record<string, unknown>;
+  let savedChrome: unknown;
+  let store: Record<string, unknown>;
+  let writes: string[];
+  beforeEach(() => {
+    savedChrome = g.chrome;
+    store = { accounts: { ACCT: { storageConfig: { activeRemote: 'https://wallet.1sat.app' } } } };
+    writes = [];
+    g.chrome = {
+      storage: {
+        local: {
+          get: async (k: string) => ({ [k]: structuredClone(store[k]) }),
+          set: async (v: Record<string, unknown>) => {
+            for (const k of Object.keys(v)) writes.push(k);
+            Object.assign(store, structuredClone(v));
+          },
+        },
+      },
+    };
+  });
+  afterEach(() => {
+    if (savedChrome === undefined) delete g.chrome;
+    else g.chrome = savedChrome;
+  });
+  const ORIGIN = 'https://my-backup.example.org';
+
+  test("a store key is saved when the wallet's own client connects, under bwx.ownServerKeys.<account> only", async () => {
+    class FakeStorageClient {
+      endpointUrl = `${ORIGIN}/`;
+      authClient = { peers: {} as Record<string, unknown> };
+      async makeAvailable() {
+        this.authClient.peers[ORIGIN] = { identityKey: CUSTOM_STORAGE_KEY }; // the BRC-103 handshake
+        return { storageIdentityKey: 'x' };
+      }
+    }
+    watchStoreConnections(FakeStorageClient, () => 'ACCT');
+    watchStoreConnections(FakeStorageClient, () => 'ACCT'); // idempotent
+    const c = new FakeStorageClient();
+    expect(await c.makeAvailable()).toEqual({ storageIdentityKey: 'x' });
+    await _ownServerKeyWrites();
+    expect(writes).toEqual(['bwx.ownServerKeys.ACCT']);
+    expect(store['bwx.ownServerKeys.ACCT']).toEqual({ [ORIGIN]: CUSTOM_STORAGE_KEY });
+    expect(store.accounts).toEqual({ ACCT: { storageConfig: { activeRemote: 'https://wallet.1sat.app' } } });
+    // A later session: the store configured but not connected yet counts by its saved key (nothing pending).
+    _resetOwnBackends();
+    await migrateServerKeys('ACCT', undefined, async () => {});
+    const notYet = { _stores: [{ storage: { endpointUrl: ORIGIN, authClient: { peers: {} } } }] };
+    setOwnServerSource('storage', () =>
+      storageServers(notYet, { saved: savedOwnServerKeys('ACCT'), pendingUntil: Date.now() + 60_000 }),
+    );
+    expect(isOwnBackend(CUSTOM_STORAGE_KEY)).toBe(true);
+    const { m } = manager();
+    await expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).resolves.toEqual({ signature: [9] });
+  });
+
+  test('saves are one at a time and merge within the account key; a new session loads them', async () => {
+    saveOwnServerKey('ACCT', ORIGIN, CUSTOM_STORAGE_KEY);
+    saveOwnServerKey('ACCT', 'https://other-backup.example', SITE_SERVER_KEY);
+    saveOwnServerKey('ACCT', ORIGIN, CUSTOM_STORAGE_KEY); // unchanged: no write
+    saveOwnServerKey('ACCT', 'not a url', SITE_SERVER_KEY); // ignored
+    await _ownServerKeyWrites();
+    expect(writes).toEqual(['bwx.ownServerKeys.ACCT', 'bwx.ownServerKeys.ACCT']);
+    expect(store['bwx.ownServerKeys.ACCT']).toEqual({
+      [ORIGIN]: CUSTOM_STORAGE_KEY,
+      'https://other-backup.example': SITE_SERVER_KEY,
+    });
+    _resetOwnBackends();
+    expect(savedOwnServerKeys('ACCT')).toEqual({});
+    await migrateServerKeys('ACCT', undefined, async () => {
+      throw new Error('no legacy field: never called');
+    });
+    expect(savedOwnServerKeys('ACCT')[ORIGIN]).toBe(CUSTOM_STORAGE_KEY);
+  });
+
+  test('keys an earlier candidate wrote into storageConfig.serverKeys move to the account key, then the field goes', async () => {
+    let removed = 0;
+    await migrateServerKeys('ACCT', { [ORIGIN]: CUSTOM_STORAGE_KEY, junk: 'x' }, async () => {
+      removed++;
+    });
+    expect(removed).toBe(1);
+    expect(store['bwx.ownServerKeys.ACCT']).toEqual({ [ORIGIN]: CUSTOM_STORAGE_KEY });
+    expect(savedOwnServerKeys('ACCT')).toEqual({ [ORIGIN]: CUSTOM_STORAGE_KEY });
   });
 });

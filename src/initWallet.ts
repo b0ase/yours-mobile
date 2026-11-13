@@ -128,9 +128,13 @@ import { ENVELOPES_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
 import {
   clearLearnedOwnBackends,
+  migrateServerKeys,
   OWN_SERVER_PENDING_MS,
+  saveOwnServerKey,
+  savedOwnServerKeys,
   setOwnServerSource,
   storageServers,
+  watchStoreConnections,
 } from './services/ownBackendKeys';
 import { normalizeOriginator, parsePrivateKey, type StoragePaymentHook } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
@@ -472,6 +476,10 @@ export interface InitWalletOptions {
 
 // A backup call that fails names itself and its page in the sync log (services/syncErrorDetail.ts, 6 Nov 2026).
 tagStorageClientErrors(StorageClient);
+// Each remote store's server key is saved when the wallet's own client connects to it (services/ownBackendKeys.ts).
+// The account the wallet is open on (set at the start of initWallet, before its stores connect).
+let ownStoresAccount: string | undefined;
+watchStoreConnections(StorageClient, () => ownStoresAccount);
 // No site signs in as the user to the wallet's own servers (services/ownBackendKeys.ts: seeded first-party keys, plus
 // the stores in use, registered below; refused in services/crossSiteSignGuard.ts). Keys saved by the learning in
 // earlier 5.2.56 candidates are dropped, so no certifier's key stays refused.
@@ -611,6 +619,7 @@ export const initWallet = async (
   // current account's persisted storageConfig. storageIdentityKey is
   // per-install and lazily materialized.
   const { account } = chromeStorageService.getCurrentAccountObject();
+  ownStoresAccount = account?.addresses?.identityAddress;
   const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
@@ -651,22 +660,19 @@ export const initWallet = async (
   if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups })))
     console.error('[initWallet] storage 402 payments are not refused');
   // The stores this wallet signs in to (its online storage and backups): no site may sign in to them as the user. Each
-  // store's key is saved in the account's storage config when it first connects, so later sessions aren't pending.
+  // store's key is saved under its own chrome.storage key when the store connects (watchStoreConnections, above), so
+  // later sessions aren't pending; never inside `accounts`, whose read-merge-write could revert a storage switch.
   const ownerAddress = account?.addresses?.identityAddress;
-  const savedOnce = new Set<string>();
+  await migrateServerKeys(ownerAddress, account?.storageConfig?.serverKeys, () =>
+    chromeStorageService.updateNested('accounts', {
+      [ownerAddress!]: { storageConfig: { serverKeys: undefined } } as unknown as Account,
+    }),
+  );
   const ownStoresSince = Date.now();
   setOwnServerSource('storage', () =>
     storageServers(storage, {
-      saved: chromeStorageService.getCurrentAccountObject().account?.storageConfig?.serverKeys,
-      onLearn: (origin, key) => {
-        if (!ownerAddress || savedOnce.has(`${origin} ${key}`)) return;
-        savedOnce.add(`${origin} ${key}`);
-        void chromeStorageService
-          .updateNested('accounts', {
-            [ownerAddress]: { storageConfig: { serverKeys: { [origin]: key } } } as unknown as Account,
-          })
-          .catch(() => savedOnce.delete(`${origin} ${key}`));
-      },
+      saved: savedOwnServerKeys(ownerAddress),
+      onLearn: (origin, key) => saveOwnServerKey(ownerAddress, origin, key),
       pendingUntil: ownStoresSince + OWN_SERVER_PENDING_MS,
     }),
   );

@@ -73,8 +73,8 @@ export type StorageConfig = {
   activeRemote?: string;
   remotes?: string[];
   /**
-   * Remote stores' server identity keys (origin -> key), saved by the wallet when each first connects, so no site can
-   * sign in to them as the user even before they reconnect (services/ownBackendKeys.ts).
+   * @deprecated Written by one 5.2.56 candidate build only; moved to `bwx.ownServerKeys.<account>` and removed at
+   * startup (initWallet migrateServerKeys). Never write it: the store keys live outside `accounts`.
    */
   serverKeys?: Record<string, string>;
 };
