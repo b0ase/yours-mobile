@@ -11,92 +11,10 @@
  * treated as a binding, so signed posts keep working.
  */
 
-// Keys that say which site a message is for. uri/url/site/callback/redirect shapes added after the b-Aware
-// report of 24 Oct 2026 (b_feedback 51): a sign-in message naming its site through one of these was not checked.
-const BINDING_KEYS = [
-  'domain',
-  'origin',
-  'host',
-  'hostname',
-  'audience',
-  'aud',
-  'uri',
-  'url',
-  'site',
-  'website',
-  'realm',
-  'rp',
-  'rp_id',
-  'rpid',
-  'relying_party',
-  'callback',
-  'callback_url',
-  'callback_uri',
-  'redirect',
-  'redirect_uri',
-  'redirect_url',
-  'return_to',
-  'return_url',
-  'return_uri',
-];
-const BINDING_SET = new Set(BINDING_KEYS);
-// b-Aware 29 Oct 2026 (squ11z1): the key list was matched with \b on the raw key, so camelCase and kebab-case keys
-// (redirectUrl, callbackUrl, returnTo, rpId, relyingParty, redirect-uri) were never seen. Every key is now read and
-// normalised to snake_case first; a key in the list, or ending in a site-ish word (login_url, app_origin,
-// expected_domain, post_login_redirect), binds.
-const ANY_FIELD = /["']?([A-Za-z_][\w-]*)["']?\s*[:=]\s*["']?([^\s"',;}\]]+)/g;
-const BINDING_SUFFIX =
-  /(?:^|_)(?:url|uri|origin|domain|host|hostname|audience|redirect|callback|return_to|realm|rp_id|relying_party)$/;
-/** camelCase / PascalCase / kebab-case / snake_case key to one snake_case form. */
-export const normaliseKey = (key: string) =>
-  key
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-    .replace(/[-\s]+/g, '_')
-    .toLowerCase();
-const isBindingKey = (key: string) => {
-  const k = normaliseKey(key);
-  return BINDING_SET.has(k) || BINDING_SUFFIX.test(k);
-};
-// "<host> wants you to sign in" (SIWE), "<host> wallet login:" and "Sign in to <host>" lines, anywhere in the
-// text: a prefix such as "Login: " or a JSON string around the line must not hide it.
-// Also IPv4 literals and "localhost" (b-Aware 25 Oct 2026, Widia): a challenge for 10.0.0.5 named no site before.
-const HOST = '((?:(?:[a-z0-9-]+\\.)+[a-z]{2,}|(?:\\d{1,3}\\.){3}\\d{1,3}|localhost)(?::\\d+)?)';
-// b-Aware 28 Oct 2026 (Jacob Anderson, 0qu5xz): "Sign into", "Log onto", "good.com - sign in", "Welcome to good.com"
-// and similar wordings named no site, so another site got the login signature. Punctuation may sit between the host
-// and the phrase, and the common login verbs before a host now bind too.
-const SEP = '[\\s,:\u2013\u2014-]*';
-const SIGN_IN_LINES = [
-  new RegExp(
-    `(?:^|[\\s"'\`(:])${HOST}\\b${SEP}(?:wants you to sign in|(?:wallet |account )?(?:log ?in|sign[ -]?in)\\b|(?:requests|requires) (?:authentication|verification|a signature)\\b|wants to (?:connect|sign you in|sign in|log you in|log in|authenticate|verify)\\b)`,
-    'gim',
-  ),
-  new RegExp(`\\b(?:sign|log) ?(?:in ?to|on ?to)\\s+${HOST}`, 'gi'),
-  new RegExp(
-    `\\b(?:welcome to|authenticate(?: (?:to|with|for|on|at))?|verify (?:your )?(?:identity|wallet) (?:for|with|on)|authori[sz]e(?: (?:to|for|with|on))?|connect (?:to|with)|(?:sign|log)[ -]?(?:in|on|up) (?:with|via|at|on|for|through|using)|log[ -]?in (?:to|with|via|at|on|for)|continue (?:with|to))\\s+${HOST}`,
-    'gi',
-  ),
-];
-const HOST_RE = /^(?:[a-z0-9-]+(\.[a-z0-9-]+)+|localhost)$/;
+import { bareHost, scanSignData } from './signDataScan';
 
-/** Lower-case hostname with no port, no trailing dot and no pairing suffix (".c<hex>.paired.invalid"). */
-export const bareHost = (value: string): string | null => {
-  let v = value.trim().toLowerCase();
-  if (!v) return null;
-  if (v.includes('://')) {
-    try {
-      v = new URL(v).hostname;
-    } catch {
-      return null;
-    }
-  }
-  v = v
-    .replace(/\/.*$/, '')
-    .replace(/:\d+$/, '')
-    .replace(/\.$/, '')
-    .replace(/(\.c[0-9a-f]{44})?\.paired\.invalid$/, '');
-  return HOST_RE.test(v) ? v : null;
-};
+// The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
+export { bareHost, boundHosts, normaliseKey } from './signDataScan';
 
 /**
  * Equal hosts, or one a dot-boundary subdomain of the other (app.bchatx.com and bchatx.com). Siblings never
@@ -121,61 +39,20 @@ const decodeText = (data: unknown): string | null => {
   }
 };
 
-/** The text without control characters (C0 except tab/newline/return, DEL, C1) and U+FFFD. */
-const dropControls = (t: string) => {
-  let out = '';
-  for (const ch of t) {
-    const c = ch.charCodeAt(0);
-    if ((c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) || (c >= 0x7f && c <= 0x9f) || c === 0xfffd) continue;
-    out += ch;
-  }
-  return out;
-};
 /**
- * b-Aware triage 13 Nov 2026: data that is not readable text (invalid UTF-8, or under 90% printable) was signed for
- * any caller without a look, so 400 padding bytes or one 0xff byte before `{"domain":"good.com"}` hid the site name.
- * The receiving site's verifier may well read such bytes leniently (lossy UTF-8, Latin-1, control bytes dropped, or
- * UTF-16), so the guard reads them every one of those ways. Genuine binary (BRC-103 nonces, hashes, serialised
- * requests) names no site in any of them and signs as before.
+ * Every site the data names (signDataScan.ts reads it as text, leniently, through encodings and AuthFetch frames), and
+ * whether it was plain text. `exhausted`: crafted data needed more reading than the scan allows, so it can't be checked.
  */
-const lossyTexts = (data: unknown): string[] => {
-  if (!Array.isArray(data) || data.length === 0 || data.length > MAX_SIGN_DATA) return [];
-  if (!data.every((b) => typeof b === 'number' && b >= 0 && b <= 255)) return [];
-  const bytes = new Uint8Array(data as number[]);
-  let latin1 = '';
-  for (let i = 0; i < bytes.length; i += 8192)
-    latin1 += String.fromCharCode(...bytes.subarray(i, Math.min(i + 8192, bytes.length)));
-  const utf8Lossy = new TextDecoder('utf-8').decode(bytes);
-  // Dropping control bytes also reads ASCII text sent as UTF-16 ("d\0o\0m\0a\0i\0n\0").
-  return [...new Set([latin1, utf8Lossy, dropControls(latin1), dropControls(utf8Lossy)])].filter(Boolean);
-};
-
-/** Every site the data names, and whether the wallet had to read it leniently (it wasn't plain text). */
-const namedHosts = (data: unknown): { hosts: string[]; lenient: boolean } => {
-  const text = decodeText(data);
-  if (text !== null) return { hosts: [...new Set(textVariants(text).flatMap(boundHosts))], lenient: false };
-  const hosts = new Set<string>();
-  for (const t of lossyTexts(data)) for (const v of textVariants(t)) for (const h of boundHosts(v)) hosts.add(h);
-  return { hosts: [...hosts], lenient: true };
+const namedHosts = (data: unknown): { hosts: string[]; lenient: boolean; exhausted: boolean } => {
+  if (!Array.isArray(data) || data.length === 0 || data.length > MAX_SIGN_DATA)
+    return { hosts: [], lenient: false, exhausted: false };
+  if (!data.every((b) => typeof b === 'number' && b >= 0 && b <= 255))
+    return { hosts: [], lenient: false, exhausted: false };
+  const { hosts, exhausted } = scanSignData(new Uint8Array(data as number[]));
+  return { hosts, lenient: decodeText(data) === null, exhausted };
 };
 const NOT_TEXT = 'inside data that is not plain text';
-
-/** Every site the text says it is meant for. */
-export const boundHosts = (text: string): string[] => {
-  const out = new Set<string>();
-  for (const re of SIGN_IN_LINES) {
-    for (const m of text.matchAll(re)) {
-      const h = bareHost(m[1]);
-      if (h) out.add(h);
-    }
-  }
-  for (const m of text.matchAll(ANY_FIELD)) {
-    if (!isBindingKey(m[1])) continue;
-    const h = bareHost(m[2]);
-    if (h) out.add(h);
-  }
-  return [...out];
-};
+const TOO_MUCH = `${UNCHECKABLE_REFUSAL} (too much encoded data to read)`;
 
 export const CROSS_SITE_REFUSAL = 'This message is for a different site than the one asking you to sign it';
 export const BLIND_SIGN_REFUSAL = 'Sites cannot ask for a signature over a hash the wallet cannot read';
@@ -185,65 +62,6 @@ const BLIND_HASH_SITES = ['bchatx.com', 'chat.bwalletx.com', 'bit-sign.online'];
 /** The caller is one of them or a subdomain of one (never a parent: bwalletx.com is not chat.bwalletx.com). */
 export const blindHashAllowed = (caller: string) =>
   BLIND_HASH_SITES.some((site) => caller === site || caller.endsWith(`.${site}`));
-
-const printable = (text: string) => {
-  if (!text) return false;
-  let n = 0;
-  for (const ch of text) if (ch >= ' ' || ch === '\n' || ch === '\r' || ch === '\t') n++;
-  return n / text.length >= 0.9;
-};
-const utf8 = (bytes: Uint8Array): string | null => {
-  try {
-    const t = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    return printable(t) ? t : null;
-  } catch {
-    return null;
-  }
-};
-const B64_RE = /^[A-Za-z0-9+/_-]{16,}={0,2}$/;
-const HEX_RE = /^(?:[0-9a-fA-F]{2}){8,}$/;
-
-/**
- * The same text in the other spellings a challenge can hide a site name in (b-Aware 24-25 Oct 2026): JSON escapes
- * (\u0064omain, evil\u002ecom), percent-encoding, and a whole message or a token inside it sent as base64 or hex.
- * Bounded: a few layers, a few hundred candidates.
- */
-export const textVariants = (text: string): string[] => {
-  const out = new Set<string>();
-  const todo: [string, number][] = [[text, 0]];
-  while (todo.length && out.size < 256) {
-    const [t, depth] = todo.shift()!;
-    if (out.has(t)) continue;
-    out.add(t);
-    if (depth >= 3) continue;
-    const add = (v: string | null) => v && v !== t && todo.push([v, depth + 1]);
-    add(
-      t.replace(/\\u([0-9a-fA-F]{4})/g, (_, h: string) => String.fromCharCode(parseInt(h, 16))).replace(/\\\//g, '/'),
-    );
-    try {
-      add(decodeURIComponent(t.replace(/\+/g, ' ')));
-    } catch {
-      /* not percent-encoded */
-    }
-    for (const tok of new Set([t.trim(), ...(t.match(/[A-Za-z0-9+/_=-]{16,}/g) ?? [])])) {
-      if (HEX_RE.test(tok)) add(utf8(Uint8Array.from(tok.match(/../g)!.map((h) => parseInt(h, 16)))));
-      else if (B64_RE.test(tok)) {
-        try {
-          const b = atob(
-            tok
-              .replace(/-/g, '+')
-              .replace(/_/g, '/')
-              .padEnd(Math.ceil(tok.length / 4) * 4, '='),
-          );
-          add(utf8(Uint8Array.from(b, (c) => c.charCodeAt(0))));
-        } catch {
-          /* not base64 */
-        }
-      }
-    }
-  }
-  return [...out];
-};
 
 /**
  * A phone-paired originator ("<host>[.c<hex>].paired.invalid"). Its host is only what the relay read from an Origin
@@ -283,7 +101,8 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
   // any site, and blind hashes, are refused; data naming no site signs as before.
   if (isPairedOriginator(originator) && !provenPairing(originator)) {
     if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
-    const { hosts: named, lenient } = namedHosts(data);
+    const { hosts: named, lenient, exhausted } = namedHosts(data);
+    if (exhausted) return TOO_MUCH;
     return named.length
       ? `${CROSS_SITE_REFUSAL} (${named[0]}${lenient ? `, ${NOT_TEXT}` : ''}; this pairing did not prove its site)`
       : null;
@@ -293,7 +112,8 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
     // A caller with no parsable host (a single-label name, an extension id) can't be any site a message names: refuse
     // a blind hash or data that names a site; data naming no site signs as before.
     if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
-    const { hosts: named, lenient } = namedHosts(data);
+    const { hosts: named, lenient, exhausted } = namedHosts(data);
+    if (exhausted) return TOO_MUCH;
     return named.length ? `${CROSS_SITE_REFUSAL} (${named[0]}${lenient ? `, ${NOT_TEXT}` : ''})` : null;
   }
   // A bare hash can't be read, so it can't be checked: an outside caller must send the data itself. Our own
@@ -303,7 +123,8 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
     return BLIND_SIGN_REFUSAL;
   // Text or not (b-Aware triage 13 Nov 2026), every site the data names must be the caller's: one matching field must
   // not launder another, and bytes that aren't valid text are read leniently rather than waved through.
-  const { hosts, lenient } = namedHosts(data);
+  const { hosts, lenient, exhausted } = namedHosts(data);
+  if (exhausted) return TOO_MUCH;
   const other = hosts.find((h) => !sameSite(h, caller));
   return other ? `${CROSS_SITE_REFUSAL} (${other}${lenient ? `, ${NOT_TEXT}` : ''})` : null;
 };

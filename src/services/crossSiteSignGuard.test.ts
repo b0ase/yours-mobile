@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { Utils } from '@bsv/sdk';
+import { gzipSync, zlibSync } from 'fflate';
+import { MAX_SCAN_CHARS, scanSignData } from './signDataScan';
 import {
   BLIND_SIGN_REFUSAL,
+  bareHost,
+  MAX_SIGN_DATA,
   boundHosts,
   normaliseKey,
   crossSiteSignRefusal,
@@ -10,6 +15,11 @@ import {
 } from './crossSiteSignGuard';
 
 const bytes = (s: string) => Array.from(new TextEncoder().encode(s));
+/** Deterministic pseudo-random bytes. */
+const rand = (n: number, seed: number) => {
+  let x = seed;
+  return Array.from({ length: n }, () => ((x = (x * 1103515245 + 12345) >>> 0) >>> 16) & 0xff);
+};
 const sig = (s: string) => ({ protocolID: [2, 'good login'], keyID: '1', counterparty: 'anyone', data: bytes(s) });
 
 describe('crossSiteSignRefusal (audit 24 Oct B1)', () => {
@@ -365,31 +375,10 @@ describe('b-Aware triage 13 Nov: data that is not plain text is read leniently, 
   });
 
   // Callers that sign genuine binary must keep working.
-  const rand = (n: number, seed: number) => {
-    let x = seed;
-    return Array.from({ length: n }, () => ((x = (x * 1103515245 + 12345) >>> 0) >>> 16) & 0xff);
-  };
-  const varint = (n: number) => (n < 0xfd ? [n] : [0xfd, n & 0xff, n >> 8]);
-  const str = (s: string) => [...varint(bytes(s).length), ...bytes(s)];
-
-  test('BRC-103/104 mutual-auth signatures (nonce bytes, serialised AuthFetch requests) still sign', () => {
+  test('BRC-103/104 mutual-auth nonces still sign', () => {
     // initialResponse: the two 32-byte nonces concatenated.
     for (let seed = 1; seed <= 200; seed++)
       expect(crossSiteSignRefusal('https://app.example', { data: rand(64, seed) })).toBeNull();
-    // general message: request nonce + method + path + search + headers + JSON body.
-    const req = [
-      ...rand(32, 7),
-      ...str('POST'),
-      ...str('/api/v1/post'),
-      ...varint(0),
-      ...varint(1),
-      ...str('content-type'),
-      ...str('application/json'),
-      ...str(JSON.stringify({ text: 'hello, see https://news.example/a', amount: 1000 })),
-    ];
-    expect(
-      crossSiteSignRefusal('https://app.example', { protocolID: [2, 'auth message signature'], data: req }),
-    ).toBeNull();
   });
 
   test('hashes, keys and other high-entropy binary still sign', () => {
@@ -408,5 +397,219 @@ describe('b-Aware triage 13 Nov: data that is not plain text is read leniently, 
     expect(crossSiteSignRefusal('https://bit-sign.online', { data: bytes(record) })).toBeNull();
     expect(crossSiteSignRefusal('https://bit-sign.online', { data: [0xff, ...bytes(record)] })).toBeNull();
     expect(crossSiteSignRefusal('https://bit-sign.online', { data: [...rand(33, 3), ...rand(200, 4)] })).toBeNull();
+  });
+});
+
+// Review of 13 Nov 2026 (s2): cost on crafted input, AuthFetch frames, and the readings the first fix missed.
+describe('review 13 Nov: the scan is linear and bounded (A1)', () => {
+  const M = MAX_SIGN_DATA;
+  const fill = (s: string, n: number) =>
+    Array.from(s.repeat(Math.ceil(n / s.length)).slice(0, n), (c) => c.charCodeAt(0) & 0xff);
+  const worst: [string, number[]][] = [
+    // 70.5 s on the first fix, 4.5 s for plain text on the guard before it.
+    ['0xff 0x85 + escapes + 64K a', [0xff, 0x85, ...fill('\\u0041%41', 10), ...fill('a', M - 12)]],
+    ['64K a', fill('a', M)],
+    ['0xff + 64K a', [0xff, ...fill('a', M - 1)]],
+    ['controls + a', [...Array(7000).fill(1), ...fill('a', M - 7000)]],
+    ['words without separators', [0xff, ...fill('ab-cd_', M - 1)]],
+    ['a. runs', [0xff, ...fill('a.', M - 1)]],
+    ['host-ish lines', [0xff, ...fill('\na.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a1 sign', M - 1)]],
+    ['NUL interleaved', [0xff, ...fill('a\0', M - 1)]],
+    ['%41 runs', [0xff, ...fill('%41', M - 1)]],
+    ['\\u0041 runs', [0xff, ...fill('\\u0041', M - 1)]],
+    ['base64 tokens', [0xff, ...fill(btoa('aaaaaaaaaaaaaaaaaaaaaaaa') + ' ', M - 1)]],
+    [
+      'distinct base64 tokens',
+      fill(Array.from({ length: 4000 }, (_, k) => btoa(String(k).padStart(14, 'q'))).join(' '), M),
+    ],
+    ['triple percent + controls + login words', fill('%25252F sign \x01 log : ', M)],
+    ['& without ;', fill('&', M)],
+    ['backslashes', fill('\\', M)],
+    ['url=url=url=', fill('url=', M)],
+    ['tabs inside URLs', fill('url=https://a\t', M)],
+    ['sign in to a.a.a', fill('sign in to ' + 'a.'.repeat(300), M)],
+    ['random', rand(M, 5)],
+  ];
+  test.each(worst)('%s: within the character budget and fast', (_name, data) => {
+    const { chars } = scanSignData(new Uint8Array(data));
+    expect(chars).toBeLessThanOrEqual(MAX_SCAN_CHARS);
+    const t = performance.now();
+    crossSiteSignRefusal('https://app.example', { data });
+    // Measured 2-17 ms on an M-series Mac; the bound is generous so a loaded test machine doesn't flake.
+    expect(performance.now() - t).toBeLessThan(250);
+  });
+
+  test('more reading than the budget allows is refused, not signed', () => {
+    const bomb = gzipSync(new Uint8Array(20_000_000), { level: 9 });
+    expect(crossSiteSignRefusal('https://app.example', { data: Array.from(bomb) })).toContain('too much encoded data');
+  });
+});
+
+describe('review 13 Nov: AuthFetch (BRC-104) frames sign unless they name another site (A2)', () => {
+  // The exact framing of @bsv/sdk AuthFetch.serializeRequest / SimplifiedFetchTransport responses.
+  const opt = (w: InstanceType<typeof Utils.Writer>, v?: string) => {
+    if (!v) return w.writeVarIntNum(-1);
+    const b = Utils.toArray(v, 'utf8');
+    w.writeVarIntNum(b.length);
+    w.write(b);
+  };
+  const request = (method: string, path: string, search: string, headers: [string, string][], body?: string) => {
+    const w = new Utils.Writer();
+    w.write(rand(32, 11));
+    w.writeVarIntNum(method.length);
+    w.write(Utils.toArray(method));
+    opt(w, path);
+    opt(w, search);
+    w.writeVarIntNum(headers.length);
+    for (const [k, v] of headers) {
+      opt(w, k);
+      opt(w, v);
+    }
+    opt(w, body);
+    return w.toArray();
+  };
+  const response = (status: number, headers: [string, string][], body?: string) => {
+    const w = new Utils.Writer();
+    w.write(rand(32, 12));
+    w.writeVarIntNum(status);
+    w.writeVarIntNum(headers.length);
+    for (const [k, v] of headers) {
+      opt(w, k);
+      opt(w, v);
+    }
+    opt(w, body);
+    return w.toArray();
+  };
+  const json: [string, string][] = [['content-type', 'application/json']];
+  const signs = (data: number[]) =>
+    crossSiteSignRefusal('https://app.example', { protocolID: [2, 'auth message signature'], data });
+
+  test.each([
+    [
+      'imageUrl on a CDN',
+      request(
+        'POST',
+        '/api/posts',
+        '',
+        json,
+        JSON.stringify({ text: 'hi', imageUrl: 'https://cdn.othercdn.net/a.png' }),
+      ),
+    ],
+    [
+      'webhook_url',
+      request('POST', '/api/jobs', '', json, JSON.stringify({ webhook_url: 'https://hooks.zapier.com/x' })),
+    ],
+    ['?url= link preview', request('GET', '/api/preview', '?url=https%3A%2F%2Fyoutube.com%2Fwatch', [])],
+    [
+      'link.url',
+      request(
+        'POST',
+        '/api/bookmark',
+        '',
+        json,
+        JSON.stringify({ link: { url: 'https://en.wikipedia.org/wiki/Bitcoin' } }),
+      ),
+    ],
+    [
+      'origin of an import',
+      request('POST', '/api/import', '', json, JSON.stringify({ origin: 'https://github.com/foo/bar' })),
+    ],
+    [
+      'a free link in text',
+      request('POST', '/api/v1/post', '', json, JSON.stringify({ text: 'hello, see https://news.example/a' })),
+    ],
+    ['an empty GET (path/search/body absent)', request('GET', '', '', [])],
+    [
+      'a bearer token naming its audience',
+      request('GET', '/me', '', [['authorization', `Bearer x.${btoa('{"aud":"api.other.example"}')}.y`]]),
+    ],
+    [
+      'a response with a redirect field',
+      response(200, [['x-bsv-payment-version', '1.0']], JSON.stringify({ redirect: 'https://pay.example/r' })),
+    ],
+  ])('%s: signs (as on the guard before the fix)', (_name, data) => {
+    expect(signs(data)).toBeNull();
+  });
+
+  test.each([
+    ['a domain field', request('POST', '/login', '', json, JSON.stringify({ domain: 'good.com', nonce: 'n' }))],
+    ['a login line', request('POST', '/x', '', json, JSON.stringify({ message: 'good.com wants you to sign in' }))],
+    ['?audience=', request('GET', '/token', '?audience=good.com', [])],
+    ['an rpId', request('POST', '/webauthn', '', json, JSON.stringify({ rpId: 'good.com' }))],
+  ])('%s naming another site: refused', (_name, data) => {
+    expect(signs(data)).toContain('good.com');
+  });
+
+  test('data that only looks like a frame is read whole, with every binding key', () => {
+    const frame = request('POST', '/x', '', json, JSON.stringify({ redirect_uri: 'https://good.com/cb' }));
+    expect(signs([...frame, 0x00])).toContain('good.com'); // a trailing byte: not exactly one frame
+  });
+});
+
+describe('review 13 Nov: readings the first fix missed (A3, A4)', () => {
+  const login = JSON.stringify({ domain: 'good.com', nonce: 'n1' });
+  const lat = (s: string) => Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+  const b64 = (a: number[]) => btoa(String.fromCharCode(...a));
+  const hex = (a: number[]) => a.map((b) => b.toString(16).padStart(2, '0')).join('');
+  const utf16le = (s: string) => Array.from(s).flatMap((c) => [c.charCodeAt(0), 0]);
+  const utf16be = (s: string) => Array.from(s).flatMap((c) => [0, c.charCodeAt(0)]);
+  const utf32le = (s: string) => Array.from(s).flatMap((c) => [c.charCodeAt(0), 0, 0, 0]);
+  test.each([
+    ['domain split by 0x01 in text', lat('{"domain":"go\x01od.com","nonce":"n1"}')],
+    ['domain split by NUL in text', lat('{"domain":"go\x00od.com","nonce":"n1"}')],
+    ['ASCII padding + a UTF-16LE login', [...bytes('x'.repeat(400)), ...utf16le(login)]],
+    ['UTF-16LE login', utf16le(login)],
+    ['UTF-16BE login with a BOM', [0xfe, 0xff, ...utf16be(login)]],
+    ['UTF-32LE login', utf32le(login)],
+    ['a stray % after a percent-encoded redirect', bytes('redirect_uri=https%3A%2F%2Fgood.com%2Fcb&note=100%')],
+    ['base64 of (0xff + login) in JSON', bytes(JSON.stringify({ token: b64([0xff, ...bytes(login)]) }))],
+    ['base64 of (0xff + login) after token=, in binary', [0xff, ...bytes('token=' + b64([0xff, ...bytes(login)]))]],
+    ['hex of (0xff + login)', bytes('token=' + hex([0xff, ...bytes(login)]))],
+    ['base64 of a UTF-16 login', bytes('token=' + b64(utf16le(login)))],
+    ['gzip of the login', Array.from(gzipSync(bytes(login) as unknown as Uint8Array))],
+    ['zlib of the login', Array.from(zlibSync(Uint8Array.from(bytes(login))))],
+    ['uri https:\\\\good.com', bytes(JSON.stringify({ uri: 'https:\\good.com/login', nonce: 'n' }))],
+    ['uri https:/good.com', bytes(JSON.stringify({ uri: 'https:/good.com/login', nonce: 'n' }))],
+    ['uri https:good.com', bytes(JSON.stringify({ uri: 'https:good.com/login', nonce: 'n' }))],
+    ['uri with a tab in the host', bytes(JSON.stringify({ uri: 'https://go\tod.com/login', nonce: 'n' }))],
+    ['uri //good.com', bytes(JSON.stringify({ uri: '//good.com/login', nonce: 'n' }))],
+    ['an HTML entity for the dot', bytes('domain: good&#46;com')],
+    ['a mixed-case key', bytes('{"DoMaIn":"good.com"}')],
+    ['JSON nested in a JSON string', bytes(JSON.stringify({ payload: JSON.stringify({ domain: 'good.com' }) }))],
+    ['a field after another in a query string', bytes('note=1&domain=good.com')],
+    ['0xff + \\u-escaped key', [0xff, ...bytes('{"\\u0064omain":"good\\u002ecom"}')]],
+  ])('%s: refused for evil.com, allowed for good.com', (_name, data) => {
+    expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('good.com');
+    expect(crossSiteSignRefusal('https://good.com', { data })).toBeNull();
+  });
+
+  test('a Unicode (IDN) domain is compared in punycode', () => {
+    const data = bytes(JSON.stringify({ domain: 'bücher.de' }));
+    expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('xn--bcher-kva.de');
+    expect(crossSiteSignRefusal('https://xn--bcher-kva.de', { data })).toBeNull();
+  });
+
+  test('bareHost reads URLs the way a URL parser does', () => {
+    for (const v of [
+      'https:\\\\good.com',
+      'https:/good.com',
+      'https:good.com',
+      'https://go\tod.com',
+      '//good.com/x',
+      'https://u:p@good.com:8443/x',
+      'GOOD.COM.',
+      'good.com:443',
+    ])
+      expect(bareHost(v)).toBe('good.com');
+    expect(bareHost('mailto:a@good.com')).toBeNull();
+    expect(bareHost('note')).toBeNull();
+  });
+
+  test('a line break still ends a value in line-based challenges', () => {
+    const msg = 'Sign in to www.bchatx.com with bWallet\nOrigin: https://www.bchatx.com\nNonce: abc';
+    expect(crossSiteSignRefusal('https://www.bchatx.com', { data: bytes(msg) })).toBeNull();
+    expect(
+      crossSiteSignRefusal('https://www.bchatx.com', { data: bytes(JSON.stringify({ message: msg })) }),
+    ).toBeNull();
   });
 });
