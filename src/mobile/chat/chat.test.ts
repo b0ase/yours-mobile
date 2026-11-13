@@ -315,6 +315,16 @@ describe('BchatClient', () => {
     expect(await client.openDirect('$Bob')).toBe('DMX');
     expect(calls[1].body).toEqual({ handle: 'Bob' });
   });
+
+  test('openBDirect: your own 1:1 with b, through bit-sign POST /api/bitsign/b/direct', async () => {
+    const { http, calls } = fakeHttp({
+      'POST /api/bitsign/b/direct': () => ({ status: 200, data: { ticker: 'MEB' } }),
+    });
+    const client = new BchatClient(http, { token: 'T', handle: 'me', address: 'a' }, 'https://x.test');
+    expect(await client.openBDirect()).toBe('MEB');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toEqual({});
+  });
 });
 
 describe('lounge bot', () => {

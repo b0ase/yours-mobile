@@ -1288,6 +1288,15 @@ export class BchatClient {
     return r.ticker;
   }
 
+  /**
+   * Your own private 1:1 with b, found or created (bit-sign POST /api/bitsign/b/direct). Everything typed there goes
+   * to b without `$b`. Called when the pinned b row is opened, never on list load. Returns its ticker.
+   */
+  async openBDirect(): Promise<string> {
+    const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/b/direct', {});
+    return r.ticker;
+  }
+
   // ── Open rooms: no token to hold (docs/TOKEN-ROOMS.md › Open rooms) ──
 
   /** Public open rooms (raw; parsed by parsePublicRooms). */

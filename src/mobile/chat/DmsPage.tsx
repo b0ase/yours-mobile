@@ -31,6 +31,8 @@ import { LIST_TYPES, useLive } from './live';
 import {
   canMessage,
   contactLine,
+  B_HANDLE,
+  bDirectOf,
   dmRooms,
   filterContacts,
   mergeContacts,
@@ -194,10 +196,32 @@ export const DmsPage = ({
   useEffect(() => {
     if (handle) return afterPaint(() => void syncBlocks(client));
   }, [client, handle]);
-  const allDms = useMemo(
+  const everyDm = useMemo(
     () => (rooms ? dmRooms(rooms).filter((r) => !isBlocked(roomTitle(r, handle || ''))) : null),
     [rooms, handle, blockTick], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // Your own 1:1 with b is pinned at the top (bit-sign POST /api/bitsign/b/direct): never an ordinary row, and
+  // created on the first tap, not when the list loads. Everything typed there goes to b without `$b`.
+  const bRoom = useMemo(() => (everyDm ? bDirectOf(everyDm, handle || '') : null), [everyDm, handle]);
+  const allDms = useMemo(() => (everyDm ? everyDm.filter((r) => r !== bRoom) : null), [everyDm, bRoom]);
+  const [bOpening, setBOpening] = useState(false);
+  const [bProblem, setBProblem] = useState('');
+  const openB = async () => {
+    if (bRoom) return setOpen(bRoom);
+    if (bOpening) return;
+    setBOpening(true);
+    setBProblem('');
+    try {
+      const ticker = await client.openBDirect();
+      const all = await fetchRooms(client, identityAddress, 0);
+      setOpen(all.find((r) => r.ticker === ticker) ?? { id: ticker, ticker, name: `$${handle} ↔ $${B_HANDLE}` });
+    } catch (e) {
+      if (e instanceof ChatApiError && e.status === 401) return authLost();
+      setBProblem(errText(e));
+    } finally {
+      setBOpening(false);
+    }
+  };
   // Each row's face: the other person's photo (bit-sign avatars), else their gold bAvatar (ChatAvatar).
   useAvatars(
     client,
@@ -420,6 +444,46 @@ export const DmsPage = ({
         {/* Always a touch taller than the frame: iOS only rubber-bands a list that overflows, and a short DM list
             felt stuck next to Chatrooms and Calls (owner, 14 Oct 2026, iOS phone layout). */}
         <ul className="w-full" style={{ minHeight: 'calc(100% + 1px)' }}>
+          {handle && dms && (
+            <li key="b-direct" data-b-direct="">
+              <button
+                onClick={() => void openB()}
+                disabled={bOpening}
+                aria-label="Open your private chat with b"
+                className="w-full flex items-center gap-3 px-4 py-[10px] text-left active:bg-[#111]"
+                style={{ background: BG }}
+              >
+                <ChatAvatar title={`$${B_HANDLE}`} issuer={B_HANDLE} />
+                <div className="flex-1 min-w-0 pb-[10px] -mb-[10px]" style={{ borderBottom: `1px solid ${LINE}` }}>
+                  <div className="flex items-baseline gap-2">
+                    <span className={`flex-1 flex items-center gap-2 text-[15px] font-semibold text-white ${ELLIPSIS}`}>
+                      <span>b</span>
+                      <span
+                        className="rounded-full px-1.5 text-[10px] font-bold leading-4"
+                        style={{ color: GOLD, border: '1px solid rgba(245,184,0,0.45)' }}
+                      >
+                        Private
+                      </span>
+                    </span>
+                    {bRoom && (
+                      <span className="text-[11px] shrink-0" style={{ color: (bRoom.unread ?? 0) ? GOLD : MUTED }}>
+                        {listTimeLabel(bRoom.last_message?.created_at ?? bRoom.updated_at)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-[2px] min-h-5">
+                    <span className={`flex-1 text-[13px] ${ELLIPSIS}`} style={{ color: bProblem ? '#F97066' : MUTED }}>
+                      {bProblem ||
+                        (bOpening
+                          ? 'Opening…'
+                          : (bRoom && previewText(bRoom, handle)) || 'Private. Just type: no $b needed.')}
+                    </span>
+                    <RowBadge unread={bRoom?.unread ?? 0} marked={false} muted={false} pinned />
+                  </div>
+                </div>
+              </button>
+            </li>
+          )}
           {arranged && (
             <ArchivedGroup
               identity={handle || ''}
