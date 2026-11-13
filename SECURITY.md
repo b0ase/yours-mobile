@@ -76,10 +76,10 @@ listed, dated, on https://bwalletx.com/b-Aware#advisories.
 
 ## Changes to this policy
 
-- 13 November 2026: payout terms aligned to the b-Aware page (`site/b-aware.html`): within 14 days of the fix going
-  live, or within 30 days of triage if the fix takes longer, whichever is sooner. This replaces "30 days after the fix
-  is live on every channel / 60 days after we confirm your report" and the monthly payment batch. The more favourable
-  term applies to every report made while both were published.
+- 13 November 2026: payout timing is now within 14 days of the fix going live, or within 30 days of triage if the
+  fix takes longer, whichever is sooner. This replaces "30 days after the fix is live on every channel / 60 days after
+  we confirm your report" and the monthly payment batch (policy versions 3 and 4), and applies to every open report,
+  whenever it was made.
 - 13 November 2026: version 5. Payment no longer waits for programme funding: the programme has a fixed budget, we
   say so on the b-Aware page before accepting new reports if it runs out, and reports already accepted are paid on the
   terms above.
