@@ -77,6 +77,7 @@ import {
   installInboundSyncGuard,
   registerInboundVerifier,
   admitPending,
+  requeueHeldTokenCoins,
   walletOwnership,
   walletRecords,
   type AdmitOptions,
@@ -725,6 +726,19 @@ export const initWallet = async (
   const deviceStore = (): AdmitStore | undefined =>
     managed._stores?.map((m) => m.storage).find((s): s is StorageIdb => s instanceof StorageIdb) as never;
   stopBackupCheck.useSecondSource(oneSatChainLookups(toolboxServices));
+  // A held BSV-21 coin the chain calls unspent: the token overlay's word, read through tokenOverlayVerdict (fix 7). Only
+  // its 'spent' holds the coin back; an error or an unfunded overlay never does. Set before the first admission run
+  // is scheduled (onQueued below), from the factory's 1Sat services.
+  stopBackupCheck.verifier.tokenState = async (tokenId, outpoint) => {
+    const bsv21 = (
+      toolboxServices as unknown as {
+        bsv21?: { getOutputStatus?: (id: string, ops: string[]) => Promise<{ outpoint: string; state: string }[]> };
+      }
+    ).bsv21;
+    if (typeof bsv21?.getOutputStatus !== 'function') return undefined;
+    const [s] = await bsv21.getOutputStatus(tokenId, [outpoint]);
+    return s?.state;
+  };
   let admitClosed = false;
   let admitTimer: ReturnType<typeof setTimeout> | undefined;
   let admitAt = Infinity;
@@ -745,10 +759,33 @@ export const initWallet = async (
   /** Set by every device-sync pull: what that pull lists is retried every few seconds for a while (inboundSync.ts). */
   let admitPrompt: AdmitOptions['prompt'];
   const PROMPT_ADMIT_MS = 2 * 60_000;
+  /**
+   * Token coins this device holds as not spendable with no spender go back on the admission list at most every 6 hours
+   * (fix 7, 13 Nov 2026: the extension's 2a5d3e03:0 stayed not spendable while the phone's copy was spendable). The
+   * chain then decides them like any backup coin. The time is kept across service-worker restarts; no store: every run.
+   */
+  const HELD_TOKENS_EVERY_MS = 6 * 3_600_000;
+  const requeueHeldTokensIfDue = async (device: AdmitStore, identityKey: string) => {
+    const key = `bwxHeldTokenRecheckAt:${identityKey}`;
+    try {
+      const last = Number((await chrome.storage?.local?.get(key))?.[key] ?? 0);
+      if (Date.now() - last < HELD_TOKENS_EVERY_MS) return;
+      await chrome.storage?.local?.set({ [key]: Date.now() });
+    } catch {
+      // no store to remember the time in: check anyway (local reads; listed entries keep their back-off)
+    }
+    try {
+      const n = await requeueHeldTokenCoins(device, identityKey);
+      if (n) console.warn(`[inbound-sync] ${n} token coin(s) held not spendable here: asking the chain again`);
+    } catch (e) {
+      console.warn('[inbound-sync] held token coins not listed:', e);
+    }
+  };
   const admitBackupRows = async (): Promise<AdmitReport | undefined> => {
     const device = deviceStore();
     if (!device || admitClosed) return undefined;
     const { identityKey } = await storage.getAuth();
+    await requeueHeldTokensIfDue(device, identityKey);
     const r = await admitPending(device, identityKey, stopBackupCheck.verifier, { prompt: admitPrompt }).catch(
       (e: unknown) => {
         console.warn('[inbound-sync] admission list not worked through:', e);

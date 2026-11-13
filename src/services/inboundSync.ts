@@ -41,6 +41,7 @@
  * (services/localFirst.ts) are untouched; F-C's pull keeps the device store active (this only filters what it merges).
  */
 import {
+  Beef,
   CachedKeyDeriver,
   Hash,
   PrivateKey,
@@ -189,6 +190,13 @@ export type InboundVerifier = {
    * status and outputs, each checked. 'wait': not mined yet, or no answer. Absent: the status alone becomes 'unproven'.
    */
   recover?(txid: string): Promise<'restored' | 'done' | 'wait'>;
+  /**
+   * The token overlay's word on one BSV-21 coin "txid.vout" (fix 7, 13 Nov 2026), asked only once the chain has called
+   * the coin unspent. Read through tokenOverlayVerdict: only 'spent' holds the coin back, and it is asked again later.
+   * Any other answer, an error, an overlay that isn't funded or can't be reached, never holds a coin: spendability is
+   * the chain's to decide, and a token's validity is checked when it is sent. Absent: the chain alone decides.
+   */
+  tokenState?(tokenId: string, outpoint: string): Promise<unknown>;
   /** A merge put something on the admission list: run admitPending soon (initWallet schedules it). */
   onQueued?: () => void;
   /** A pass from the start we started paused (a slice used up, or a heal left it): pull again soon (initWallet). */
@@ -676,8 +684,13 @@ export async function verifyInboundChunk(
       if (time(o.updated_at) <= time(filed.updated_at)) {
         // Only a row carrying the backup's own time (an admission given up on). A row the device lowered itself
         // (heal, already-off, orphan, hold) is newer and keeps its own both-lookups undo as the only way back (R1).
+        // Equal times with a different spendable come from a merge that lowered the row on arrival (rule 3: StorageIdb
+        // stamps every local write with its own time). Fix 7, 13 Nov 2026: the extension held the 1-sat BSV-21 coin
+        // 2a5d3e03:0 not spendable at the phone's exact time while the phone held it spendable, and no later pull
+        // asked the chain again. So in every pass (not only one from the start), a row in a basket seen again at the
+        // same time goes back on the admission list: the chain decides, the same way on every device.
         if (
-          opts.requeueHeld &&
+          (opts.requeueHeld || filed.basketId != null) &&
           time(o.updated_at) === time(filed.updated_at) &&
           o.spendable === true &&
           filed.spendable !== true &&
@@ -888,10 +901,16 @@ export type AdmissionList = {
    * yet kept a 4-hour wait after the row came). One waiting on the chain keeps its back-off. A transaction's claim is
    * updated.
    */
-  add(identityKey: string, items: Admission[], now: number): Promise<void>;
+  add(identityKey: string, items: Admission[], now: number, opts?: { delayMs?: number }): Promise<void>;
   list(identityKey: string): Promise<PendingAdmission[]>;
   put(e: PendingAdmission): Promise<void>;
   remove(key: string): Promise<void>;
+  /**
+   * Small numbers this device keeps per account beside the list (fix 7 review): the held-token check's cursor, and when
+   * each coin was last refused. In a store of their own, so the list's entries are never mixed with them.
+   */
+  notes(identityKey: string): Promise<Map<string, number>>;
+  setNote(identityKey: string, name: string, value: number | undefined): Promise<void>;
 };
 
 const admissionKey = (identityKey: string, a: Admission) =>
@@ -900,6 +919,7 @@ const admissionKey = (identityKey: string, a: Admission) =>
 /** Its own IndexedDB database per device store: the toolbox sync only writes the wallet's own tables. */
 export const admissionDbName = (storageIdentityKey: string) => `bwx-inbound-admission-${storageIdentityKey}`;
 const ADMISSION_STORE = 'pending';
+const NOTES_STORE = 'notes';
 
 const idbRequest = <T>(r: IDBRequest<T>) =>
   new Promise<T>((resolve, reject) => {
@@ -911,10 +931,12 @@ function idbAdmissionList(name: string): AdmissionList {
   let opened: Promise<IDBDatabase> | undefined;
   const db = () =>
     (opened ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const r = indexedDB.open(name, 1);
+      const r = indexedDB.open(name, 2);
       r.onupgradeneeded = () => {
         if (!r.result.objectStoreNames.contains(ADMISSION_STORE))
           r.result.createObjectStore(ADMISSION_STORE, { keyPath: 'key' });
+        if (!r.result.objectStoreNames.contains(NOTES_STORE))
+          r.result.createObjectStore(NOTES_STORE, { keyPath: 'key' });
       };
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
@@ -922,18 +944,22 @@ function idbAdmissionList(name: string): AdmissionList {
       opened = undefined;
       throw e;
     }));
-  const withStore = async <T>(mode: IDBTransactionMode, body: (s: IDBObjectStore) => Promise<T>): Promise<T> => {
-    const t = (await db()).transaction(ADMISSION_STORE, mode);
+  const withStore = async <T>(
+    mode: IDBTransactionMode,
+    body: (s: IDBObjectStore) => Promise<T>,
+    storeName: string = ADMISSION_STORE,
+  ): Promise<T> => {
+    const t = (await db()).transaction(storeName, mode);
     const done = new Promise<void>((resolve, reject) => {
       t.oncomplete = () => resolve();
       t.onerror = t.onabort = () => reject(t.error);
     });
-    const out = await body(t.objectStore(ADMISSION_STORE));
+    const out = await body(t.objectStore(storeName));
     await done;
     return out;
   };
   return {
-    add: (identityKey, items, now) =>
+    add: (identityKey, items, now, opts) =>
       withStore('readwrite', async (s) => {
         for (const a of items) {
           const key = admissionKey(identityKey, a);
@@ -948,7 +974,7 @@ function idbAdmissionList(name: string): AdmissionList {
                   ...(a.kind === 'tx' ? { claim: a.claim } : {}),
                   ...(fresh ? { tries: 0, nextAt: Math.min(had.nextAt, now) } : {}),
                 }
-              : { ...a, key, identityKey, firstAt: now, nextAt: now, tries: 0 },
+              : { ...a, key, identityKey, firstAt: now, nextAt: now + Math.max(0, opts?.delayMs ?? 0), tries: 0 },
           );
         }
       }),
@@ -958,6 +984,28 @@ function idbAdmissionList(name: string): AdmissionList {
       ),
     put: (e) => withStore('readwrite', async (s) => void (await idbRequest(s.put(e)))),
     remove: (key) => withStore('readwrite', async (s) => void (await idbRequest(s.delete(key)))),
+    notes: (identityKey) =>
+      withStore(
+        'readonly',
+        async (s) => {
+          const out = new Map<string, number>();
+          const prefix = `${identityKey}|`;
+          for (const n of (await idbRequest(s.getAll())) as { key: string; value: number }[])
+            if (n.key.startsWith(prefix)) out.set(n.key.slice(prefix.length), n.value);
+          return out;
+        },
+        NOTES_STORE,
+      ),
+    setNote: (identityKey, name, value) =>
+      withStore(
+        'readwrite',
+        async (s) => {
+          const key = `${identityKey}|${name}`;
+          if (value === undefined) await idbRequest(s.delete(key));
+          else await idbRequest(s.put({ key, value }));
+        },
+        NOTES_STORE,
+      ),
   };
 }
 
@@ -982,6 +1030,7 @@ export type AdmitStore = Omit<DeviceStore, 'getSettings'> & {
   transaction<T>(scope: (trx: Trx) => Promise<T>): Promise<T>;
   updateOutput(id: number, update: Record<string, unknown>, trx?: Trx): Promise<unknown>;
   updateTransaction(id: number, update: Record<string, unknown>, trx?: Trx): Promise<unknown>;
+  findOutputBaskets?(a: { partial: Record<string, unknown> }): Promise<{ basketId?: number; name?: string }[]>;
 };
 
 export type AdmitReport = {
@@ -1058,6 +1107,45 @@ export function admitPending(
 }
 
 type Waiting = 'chain' | 'local';
+
+/**
+ * Outpoints a transaction of this device's not yet settled on the network spends (fix 7 review, finding 1): every
+ * transaction in an IN_FLIGHT state, read from its own bytes. Such a coin may have reached this device with its spend
+ * link dropped (rule 3 and N1 drop a link to a payment that isn't completed), so its row alone says nothing. A
+ * transaction with no bytes yet (unsigned) reserves every output of each transaction its input BEEF carries.
+ */
+export async function reservedByInFlight(
+  store: Pick<DeviceStore, 'findTransactions'>,
+  userId: number,
+): Promise<{ outpoints: Set<string>; txids: Set<string> }> {
+  const outpoints = new Set<string>();
+  const txids = new Set<string>();
+  for (const status of IN_FLIGHT) {
+    for (const t of await store.findTransactions({ partial: { userId, status } })) {
+      let read = false;
+      if (t.rawTx?.length) {
+        try {
+          for (const i of Transaction.fromBinary(Array.from(t.rawTx)).inputs)
+            if (i.sourceTXID) outpoints.add(`${i.sourceTXID.toLowerCase()}.${i.sourceOutputIndex}`);
+          read = true;
+        } catch {
+          // unreadable bytes: fall back to the input BEEF
+        }
+      }
+      if (read) continue;
+      if (t.inputBEEF?.length) {
+        try {
+          for (const b of Beef.fromBinary(Array.from(t.inputBEEF)).txs) txids.add(b.txid.toLowerCase());
+        } catch {
+          // nothing readable: nothing reserved by it
+        }
+      }
+    }
+  }
+  return { outpoints, txids };
+}
+const isReserved = (r: { outpoints: Set<string>; txids: Set<string> }, txid: string, vout: number) =>
+  r.outpoints.has(`${txid.toLowerCase()}.${vout}`) || r.txids.has(txid.toLowerCase());
 
 /** This device holds a row for the entry: its transaction (a tx entry), or that transaction's output (a coin). */
 async function hasRow(store: AdmitStore, userId: number, e: PendingAdmission): Promise<boolean> {
@@ -1285,44 +1373,70 @@ async function admitOnce(
     out.lockingScript.toHex().toLowerCase() === script &&
     (typeof row.satoshis !== 'number' || out.satoshis === row.satoshis);
 
+  /**
+   * A coin entry dropped, its row left not spendable: why, in the log (fix 7: the extension's 2a5d3e03:0 left no
+   * trace), and noted, so the held-token check doesn't list it again for REFUSED_SKIP_MS (fix 7 review, finding 2).
+   */
+  const refuse = async (e: PendingAdmission, why: string) => {
+    v.log?.(`[inbound-sync] ${e.txid}.${e.vout ?? 0} not admitted: ${why}`);
+    await list.setNote(identityKey, `refused|${e.txid}.${e.vout ?? 0}`, now).catch(() => undefined);
+    return finish(e, 'refused');
+  };
+  let reserved: Promise<{ outpoints: Set<string>; txids: Set<string> }> | undefined;
   const settleCoin = async (e: PendingAdmission) => {
     const vout = e.vout ?? 0;
     const row = await coinRow(e);
-    if (row === 'many') return finish(e, 'refused');
+    if (row === 'many') return refuse(e, 'more than one row for the outpoint');
     // Not there (yet): its page may still be merging (D3). Asked again shortly.
     if (!row || typeof row.outputId !== 'number') return wait(e, 'local', undefined, 'row');
     if (row.spendable === true) return finish(e, 'refused');
-    if (row.basketId == null) return finish(e, 'refused'); // in no basket: a quarantined row, or not the wallet's coin
+    // In no basket: a quarantined row, or not the wallet's coin.
+    if (row.basketId == null) return refuse(e, 'in no basket');
     // An output of a transaction this device holds as failed: WhatsOnChain's 404 is no proof (F4). It waits as long as
     // that transaction is queued to be settled.
     if ((await txStatus(row.transactionId)) === 'failed') return wait(e, txQueued.has(e.txid) ? 'chain' : 'local');
     // Spent by a payment of this device's not yet on the network (R5, C7): the chain hasn't seen that spend.
     const spender = row.spentBy != null ? await txStatus(row.spentBy) : undefined;
     if (spender !== undefined && IN_FLIGHT.has(spender)) return wait(e, 'local');
+    // …or by one whose link this row lost on its way here (fix 7 review, finding 1): read from that payment's bytes.
+    reserved ??= reservedByInFlight(store, userId);
+    if (isReserved(await reserved, e.txid, vout)) return wait(e, 'local');
     const script = hex(row.lockingScript);
-    if (!script || (await admissibleRow(v, row, script)) === 'refuse') return finish(e, 'refused'); // C1, D4
+    if (!script) return refuse(e, 'no locking script');
+    if ((await admissibleRow(v, row, script)) === 'refuse')
+      return refuse(e, "its record or key doesn't match its script"); // C1, D4
     // What the output really locks and holds (D5): the device's raw transaction, else the chain's. Never the row's word.
     const local = await deviceTx(e.txid);
-    if (local === null || (local && !sameOutput(local.outputs[vout], row, script))) return finish(e, 'refused');
+    if (local === null) return refuse(e, "the stored transaction doesn't hash to its txid");
+    if (local && !sameOutput(local.outputs[vout], row, script))
+      return refuse(e, 'the row differs from its transaction');
     const st = await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' }));
     if (st.state === 'unclear') {
       report.deferred = true;
       return wait(e, 'chain');
     }
     if (st.state === 'spent') {
-      if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return finish(e, 'refused');
+      if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return refuse(e, 'the chain says spent');
       return wait({ ...e, spentAt: e.spentAt ?? now }, 'chain', (e.spentAt ?? now) + SPENT_RECHECK_MS);
     }
     if (!local) {
       const c = await chainTx(e.txid);
       if (c.state === 'unclear') report.deferred = true;
       if (c.state !== 'found') return wait(e, 'chain');
-      if (!sameOutput(parseRawTx(c.rawTx, e.txid)?.outputs[vout], row, script)) return finish(e, 'refused');
+      if (!sameOutput(parseRawTx(c.rawTx, e.txid)?.outputs[vout], row, script))
+        return refuse(e, "the chain's transaction differs from the row");
     } else {
       // WhatsOnChain answers /spent with 404 for an outpoint it has never seen (F4b): unspent only for a known one.
       const k = await known(e.txid);
       if (k === 'unclear') report.deferred = true;
       if (k !== 'known') return wait(e, 'chain');
+    }
+    // A BSV-21 coin the chain calls unspent: the token overlay is asked last (fix 7). Only its 'spent' holds the coin
+    // back, asked again later (never given up on); an error, 'unknown', 'queued' or an unfunded overlay never does.
+    const token = tokenFacts(script, e.txid, vout);
+    if (token?.kind === 'bsv21' && token.id && v.tokenState) {
+      const said = await v.tokenState(token.id, `${e.txid}.${vout}`).catch(() => undefined);
+      if (tokenOverlayVerdict(said) === 'spent') return wait(e, 'chain');
     }
     const ok = await store.transaction(async (trx) => {
       const [cur] = await store.findOutputs({ partial: { userId, outputId: row.outputId }, trx });
@@ -1353,6 +1467,105 @@ async function admitOnce(
       `[inbound-sync] admitted ${report.admitted} coin(s), settled ${report.applied} transaction(s), gave up on ${report.retired}`,
     );
   return count();
+}
+
+// ── token coins held not spendable: asked of the chain again (fix 7, 13 Nov 2026) ──
+
+/**
+ * What the token overlay's answer about one coin means for its spendability. The overlay
+ * (POST /bsv21/:tokenId/outputs/status) answers valid, spent, queued or unknown; a lookup can also fail, time out, or
+ * find the token's overlay not funded ("not-active"). Only 'spent' is a verdict against the coin. 'valid' and 'queued'
+ * are for it. Everything else (unknown: never submitted, or not indexed yet; an error; an unfunded or unreachable
+ * overlay; a missing answer) is no verdict at all, and never holds a coin back or takes one away.
+ */
+export function tokenOverlayVerdict(state: unknown): 'spent' | 'valid' | 'unclear' {
+  const s = typeof state === 'string' ? state.toLowerCase() : '';
+  if (s === 'spent') return 'spent';
+  if (s === 'valid' || s === 'queued') return 'valid';
+  return 'unclear';
+}
+
+/** The wallet's token baskets: 'bsv21' (@1sat/types BSV21_BASKET) and its legacy name (services/legacyBaskets.ts). */
+export const TOKEN_BASKETS = ['bsv21', 'p 1sat bsv21'];
+/** Transactions whose outputs can be on the chain now: a coin of any other is left to its own transaction's checks. */
+const SETTLED_TX = new Set(['completed', 'unproven']);
+/** A coin admission refused is not listed again by the held-token check for this long. */
+export const REFUSED_SKIP_MS = 7 * 24 * 3_600_000;
+/**
+ * Entries the held-token check lists wait this long first, so a pull's own entries (due at once, or every few seconds
+ * in a prompt window) and fresh sweep change are asked about before them (fix 7 review, finding 3).
+ */
+export const HELD_TOKEN_DELAY_MS = 60_000;
+
+/**
+ * Token coins this device holds as not spendable with no spend recorded, in a token basket, of a transaction that is
+ * completed or unproven, go on the admission list (fix 7). The extension held the 1-sat BSV-21 coin 2a5d3e03:0 (unspent,
+ * paid to the account's primary address) not spendable while the phone held the same row spendable: the row arrived
+ * through the backup merge at the phone's time (most likely: equal times can only come from a merge), lowered on
+ * arrival (rule 3), and its admission entry was gone, so no later pull asked the chain again. admitPending then decides
+ * every one exactly as it decides a backup's coin: the row must match its raw transaction and pass the record checks,
+ * no payment of this device's not yet settled may spend it, the chain must know its transaction and call it unspent
+ * (WhatsOnChain, then the 1Sat stack), and the token overlay must not call it spent. A coin the chain calls spent stays
+ * not spendable; one it can't answer for waits. Lowering still travels by sync (rule 2), raising never does: each
+ * device asks the chain itself, so both arrive at the chain's answer.
+ *
+ * Never listed: a coin linked to a spending transaction (spentBy: the toolbox frees it if that payment fails), one an
+ * in-flight transaction of this device spends (its link may have been dropped on the way here), and one refused in
+ * the last REFUSED_SKIP_MS. At most `limit` a run, going round the rows by output id from a cursor kept beside the list,
+ * so dead rows can't take every slot for ever. Entries already on the list keep their back-off; new ones wait
+ * HELD_TOKEN_DELAY_MS. Returns how many coins were listed (new or already waiting).
+ */
+export async function requeueHeldTokenCoins(
+  store: AdmitStore,
+  identityKey: string,
+  opts: { baskets?: string[]; now?: () => number; limit?: number } = {},
+): Promise<number> {
+  const user = (await store.findUsers({ partial: { identityKey } }))[0];
+  if (!user || typeof store.findOutputBaskets !== 'function') return 0;
+  const userId = user.userId;
+  const now = opts.now?.() ?? Date.now();
+  const limit = Math.max(1, opts.limit ?? 200);
+  const list = admissionListFor(store.getSettings().storageIdentityKey);
+  const notes = await list.notes(identityKey);
+  const reserved = await reservedByInFlight(store, userId);
+  const statusOf = new Map<number, string | undefined>();
+  const candidates: (OutputRow & { outputId: number; txid: string; transactionId: number })[] = [];
+  for (const name of opts.baskets ?? TOKEN_BASKETS) {
+    const basket = (await store.findOutputBaskets({ partial: { userId, name } }))[0];
+    if (typeof basket?.basketId !== 'number') continue;
+    for (const r of await store.findOutputs({ partial: { userId, basketId: basket.basketId, spendable: false } })) {
+      if (r.spendable === true || r.spentBy != null) continue;
+      if (typeof r.outputId !== 'number' || typeof r.transactionId !== 'number' || !r.txid) continue;
+      if (isReserved(reserved, r.txid, r.vout)) continue;
+      const refusedAt = notes.get(`refused|${r.txid}.${r.vout}`);
+      if (refusedAt !== undefined && now - refusedAt < REFUSED_SKIP_MS) continue;
+      candidates.push(r as never);
+    }
+  }
+  candidates.sort((x, y) => x.outputId - y.outputId);
+  const cursor = notes.get('heldTokenCursor') ?? 0;
+  const start = candidates.findIndex((r) => r.outputId > cursor);
+  const ordered = start < 0 ? candidates : [...candidates.slice(start), ...candidates.slice(0, start)];
+  const held: Admission[] = [];
+  let last: number | undefined;
+  for (const r of ordered) {
+    if (held.length >= limit) break;
+    if (!statusOf.has(r.transactionId))
+      statusOf.set(
+        r.transactionId,
+        (await store.findTransactions({ partial: { userId, transactionId: r.transactionId }, noRawTx: true }))[0]
+          ?.status,
+      );
+    last = r.outputId;
+    const t = statusOf.get(r.transactionId);
+    if (!t || !SETTLED_TX.has(t)) continue;
+    held.push({ kind: 'coin', txid: r.txid, vout: r.vout });
+  }
+  // Next run goes on after the last row looked at; a run that looked at every row starts from the beginning again.
+  await list.setNote(identityKey, 'heldTokenCursor', held.length >= limit ? last : undefined).catch(() => undefined);
+  if (!held.length) return 0;
+  await list.add(identityKey, held, now, { delayMs: HELD_TOKEN_DELAY_MS });
+  return held.length;
 }
 
 // ── the wallet's own keys ──

@@ -96,3 +96,19 @@ export function eitherChainSource(first: ChainLookups, second: () => ChainLookup
       ),
   };
 }
+
+/**
+ * 'unknown' only when every source answers 'unknown'; 'known' when any knows the transaction; else 'unclear'. A missing
+ * source makes it 'unclear'. For a decision that removes something for good (fix 7 review: a token coin relinquished
+ * after a refused rebroadcast), never one source's 404 alone.
+ */
+export function unknownToAll(
+  sources: (((txid: string) => Promise<'known' | 'unknown' | 'unclear'>) | undefined)[],
+): (txid: string) => Promise<'known' | 'unknown' | 'unclear'> {
+  return async (txid) => {
+    if (!sources.length || sources.some((s) => !s)) return 'unclear';
+    const answers = await Promise.all(sources.map((s) => s!(txid).catch(() => 'unclear' as const)));
+    if (answers.includes('known')) return 'known';
+    return answers.every((a) => a === 'unknown') ? 'unknown' : 'unclear';
+  };
+}

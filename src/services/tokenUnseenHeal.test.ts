@@ -26,6 +26,11 @@ type World = {
   broadcast: Record<string, BroadcastOutcome>;
   /** Overlay learns a txid's outputs once submitted. */
   learnOnSubmit?: boolean;
+  /** The chain's word on a txid for txOnChain (default: known when in `chain`, else unknown). */
+  onChain?: Record<string, 'known' | 'unknown' | 'unclear'>;
+  /** chainBeef fails for these txids (a lookup error, not "not on chain"): it answers null like the wiring does. */
+  beefDown?: Set<string>;
+  submitError?: string;
 };
 
 const make = (w: World) => {
@@ -33,7 +38,8 @@ const make = (w: World) => {
   const deps: UnseenHealDeps = {
     localOutputs: async () => w.local,
     overlayStatus: async (_t, ops) => new Map(ops.map((o) => [o, w.states[o]])),
-    chainBeef: async (txid) => (w.chain.has(txid) ? [1, 2, 3] : null),
+    chainBeef: async (txid) => (w.chain.has(txid) && !w.beefDown?.has(txid) ? [1, 2, 3] : null),
+    txOnChain: async (txid) => w.onChain?.[txid] ?? (w.chain.has(txid) ? 'known' : 'unknown'),
     localBeef: async (txid) => (w.stored.has(txid) ? [4, 5, 6] : null),
     broadcast: async (_b, txid) => {
       calls.broadcast.push(txid);
@@ -41,6 +47,7 @@ const make = (w: World) => {
     },
     submitOverlay: async (beef, tokenId) => {
       expect(tokenId).toBe(TOKEN);
+      if (w.submitError) throw new Error(w.submitError);
       const txid = beef[0] === 1 ? [...w.chain].find((t) => !calls.submitted.includes(t))! : '';
       calls.submitted.push(txid);
       if (w.learnOnSubmit) for (const o of Object.keys(w.states)) w.states[o] = 'valid';
@@ -103,6 +110,59 @@ describe('healUnseenTokenOutputs', () => {
     expect(calls.relinquished).toEqual([`${DEAD}.0`, `${DEAD}.1`]);
     expect(r.dropped.length).toBe(2);
     expect(r.stillUnseen).toEqual([]);
+  });
+
+  // Fix 7, 13 Nov 2026: the extension's Repair Sync logged "Unable to process submitted transaction" for 2a5d3e03.
+  test('an overlay that refuses the submit (transient error): every output stays, the error is reported', async () => {
+    const { deps, calls } = make({
+      local: [out(MINED, 0, '25')],
+      states: { [`${MINED}.0`]: 'unknown' },
+      chain: new Set([MINED]),
+      stored: new Set([MINED]),
+      broadcast: {},
+      submitError: 'Unable to process submitted transaction',
+    });
+    const r = await healUnseenTokenOutputs(deps);
+    expect(calls.relinquished).toEqual([]);
+    expect(calls.broadcast).toEqual([]);
+    expect(r.dropped).toEqual([]);
+    expect(r.errors.join(' ')).toContain('Unable to process submitted transaction');
+  });
+
+  test('a mined transfer whose chain lookup failed, rebroadcast and refused as "missing inputs": kept and submitted', async () => {
+    const { deps, calls } = make({
+      local: [out(MINED, 0, '25')],
+      states: { [`${MINED}.0`]: 'unknown' },
+      chain: new Set([MINED]),
+      beefDown: new Set([MINED]),
+      stored: new Set([MINED]),
+      broadcast: { [MINED]: { ok: false, inputsSpent: true, error: 'Missing inputs' } },
+    });
+    const r = await healUnseenTokenOutputs(deps);
+    expect(calls.broadcast).toEqual([MINED]);
+    expect(calls.relinquished).toEqual([]);
+    expect(r.dropped).toEqual([]);
+    // The chain has it: the stored copy goes to the overlay, so the coin stops being overlay-unknown.
+    expect(r.submitted).toEqual([MINED]);
+    expect(calls.submitted.length).toBe(1);
+    expect(r.errors).toEqual([]);
+  });
+
+  test('a refused rebroadcast while the chain lookup is unclear (or missing): kept', async () => {
+    for (const onChain of ['unclear', undefined] as const) {
+      const { deps, calls } = make({
+        local: [out(DEAD, 0)],
+        states: {},
+        chain: new Set(),
+        stored: new Set([DEAD]),
+        broadcast: { [DEAD]: { ok: false, inputsSpent: true, error: 'DOUBLE_SPEND_ATTEMPTED' } },
+        onChain: onChain ? { [DEAD]: onChain } : undefined,
+      });
+      if (!onChain) delete deps.txOnChain;
+      const r = await healUnseenTokenOutputs(deps);
+      expect(calls.relinquished).toEqual([]);
+      expect(r.dropped).toEqual([]);
+    }
   });
 
   test('an inconclusive broadcast keeps the outputs and reports it', async () => {
