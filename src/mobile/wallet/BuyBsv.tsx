@@ -20,8 +20,7 @@ import { createPortal } from 'react-dom';
 import { ArrowDownToLine, CreditCard, ExternalLink, Users, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
-import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
-import { startAlignedRateRefresh } from '../../utils/exchangeRate';
+import { cachedDisplayRate, fetchDisplayRate, startAlignedRateRefresh } from '../../utils/exchangeRate';
 import { HistoryButton } from './HistoryButton';
 import { formatUSD } from '../../utils/format';
 
@@ -33,8 +32,9 @@ const MUTED = '#98A2B3';
  * tile and the balance never use two different prices (utils/exchangeRate.ts startAlignedRateRefresh).
  */
 const useLivePrice = () => {
-  const [rate, setRate] = useState(cachedExchangeRate);
-  useEffect(() => startAlignedRateRefresh(setRate, () => fetchExchangeRate('main')), []);
+  // Display only (the price on the Buy card): the shared per-minute price, the same as the balance.
+  const [rate, setRate] = useState(cachedDisplayRate);
+  useEffect(() => startAlignedRateRefresh(setRate, () => fetchDisplayRate('main')), []);
   return rate;
 };
 

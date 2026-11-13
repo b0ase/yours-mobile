@@ -55,14 +55,18 @@ describe('one dollar figure on every build (owner, 13 Nov 2026: "one penny diffe
 
   test('both UIs use it: the extension headline, the phone card and its count-up', () => {
     const page = src('src/pages/BsvWallet.tsx');
-    expect(page).toContain('formatBalanceUsd(satsOf(bsvBalance), exchangeRate, services.mnee ? mneeBalance : 0)');
+    // the headline uses the shared display price; dollar SENDS use the payment rate read at send time
+    expect(page).toContain('formatBalanceUsd(satsOf(bsvBalance), headlineRate, services.mnee ? mneeBalance : 0)');
+    expect(page).toContain('fetchDisplayRate(apiContext.chain, apiContext.wocApiKey)');
+    expect(page).toContain('(r.usdSendAmount / payRate) * BSV_DECIMAL_CONVERSION');
     expect(page).not.toContain('formatUSD(bsvBalance * exchangeRate');
     expect(page).toContain('startAlignedRateRefresh(');
     const mobile = src('vite.config.mobile.ts');
     expect(mobile).toContain(
-      '<WalletCard usd={balanceUsd(satsOf(bsvBalance), exchangeRate, services.mnee ? mneeBalance : 0)} sats={satsOf(bsvBalance)}',
+      '<WalletCard usd={balanceUsd(satsOf(bsvBalance), headlineRate, services.mnee ? mneeBalance : 0)} sats={satsOf(bsvBalance)}',
     );
     expect(mobile).not.toContain('usd={bsvBalance * exchangeRate');
+    expect(mobile).toContain('refreshing={isRefreshing} rate={headlineRate} /></HomeTop></SectionBoundary>');
     const card = src('src/mobile/wallet/WalletCard.tsx');
     expect(card).toContain('bsvCents(animSats, rate) - bsvCents(sats, rate)');
     expect(card).not.toContain('((animSats - sats) * rate) / 100_000_000');
