@@ -241,6 +241,23 @@ async function stuckPass(store: SyncStateStore, row: SyncStateRow, now: number):
   return false;
 }
 
+/**
+ * Read only, for the balance card's sync line (services/balanceTruth.ts): is this pass from the start stuck as of this
+ * row? Ours, under way, its offsets unchanged since the last progress check (stuckPass wrote progressKey before the pull)
+ * and that check had seen no movement for `minMs`. A pull that moved the offsets reads as not stuck, whatever the mark
+ * said before it.
+ */
+export const passLooksStuck = (row: SyncStateRow | undefined, minMs: number): boolean => {
+  if (!row) return false;
+  const mark = markOf(row);
+  return (
+    typeof mark.startedAt === 'number' &&
+    passUnderWay(row) &&
+    mark.progressKey === countsKey(row) &&
+    (mark.stuckMs ?? 0) >= minMs
+  );
+};
+
 /** Give a stuck pass from the start up: the last good cursor back, its offsets reset, no new one for a day. */
 const abandonPass = (store: SyncStateStore, row: SyncStateRow, when: number, now: number) =>
   write(store, row, (ss) => {

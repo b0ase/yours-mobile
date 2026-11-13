@@ -1,3 +1,4 @@
+import { TruthLinesOn } from '../../components/truthLinesContext';
 import {
   createContext,
   useCallback,
@@ -483,7 +484,11 @@ const TimeMachine = ({
                 onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && pick()}
               >
                 <div className="bw-tm-inner">
-                  {c.id === 'bsv' ? bsvCard : <StaticCard c={c} live={Math.abs(o) < 2.5} />}
+                  {c.id === 'bsv' ? (
+                    <TruthLinesOn.Provider value={false}>{bsvCard}</TruthLinesOn.Provider>
+                  ) : (
+                    <StaticCard c={c} live={Math.abs(o) < 2.5} />
+                  )}
                 </div>
               </div>
             );

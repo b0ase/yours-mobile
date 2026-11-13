@@ -3276,6 +3276,8 @@ if (!(
       'STORE_ACTION_STATUS',
       'STORAGE_MOVE_STATUS',
       'STORAGE_MOVE_TO_DEVICE',
+      // The balance card's truth lines (services/balanceTruth.ts): read only.
+      'BALANCE_TRUTH',
       'STORAGE_REPAIR_WALLET',
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
@@ -3708,6 +3710,24 @@ if (!(
             return true;
           }
           sendResponse({ type: 'STORAGE_MOVE_STATUS', success: true, data: moveStatus() });
+          return true;
+        case 'BALANCE_TRUTH':
+          // Unsent payments holding coins, coins arriving from the other device, the last device-sync pull. Reads
+          // only. Waits for the wallet to open, as GET_BALANCE does (the card shows nothing until it knows).
+          (async () => {
+            try {
+              await ensureWallet(true);
+              const ctx = accountContext;
+              if (!ctx) throw new Error('Wallet not initialized');
+              sendResponse({ type: 'BALANCE_TRUTH', success: true, data: await ctx.balanceTruth() });
+            } catch (error) {
+              sendResponse({
+                type: 'BALANCE_TRUTH',
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
           return true;
         case 'STORAGE_MOVE_TO_DEVICE':
           // "Retry moving this account to this device": now, whatever the backoff says (review F4).

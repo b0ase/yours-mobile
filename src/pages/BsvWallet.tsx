@@ -34,6 +34,7 @@ import { MainContent } from '../components/Reusable';
 import { Show } from '../components/Show';
 import { TopNav } from '../components/TopNav';
 import { RefreshGlyph, UpToDateAnnouncer, useUpToDate } from '../components/RefreshGlyph';
+import { BalanceTruthLines } from '../components/BalanceTruthLines';
 import { useBottomMenu } from '../hooks/useBottomMenu';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { useIdentity, resolveImageUrl } from '../hooks/useIdentity';
@@ -1834,6 +1835,18 @@ export const BsvWallet = () => {
             <p role="status" className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray }}>
               {restoreMessage}
             </p>
+          )}
+          {/* One small line each when it applies: held by an unsent payment, arriving from the other device, last sync
+              with the other devices (services/balanceTruth.ts, plan fix 5). The phone shows them under WalletCard. */}
+          {balanceKnown && (
+            <BalanceTruthLines
+              fmt={(n) =>
+                exchangeRate > 0
+                  ? formatBalanceUsd(n, exchangeRate, 0)
+                  : `${formatNumberWithCommasAndDecimals(n, 0)} sats`
+              }
+              refreshKey={bsvBalance}
+            />
           )}
         </motion.div>
 
