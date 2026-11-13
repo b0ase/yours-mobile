@@ -57,6 +57,7 @@ import { TAIL_ENTITIES } from './pullTail';
 import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
 import { readPushPage, type ParentStore, type PushArgs, type PushPage } from './pushParents';
+import { noteAwaiting } from './pullIntegrity';
 import {
   abandonTail,
   afterPage,
@@ -239,6 +240,11 @@ export type InboundReport = {
   withheldSats: number;
   /** For the admission list (the guard writes them before the merge). */
   admissions: Admission[];
+  /**
+   * The backup's ids of transactions on this page that this device doesn't hold yet (the merge inserts them): their
+   * coins come in later pages, so they are checked for once the pass has caught up (services/pullIntegrity.ts).
+   */
+  newTx?: number[];
 };
 
 /** Wallet change: what the toolbox's funding picks on its own (managedChangeOutputFields + both derivation halves). */
@@ -589,7 +595,10 @@ export async function verifyInboundChunk(
     if (!t) continue;
     let d = t.txid ? (await store.findTransactions({ partial: { userId, txid: t.txid } }))[0] : undefined;
     if (!d && t.reference) d = (await store.findTransactions({ partial: { userId, reference: t.reference } }))[0];
-    if (!d) continue;
+    if (!d) {
+      if (typeof t.transactionId === 'number') (report.newTx ??= []).push(t.transactionId);
+      continue;
+    }
     const keepTx = () => {
       t.updated_at = new Date(0);
       t.provenTxId = undefined; // no "proof evidence" path around the time check (EntityTransaction.mergeExisting)
@@ -1804,7 +1813,9 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
     /** A tail pass (rows that reached the backup late with old times: services/pullTail.ts), not one from the start. */
     const tail = fromStart && tailUnderWay(mark);
     /** A deep, full or tail pass this device started: the device-sync pulls carry it (services/fullPass.ts). */
-    const ours = fromStart ? typeof mark.startedAt === 'number' || tail : typeof mark.deepStartedAt === 'number';
+    const ours = fromStart
+      ? typeof mark.startedAt === 'number' || tail
+      : typeof mark.deepStartedAt === 'number' || typeof mark.healStartedAt === 'number';
     // A heal, or a merge with no mode (the factory's at open), leaves it to the pulls (review 23, M2; re-check N2).
     if (beforePage(deviceSik, { fromStart, ours }) === 'stop') {
       more();
@@ -1881,6 +1892,15 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         // scheduling only
       }
     if (!merged) return merged;
+    // Transactions new to this device: their coins travel in later pages (or, untouched since the cursor, not at all),
+    // so they are checked for once the pass has caught up (services/pullIntegrity.ts). Read after the merge: the page's
+    // checkpoint is in the row now.
+    if (report.newTx?.length)
+      try {
+        await noteAwaiting(this, await readerSyncState(this, args), report.newTx);
+      } catch (e) {
+        v.log?.('[inbound-sync] new payments not noted for the coin check:', e);
+      }
     if (merged.done || endsHere) {
       rewound.delete(passKey);
       if (tail) {
@@ -1891,13 +1911,38 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         // A pass from the start (ours, or a store's first) or a deep pull completed: recorded for the schedule.
         row = await readerSyncState(this, args);
         const now = Date.now();
+        const m = markOf(row);
         if (row && typeof row.syncStateId === 'number' && !passFromStart(row))
           await updateMark(
             this,
             row,
             fromStart
-              ? { doneAt: now, deepDoneAt: now, startedAt: undefined, deepStartedAt: undefined, due: undefined }
-              : { deepDoneAt: now, deepStartedAt: undefined },
+              ? {
+                  doneAt: now,
+                  deepDoneAt: now,
+                  startedAt: undefined,
+                  deepStartedAt: undefined,
+                  deepFromWhen: undefined,
+                  healStartedAt: undefined,
+                  healFromWhen: undefined,
+                  due: undefined,
+                  // Every row the backup has was read: nothing can still be on its way (services/pullIntegrity.ts).
+                  awaitOutputs: undefined,
+                  progressKey: undefined,
+                  progressSeenAt: undefined,
+                  stuckMs: undefined,
+                }
+              : {
+                  ...(typeof m.deepStartedAt === 'number' ? { deepDoneAt: now } : {}),
+                  ...(typeof m.healStartedAt === 'number' ? { healDoneAt: now } : {}),
+                  deepStartedAt: undefined,
+                  deepFromWhen: undefined,
+                  healStartedAt: undefined,
+                  healFromWhen: undefined,
+                  progressKey: undefined,
+                  progressSeenAt: undefined,
+                  stuckMs: undefined,
+                },
           );
       }
       return endsHere ? { ...merged, done: true } : merged;

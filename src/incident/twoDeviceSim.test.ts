@@ -17,10 +17,11 @@
  * plain tests: SIM_FIXED=<branch>[,<branch>…] or SIM_FIXED=all.
  *   - fix/unsent-auto-release: a noSend whose input the other device spent is held for ever by unsentExpiry
  *     ('input-spent-elsewhere'), and its change counts in the balance (+change sats on that device);
+ * FIXED (plain tests now):
  *   - fix/sync-atomic-pull: a push that lands late (row times older than the other device's cursor beyond the
- *     15-minute overlap), then the tx is proven: the incremental pull merges the 'completed' tx with none of its
- *     outputs; only the 6-hourly tail pass / daily deep pull bring the change in (hours later). The harness runs
- *     the app's post-pull step (pullIntegrity afterPull) on builds that have it (world.ts postPullStep).
+ *     15-minute overlap), then the tx is proven: the incremental pull merged the 'completed' tx with none of its
+ *     outputs; only the 6-hourly tail pass / daily deep pull brought the change in (hours later). The app's post-pull
+ *     step (pullIntegrity afterPull, run by the harness: world.ts postPullStep) heals it within the half hour.
  * Not reproduced (pass on 5.2.54, kept as regressions): a pull cut between the tx page and the outputs page resumes
  * from its checkpoint; a 1-sat BSV-21 token taken in as a 'bsv21' insertion is admitted on the other device.
  *   bun test src/incident/twoDeviceSim.test.ts
@@ -262,9 +263,9 @@ describe('two devices, one seed: named cases', () => {
     };
   }
 
-  bug(
-    'fix/sync-atomic-pull',
-    'a push that lands late, then its tx is proven: the completed tx arrives without its change (within the same half hour)',
+  // Fixed by fix/sync-atomic-pull (services/pullIntegrity.ts): a plain test from here on.
+  sim(
+    '[fix/sync-atomic-pull] a push that lands late, then its tx is proven: the completed tx arrives without its change (within the same half hour)',
     async () => {
       const { w, status, outputRows } = await latePush();
       // On 5.2.54: 'completed' with 0 output rows (owner's phone, problem 4: change only Find missing coins brought).

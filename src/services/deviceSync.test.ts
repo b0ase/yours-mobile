@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   BACKOFF_MS,
+  PULL_MIN_GAP_MS,
+  PULL_STALE_MS,
+  PULL_TIMER_MS,
   PUSH_DELAY_MS,
   SLOW_SYNC_MS,
   WAIT_BACKOFF_MS,
@@ -80,8 +83,10 @@ describe('device sync: the owner’s devices stay in step through the backup (2 
     expect(c.pending()).toEqual([BACKOFF_MS[1]]);
     up = true;
     await c.advance(BACKOFF_MS[1]);
-    expect(calls).toEqual(['push']);
+    // The open's pull failed, so its retry pulls too (review of fix 5: retries used to be pushes only).
+    expect(calls).toEqual(['pull', 'push']);
     expect(sync.state().failures).toBe(0);
+    expect(sync.state().pendingFull).toBe(false);
   });
 
   test('not this setup (remote active, or no backup): does nothing', async () => {
@@ -96,7 +101,97 @@ describe('device sync: the owner’s devices stay in step through the backup (2 
     expect((await sync.syncNow()).ok).toBe(false);
     busy = false;
     await c.advance(PUSH_DELAY_MS);
-    expect(calls).toEqual(['push']);
+    expect(calls).toEqual(['pull', 'push']); // a deferred pull is tried again as a pull
+  });
+
+  test('review of fix 5: a deferred or failed push stays a push; only a pull that did not happen is retried as one', async () => {
+    let fail = true;
+    const { sync, calls, c } = harness({
+      push: async () => {
+        calls.push('push');
+        if (fail) throw new Error('backup down');
+      },
+    });
+    expect((await sync.syncNow()).ok).toBe(false); // the pull went through, the push failed
+    fail = false;
+    await c.advance(BACKOFF_MS[0]);
+    expect(calls).toEqual(['pull', 'push', 'push']);
+  });
+
+  test('review of 6737dd2c (HIGH): a pull that fails every time never keeps this device off the backup: each run still pushes', async () => {
+    const { sync, calls, c } = harness({
+      pull: async () => {
+        calls.push('pull');
+        throw new Error(
+          'A page from your backup names a payment this device has no record of, so none of it was taken.',
+        );
+      },
+    });
+    expect((await sync.syncNow()).ok).toBe(false);
+    sync.changed();
+    for (let i = 0; i < 12; i++) await c.advance(30 * 60_000);
+    const pulls = calls.filter((x) => x === 'pull').length;
+    const pushes = calls.filter((x) => x === 'push').length;
+    expect(pulls).toBeGreaterThan(1); // retried as pulls
+    expect(pushes).toBe(pulls); // and every run pushed after its failed pull
+    expect(calls.slice(0, 2)).toEqual(['pull', 'push']);
+    expect(sync.state()).toMatchObject({ pendingFull: true, pendingPush: false });
+    expect(sync.state().lastPushOkAt).toBeGreaterThan(0);
+  });
+
+  test('review of 6737dd2c: a pushNow waiting for the running run is visible (the coin check steps aside)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const seen: boolean[] = [];
+    const { sync } = harness({
+      pull: async () => {
+        await gate;
+        seen.push(sync.pushWaiting());
+      },
+    });
+    const full = sync.syncNow();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sync.pushWaiting()).toBe(false);
+    const pushing = sync.pushNow();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sync.pushWaiting()).toBe(true);
+    release();
+    await Promise.all([full, pushing]);
+    expect(seen).toEqual([true]);
+    expect(sync.pushWaiting()).toBe(false);
+  });
+
+  test('review of fix 5: pullIfStale pulls when the last good pull is old, paced, never past a back-off', async () => {
+    let t = 1_000_000;
+    let up = true;
+    const { sync, calls, c } = harness({ now: () => t, ensureBackup: async () => up });
+    expect(await sync.pullIfStale()).toMatchObject({ ok: true, pulled: true }); // none yet: pulls
+    expect(sync.state().lastPullOkAt).toBeGreaterThan(0);
+    expect(sync.pullIfStale()).toBeNull(); // just pulled
+    expect(sync.pullIfStale(0)).toBeNull(); // asked a moment ago: paced
+    t += PULL_MIN_GAP_MS;
+    expect(await sync.pullIfStale(0)).toMatchObject({ pulled: true });
+    expect(calls).toEqual(['pull', 'push', 'pull', 'push']);
+    // A failing backup: the back-off's retry (a pull) is the only one; pullIfStale doesn't add more.
+    up = false;
+    t += PULL_MIN_GAP_MS;
+    expect((await sync.pullIfStale(0))?.ok).toBe(false);
+    t += PULL_MIN_GAP_MS;
+    expect(sync.pullIfStale(0)).toBeNull();
+    up = true;
+    await c.advance(BACKOFF_MS[0]);
+    expect(calls.slice(-2)).toEqual(['pull', 'push']);
+  });
+
+  test('review of fix 5: the open wallet pulls on a timer once the last good pull is an hour old', async () => {
+    let t = 0;
+    const { sync, calls } = harness({ now: () => t });
+    await sync.syncNow();
+    t = PULL_STALE_MS - 1;
+    expect(sync.pullIfStale()).toBeNull();
+    t = PULL_STALE_MS + PULL_TIMER_MS;
+    expect(await sync.pullIfStale()).toMatchObject({ pulled: true });
+    expect(calls).toEqual(['pull', 'push', 'pull', 'push']);
   });
 
   test('two requests at once share one run', async () => {

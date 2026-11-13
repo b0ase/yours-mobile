@@ -75,8 +75,11 @@ export type FullPassMark = {
   deepDoneAt?: number;
   /** The last full pass asked for by an error, or the last full pass that met an unfiled row (ms): the 24 h limit. */
   onDemandAt?: number;
-  /** Asked for by a failure: a full pass when the 24 h limit allows. */
-  due?: 'unfiled' | 'failed';
+  /**
+   * Asked for by a failure: a full pass when the 24 h limit allows. 'incomplete': transactions whose coins the backup
+   * holds never arrived here, and targeted re-pulls didn't bring them (services/pullIntegrity.ts).
+   */
+  due?: 'unfiled' | 'failed' | 'incomplete';
   /** An install that synced before this release: its first full pass is not before this (ms). */
   firstAt?: number;
   /** The last request made on Wi-Fi (ms), at most hourly: a phone off Wi-Fi 14 days runs one pass on mobile data. */
@@ -103,6 +106,45 @@ export type FullPassMark = {
   stuckMs?: number;
   /** The last pass from the start given up as stuck (ms): no new one for ON_DEMAND_GAP_MS. */
   abandonedAt?: number;
+  /** The cursor before the deep pull now under way (ms): put back if that pull is given up as stuck. */
+  deepFromWhen?: number;
+  /**
+   * A heal pass under way (services/pullIntegrity.ts): the cursor moved back to just before the backup's copies of coins
+   * that never arrived here, offsets 0. Cleared when it completes (healDoneAt) or is given up as stuck.
+   */
+  healStartedAt?: number;
+  /** The cursor before that heal pass (ms): put back if it is given up. */
+  healFromWhen?: number;
+  healDoneAt?: number;
+  /**
+   * Backup transactions merged here as new whose coins (output rows) are still to be confirmed against the backup, by the
+   * backup's transaction id (services/pullIntegrity.ts). A transaction row and its outputs travel in different pages
+   * (every transaction of a pass before any output), so a pass that stops, is reset, or never sends the outputs (their
+   * times older than the cursor) can leave the row here without them.
+   */
+  awaitOutputs?: Record<string, AwaitOutputs>;
+  /**
+   * Backup transactions the backup itself holds no outputs for, by backup id → the day (ms / 86 400 000) it said so: not
+   * asked about again until EMPTY_OK_DAYS later (services/pullIntegrity.ts). An array (an unreleased first form) reads as
+   * checked today.
+   */
+  emptyOk?: Record<string, number> | number[];
+  /** The last scan of this device for transactions from the backup with no outputs at all (ms). */
+  scanAt?: number;
+  /** The last device-sync pull that caught up with this backup: every page merged, no pass under way (ms). */
+  pullOkAt?: number;
+};
+
+/** One transaction waiting for its coins (FullPassMark.awaitOutputs). */
+export type AwaitOutputs = {
+  /** When it was noted (ms). */
+  at: number;
+  /** Checks that found coins missing (each one followed by a heal pass while tries <= MAX_HEAL_TRIES). */
+  tries?: number;
+  /** Not asked about again before this (ms): after an unclear answer, or once heals have run out. */
+  nextAt?: number;
+  /** Coins the backup holds for it that this device lacks, at the last check. */
+  missing?: number;
 };
 
 export type SyncStateRow = { syncStateId?: number; when?: unknown; syncMap?: unknown };
@@ -284,8 +326,81 @@ export const rewindDeep = (store: SyncStateStore, row: SyncStateRow, now = Date.
     const when = row.when == null ? undefined : new Date(row.when as string | Date).getTime();
     ss.when = when === undefined ? undefined : new Date(when - DEEP_OVERLAP_MS);
     resetCounts(ss);
-    setMark(ss, { ...markOf(row), deepStartedAt: now });
+    setMark(ss, {
+      ...markOf(row),
+      deepStartedAt: now,
+      deepFromWhen: when,
+      progressKey: undefined,
+      progressSeenAt: undefined,
+      stuckMs: undefined,
+    });
   });
+
+/**
+ * Start a heal pass (services/pullIntegrity.ts): the cursor back to `since` (never forward), offsets 0, the id maps kept,
+ * marked as ours so the device-sync pulls carry it in slices. Rows this device holds come again as no-ops; the toolbox
+ * sets the cursor back to the newest time it has seen when the pass completes.
+ */
+export const rewindHeal = (
+  store: SyncStateStore,
+  row: SyncStateRow,
+  since: number,
+  now = Date.now(),
+  patch: FullPassMark = {},
+) =>
+  write(store, row, (ss) => {
+    const when = row.when == null ? undefined : new Date(row.when as string | Date).getTime();
+    if (when !== undefined && since < when) ss.when = new Date(since);
+    resetCounts(ss);
+    setMark(ss, {
+      ...markOf(row),
+      ...patch,
+      healStartedAt: now,
+      healFromWhen: when,
+      progressKey: undefined,
+      progressSeenAt: undefined,
+      stuckMs: undefined,
+    });
+  });
+
+/**
+ * Give a stuck deep or heal pass up (offsets unmoved for STUCK_PASS_MS of uptime): the cursor back where it was before
+ * its rewind, offsets reset, recorded as done so the schedule doesn't start it again at once. What it was for is asked
+ * again later (the next daily deep pull; pullIntegrity's next check, which escalates to a full pass).
+ */
+const abandonOurs = (store: SyncStateStore, row: SyncStateRow, when: number, now: number) =>
+  write(store, row, (ss) => {
+    const mark = markOf(row);
+    ss.when = new Date(when);
+    resetCounts(ss);
+    setMark(ss, {
+      ...mark,
+      ...(typeof mark.deepStartedAt === 'number' ? { deepDoneAt: now } : {}),
+      ...(typeof mark.healStartedAt === 'number' ? { healDoneAt: now } : {}),
+      deepStartedAt: undefined,
+      deepFromWhen: undefined,
+      healStartedAt: undefined,
+      healFromWhen: undefined,
+      progressKey: undefined,
+      progressSeenAt: undefined,
+      stuckMs: undefined,
+    });
+  });
+
+const oursMarked = (mark: FullPassMark) =>
+  typeof mark.deepStartedAt === 'number' || typeof mark.healStartedAt === 'number';
+
+/** The cursor a stuck deep or heal pass goes back to (the earliest saved; undefined for a plain incremental pass). */
+const oursFromWhen = (row: SyncStateRow): number | undefined => {
+  const mark = markOf(row);
+  const when = row.when == null ? undefined : new Date(row.when as string | Date).getTime();
+  const c: number[] = [];
+  if (typeof mark.healStartedAt === 'number' && typeof mark.healFromWhen === 'number') c.push(mark.healFromWhen);
+  if (typeof mark.deepStartedAt === 'number' && typeof mark.deepFromWhen === 'number') c.push(mark.deepFromWhen);
+  // No saved cursor (a deep pull rewound before deepFromWhen was kept): the cursor stays where it is, never forward.
+  if (!c.length && oursMarked(mark) && when !== undefined) c.push(when);
+  return c.length ? Math.min(...c) : undefined;
+};
 
 /** A pass from the start is under way (or the first one will be): the cursor is empty. */
 export const passFromStart = (row: SyncStateRow | undefined) => !row || row.when == null;
@@ -322,7 +437,11 @@ export type FullPassRequest = {
   onMobileData?: (mb: number) => void;
 };
 
-export type FullPassPlan = 'started' | 'deep' | 'resuming' | 'not-due' | 'abandoned';
+/**
+ * 'stuck': an incremental pass (or a store's first pass) whose offsets haven't moved for STUCK_PASS_MS of uptime. It
+ * can't be given up without skipping rows, so it is only reported (services/syncHealth.ts) and keeps being retried.
+ */
+export type FullPassPlan = 'started' | 'deep' | 'resuming' | 'not-due' | 'abandoned' | 'stuck';
 
 /** About how many MB a full pass from this backup brings, from what this device holds. */
 export async function fullPassMb(store: unknown, identityKey: string): Promise<number> {
@@ -353,20 +472,42 @@ export async function requestFullPass(o: FullPassRequest): Promise<FullPassPlan>
     // A pass from the start given up as stuck: none again (asked by errors or by the week) for ON_DEMAND_GAP_MS.
     const held = typeof mark.abandonedAt === 'number' && now - mark.abandonedAt < ON_DEMAND_GAP_MS;
     const onDemand = !held && (mark.due !== undefined || o.failed === true) && onDemandAllowed(mark, now);
-    if (passFromStart(row) || passUnderWay(row)) {
+    // A deep or heal pass whose first page hasn't merged yet counts as under way too: rewinding it again would move the
+    // cursor back another 48 h on every failed pull.
+    const oursPending = oursMarked(mark);
+    if (passFromStart(row) || passUnderWay(row) || oursPending) {
       // A pass under way is resumed, whatever a retry asks; unless it stopped at a row it can't file and the 24 h
       // limit allows one more pass from the start.
       if (mark.due === 'unfiled' && onDemand) {
         await rewind(o.store, row, now, { onDemandAt: now });
         return 'started';
       }
-      // A stuck pass from the start (ours) is given up, so the pulls and the tail check run again.
-      const good = passFromStart(row) && typeof mark.startedAt === 'number' ? lastGoodWhen(row) : undefined;
-      if (good !== undefined && (await stuckPass(o.store, row, now))) {
-        await abandonPass(o.store, row, good, now);
+      if (passFromStart(row)) {
+        // A stuck pass from the start (ours) is given up, so the pulls and the tail check run again.
+        const good = typeof mark.startedAt === 'number' ? lastGoodWhen(row) : undefined;
+        const tail = tailUnderWay(mark) && typeof mark.tailFromWhen === 'number';
+        if (good === undefined && !tail && typeof mark.startedAt === 'number') return 'resuming';
+        if (!(await stuckPass(o.store, row, now))) return 'resuming';
+        if (good !== undefined) {
+          await abandonPass(o.store, row, good, now);
+          return 'abandoned';
+        }
+        if (tail) {
+          await abandonTail(o.store, row, { progressKey: undefined, progressSeenAt: undefined, stuckMs: undefined });
+          return 'abandoned';
+        }
+        return 'stuck'; // a store's first pass: there is no cursor to go back to
+      }
+      // An incremental, deep or heal pass under way, unmoved for STUCK_PASS_MS of uptime (the extension's 8 Nov freeze,
+      // for passes other than from the start): a deep or heal pass goes back to the cursor it was rewound from; a plain
+      // incremental one can't be given up without skipping rows, so it is reported and keeps being retried.
+      if (!(await stuckPass(o.store, row, now))) return 'resuming';
+      const back = oursFromWhen(row);
+      if (back !== undefined) {
+        await abandonOurs(o.store, row, back, now);
         return 'abandoned';
       }
-      return 'resuming';
+      return 'stuck';
     }
     if (onDemand) {
       await rewind(o.store, row, now, { onDemandAt: now });
@@ -555,8 +696,9 @@ export async function requestTailPass(o: {
   now?: number;
 }): Promise<TailPlan> {
   const now = o.now ?? Date.now();
+  // A deep or heal pass set to start (rewound, no page merged yet) counts as under way too.
   const busy = (r: SyncStateRow | undefined) =>
-    !r || typeof r.syncStateId !== 'number' || passFromStart(r) || passUnderWay(r);
+    !r || typeof r.syncStateId !== 'number' || passFromStart(r) || passUnderWay(r) || oursMarked(markOf(r));
   const row0 = await o.manager.runAsSync(() => syncStateFor(o.store, o.identityKey, o.readerSik));
   if (busy(row0)) return 'busy';
   const mark0 = markOf(row0);
@@ -623,9 +765,20 @@ export const finishTail = (store: SyncStateStore, row: SyncStateRow, now = Date.
       tailFromWhen: undefined,
       tailUntil: undefined,
       tailDoneAt: now,
-      tailSeen: { ...(mark.tailSeen ?? {}), ...highestIds(mergedIds(row.syncMap)) },
+      tailSeen: { ...(mark.tailSeen ?? {}), ...readIds(highestIds(mergedIds(row.syncMap)), mark.tailUntil) },
     });
   });
+
+/**
+ * Only the entities a tail pass really read (those before tailUntil) are confirmed: one too large to check was cut out of
+ * the pass, and confirming its highest merged id would hide every row of it this device never had, for good.
+ */
+const readIds = (ids: Record<string, number>, until: string | undefined): Record<string, number> => {
+  const end = until ? TAIL_ENTITIES.findIndex((e) => e.name === until) : -1;
+  if (end < 0) return ids;
+  const read = new Set<string>(TAIL_ENTITIES.slice(0, end).map((e) => e.name));
+  return Object.fromEntries(Object.entries(ids).filter(([k]) => read.has(k)));
+};
 
 /**
  * A tail pass that can't go on (it met a row whose transaction lies before the tail): the cursor back where it was and
