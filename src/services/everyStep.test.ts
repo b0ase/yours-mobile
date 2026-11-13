@@ -63,6 +63,22 @@ describe('rejectStillPending', () => {
     expect(pending.size).toBe(0);
     expect(rejectStillPending(['a', 'c'], pending, new Error('again'))).toBe(0);
   });
+
+  test('N1: settles the other side (the permissions manager) once per id still waiting, even if that throws', () => {
+    const rejected: string[] = [];
+    const managers: string[] = [];
+    const pending = new Map([
+      ['x', { reject: () => void rejected.push('x') }],
+      ['y', { reject: () => void rejected.push('y') }],
+    ]);
+    const n = rejectStillPending(['x', 'gone', 'y'], pending, new Error('refused'), (id) => {
+      managers.push(id);
+      if (id === 'x') throw new Error('manager gone');
+    });
+    expect(n).toBe(2);
+    expect(managers).toEqual(['x', 'y']);
+    expect(rejected).toEqual(['x', 'y']);
+  });
 });
 
 describe('background wiring', () => {
@@ -94,5 +110,25 @@ describe('background wiring', () => {
     expect(s).toContain('rejectStillPending(');
     expect(s).toContain('[...result.granted, ...result.denied].map((r) => r.requestID),');
     expect(s).toContain(': workFailed');
+  });
+
+  test('N1: unsettled requests are refused on the manager side too (as failUnshownPrompt does)', () => {
+    const s = section('// The envelope: only on a sheet carrying a payment the user approved.', 'return true;');
+    expect(s).toContain('rejectManagerRequest(wallet, id, err)');
+    expect(s).toContain('if (!isReconnectRequestId(id) && !isSealRequestId(id))');
+  });
+
+  test('N2: once settling starts, a failure never tells the user to retry; a failed deny never fails the answer', () => {
+    const work = section('let settling = false;', 'return true;');
+    const all = work.indexOf('await Promise.all([');
+    expect(work.lastIndexOf('settling = true;', all)).toBeGreaterThan(0);
+    expect(work).toContain('if (settling) return;');
+    expect(work.indexOf('if (settling) return;')).toBeLessThan(work.indexOf('workFailed = true;'));
+    expect(work).toMatch(/await wallet\?\.denyPermission\(r\.requestID\);\n\s+\} catch \(error\) \{/);
+  });
+
+  test('PermissionsManager reloads after a partial Revoke all', () => {
+    const page = readFileSync(new URL('../pages/PermissionsManager.tsx', import.meta.url), 'utf8');
+    expect(page).toContain("if (typeof response.data?.revokedCount === 'number') {\n          await loadData();");
   });
 });

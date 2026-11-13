@@ -193,13 +193,23 @@ export const requireSharedEnvelopeLock = (on = true) => {
  * process. Same pattern as storePay.ts withPayLock. Not re-entrant: never take it twice in one call chain. A lock
  * that cannot be taken rejects, so the spend is refused (fail closed), never run unlocked.
  */
-export function withEnvelopeLock<T>(name: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+export function withEnvelopeLock<T>(
+  name: string,
+  fn: () => Promise<T>,
+  signal?: AbortSignal,
+  /**
+   * Coin return only: run on this tab's queue when there is no shared lock (see EnvelopeStore.close). Never for a
+   * fill or a spend.
+   */
+  removalOnly = false,
+): Promise<T> {
   const locks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
   // `signal`: a caller that gave up while still waiting leaves the queue without running.
   if (locks && typeof locks.request === 'function')
     return locks.request(`bwx-envelopes:${name}`, signal ? { signal } : {}, fn);
   // Web wallet without Web Locks (Safari before 15.4): a module queue covers this tab only, so refuse.
-  if (sharedLockRequired) return Promise.reject(new EnvelopeUnavailableError(ENVELOPE_LOCK_UNAVAILABLE));
+  if (sharedLockRequired && !removalOnly)
+    return Promise.reject(new EnvelopeUnavailableError(ENVELOPE_LOCK_UNAVAILABLE));
   const before = localLocks.get(name) ?? Promise.resolve();
   const start = () => (signal?.aborted ? Promise.reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT)) : fn());
   const run = before.then(start, start);
@@ -210,6 +220,14 @@ export function withEnvelopeLock<T>(name: string, fn: () => Promise<T>, signal?:
   });
   return run;
 }
+
+/**
+ * Keys whose write outlived its caller's deadline and has not settled (review N3). Their lock is still held (so no op
+ * can read around the write), and ops on them in this process are refused at once instead of each waiting out the
+ * deadline. Other web tabs still wait out theirs: releasing the lock before the write settles could let that late
+ * write land over a newer one, so there is no safe earlier bound for them.
+ */
+const stuckWrites = new Set<string>();
 
 /** Lock names for backends without a key: one per backend object. */
 const anonLockNames = new WeakMap<EnvelopeBackend, string>();
@@ -248,7 +266,11 @@ export class EnvelopeStore {
    * - once the deadline has passed nothing is written (the caller was already told no);
    * - a write already sent keeps the lock until it settles, so no other op can read around it (no unlocked spend).
    */
-  private run<T>(fn: (s: EnvelopeState) => { state?: EnvelopeState; result: T }): Promise<T> {
+  private run<T>(
+    fn: (s: EnvelopeState) => { state?: EnvelopeState; result: T },
+    removalOnly = false,
+  ): Promise<T> {
+    if (stuckWrites.has(this.lockName)) return Promise.reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT));
     const ac = typeof AbortController === 'function' ? new AbortController() : undefined;
     let late = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -273,11 +295,20 @@ export class EnvelopeStore {
         const out = fn(state);
         if (out.state && out.state !== state) {
           if (late) throw new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT);
-          await this.backend.save(out.state);
+          const saving = this.backend.save(out.state);
+          // Past the deadline with this write still out: refuse this key's ops here at once until it settles.
+          const mark = setTimeout(() => stuckWrites.add(this.lockName), Math.max(0, this.timeoutMs));
+          try {
+            await saving;
+          } finally {
+            clearTimeout(mark);
+            stuckWrites.delete(this.lockName);
+          }
         }
         return out.result;
       },
       ac?.signal,
+      removalOnly,
     ).catch((e: unknown) => {
       // A lock request the deadline aborted rejects with AbortError: that is the timeout, said as such.
       throw late && !isEnvelopeUnavailable(e) && (e as { name?: string } | null)?.name === 'AbortError'
@@ -312,12 +343,19 @@ export class EnvelopeStore {
     });
   }
 
-  /** Coin return. Resolves to what was released (0 when there was no envelope). */
+  /**
+   * Coin return. Resolves to what was released (0 when there was no envelope).
+   *
+   * Without a shared lock (web wallet on a browser with no Web Locks) it still runs, on this tab's queue (review of
+   * fix/envelope-queue: Forget site and the pairing revoke queue must not fail for ever there). That is safe because
+   * on such a browser no fill or spend runs at all (they are refused), so nothing of this build writes envelopes
+   * concurrently; and a close only removes an earmark, so at worst it is lost and retried, never more spending.
+   */
   close(originator: string): Promise<number> {
     return this.run((s) => {
       const r = returnCoins(s, originator);
       return { state: r.returned || s.envelopes[originator] ? r.state : undefined, result: r.returned };
-    });
+    }, true);
   }
 }
 

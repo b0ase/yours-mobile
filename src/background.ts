@@ -5757,6 +5757,9 @@ if (!(
       } as Parameters<typeof store.putGrant>[0]);
     };
 
+    // Set when the requests start being settled. A failure before that refused everything (below); a failure after it
+    // must never tell the user "ask the site to try again": a payment in this bundle may already have gone (N2).
+    let settling = false;
     const work = (async () => {
       await blockSite().catch((error) => console.error('[background] block site failed:', error));
       const usd = Number(response.allowanceUsd ?? 0);
@@ -5821,6 +5824,7 @@ if (!(
           baskets: trustedBasketsFrom(result.granted as (BundledRequest & BundleRequest)[]),
         } as Parameters<typeof accountContext.permissionStore.putGrant>[0]);
       }
+      settling = true;
       await Promise.all([
         ...result.granted.map(async (r) => {
           const pending = pendingPermissionRequests.get(r.requestID);
@@ -5845,6 +5849,10 @@ if (!(
           if (!response.block) noteBasketDenial(r as BundleRequest);
           try {
             await wallet?.denyPermission(r.requestID);
+          } catch (error) {
+            // The manager no longer holds it ("Request ID not found."): nothing left to deny. Never fail the whole
+            // answer for it once grants in this bundle have gone through (review N2).
+            console.warn('[background] denyPermission failed:', r.requestID, error);
           } finally {
             pending.reject(userDeniedError());
           }
@@ -5857,14 +5865,21 @@ if (!(
       'Something went wrong finishing this approval. Any request it could not finish was refused; ask the site to try again.';
     work
       .catch((error) => {
-        workFailed = true;
         console.error('[background] bundle response failed:', error);
-        // Every waiting request gets an outcome (review F3): any this answer did not settle is refused, so nothing is
-        // paid for it and its caller is not left waiting. Requests already settled are not in the map any more.
+        if (settling) return; // grants may have gone through: the sheet is not told to retry (N2)
+        workFailed = true;
+        // Every waiting request gets an outcome (review F3, N1): any this answer did not settle is refused, both the
+        // background's caller and the permissions manager's own request (as failUnshownPrompt does), so the site's call
+        // rejects instead of hanging, and a later identical request can't piggyback on a hung one. Nothing is granted.
+        const err = new Error(BUNDLE_UNFINISHED);
         rejectStillPending(
           [...result.granted, ...result.denied].map((r) => r.requestID),
           pendingPermissionRequests,
-          new Error(BUNDLE_UNFINISHED),
+          err,
+          (id) => {
+            if (!isReconnectRequestId(id) && !isSealRequestId(id))
+              rejectManagerRequest(wallet, id, err).catch(() => undefined);
+          },
         );
       })
       .finally(() => {

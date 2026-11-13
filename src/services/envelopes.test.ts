@@ -650,5 +650,49 @@ describe('review of fix/envelope-queue (13 Nov 2026): deadlines, carrying on, fa
     expect(await new EnvelopeStore(be('x2')).get(A)).toBeUndefined();
     expect(await new EnvelopeStore(be('z2')).get(A)).toBeUndefined();
   });
+
+  test('re-review: on a browser without Web Locks, Coin return / Revoke all still close the envelope; fill and spend stay refused', async () => {
+    requireSharedEnvelopeLock();
+    const cell = sharedCell();
+    try {
+      requireSharedEnvelopeLock(false);
+      await new EnvelopeStore(cell.backend('bwxEnvelopes:acct-nolock-close')).fill(A, 100);
+      requireSharedEnvelopeLock();
+      const store = new EnvelopeStore(cell.backend('bwxEnvelopes:acct-nolock-close'));
+      await expect(store.trySpend(A, 1)).rejects.toThrow(ENVELOPE_LOCK_UNAVAILABLE);
+      await expect(store.fill(A, 1)).rejects.toThrow(ENVELOPE_LOCK_UNAVAILABLE);
+      expect(
+        await closeEnvelopeInAccounts(['acct-nolock-close'], A, () => cell.backend('bwxEnvelopes:acct-nolock-close')),
+      ).toBe(100);
+      expect(cell.raw()?.envelopes[A]).toBeUndefined();
+    } finally {
+      requireSharedEnvelopeLock(false);
+    }
+  });
+
+  test('N3: while a write is stuck past its deadline, this process refuses the key at once (no 15 s wait each time)', async () => {
+    const cell = sharedCell();
+    const key = 'bwxEnvelopes:acct-stuck';
+    let finish!: () => void;
+    const stuck: EnvelopeBackend = {
+      key,
+      load: () => cell.backend(key).load(),
+      save: (st) => new Promise<void>((r) => (finish = () => void cell.backend(key).save(st).then(r))),
+    };
+    await new EnvelopeStore(cell.backend(key)).fill(A, 100);
+    const timeoutMs = 60;
+    const first = new EnvelopeStore(stuck, Date.now, { timeoutMs }).trySpend(A, 10);
+    await expect(first).rejects.toBeInstanceOf(EnvelopeUnavailableError);
+    await new Promise((r) => setTimeout(r, timeoutMs));
+    const t0 = Date.now();
+    await expect(new EnvelopeStore(cell.backend(key), Date.now, { timeoutMs: 5_000 }).get(A)).rejects.toThrow(
+      ENVELOPE_TIMED_OUT,
+    );
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    finish();
+    await new Promise((r) => setTimeout(r, 20));
+    // Settled: the key works again and reads the write that landed.
+    expect((await new EnvelopeStore(cell.backend(key)).get(A))?.balanceSats).toBe(90);
+  });
 });
 

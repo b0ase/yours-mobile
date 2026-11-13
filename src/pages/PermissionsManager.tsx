@@ -320,6 +320,12 @@ export const PermissionsManager = ({ onBack: _onBack }: PermissionsManagerProps)
         if (env) await coinReturn(env.originator);
       } else {
         addSnackbar(response.error || 'Revoke failed', 'error');
+        // Partly revoked (the background ran every step and reports the ones that failed): reload, so the list shows
+        // what is left rather than what was there before.
+        if (typeof response.data?.revokedCount === 'number') {
+          await loadData();
+          await loadEnvelopes();
+        }
         return;
       }
 

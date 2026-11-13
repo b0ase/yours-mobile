@@ -31,12 +31,23 @@ type Waiting = { reject: (error: Error) => void };
  * Reject (and forget) every request in `ids` still waiting in `pending`. Requests already taken out of the map were
  * settled by their own path and are left alone, so no request is answered twice. Returns how many were rejected.
  */
-export function rejectStillPending(ids: readonly string[], pending: Map<string, Waiting>, error: Error): number {
+export function rejectStillPending(
+  ids: readonly string[],
+  pending: Map<string, Waiting>,
+  error: Error,
+  /** Also settle the other side of the request (the permissions manager's own pending call), once per id. */
+  onEach?: (id: string) => void,
+): number {
   let n = 0;
   for (const id of ids) {
     const p = pending.get(id);
     if (!p) continue;
     pending.delete(id);
+    try {
+      onEach?.(id);
+    } catch {
+      /* the background's own reject below still runs */
+    }
     p.reject(error);
     n++;
   }
