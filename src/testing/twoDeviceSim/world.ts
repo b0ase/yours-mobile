@@ -6,8 +6,8 @@
  *    internalizeAction / abortAction / listNoSendActions, the toolbox's sync (syncFromReader / syncToWriter / chunks);
  *  - legacy action batches (services/actionBatchMode.ts), so a noSend payment is written to storage when it is signed;
  *  - device sync as initWallet wires it: createDeviceSync (services/deviceSync.ts) with the pull initWallet runs
- *    (pullThenAdmitSoon, requestFullPass, requestTailPass, withFullPassMode 'slice', withDeadlines, syncFromReader)
- *    and the push (makeBackupPush / pushView); the inbound guard (installInboundSyncGuard, registerInboundVerifier)
+ *    (pullThenAdmitSoon, requestFullPass, requestTailPass, withFullPassMode 'slice', withDeadlines, syncFromReader,
+ *    then pullIntegrity's afterPull on builds that have it, loaded by URL: postPullStep) and the push (makeBackupPush / pushView); the inbound guard (installInboundSyncGuard, registerInboundVerifier)
  *    with the production verifier shape (walletOwnership, walletRecords, eitherChainSource over wocChainLookups +
  *    oneSatChainLookups); admission (admitPending);
  *  - autoCoinResync (runAutoResyncIfDue → autoResyncCoins) with background.ts's deps (readAutoResyncCoins, the same
@@ -318,6 +318,30 @@ export class World {
             log('[deviceSync] the backup has rows this device never had (pushed late): pulling from the first');
           const bounded = withDeadlines(reader as object) as Parameters<typeof sm.syncFromReader>[1];
           await withFullPassMode(sik, 'slice', () => sm.syncFromReader(this.identityKey, bounded));
+          // The app's post-pull step, on a build that has one (services/pullIntegrity.ts, fix/sync-atomic-pull),
+          // wired as initWallet wires it: the backup's output rows read with findOutputsAuth.
+          const integrity = await postPullStep();
+          if (integrity) {
+            const r = await integrity
+              .afterPull({
+                manager: sm,
+                store: s,
+                identityKey: this.identityKey,
+                readerSik: backupSik,
+                backupOutputs: async (backupTxId: number) => {
+                  const m = managed._backups?.[0] as { storage: StorageIdb; user?: { userId: number } } | undefined;
+                  if (!m) throw new Error('backup storage is not connected');
+                  return m.storage.findOutputsAuth({ identityKey: this.identityKey, userId: m.user?.userId } as never, {
+                    partial: { transactionId: backupTxId },
+                    noScript: true,
+                  });
+                },
+                stop: () => false,
+                log,
+              })
+              .catch((e: unknown) => void log('[sync-integrity] the coin check after the pull did not run:', e));
+            if (r?.plan && r.plan !== 'none') log(`[deviceSync] after the pull: ${r.plan}`);
+          }
           return undefined;
         },
         () => undefined,
@@ -912,6 +936,33 @@ export class World {
     this.chain.fault(source, kind, n);
   }
 }
+
+/**
+ * The app's post-pull step (services/pullIntegrity.ts afterPull), when the build under test has it. Loaded by URL so
+ * the harness still runs on builds without it (origin/bwallet 5.2.54): there the pull ends at syncFromReader, as
+ * initWallet's does.
+ */
+type PostPullStep = {
+  afterPull: (o: {
+    manager: unknown;
+    store: unknown;
+    identityKey: string;
+    readerSik: string;
+    backupOutputs: (backupTxId: number) => Promise<unknown[]>;
+    stop?: () => boolean;
+    log?: (m: string) => void;
+  }) => Promise<{ plan?: string } | undefined>;
+};
+let postPull: Promise<PostPullStep | undefined> | undefined;
+export const postPullStep = (): Promise<PostPullStep | undefined> =>
+  (postPull ??= import(/* @vite-ignore */ new URL('../../services/pullIntegrity.ts', import.meta.url).href).then(
+    (m: Partial<PostPullStep>) => (typeof m.afterPull === 'function' ? (m as PostPullStep) : undefined),
+    (e: unknown) => {
+      // Only "this build has no such file" means "no post-pull step"; a module that fails to load is a failure.
+      if (/cannot find module|module not found/i.test(String((e as Error)?.message ?? e))) return undefined;
+      throw e;
+    },
+  ));
 
 /** A push that fails while the device is offline. */
 const offlineGuard =
