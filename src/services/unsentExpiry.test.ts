@@ -721,6 +721,52 @@ describe('conflicted payments (an input spent on chain by a different, confirmed
     expect(detached).toEqual([]);
   });
 
+  test('a single-input payment whose input another device spent: cancelled only if the spender is not a copy of it', async () => {
+    // The two-device sim's shape: a 20k noSend from one 100k coin; the phone's 250k send spends that coin.
+    const OURS = { lockingScript: '76a914' + '11'.repeat(20) + '88ac', satoshis: 20_000 };
+    const one = (spender: { lockingScript: string; satoshis: number }[] | undefined | 'throw') => {
+      const c = conflictWorld();
+      c.w.deps.spenderOutputs = async () => {
+        if (spender === 'throw') throw new Error('429');
+        return spender;
+      };
+      return c;
+    };
+    const run = async (c: ReturnType<typeof conflictWorld>) => {
+      await due(c.w, {
+        ...act(A, [`${P}.0`]),
+        outputs: [OURS, { lockingScript: '76a914' + '22'.repeat(20) + '88ac', satoshis: 79_000 }],
+      });
+      c.w.spends.set(`${P}.0`, X);
+      c.conclusive.add(`${P}.0>${X}`);
+      return expireOnce(c.w.deps);
+    };
+    // A different payment (the phone's send): cancelled, the coin detached.
+    let c = one([{ lockingScript: '76a914' + '33'.repeat(20) + '88ac', satoshis: 250_000 }]);
+    let r = await run(c);
+    expect(r.released).toEqual([A]);
+    expect(c.detached).toEqual([`${A}:${P}.0>${X}`]);
+    // A spender paying all of our outputs (a malleated or re-signed copy?): kept.
+    c = one([OURS, { lockingScript: '76a914' + '22'.repeat(20) + '88ac', satoshis: 79_000 }]);
+    r = await run(c);
+    expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+    expect(c.w.aborted).toEqual([]);
+    // The spender can't be read (404 / 429): kept.
+    for (const x of [undefined, 'throw'] as const) {
+      c = one(x);
+      r = await run(c);
+      expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+      expect(c.detached).toEqual([]);
+    }
+    // Our own outputs unknown (no locking scripts listed): kept.
+    c = one([{ lockingScript: 'aa', satoshis: 1 }]);
+    await due(c.w, act(A, [`${P}.0`]));
+    c.w.spends.set(`${P}.0`, X);
+    c.conclusive.add(`${P}.0>${X}`);
+    r = await expireOnce(c.w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+  });
+
   test('after the abort the detached coins are re-marked spent; a failed re-mark does not undo the release', async () => {
     const { w, conclusive } = conflictWorld();
     const order: string[] = [];
