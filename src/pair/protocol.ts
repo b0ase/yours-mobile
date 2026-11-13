@@ -124,13 +124,65 @@ export function pairUrl(link: PairLink): string {
   return `https://${PAIR_HOST}/pair?${q}`;
 }
 
+/**
+ * The CLI's compact pairing code (owner, 13 Nov 2026: the full link made a 49-module QR that terminals draw badly).
+ * `BWX1:<channel>:<key>`, both RFC 4648 base32 without padding: uppercase only, so the QR uses alphanumeric mode
+ * (33 modules instead of 49). Only the CLI shows it, so the rest is implied: the default relay, the CLI origin (a
+ * claim, as the full link's `o` is) and the usual lifetime from now (the relay drops the channel at its own expiry).
+ */
+export const COMPACT_PAIR_PREFIX = 'BWX1:';
+const CLI_PAIR_ORIGIN = 'https://cli.bwalletx.com'; // = mobile/pair/agentPairing.ts CLI_ORIGIN
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+export const base32 = (bytes: Uint8Array) => {
+  let out = '';
+  let acc = 0;
+  let bits = 0;
+  for (const b of bytes) {
+    acc = (acc << 8) | b;
+    bits += 8;
+    while (bits >= 5) out += B32[(acc >>> (bits -= 5)) & 31];
+  }
+  return bits ? out + B32[(acc << (5 - bits)) & 31] : out;
+};
+export const fromBase32 = (s: string) => {
+  const out: number[] = [];
+  let acc = 0;
+  let bits = 0;
+  for (const ch of s) {
+    const v = B32.indexOf(ch);
+    if (v < 0) throw new Error('Bad pairing code');
+    acc = ((acc << 5) | v) & 0xffff;
+    bits += 5;
+    if (bits >= 8) out.push((acc >>> (bits -= 8)) & 255);
+  }
+  return Uint8Array.from(out);
+};
+/** `BWX1:…` → the equivalent full pairing link; null for anything else. Throws on a malformed compact code. */
+export function expandCompactPair(text: string, nowS = Math.floor(Date.now() / 1000)): string | null {
+  const t = text.trim().toUpperCase();
+  if (!t.startsWith(COMPACT_PAIR_PREFIX)) return null;
+  const [c32, k32, ...rest] = t.slice(COMPACT_PAIR_PREFIX.length).split(':');
+  if (!c32 || !k32 || rest.length) throw new Error('Bad pairing code');
+  const c = fromBase32(c32);
+  const k = fromBase32(k32);
+  if (c.length !== 16 || k.length !== 33) throw new Error('Bad pairing code');
+  return pairUrl({
+    v: PAIR_VERSION,
+    r: DEFAULT_RELAY,
+    c: b64url(c),
+    k: Array.from(k, (x) => x.toString(16).padStart(2, '0')).join(''),
+    o: CLI_PAIR_ORIGIN,
+    e: nowS + QR_LIFETIME_S,
+  });
+}
+
 /** Parse a scanned QR (https link or bwallet:// fallback). Throws on anything else. */
 export function parsePairUrl(
   text: string,
   nowS = Math.floor(Date.now() / 1000),
   opts: { allowLocalRelay?: boolean } = {},
 ): PairLink {
-  const u = new URL(text.trim());
+  const u = new URL(expandCompactPair(text, nowS) ?? text.trim());
   const ok =
     (u.protocol === 'https:' && PAIR_HOSTS.has(u.host) && u.pathname === '/pair') ||
     (u.protocol === 'bwallet:' && /pair/.test(u.href));

@@ -41,6 +41,9 @@ describe('parseScan', () => {
   test('pairing codes go to pairing', () => {
     const link = 'https://www.bwallet.space/pair?v=1&r=relay.example&c=x&k=y&o=https://a.b&e=1';
     expect(parseScan(link)).toEqual({ kind: 'pair', text: link });
+    // The CLI's compact code (pair/protocol.ts expandCompactPair) goes to pairing too.
+    const compact = 'BWX1:AAAQEAYEAUDAOCAJBIFQYDIOB4:AKV2XK5LVOV2XK5LVOV2XK5LVOV2XK5LVOV2XK5LVOV2XK5LVOV2W';
+    expect(parseScan(compact)).toEqual({ kind: 'pair', text: compact });
   });
 
   test('junk is text', () => {

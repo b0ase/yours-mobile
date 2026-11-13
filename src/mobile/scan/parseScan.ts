@@ -101,7 +101,7 @@ export const parseScan = (raw: string | null | undefined): Scan => {
   const text = (raw ?? '').trim();
   if (!text) return { kind: 'text', text: '' };
 
-  if (isPairLink(text) || /^bwallet:.*pair/i.test(text)) return { kind: 'pair', text };
+  if (isPairLink(text) || /^bwallet:.*pair/i.test(text) || /^BWX1:/i.test(text)) return { kind: 'pair', text };
   // bwalletx://pair?… (site/pair.html's app-scheme button; pair/links.ts pairLinkFrom): the same https pair URL.
   const appPair = appSchemePair(text);
   if (appPair) return { kind: 'pair', text: appPair };
