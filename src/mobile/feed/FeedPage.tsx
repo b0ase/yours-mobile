@@ -2004,7 +2004,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
 
   return (
     <div
-      className="isolate flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+      className="bw-feed isolate flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <PullToRefresh onRefresh={() => load(tab)} />

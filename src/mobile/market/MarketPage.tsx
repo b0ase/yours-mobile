@@ -1109,7 +1109,7 @@ const MarketPage = () => {
 
   return (
     <div
-      className="flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+      className="bw-exchange flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <PullToRefresh

@@ -435,14 +435,14 @@ html:root .bw-sendrow > .bw-pill.bw-pill.bw-pill {
   border-radius: 0 !important;
 }
 
-/* ── The rounded leftovers (owner, 10 Nov 2026): Exchange, chat list, chat room, sheets, Ask b ──
+/* ── The rounded leftovers (owner, 10 Nov 2026; Feed 13 Nov): Exchange, Feed, chat list, chat room, sheets, Ask b ──
    Screens write Tailwind radii (rounded-xl…) in the markup, so these rules match the utility by class token inside a
-   screen's root (.bw-exchange, .bw-chatlist, .bw-room-view, .bw-askchat) or a sheet. Same two techniques as above:
+   screen's root (.bw-exchange, .bw-feed, .bw-chatlist, .bw-room-view, .bw-askchat) or a sheet. Same two techniques as above:
    - Panels, inputs, bubbles and anything that may carry a border or repeat: the small --bw-corner box, no clip.
    - Filled buttons (no `border` class) and sheets: the clipped cut, static elements only.
    Left round on purpose: the wallet credit card and its pills, the b button (.askb-bar's talk b, the dock b), avatars,
    count badges and any rounded-full without a text-button shape (icon hit areas, dots, tags). */
-:is(.bw-exchange, .bw-chatlist, .bw-room-view, .bw-askchat, [class~='rounded-t-3xl'])
+:is(.bw-exchange, .bw-feed, .bw-chatlist, .bw-room-view, .bw-askchat, [class~='rounded-t-3xl'])
   :is(
     [class~='rounded'],
     [class~='rounded-md'],
@@ -454,7 +454,7 @@ html:root .bw-sendrow > .bw-pill.bw-pill.bw-pill {
   border-radius: var(--bw-corner) !important;
 }
 /* Filled buttons: cut corners. A bordered button would lose its outline at the cut, so it keeps the small corner above. */
-:is(.bw-exchange, .bw-chatlist, .bw-room-view, .bw-askchat, [class~='rounded-t-3xl'])
+:is(.bw-exchange, .bw-feed, .bw-chatlist, .bw-room-view, .bw-askchat, [class~='rounded-t-3xl'])
   button:is([class~='rounded-xl'], [class~='rounded-2xl'], [class~='rounded-full'][class*='px-3']):not(
     [class~='border'],
     [class~='p-2'],
@@ -472,6 +472,34 @@ html:root .bw-sendrow > .bw-pill.bw-pill.bw-pill {
 .yours-sheet-secondary:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--bw-text) !important;
+}
+/* Pills on Exchange, Feed and the chat list (owner, 13 Nov 2026: "chamfer buttons in Exchange, Feed and Chat"): text
+   pills, chips and segmented controls lose their round ends. Fixed-size round things stay round: avatars, icon buttons
+   (fixed width or height, or p-2), the compose button and count dots. Bordered pills get the small corner; filled ones the cut. */
+:is(.bw-exchange, .bw-feed, .bw-chatlist)
+  :is(
+    button,
+    a,
+    [role='tab'],
+    [role='button'],
+    div[class~='p-0.5'],
+    div[class~='p-[3px]'],
+    .bw-feed-chip,
+    .bw-feed-sort
+  ):is([class~='rounded-full'], .bw-feed-chip, .bw-feed-sort):not(
+    [class*=' h-'],
+    [class^='h-'],
+    [class~='p-2'],
+    [class~='p-[2px]'],
+    img
+  ) {
+  border-radius: var(--bw-corner) !important;
+}
+:is(.bw-exchange, .bw-feed, .bw-chatlist) :is(.bw-pill, .bw-feed-chip.is-on),
+:is(.bw-exchange, .bw-feed, .bw-chatlist)
+  button[class~='rounded-full'][class~='flex-1']:not([class~='border'], [style*='border']) {
+  border-radius: 0 !important;
+  clip-path: var(--bw-cut);
 }
 /* Ask b: the bar and its reply bubbles. The bar has a border, so a small corner; its b button stays circular. */
 .askb-bar,
