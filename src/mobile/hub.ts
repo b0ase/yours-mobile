@@ -1,5 +1,8 @@
+import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
+import { applyAtomically } from './atomicStorage';
 import { YoursNative } from './native';
+import { freeDisposableCaches } from './storageCaches';
 import type { HostOp, Sender, StorageArea, StorageChanges, ToEndpoint, ToHub } from './protocol';
 
 /**
@@ -99,6 +102,15 @@ export const nativeLocalBackend: LocalBackend = {
     return out;
   },
   async apply(sets, removes) {
+    // Web (web.bwalletx.com): native.ts keeps these as `secure:` items in localStorage. Written all-or-nothing: a full
+    // localStorage must never leave a new salt beside old accounts (a lockout; re-review R2). Phones: one Keychain /
+    // Keystore item per key, as before (see the note in the review report).
+    if (!Capacitor.isNativePlatform()) {
+      return applyAtomically(localStorage, sets, removes, {
+        prefix: WEB_SECURE_PREFIX,
+        freeSpace: () => freeDisposableCaches(localStorage),
+      });
+    }
     await Promise.all([
       ...Object.entries(sets).map(([key, value]) => YoursNative.secureSet({ key, value })),
       ...removes.map((key) => YoursNative.secureRemove({ key })),
@@ -110,6 +122,9 @@ export const nativeLocalBackend: LocalBackend = {
     return out;
   },
 };
+
+/** The prefix native.ts's web fallback puts on secure items in localStorage. */
+export const WEB_SECURE_PREFIX = 'secure:';
 
 const clone = <T>(value: T): T => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
 
@@ -127,6 +142,10 @@ export class Hub {
   private freshQueue: Promise<unknown> = Promise.resolve();
   private storageReady: Promise<void>;
   private fenced = false;
+  /** storage.local values as last saved (loaded, re-read, or a write that went through): what a refused write restores. */
+  private confirmed = new Map<string, unknown>();
+  /** Per storage.local key: how many set/remove attempts it has had, no-ops included (rollback ownership, R1). */
+  private writeSeq = new Map<string, number>();
   private backgroundReady: Promise<void>;
   private resolveBackgroundReady!: () => void;
 
@@ -308,6 +327,7 @@ export class Hub {
     for (const [key, value] of Object.entries(await this.backend.load())) {
       if (key.startsWith(LOCAL_PREFIX)) this.local.set(key.slice(LOCAL_PREFIX.length), JSON.parse(value));
     }
+    this.confirmed = new Map(this.local);
   }
 
   private persist(ops: Array<[string, unknown]>) {
@@ -349,12 +369,14 @@ export class Hub {
       const raw = stored[LOCAL_PREFIX + key];
       const oldValue = this.local.get(key);
       if (raw === null || raw === undefined) {
+        this.confirmed.delete(key);
         if (!this.local.has(key)) continue;
         this.local.delete(key);
         changes[key] = { oldValue };
         continue;
       }
       const value = JSON.parse(raw) as unknown;
+      this.confirmed.set(key, value);
       if (JSON.stringify(oldValue) === JSON.stringify(value)) continue;
       this.local.set(key, value);
       changes[key] = oldValue === undefined ? { newValue: value } : { oldValue, newValue: value };
@@ -406,19 +428,26 @@ export class Hub {
     try {
       const { result, changes } = this.applyStorageOp(store, msg.op, msg.arg);
       if (msg.area === 'local' && changes) {
+        // Every key's attempt count as this op left it: a later attempt on the key (even a no-op) owns it from then.
+        const seqAt = new Map(Object.keys(changes).map((k) => [k, this.writeSeq.get(k) ?? 0]));
         try {
           const write = this.persist(Object.entries(changes).map(([key, change]) => [key, change.newValue]));
           // The queue never holds a failure: one refused write (the one-tab fence could not confirm, a full
           // localStorage) must not fail every later write until a reload (re-review A). This write still fails.
           this.persistQueue = write.catch(() => undefined);
           await write;
-        } catch (error) {
-          // Not saved: take it back out of this hub's copy too (unless a later op changed the key since), so the copy
-          // never holds a value localStorage doesn't.
+          // Saved: writes reach the backend in queue order, so these are now the stored values.
           for (const [key, change] of Object.entries(changes)) {
-            if (JSON.stringify(store.get(key)) !== JSON.stringify(change.newValue)) continue;
-            if (change.oldValue === undefined) store.delete(key);
-            else store.set(key, change.oldValue);
+            if (change.newValue === undefined) this.confirmed.delete(key);
+            else this.confirmed.set(key, change.newValue);
+          }
+        } catch (error) {
+          // Not saved (and the backend wrote none of it): put this hub's copy back to what is stored, for every key
+          // no later op has touched since (re-review R1: a later identical set owns the key and persists it itself).
+          for (const key of Object.keys(changes)) {
+            if ((this.writeSeq.get(key) ?? 0) !== seqAt.get(key)) continue;
+            if (this.confirmed.has(key)) store.set(key, this.confirmed.get(key));
+            else store.delete(key);
           }
           throw error;
         }
@@ -428,8 +457,14 @@ export class Hub {
       }
       this.send(from, { t: 'storageResult', reqId: msg.reqId, result });
       // Chrome fires onChanged in every context, the writer included.
-      if (changes && Object.keys(changes).length > 0) {
-        this.broadcast({ t: 'storageChanged', area: msg.area as StorageArea, changes });
+      // A re-write of an unsaved value (applyStorageOp) is no change to the contexts: left out.
+      const visible = changes
+        ? Object.fromEntries(
+            Object.entries(changes).filter(([, c]) => JSON.stringify(c.oldValue) !== JSON.stringify(c.newValue)),
+          )
+        : {};
+      if (Object.keys(visible).length > 0) {
+        this.broadcast({ t: 'storageChanged', area: msg.area as StorageArea, changes: visible });
       }
     } catch (error) {
       this.send(from, { t: 'storageResult', reqId: msg.reqId, error: String(error) });
@@ -467,17 +502,26 @@ export class Hub {
     }
 
     const changes: StorageChanges = {};
+    const local = store === this.local;
     if (op === 'set') {
       for (const [key, raw] of Object.entries(clone(arg as Record<string, unknown>))) {
         const oldValue = store.get(key);
         if (raw === undefined) continue;
-        if (JSON.stringify(oldValue) === JSON.stringify(raw)) continue;
+        if (local) this.writeSeq.set(key, (this.writeSeq.get(key) ?? 0) + 1);
+        // Same as this hub's copy: a no-op, unless that value isn't saved yet (an earlier write still going out, or
+        // refused): then this set writes it too, so its "ok" is true even if the earlier write fails (re-review R1).
+        if (JSON.stringify(oldValue) === JSON.stringify(raw)) {
+          if (!local || JSON.stringify(this.confirmed.get(key)) === JSON.stringify(raw)) continue;
+          changes[key] = { oldValue, newValue: raw };
+          continue;
+        }
         store.set(key, raw);
         changes[key] = oldValue === undefined ? { newValue: raw } : { oldValue, newValue: raw };
       }
     } else {
       const keys = op === 'clear' ? [...store.keys()] : typeof arg === 'string' ? [arg] : (arg as string[]);
       for (const key of keys) {
+        if (local) this.writeSeq.set(key, (this.writeSeq.get(key) ?? 0) + 1);
         if (!store.has(key)) continue;
         changes[key] = { oldValue: store.get(key) };
         store.delete(key);
