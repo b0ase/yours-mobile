@@ -6,7 +6,7 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { OneSatContext } from '@1sat/actions';
+import { ORDINALS_BASKET, type OneSatContext } from '@1sat/actions';
 // The real actions as their own module instance (`?unmocked`): other test files patch '@1sat/actions' with
 // mock.module, and in one bun run that patch outlives their file.
 import { buyBsv21 } from '../../../node_modules/@1sat/actions/dist/tokens/index.js?unmocked';
@@ -169,11 +169,12 @@ describe('verifyOrdinalPurchaseArgs', () => {
   const price = 10_000;
   const { beef, outpoint } = nftListing(price);
   const inputBEEF = beef.toBinary();
-  const receive = { lockingScript: new P2PKH().lock(BUYER.toAddress()).toHex(), satoshis: 1 };
+  const receive = { lockingScript: new P2PKH().lock(BUYER.toAddress()).toHex(), satoshis: 1, basket: ORDINALS_BASKET };
   const e = {
     outpoint,
     priceSats: price,
     receiveScript: receive.lockingScript,
+    baskets: [ORDINALS_BASKET],
     marketFee: { address: MARKET, sats: 100 },
   };
   const good = { inputs: [{ outpoint }], inputBEEF, outputs: [receive, pay(SELLER, price), pay(MARKET, 100)] };
@@ -186,6 +187,14 @@ describe('verifyOrdinalPurchaseArgs', () => {
     bad(() => verifyOrdinalPurchaseArgs({ ...good, outputs: [pay(addr(), 1), pay(SELLER, price)] }, e)));
   test('rejects an extra payout', () =>
     bad(() => verifyOrdinalPurchaseArgs({ ...good, outputs: [...good.outputs, pay(addr(), 5)] }, e)));
+  test('rejects our receive output outside the wallet baskets', () => {
+    bad(() =>
+      verifyOrdinalPurchaseArgs({ ...good, outputs: [{ ...receive, basket: undefined }, pay(SELLER, price)] }, e),
+    );
+    bad(() =>
+      verifyOrdinalPurchaseArgs({ ...good, outputs: [{ ...receive, basket: 'other' }, pay(SELLER, price)] }, e),
+    );
+  });
   test('rejects a fee above the sheet', () =>
     bad(() => verifyOrdinalPurchaseArgs({ ...good, outputs: [receive, pay(SELLER, price), pay(MARKET, 101)] }, e)));
   test('rejects a foreign extra input', () =>

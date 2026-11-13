@@ -3,6 +3,8 @@
  * checks before paying, and the two outputs it sends. bWalletX only: imported by the lazy ticket sheet, never by
  * a store build (paid entry is a digital sale there, storeBuild.ts).
  */
+import { maxSatsForCents } from '../exchange/curveSales';
+
 const norm = (t: string | null | undefined) => (t ?? '').replace(/^\$/, '').toUpperCase();
 
 export interface TicketPay {
@@ -42,8 +44,11 @@ export const parseTicketCard = (raw: unknown): TicketCard | null => {
 
 export type TicketCheck = { ok: true; pay: TicketPay; usd: number } | { ok: false; why: string };
 
-/** Defence in depth: the wallet pays only a penny-scale ticket, for me, to this room, with my reference. */
-export const checkTicket = (card: TicketCard | null, ticker: string, me: string): TicketCheck => {
+/**
+ * Defence in depth: the wallet pays only a penny-scale ticket, for me, to this room, with my reference, and no more
+ * sats than its USD price at this wallet's BSV rate (`usdPerBsv`, tolerance included).
+ */
+export const checkTicket = (card: TicketCard | null, ticker: string, me: string, usdPerBsv: number): TicketCheck => {
   if (!card) return { ok: false, why: 'Room not found' };
   if (norm(card.room.ticker) !== norm(ticker)) return { ok: false, why: 'Room mismatch; not paying' };
   const t = card.ticket;
@@ -54,10 +59,31 @@ export const checkTicket = (card: TicketCard | null, ticker: string, me: string)
   if (!P2PKH.test(p.address)) return { ok: false, why: 'The payment address looks wrong; not paying' };
   if (!Number.isInteger(p.sats) || p.sats <= 0 || p.sats !== t.sats)
     return { ok: false, why: 'The amount looks wrong; not paying' };
+  if (!(usdPerBsv > 0)) return { ok: false, why: 'Couldn’t get the BSV price. Try again in a minute.' };
+  if (p.sats > maxSatsForCents(t.usd * 100, usdPerBsv))
+    return { ok: false, why: 'The amount is more than the ticket price; not paying' };
   const ref = ticketReference(ticker, me);
   if (p.reference !== ref || p.data.length !== 1 || p.data[0] !== hexOf(ref))
     return { ok: false, why: 'The ticket reference is wrong; not paying' };
   return { ok: true, pay: p, usd: t.usd };
+};
+
+/** What the ticket sheet showed: these sats, to this address, for this payee. */
+export type ShownTicket = { sats: number; address: string; payee: string };
+
+/** At Allow: the re-read ticket passes checkTicket AND is still exactly the one on the sheet, or nothing is paid. */
+export const recheckTicket = (
+  card: TicketCard | null,
+  ticker: string,
+  me: string,
+  usdPerBsv: number,
+  shown: ShownTicket,
+): TicketCheck => {
+  const c = checkTicket(card, ticker, me, usdPerBsv);
+  if (!c.ok) return c;
+  if (c.pay.sats !== shown.sats || c.pay.address !== shown.address || (card?.ticket?.payee ?? '') !== shown.payee)
+    return { ok: false, why: 'The ticket changed since you opened it; not paying. Close and try again.' };
+  return c;
 };
 
 /** The two outputs: the room's payee, and my ticket reference (so the payment is provably mine). */

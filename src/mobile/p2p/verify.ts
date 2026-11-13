@@ -206,6 +206,8 @@ export type OrdinalPurchaseExpect = {
   priceSats: number;
   /** Our receive script (P2PKH to the key buyOrdinal derives from the outpoint). */
   receiveScript: string;
+  /** Wallet baskets the bought ordinal may land in (buyOrdinal picks by content type). */
+  baskets: readonly string[];
   /** Fee output shown on the sheet (the marketplace / ticket resale fee), at most `sats`. */
   marketFee: { address: string; sats: number } | null;
 };
@@ -249,7 +251,7 @@ export function verifyOrdinalPurchaseArgs(args: CheckArgs, e: OrdinalPurchaseExp
   let market = 0;
   for (const o of args.outputs ?? []) {
     if (o.lockingScript === e.receiveScript && receive === 0) {
-      if (o.satoshis !== 1) fail('the ordinal is not coming to your wallet');
+      if (o.satoshis !== 1 || !e.baskets.includes(o.basket ?? '')) fail('the ordinal is not coming to your wallet');
       receive += 1;
       continue;
     }

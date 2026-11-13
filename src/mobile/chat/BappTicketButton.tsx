@@ -22,8 +22,25 @@ import { celebrateSend } from '../../components/sent/sent';
 import { useBackClose } from '../backStack';
 import { loadSession } from './api';
 import type { Bapp } from './bappRooms';
-import { checkTicket, fetchTicketCard, recordTicket, ticketLabel, ticketRequests, type TicketCard } from './bappTicket';
-import { fetchQuote, pickCurveListing, recordPurchase, supporterBadge, centsLabel } from '../exchange/curveSales';
+import {
+  checkTicket,
+  fetchTicketCard,
+  recheckTicket,
+  recordTicket,
+  ticketLabel,
+  ticketRequests,
+  type ShownTicket,
+  type TicketCard,
+} from './bappTicket';
+import {
+  centsLabel,
+  curveHeadlineCents,
+  fetchQuote,
+  pickCurveListing,
+  recordPurchase,
+  supporterBadge,
+} from '../exchange/curveSales';
+import { fetchExchangeRate } from '../../utils/exchangeRate';
 import { roomMarket, clearMarketCache, type Listing } from '../market/indexer';
 import { marketFeeOptions, marketFeeSats } from '../market/fee';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
@@ -37,7 +54,7 @@ const MUTED = '#8a8f98';
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type Sheet =
-  | { kind: 'door'; usd: number; sats: number; payee: string }
+  | ({ kind: 'door'; usd: number } & ShownTicket)
   | { kind: 'curve'; cents: number; supporter: number | null; listing: Listing };
 
 export const BappTicketButton = ({
@@ -75,6 +92,7 @@ export const BappTicketButton = ({
   }, [bapp.ticker, me]);
 
   const isIn = member || !!card?.member;
+  const rate = () => fetchExchangeRate(apiContext.chain, apiContext.wocApiKey);
   const members = card?.room.members;
 
   const start = async () => {
@@ -96,17 +114,27 @@ export const BappTicketButton = ({
             () => null,
           );
           const l = pickCurveListing(q.listings, m?.listings ?? []);
-          if (l)
-            return setSheet({ kind: 'curve', cents: q.price_usd_cents * q.pack, supporter: q.supporter, listing: l });
+          if (l) {
+            // The headline is the picked listing's own price (what gets signed), not just the server's quote.
+            const cents = curveHeadlineCents(q.price_usd_cents * q.pack, l.priceSats, await rate());
+            if (cents === null) throw new Error('Couldn’t get the BSV price. Try again in a minute.');
+            return setSheet({ kind: 'curve', cents, supporter: q.supporter, listing: l });
+          }
         }
       }
       // The door fee.
       const fresh = await fetchTicketCard(bapp.ticker, loadSession()?.token ?? null);
       setCard(fresh);
       if (fresh?.member) return onEnter();
-      const c = checkTicket(fresh, bapp.ticker, me);
+      const c = checkTicket(fresh, bapp.ticker, me, await rate());
       if (!c.ok) throw new Error(c.why);
-      setSheet({ kind: 'door', usd: c.usd, sats: c.pay.sats, payee: fresh?.ticket?.payee ?? '' });
+      setSheet({
+        kind: 'door',
+        usd: c.usd,
+        sats: c.pay.sats,
+        address: c.pay.address,
+        payee: fresh?.ticket?.payee ?? '',
+      });
     } catch (e) {
       addSnackbar(errText(e), 'error');
     } finally {
@@ -114,14 +142,15 @@ export const BappTicketButton = ({
     }
   };
 
-  const payDoor = async () => {
+  const payDoor = async (shown: ShownTicket) => {
     if (!me) return;
     setBusy('Paying…');
     setError('');
     try {
-      // Re-read and re-check right before paying: the quote is never older than this tap.
+      // Re-read and re-check right before paying: the quote is never older than this tap, and it must still be
+      // the ticket on the sheet (same sats, same address, same payee), or nothing is paid.
       const fresh = await fetchTicketCard(bapp.ticker, loadSession()?.token ?? null);
-      const c = checkTicket(fresh, bapp.ticker, me);
+      const c = recheckTicket(fresh, bapp.ticker, me, await rate(), shown);
       if (!c.ok) throw new Error(c.why);
       const res = await sendBsv.execute(apiContext, { requests: ticketRequests(c.pay) });
       if (!res.txid || res.error) throw new Error(getErrorMessage(res.error) || 'Payment failed');
@@ -231,7 +260,7 @@ export const BappTicketButton = ({
             }
             primary={{
               label: busy || 'Allow',
-              onClick: () => void (sheet.kind === 'door' ? payDoor() : buyCurve(sheet.listing)),
+              onClick: () => void (sheet.kind === 'door' ? payDoor(sheet) : buyCurve(sheet.listing)),
               busy: !!busy,
               disabled: !!busy,
             }}

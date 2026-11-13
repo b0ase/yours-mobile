@@ -7,7 +7,7 @@
  * Every Market / Exchange / agent buy goes through one of these: the listing's own script decides what the
  * wallet pays, so without the check the wallet would sign whatever the listing asks, not the price shown.
  */
-import { BSV21_BASKET, P1SAT_PROTOCOL, type OneSatContext } from '@1sat/actions';
+import { BSV21_BASKET, OPNS_BASKET, ORDINALS_BASKET, P1SAT_PROTOCOL, type OneSatContext } from '@1sat/actions';
 import { BSV21 } from '@1sat/templates';
 import { P2PKH, PublicKey } from '@bsv/sdk';
 import { marketFeeOptions, marketFeeSats } from '../market/fee';
@@ -96,6 +96,12 @@ export async function checkedOrdinalPurchaseContext<C extends OneSatContext>(
   const receiveScript = new P2PKH().lock(PublicKey.fromString(publicKey).toAddress()).toHex();
   const marketFee = shown.fee !== undefined ? shown.fee : feeFromOptions(marketFeeOptions(), shown.priceSats);
   return checkedContext(ctx, (args) =>
-    verifyOrdinalPurchaseArgs(args, { outpoint: shown.outpoint, priceSats: shown.priceSats, receiveScript, marketFee }),
+    verifyOrdinalPurchaseArgs(args, {
+      outpoint: shown.outpoint,
+      priceSats: shown.priceSats,
+      receiveScript,
+      baskets: [ORDINALS_BASKET, OPNS_BASKET],
+      marketFee,
+    }),
   );
 }

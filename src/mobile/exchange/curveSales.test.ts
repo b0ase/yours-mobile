@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
   centsLabel,
+  curveHeadlineCents,
   flatCents,
   joinSheetTitle,
   listingPriceSats,
@@ -88,6 +89,18 @@ describe('curve sales: seller', () => {
   test('price in sats at the USD rate', () => {
     expect(listingPriceSats(1, 1, 50)).toBe(20000);
     expect(listingPriceSats(1, 0, 50)).toBe(0);
+  });
+  test('curve headline: the quote only when the picked listing matches it, else the listing’s own price', () => {
+    // 1¢ quote at $50/BSV = 20,000 sats.
+    expect(curveHeadlineCents(1, 20_000, 50)).toBe(1);
+    expect(curveHeadlineCents(1, 21_000, 50)).toBe(1); // within tolerance (rates differ a little)
+    // A cheapest listing priced far above the quote: the sheet headlines what will be signed ($5), not 1¢.
+    expect(curveHeadlineCents(1, 10_000_000, 50)).toBe(500);
+    expect(centsLabel(curveHeadlineCents(1, 10_000_000, 50)!)).toBe('$5.00');
+    expect(curveHeadlineCents(1, 10_000, 50)).toBe(0.5);
+    // No rate (or no price): no headline to show; the caller refuses.
+    expect(curveHeadlineCents(1, 20_000, 0)).toBeNull();
+    expect(curveHeadlineCents(1, 0, 50)).toBeNull();
   });
   test('flat price form', () => {
     expect(flatCents('0.25')).toBe(25);
