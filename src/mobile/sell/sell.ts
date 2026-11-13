@@ -265,3 +265,24 @@ export const onListingsChanged = (fn: () => void) => {
   listeners.add(fn);
   return () => void listeners.delete(fn);
 };
+
+// ── opening the sheet (useSellSheet.tsx) ──
+
+const normTokenId = (id: string) => id.toLowerCase().replace('.', '_');
+
+/** What SellSheet needs to sell `tokenId`, from this wallet's balances (matched on the token ID, never the
+ *  ticker); null when the wallet holds none. */
+export const sellTargetFor = (
+  balances: readonly { id: string; sym?: string; dec?: number; all: { confirmed: bigint } }[],
+  tokenId: string,
+  fallbackSymbol = '',
+): { tokenId: string; symbol: string; dec: number; heldRaw: bigint } | null => {
+  const b = balances.find((x) => normTokenId(x.id || '') === normTokenId(tokenId));
+  if (!b || b.all.confirmed <= 0n) return null;
+  return {
+    tokenId: normTokenId(tokenId),
+    symbol: (b.sym || fallbackSymbol || tokenId.slice(0, 6)).replace(/^\$/, ''),
+    dec: normDec(b.dec),
+    heldRaw: b.all.confirmed,
+  };
+};

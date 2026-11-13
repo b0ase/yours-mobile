@@ -75,8 +75,7 @@ import { MyTokenListings } from '../sell/MyTokenListings';
 import { TokenDetails } from '../exchange/TokenDetails';
 import { TokenBoard } from '../exchange/TokenBoard';
 import { STALE_LISTING_MESSAGE, listingSpendState } from './tokenPage';
-import { sellRoute } from '../exchange/rowActions';
-import { useNavigate } from 'react-router-dom';
+import { useSellSheet } from '../sell/useSellSheet';
 import { SELL_ENABLED, ticketResaleFeeOptions, ticketResaleFeeSats } from '../sell/sell';
 import { TicketsPanel } from '../tickets/TicketsPanel';
 import { openTicketRoomInChat } from '../tickets/ticketRoom';
@@ -187,7 +186,6 @@ const nftSafe = (n: NftListing) =>
     .blocked;
 
 const MarketPage = () => {
-  const navigate = useNavigate();
   const { theme } = useTheme();
   const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
@@ -198,6 +196,8 @@ const MarketPage = () => {
   const [room, setRoom] = useState<HotRoom | null>(null);
   // The room on screen, read after an await (openRoom) to drop a stale market answer.
   const roomRef = useRef<HotRoom | null>(null);
+  // "List mine for sale" opens the sell sheet here (owner, 13 Nov 2026), not the trade screen.
+  const { openSell, sellSheet } = useSellSheet();
   roomRef.current = room;
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [gamesOpen, setGamesOpen] = useState(false);
@@ -961,7 +961,7 @@ const MarketPage = () => {
       {room.ref.kind === 'bsv21' && !ticketPage && SELL_ENABLED && TRADING && (
         <button
           type="button"
-          onClick={() => navigate(sellRoute(room.ref.id))}
+          onClick={() => void openSell(room.ref.id, room.title)}
           className="rounded-xl py-2.5 text-xs font-bold border"
           style={{ background: '#2a2208', color: 'var(--bw-accent-hi)', borderColor: '#3a2f0c' }}
         >
@@ -1139,6 +1139,7 @@ const MarketPage = () => {
       />
       <TopNav />
       {busy && <PageLoader theme={theme} message={busy} />}
+      {sellSheet}
       <div className="w-full px-4 pt-16 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-white flex items-center gap-1.5">

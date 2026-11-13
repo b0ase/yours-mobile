@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { buyBsv21 } from '@1sat/actions';
 import { ArrowLeft, Star } from 'lucide-react';
@@ -161,6 +161,15 @@ export const TradeView = ({
     const t = setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ block: 'start' }), 80);
     return () => clearTimeout(t);
   }, [id, hash]);
+  // A Sell link (sellRoute) opens the sell sheet straight away once the balance is known (owner, 13 Nov 2026:
+  // "the 'sell' card should come up straight away"); the order book stays on this page behind it. Once per visit.
+  const sellOpened = useRef<string | null>(null);
+  useEffect(() => {
+    if (hash !== `#${SELL_ANCHOR}` || sellOpened.current === id) return;
+    if (!SELL_ENABLED || !TRADING || meta === undefined || held === null || held <= 0n) return;
+    sellOpened.current = id;
+    setSelling({ tokenId: id, symbol: meta?.sym ?? id.slice(0, 8), dec: meta?.dec ?? 0, heldRaw: held });
+  }, [hash, id, meta, held]);
 
   const dec = meta?.dec ?? 0;
   const sym = meta?.sym ?? id.slice(0, 8);

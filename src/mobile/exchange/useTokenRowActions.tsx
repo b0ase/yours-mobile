@@ -9,7 +9,8 @@ import { asMenuItem } from '../tabs/tabs';
 import { requestChatRoom } from '../chat/nav';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { useBackClose } from '../backStack';
-import { buyRoute, chatDecision, heldTokenIds, infoRoute, sellRoute, tokenActionIds } from './rowActions';
+import { buyRoute, chatDecision, heldTokenIds, infoRoute, tokenActionIds } from './rowActions';
+import { useSellSheet } from '../sell/useSellSheet';
 import { loadRowPrefs, onRowPrefs, saveRowPrefs, toggleHidden, togglePinned, type RowPrefs } from './rowPrefs';
 import { HoldHint } from './TokenRowActions';
 import { useAlbums } from '../albums/useAlbums';
@@ -79,6 +80,8 @@ export const useTokenRowActions = () => {
   const navigate = useNavigate();
   const { handleSelect } = useBottomMenu();
   const held = useHeldTokenIds();
+  // Sell opens the sell sheet straight away, not the trade screen (owner, 13 Nov 2026).
+  const { openSell, sellSheet } = useSellSheet();
   const [prefs, updatePrefs] = useRowPrefs();
   const [hint, setHint] = useState<HintTarget | null>(null);
   useBackClose(!!hint, () => setHint(null));
@@ -129,7 +132,7 @@ export const useTokenRowActions = () => {
           label: 'Sell',
           icon: <Tag size={18} />,
           ...TRAY.second,
-          onPress: () => navigate(sellRoute(id)),
+          onPress: () => void openSell(id, title),
         };
       return {
         id: a,
@@ -218,6 +221,7 @@ export const useTokenRowActions = () => {
     <>
       {holdSheet}
       {folderSheet}
+      {sellSheet}
     </>
   );
 

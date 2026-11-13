@@ -21,7 +21,8 @@ import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
 import { useNavigate } from 'react-router-dom';
 import { SELL_ENABLED } from '../mobile/sell/sell';
 import { marketTradingEnabled } from '../mobile/storeBuild';
-import { buyRoute, sellRoute } from '../mobile/exchange/rowActions';
+import { buyRoute } from '../mobile/exchange/rowActions';
+import { useSellSheet } from '../mobile/sell/useSellSheet';
 import { TokenRowPanel, rowPanelActions } from '../mobile/wallet/TokenRowPanel';
 import { UndoToastHost } from '../mobile/swipe/undo';
 import { arrange, useTokenRows } from '../mobile/wallet/tokenRows';
@@ -92,6 +93,8 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
   const [tokens, setTokens] = useState<Bsv21Balance[]>([]);
   const [exchangeRate, setExchangeRate] = useState<number>(0);
   const ownId = useOwnPersonalTokenId();
+  // Sell opens the sell sheet right here (owner, 13 Nov 2026), not the trade screen's order book.
+  const { openSell, sellSheet } = useSellSheet();
 
   useEffect(() => {
     const loadExchangeRate = async () => {
@@ -217,7 +220,16 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
     const groups = arrange(inFolder, (t) => t.id, rowsState.pinned, rowsState.archived);
     const trading = marketTradingEnabled();
     const row = (t: Bsv21Balance) => {
-      const onSell = SELL_ENABLED && trading ? () => navigate(sellRoute(t.id)) : undefined;
+      const onSell =
+        SELL_ENABLED && trading
+          ? () =>
+              void openSell(t.id, getTokenName(t), {
+                tokenId: t.id,
+                symbol: getTokenName(t),
+                dec: t.dec,
+                heldRaw: t.all.confirmed,
+              })
+          : undefined;
       const open = expanded === t.id;
       const panelId = `token-panel-${t.id}`;
       return (
@@ -330,6 +342,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
             />
           </div>
         ))}
+        {sellSheet}
         {/* Archived rows live in Wallet › Hidden tokens (HiddenTokens.tsx). */}
         {filing && (
           <AddToAlbumSheet
