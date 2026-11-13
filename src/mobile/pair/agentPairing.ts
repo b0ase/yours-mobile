@@ -29,7 +29,7 @@ import {
   isPairableAgent,
 } from '../agents/agentAccounts';
 import { isPaused, PAUSED_MESSAGE } from '../config/killSwitch';
-import { runAgentAction } from '../agents/agentTrade';
+import { runAgentAction, type AgentActionHooks } from '../agents/agentTrade';
 import { serialSpend } from '../agents/spendQueue';
 import { getLoadedStrategy, getPaperBook, loadStrategy, parseStrategy } from '../agents/strategy';
 
@@ -112,6 +112,27 @@ export type AgentDeps = {
   mintMedia?: typeof mintMedia;
   /** The `spending` kill switch (config/killSwitch.ts); swappable for tests. */
   spendingPaused?: () => Promise<boolean>;
+  /**
+   * Is this pairing still live (not unpaired, lapsed or parked, same account and wallet open)? sessions.ts sets it per
+   * request. A spend waits in the queue behind other spends, so it is asked again inside the queued job and right
+   * before signing (b-Aware report, 13 Nov 2026). Missing = live (direct callers and tests with no session).
+   */
+  isLive?: () => boolean;
+  /** Swappable for tests: the trade run's own outside calls (agentTrade.ts AgentTradeIo). */
+  tradeIo?: AgentActionHooks['io'];
+};
+
+const NOT_PAIRED = 'This computer is no longer paired with bWalletX. Run `bwalletx login` again.';
+
+/** Refuse when the pairing was removed (or the account switched) since the request came in. Fails closed. */
+const assertLive = (deps: AgentDeps) => {
+  let ok: boolean;
+  try {
+    ok = deps.isLive ? deps.isLive() : true;
+  } catch {
+    ok = false;
+  }
+  if (!ok) throw new AgentCallError('UNPAIRED', NOT_PAIRED);
 };
 
 /**
@@ -124,6 +145,17 @@ const assertMaySpend = async (grant: AgentGrant, deps: AgentDeps) => {
     throw new AgentCallError('STOPPED', `${grant.name} is stopped in bWalletX.`);
   const paused = deps.spendingPaused ?? (() => isPaused('spending'));
   if (await paused().catch(() => true)) throw new AgentCallError('PAUSED', PAUSED_MESSAGE);
+};
+
+/**
+ * First thing inside a queued spend job, and its last look: the pairing is still live, the grant still allows the call
+ * (expiry, agent status), and Stop all / Stop / pause are off. Throws AgentCallError.
+ */
+const assertSpendJob = async (grant: AgentGrant, action: string, deps: AgentDeps) => {
+  assertLive(deps);
+  checkGrant(grant, action, deps.currentId);
+  await assertMaySpend(grant, deps);
+  assertLive(deps);
 };
 
 const uploads = new UploadStore();
@@ -202,7 +234,22 @@ export async function handleAgentCall(
       // Serialised like mint: checkAgentAction reads the log and the spend is logged only after it is
       // signed, so two parallel requests could both pass the daily cap (18 Oct 2026 review).
       const rate = await deps.bsvUsd();
-      const r = await serial(() => runAgentAction(deps.ctx, id, block, rate));
+      const r = await serial(async () => {
+        // The job may have waited behind a slow mint: unpaired, expired or Stopped meanwhile → nothing runs.
+        await assertSpendJob(grant, action, deps);
+        return runAgentAction(deps.ctx, id, block, rate, {
+          // Again after the listing / destination checks, right before signing (agentTrade.ts lastLook).
+          beforeSign: async () => {
+            try {
+              await assertSpendJob(grant, action, deps);
+              return null;
+            } catch (e) {
+              return e instanceof Error ? e.message : 'Refused';
+            }
+          },
+          io: deps.tradeIo,
+        });
+      });
       if (!r.ok) throw new AgentCallError('REFUSED', r.text);
       return { text: r.text, txid: r.txid ?? null };
     }
@@ -221,7 +268,10 @@ export async function handleAgentCall(
     case 'mint_upload':
       return wrapLimit(() => uploads.put(p as Parameters<UploadStore['put']>[0]));
     case 'mint':
-      return serial(() => runMint(grant, p, deps));
+      return serial(async () => {
+        await assertSpendJob(grant, action, deps);
+        return runMint(grant, p, deps);
+      });
   }
   throw new AgentCallError('UNKNOWN', `Unknown action "${action}"`);
 }
@@ -298,8 +348,9 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
     if (!outputs.some((o) => o.outpoint.replace('.', '_') === collection.id))
       throw new AgentCallError('INVALID', "That collection isn't in this wallet.");
   }
-  // Last look right before signing: Stop all / Stop / pause may have been turned on while the file came in.
-  await assertMaySpend(grant, deps);
+  // Last look right before signing: Stop all / Stop / pause may have been turned on, or the computer unpaired,
+  // while the file came in.
+  await assertSpendJob(grant, 'mint', deps);
   assertAgentCap(grant, cost.usd ?? 0);
 
   const r = await (deps.mintMedia ?? mintMedia)(deps.ctx, {

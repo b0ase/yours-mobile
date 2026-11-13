@@ -294,6 +294,14 @@ const isCurrent = (s: StoredSession, now = Date.now()) =>
   s.agent ? now < s.agent.expiresAt : now - s.lastUsed < IDLE_MS;
 
 /**
+ * Bumped for a channel whenever its pairing ends here (forget, lapse, closeAllPairings). A paired-computer spend can wait
+ * in the spend queue behind a slow mint; it checks the generation it started with before it signs (b-Aware report,
+ * 13 Nov 2026), so an unpair always wins, even when storage is blocked and the stored session can't be removed.
+ */
+const revokedGen = new Map<string, number>();
+const revokeChannel = (c: string) => revokedGen.set(c, (revokedGen.get(c) ?? 0) + 1);
+
+/**
  * A session that lapses (24 h idle, agent grant expired, unpinned relay) is dropped like a Disconnect: its socket
  * closes and the paired key's grants are queued for revocation (b-Aware report, 23 Oct 2026), unless another
  * current session still uses the same paired key. The queue is written before anything else so a revoke is
@@ -304,6 +312,7 @@ const dropLapsed = (dropped: StoredSession[], kept: StoredSession[]) => {
   const origins = [...new Set(dropped.map(keyOf))].filter((o) => !inUse.has(o));
   if (origins.length) writeQueue([...readQueue(), ...origins]);
   for (const s of dropped) {
+    revokeChannel(s.c);
     replies.forget(s.c);
     const l = live.get(s.c);
     if (!l) continue;
@@ -500,12 +509,27 @@ function flush(c: string) {
   for (const msg of replies.drain(c)) void send(c, msg);
 }
 
+/**
+ * isLive for a paired-computer call: the channel wasn't revoked since the request came in, its stored session still
+ * holds the same agent grant (not lapsed or parked), and the same account and wallet are still open.
+ */
+export const pairingLiveCheck = (c: string, grant: AgentGrant, ctx: OneSatContext) => {
+  const gen = revokedGen.get(c) ?? 0;
+  return () => {
+    if ((revokedGen.get(c) ?? 0) !== gen) return false;
+    if (agentDeps.ctx !== ctx || agentDeps.currentId !== grant.agentId) return false;
+    const s = load().find((x) => x.c === c);
+    return !!s?.agent && s.agent.agentId === grant.agentId && s.agent.expiresAt === grant.expiresAt;
+  };
+};
+
 async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
   try {
     if (!agentDeps.ctx) throw new AgentCallError('LOCKED', `${appNameFor()} is locked. Unlock it on your phone.`);
     const result = await handleAgentCall(grant, action, params, {
       ctx: agentDeps.ctx,
       currentId: agentDeps.currentId,
+      isLive: pairingLiveCheck(l.stored.c, grant, agentDeps.ctx),
       bsvUsd,
       feeRate: agentDeps.feeRate,
       saveGrant: (g) => {
@@ -715,6 +739,7 @@ function connect(c: string) {
 
 /** Disconnect a site: tell it, forget the key, and withdraw every grant and allowance the pairing was given. */
 export function forget(c: string, notify = true) {
+  revokeChannel(c); // first: a spend queued for this channel must not sign from here on
   forgetLogin(c);
   const stored = load().find((s) => s.c === c);
   const l = live.get(c);
@@ -966,7 +991,14 @@ export function initPairing() {
  * reconnects on the next launch (the caller then clears localStorage).
  */
 export function closeAllPairings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
+    if (Array.isArray(raw)) for (const s of raw) revokeChannel(s.c);
+  } catch {
+    /* storage unavailable: the live channels below are still revoked */
+  }
   for (const [c, l] of live) {
+    revokeChannel(c);
     if (l.retry) clearTimeout(l.retry);
     live.delete(c);
     replies.forget(c);
