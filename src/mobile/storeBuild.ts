@@ -506,6 +506,18 @@ export const BALANCE_CARDS_ENABLED: boolean = !(
 export const DIRECT_UPDATE_ENABLED: boolean = import.meta.env.VITE_CHANNEL === 'android-direct';
 
 /**
+ * "A newer bWalletX is available" banner (update/updateNotice.ts) for the unpacked extension, Ad Hoc iOS and Desktop
+ * (owner, 13 Nov 2026: a week on a stale extension build). Never in a store build: the stores update their apps and the
+ * store bundle must not fetch bwalletx.com/download/latest.json. Literal env check so Rollup drops the chunk; its
+ * strings are in the STORE-AUDIT.md grep (`bwallet.update.notice`).
+ */
+export const UPDATE_NOTICE_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Room X invites (chat/xInvites.ts, XInvitesSheet, XInviteClaim): a room host pre-funds one-time keys with the
  * gate token and hands each invitee a link that carries the key. Token transfers that admit someone to a token
  * room, so bWalletX only (token rooms are off in a store build, STORE-AUDIT 2.1). Literal env check so Vite
