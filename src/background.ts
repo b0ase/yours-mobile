@@ -920,9 +920,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
         .catch((err: unknown) => console.warn('[background] postage reconcile failed:', err));
       // Unbroadcast (nosend) payments past their deadline: released only once the chain shows they never went out
       // (BRC-177, services/unsentExpiry.ts). Rate-limited inside.
-      await ctx
-        .expireUnsent()
+      // Never while storage is switching (the detach and abort must land on this device's store).
+      await (storageSwitching() ? Promise.resolve(null) : ctx.expireUnsent(false, { storageBusy: storageSwitching }))
         .then((x) => {
+          if (!x) return;
           if (!x.released.length && !x.settled.length && !x.lateSeen.length) return;
           console.log('[background] nosend expiry:', x);
           notifyBalanceUpdate();
@@ -973,6 +974,8 @@ const noteMoveFailed = (id: string, reason?: string) => {
  * 22 Oct 2026 by making backups during sign-up), so the backup waits for it and a switch never starts during one.
  */
 let storageSwitch: Promise<void> | null = null;
+/** A switch of this account's storage is under way (read fresh: unsentExpiry's detach and abort wait for it). */
+const storageSwitching = (): boolean => storageSwitch !== null;
 
 /** After a failed switch: if the active store no longer answers, rebuild the wallet once (it stays on the backup). */
 const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>, id: string) => {
@@ -1985,9 +1988,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 const maybeExpireUnsent = async (): Promise<void> => {
   const ctx = accountContext;
-  if (!ctx || storageSwitch) return;
+  if (!ctx || storageSwitching()) return;
   try {
-    const x = await ctx.expireUnsent();
+    const x = await ctx.expireUnsent(false, { storageBusy: storageSwitching });
     if (x.released.length || x.settled.length || x.lateSeen.length) {
       console.log('[background] nosend expiry:', x);
       notifyBalanceUpdate();

@@ -3,7 +3,9 @@ import {
   DEFAULT_TTL_S,
   MAX_HOLD_S,
   STORE_MIN_AGE_S,
+  STORE_OTHER_DEVICE_TTL_S,
   WATCH_S,
+  storageReaffirmSpent,
   conflictCheck,
   emptyState,
   expireOnce,
@@ -19,6 +21,7 @@ import {
   type ExpiryState,
   type NoSendAction,
   type SpendState,
+  type StoreKind,
   type StoreWord,
 } from './unsentExpiry';
 import type { Sighting } from './unsentGuard';
@@ -705,6 +708,63 @@ describe('conflicted payments (an input spent on chain by a different, confirmed
     expect(r.kept).toEqual([{ txid: A, reason: 'abort-failed' }]);
   });
 
+  test('every input spent elsewhere (maybe a malleated copy of this very payment) → kept, nothing detached', async () => {
+    const { w, conclusive, detached } = conflictWorld();
+    await due(w, act(A, [`${P}.0`, `${P}.1`]));
+    w.spends.set(`${P}.0`, X);
+    w.spends.set(`${P}.1`, X);
+    conclusive.add(`${P}.0>${X}`);
+    conclusive.add(`${P}.1>${X}`);
+    const r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+    expect(w.aborted).toEqual([]);
+    expect(detached).toEqual([]);
+  });
+
+  test('after the abort the detached coins are re-marked spent; a failed re-mark does not undo the release', async () => {
+    const { w, conclusive } = conflictWorld();
+    const order: string[] = [];
+    const abort0 = w.deps.abort;
+    w.deps.abort = async (t) => {
+      order.push('abort');
+      return abort0(t);
+    };
+    w.deps.reaffirmSpent = async (o, by) => {
+      order.push(`reaffirm ${o}>${by}`);
+      throw new Error('busy');
+    };
+    await due(w, act(A, [`${P}.0`, `${P}.1`]));
+    w.spends.set(`${P}.1`, X);
+    conclusive.add(`${P}.1>${X}`);
+    const r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+    expect(order).toEqual(['abort', `reaffirm ${P}.1>${X}`]);
+    expect(w.logs.some((l) => l.includes('could not re-mark'))).toBe(true);
+  });
+
+  test('storage switching, or the active store changing between detach and abort → kept (storage-busy)', async () => {
+    const a = conflictWorld();
+    a.w.deps.storageGate = () => null;
+    await due(a.w, act(A, [`${P}.0`, `${P}.1`]));
+    a.w.spends.set(`${P}.1`, X);
+    a.conclusive.add(`${P}.1>${X}`);
+    let r = await expireOnce(a.w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'storage-busy' }]);
+    expect(a.detached).toEqual([]);
+    expect(a.w.aborted).toEqual([]);
+
+    const b = conflictWorld();
+    let reads = 0;
+    b.w.deps.storageGate = () => (++reads === 1 ? 'device' : 'remote');
+    await due(b.w, act(A, [`${P}.0`, `${P}.1`]));
+    b.w.spends.set(`${P}.1`, X);
+    b.conclusive.add(`${P}.1>${X}`);
+    r = await expireOnce(b.w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'storage-busy' }]);
+    expect(b.detached.length).toBe(1); // the detached coin stays unspendable: correct, the chain spent it
+    expect(b.w.aborted).toEqual([]);
+  });
+
   test('not due yet → nothing is asked of the chain or detached', async () => {
     const { w, conclusive, detached } = conflictWorld();
     w.actions = [act(A, [`${P}.0`, `${P}.1`])];
@@ -788,13 +848,38 @@ describe('storageDetachInput', () => {
   });
 });
 
+describe('storageReaffirmSpent', () => {
+  test('only a row that is spendable with no spender is set unspendable again', async () => {
+    const updates: [number, unknown][] = [];
+    const sp = {
+      findTransactions: async () => [],
+      findOutputs: async () => [
+        { outputId: 1, spendable: true, spentBy: null },
+        { outputId: 2, spendable: false, spentBy: null },
+        { outputId: 3, spendable: true, spentBy: 7 },
+      ],
+      updateOutput: async (id: number, patch: unknown) => {
+        updates.push([id, patch]);
+        return 1;
+      },
+    };
+    const re = storageReaffirmSpent({ isActive: () => true, userId: async () => 1, run: (fn) => fn(sp as never) });
+    await re(`${P}.1`, X);
+    expect(updates).toEqual([[1, { spendable: false, spentBy: undefined }]]);
+    await expect(
+      storageReaffirmSpent({ isActive: () => false, userId: async () => 1, run: (fn) => fn(sp as never) })(`${P}.1`, X),
+    ).rejects.toThrow(/active/);
+  });
+});
+
 // ── 13 Nov 2026: Store payments the Store never heard of, by the wallet's own record (no outbox) ──
 describe('Store payments released early (storeAsk)', () => {
-  function storeWorld(words: StoreWord[]) {
+  function storeWorld(words: StoreWord[], kind: StoreKind = 'mine') {
     const w = world();
     const asked: string[] = [];
     const locked: string[] = [];
     let i = 0;
+    w.deps.storeKind = async () => kind;
     w.deps.storeAsk = async (a) => {
       asked.push(a.txid);
       return words[Math.min(i++, words.length - 1)];
@@ -875,14 +960,21 @@ describe('Store payments released early (storeAsk)', () => {
   });
 
   test("not a Store payment, too young, or a 'never' label → the normal deadline", async () => {
-    const { w, asked } = storeWorld(['not-store']);
+    const { w, asked } = storeWorld(['never-heard'], 'not-store');
     w.actions = [act(A, [`${P}.0`])];
     await expireOnce(w.deps);
     let r = await expireOnce(w.deps);
-    expect(asked).toEqual([]); // too young: not even asked
+    expect(asked).toEqual([]);
     w.advance(STORE_MIN_AGE_S);
     r = await expireOnce(w.deps);
     expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    expect(asked).toEqual([]); // not a Store payment: never asked
+    const y = storeWorld(['never-heard']);
+    y.w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(y.w.deps);
+    y.w.advance(STORE_MIN_AGE_S - 1);
+    await expireOnce(y.w.deps);
+    expect(y.asked).toEqual([]); // too young: not even asked
     const n = storeWorld(['never-heard']);
     n.w.actions = [act(A, [`${P}.0`], ['p nosend expiry never'])];
     await expireOnce(n.w.deps);
@@ -890,5 +982,48 @@ describe('Store payments released early (storeAsk)', () => {
     r = await expireOnce(n.w.deps);
     expect(r.kept).toEqual([{ txid: A, reason: 'never' }]);
     expect(n.asked).toEqual([]);
+  });
+
+  test('MEDIUM (cross-device): a Store payment made on ANOTHER device is never released early, nor at 24 h', async () => {
+    const { w, asked } = storeWorld(['never-heard'], 'other-device');
+    w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(w.deps);
+    w.advance(STORE_MIN_AGE_S);
+    let r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    w.advance(DEFAULT_TTL_S); // past the usual 24 h: still held (the paying device may still Pay again)
+    r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    expect(asked).toEqual([]);
+    expect(w.aborted).toEqual([]);
+    w.advance(STORE_OTHER_DEVICE_TTL_S - DEFAULT_TTL_S - STORE_MIN_AGE_S);
+    r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+  });
+
+  test("another device's Store payment past 24 h that can never be mined (input spent, confirmed) → cancelled", async () => {
+    const { w } = storeWorld(['never-heard'], 'other-device');
+    const detached: string[] = [];
+    w.deps.conflict = async () => true;
+    w.deps.detachInput = async (_t, o) => void detached.push(o);
+    w.actions = [act(A, [`${P}.0`, `${Q}.0`])];
+    await expireOnce(w.deps);
+    w.advance(DEFAULT_TTL_S);
+    w.spends.set(`${P}.0`, X);
+    const r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+    expect(detached).toEqual([`${P}.0`]);
+  });
+
+  test('a storeKind that throws counts as another device (the longest hold)', async () => {
+    const { w } = storeWorld(['never-heard']);
+    w.deps.storeKind = async () => {
+      throw new Error('storage');
+    };
+    w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(w.deps);
+    w.advance(DEFAULT_TTL_S);
+    const r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
   });
 });

@@ -182,13 +182,14 @@ import {
   conflictCheck,
   runUnsentExpiry,
   storageDetachInput,
+  storageReaffirmSpent,
   storageKV,
   wocHeight,
   type DetachProvider,
   type ExpiryReport,
   type NoSendAction,
 } from './services/unsentExpiry';
-import { storeAskFor } from './mobile/themeOrder/storeHeard';
+import { createdHereKV, storeAskFor, storeKindFor } from './mobile/themeOrder/storeHeard';
 import { withPayLock } from './mobile/themeOrder/storePay';
 import { deadline } from './utils/abortTimeout';
 import { chainActive } from './services/dappChain';
@@ -331,7 +332,8 @@ export interface AccountContext {
    * BRC-177 deadlines for nosend actions: release one only after the chain shows it was never broadcast and its
    * inputs are unspent; watch releases in case it turns up later (services/unsentExpiry.ts).
    */
-  expireUnsent: (force?: boolean) => Promise<ExpiryReport>;
+  /** `storageBusy`: the background's storage switch is under way (no detach or abort meanwhile). */
+  expireUnsent: (force?: boolean, o?: { storageBusy?: () => boolean }) => Promise<ExpiryReport>;
   /** Sweep txids from this wallet's own records, for Find mined payments (recoverByTxidWiring.ts). */
   sweepCandidates: () => Promise<string[]>;
   /** Re-internalize paymail receipts the server recorded that this device lacks (restore from seed, 14 Oct 2026). */
@@ -1278,6 +1280,13 @@ export const initWallet = async (
       );
     return n;
   };
+  /** This device's storage, for unsentExpiry's detach and re-mark (services/unsentExpiry.ts 1). */
+  const expiryStore = {
+    isActive: () => storage.isActiveStorageProvider(),
+    userId: async () => (await storage.getAuth()).userId!,
+    run: <T>(fn: (sp: DetachProvider) => Promise<T>) =>
+      storage.runAsStorageProvider((sp) => fn(sp as unknown as DetachProvider)),
+  };
   /** Put back a coin the re-check marked whose spender was dropped: only a row still as the mark left it. */
   const markUnspentHere = async (outpoint: string, spender: string): Promise<number> => {
     if (!storage.isActiveStorageProvider()) return 0;
@@ -1968,7 +1977,7 @@ export const initWallet = async (
         },
         { force },
       ),
-    expireUnsent: (force?: boolean) =>
+    expireUnsent: (force?: boolean, expiryOpts: { storageBusy?: () => boolean } = {}) =>
       runUnsentExpiry(
         {
           listNoSend: async () => {
@@ -2007,7 +2016,14 @@ export const initWallet = async (
                   txo?: { getSpends?: (o: string[]) => Promise<(string | null | undefined)[]> };
                 }
               ).txo;
-              return txo?.getSpends ? (o: string[]) => txo.getSpends!.call(txo, o) : undefined;
+              // The 1Sat index takes "txid_vout", as every other caller sends it (storageReconcileBackground).
+              return txo?.getSpends
+                ? (o: string[]) =>
+                    txo.getSpends!.call(
+                      txo,
+                      o.map((x) => x.replace('.', '_')),
+                    )
+                : undefined;
             })(),
             woc: async (op) => {
               const d = deadline(5_000);
@@ -2019,9 +2035,7 @@ export const initWallet = async (
             },
           }),
           detachInput: storageDetachInput({
-            isActive: () => storage.isActiveStorageProvider(),
-            userId: async () => (await storage.getAuth()).userId!,
-            run: (fn) => storage.runAsStorageProvider((sp) => fn(sp as unknown as DetachProvider)),
+            ...expiryStore,
             recordCleared: (outpoint, spender) =>
               recordAutoCleared(
                 { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
@@ -2029,8 +2043,16 @@ export const initWallet = async (
                 { [outpoint]: spender },
               ),
           }),
-          // Store payments the Store never heard of, by the wallet's own record (no outbox needed): released at the
-          // first run after STORE_MIN_AGE_S, on every chain check; under the payment's lock so a Pay can't interleave.
+          reaffirmSpent: storageReaffirmSpent(expiryStore),
+          // Detach and abort only on this device's own active store, never during the background's storage switch;
+          // read again between the two, so both land on the same store.
+          storageGate: () =>
+            expiryOpts.storageBusy?.() || !storage.isActiveStorageProvider() ? null : storage.getActiveStore(),
+          // Store payments: whose they are (this device's record of the Store payments it made), in every build, so a
+          // payment synced from another device is held 3 days, never released under that device's "Pay again".
+          storeKind: storeKindFor(createdHereKV(baseWallet.keyDeriver.identityKey)),
+          // This device's own Store payments the Store never heard of: released at the first run after
+          // STORE_MIN_AGE_S, on every chain check; under the payment's lock, which this device's Pay takes too.
           ...(THEME_STORE_PAID_ENABLED
             ? { storeAsk: storeAskFor(baseWallet, (u, i) => fetch(u, i)), lock: withPayLock }
             : {}),

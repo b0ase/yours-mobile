@@ -29,6 +29,7 @@ import {
   conflictCheck,
   expireOnce,
   storageDetachInput,
+  storageReaffirmSpent,
   STORE_MIN_AGE_S,
   wocSpent,
   type DetachProvider,
@@ -37,7 +38,7 @@ import {
   type NoSendAction,
 } from '../services/unsentExpiry';
 import type { Sighting } from '../services/unsentGuard';
-import { storeAskFor } from '../mobile/themeOrder/storeHeard';
+import { markStoreCreatedHere, storeAskFor, storeKindFor } from '../mobile/themeOrder/storeHeard';
 
 const HEIGHT = 975_400;
 const COIN = 400_000;
@@ -73,17 +74,32 @@ type Tx = { transactionId: number; txid?: string; status: string };
 const memoHex = (quoteId: string) =>
   `006a0d${Utils.toHex(Utils.toArray('bwx-theme-buy', 'utf8'))}20${Utils.toHex(Utils.toArray(quoteId, 'utf8'))}`;
 
-/** One device: a wallet holding three mined coins of COIN sats (fund:0..2), and a Store payment spending all three. */
-async function setup(name: string) {
+/** A device's own "Store payments made here" record (chrome.storage.local in the app). */
+const memKV = () => {
+  let v: Record<string, { quoteId: string; at: number }> = {};
+  return { get: async () => structuredClone(v), set: async (x: typeof v) => void (v = structuredClone(x)) };
+};
+const openStore = async (name: string) => {
+  const s = new StorageIdb(StorageProvider.createStorageBaseOptions('main'));
+  (s as unknown as { dbName: string }).dbName = name;
+  await s.migrate(name, `sik-${name}`);
+  await s.makeAvailable();
+  s.setServices(services);
+  return s;
+};
+
+/**
+ * One device: a wallet holding three mined coins of COIN sats (fund:0..2), and a Store payment spending all three,
+ * which this device's Store flow recorded as made here (recordNewPayment → markCreated). `backup`: an encrypted-backup
+ * store it pushes to (device sync).
+ */
+async function setup(name: string, o: { backup?: StorageIdb } = {}) {
   const root = PrivateKey.fromRandom();
   const kd = new KeyDeriver(root);
-  const device = new StorageIdb(StorageProvider.createStorageBaseOptions('main'));
-  (device as unknown as { dbName: string }).dbName = name;
-  await device.migrate(name, `sik-${name}`);
-  await device.makeAvailable();
-  device.setServices(services);
-  const sm = new WalletStorageManager(kd.identityKey, device, []);
+  const device = await openStore(name);
+  const sm = new WalletStorageManager(kd.identityKey, device, o.backup ? [o.backup] : []);
   await sm.makeAvailable();
+  if (o.backup) await sm.setActive(device.getSettings().storageIdentityKey);
   sm.setServices(services);
   const wallet = new Wallet({ chain: 'main', keyDeriver: kd, storage: sm, services } as never);
   expect(forceLegacyActionBatch(wallet)).toBe(true);
@@ -134,6 +150,8 @@ async function setup(name: string) {
     options: { noSend: true, randomizeOutputs: false },
   });
   const txid = pay.txid!;
+  const created = memKV();
+  await markStoreCreatedHere(created, txid, quoteId);
 
   const txOf = async (t: string) => ((await device.findTransactions({ partial: { txid: t } })) as unknown as Tx[])[0];
   const coinOf = async (vout: number) =>
@@ -145,7 +163,7 @@ async function setup(name: string) {
     expect(c.spendable).toBe(false);
     expect(c.spentBy).toBe(action.transactionId);
   }
-  return { wallet, sm, device, kd, fundTxid, txid, quoteId, txOf, coinOf };
+  return { wallet, sm, device, kd, root, fundTxid, txid, quoteId, txOf, coinOf, created };
 }
 
 /** The run's deps as initWallet wires them; `chain` decides what WhatsOnChain, ARC and the 1Sat index answer. */
@@ -196,6 +214,12 @@ function wiring(
   };
 }
 
+const storeOf = (d: Awaited<ReturnType<typeof setup>>) => ({
+  isActive: () => d.sm.isActiveStorageProvider(),
+  userId: async () => (await d.sm.getAuth()).userId!,
+  run: <T>(fn: (sp: DetachProvider) => Promise<T>) =>
+    d.sm.runAsStorageProvider((sp) => fn(sp as unknown as DetachProvider)),
+});
 const newWiring = (d: Awaited<ReturnType<typeof setup>>, chain: Parameters<typeof wiring>[1]) => ({
   conflict: conflictCheck({
     index: async (ops: string[]) => ops.map((o) => chain.spentBy.get(o) ?? null),
@@ -207,11 +231,9 @@ const newWiring = (d: Awaited<ReturnType<typeof setup>>, chain: Parameters<typeo
         return Response.json({ txid: by, vin: 0, status: chain.confirmed.has(by) ? 'confirmed' : 'unconfirmed' });
       }) as unknown as typeof fetch),
   }),
-  detachInput: storageDetachInput({
-    isActive: () => d.sm.isActiveStorageProvider(),
-    userId: async () => (await d.sm.getAuth()).userId!,
-    run: (fn) => d.sm.runAsStorageProvider((sp) => fn(sp as unknown as DetachProvider)),
-  }),
+  detachInput: storageDetachInput(storeOf(d)),
+  reaffirmSpent: storageReaffirmSpent(storeOf(d)),
+  storageGate: () => (d.sm.isActiveStorageProvider() ? d.sm.getActiveStore() : null),
 });
 
 test('13 Nov tx 446: one input spent by a foreign mined tx, two unspent, payment 404 → after one run: failed, two coins spendable, balance = chain', async () => {
@@ -296,6 +318,7 @@ test('Store payment, outbox wiped, the Store answers 429 first → kept; release
   const deps = () =>
     wiring(d, chain, kv, {
       nowS: () => now,
+      storeKind: storeKindFor(d.created),
       storeAsk: storeAskFor(d.wallet as never, f, { api: 'https://store.test' }),
     });
   let r = await expireOnce(deps()); // first sight: too young
@@ -326,6 +349,7 @@ test('Store payment the Store has heard of → kept (before its normal deadline)
   const deps = () =>
     wiring(d, chain, kv, {
       nowS: () => now,
+      storeKind: storeKindFor(d.created),
       storeAsk: storeAskFor(d.wallet as never, f, { api: 'https://store.test' }),
     });
   await expireOnce(deps());
@@ -336,4 +360,57 @@ test('Store payment the Store has heard of → kept (before its normal deadline)
     now += 600;
   }
   expect((await d.txOf(d.txid)).status).toBe('nosend');
+}, 30_000);
+
+test('MEDIUM (cross-device): the phone made the Store payment; synced to the extension it is NOT released early (nor at 24 h); on the phone it is', async () => {
+  // The phone pays (store_unreachable: the Store never got the intent), and device sync pushes its rows to the backup.
+  const backup = await openStore('incident-1113-xdev-backup');
+  const phone = await setup('incident-1113-xdev-phone', { backup });
+  await phone.sm.updateBackups();
+  // The extension (same seed) pulls them: the payment arrives as 'nosend', its three coins held.
+  const extStore = await openStore('incident-1113-xdev-ext');
+  const extSm = new WalletStorageManager(phone.kd.identityKey, extStore, []);
+  await extSm.makeAvailable();
+  extSm.setServices(services);
+  await extSm.syncFromReader(phone.kd.identityKey, backup as never);
+  const extWallet = new Wallet({
+    chain: 'main',
+    keyDeriver: new KeyDeriver(phone.root),
+    storage: extSm,
+    services,
+  } as never);
+  const ext = { ...phone, wallet: extWallet, sm: extSm, device: extStore, created: memKV() };
+  const extTx = async () =>
+    ((await extStore.findTransactions({ partial: { txid: phone.txid } })) as unknown as Tx[])[0];
+  expect((await extTx()).status).toBe('nosend');
+
+  const chain = { spentBy: new Map<string, string>(), confirmed: new Set<string>(), seen: new Set([phone.fundTxid]) };
+  const f = async () => Response.json({ unverified: true }); // the Store never heard of it
+  let now = Math.floor(Date.now() / 1000);
+  const extKv = { s: null as ExpiryState | null };
+  const phoneKv = { s: null as ExpiryState | null };
+  const run = (d: typeof phone, kv: { s: ExpiryState | null }) =>
+    expireOnce(
+      wiring(d, chain, kv, {
+        nowS: () => now,
+        storeKind: storeKindFor(d.created),
+        storeAsk: storeAskFor(d.wallet as never, f, { api: 'https://store.test' }),
+      }),
+    );
+  await run(ext, extKv);
+  await run(phone, phoneKv);
+  now += STORE_MIN_AGE_S;
+  // The extension holds it (another device's payment: the phone may still "Pay again")…
+  let r = await run(ext, extKv);
+  expect(r.kept).toEqual([{ txid: phone.txid, reason: 'not-due' }]);
+  expect((await extTx()).status).toBe('nosend');
+  // …past the usual day too.
+  now += 24 * 3600;
+  r = await run(ext, extKv);
+  expect(r.kept).toEqual([{ txid: phone.txid, reason: 'not-due' }]);
+  expect((await extTx()).status).toBe('nosend');
+  // The phone, which made it and whose own Pay takes the same lock, releases it.
+  r = await run(phone, phoneKv);
+  expect(r.released).toEqual([phone.txid]);
+  expect((await phone.txOf(phone.txid)).status).toBe('failed');
 }, 30_000);

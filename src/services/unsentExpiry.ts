@@ -33,16 +33,26 @@
  *     extension for days after his phone spent one of its three coins): an input spent by a DIFFERENT transaction the
  *     chain has conclusively (WhatsOnChain calls the spend confirmed, or WhatsOnChain and the 1Sat spend index name
  *     the same spender: autoCoinResync's clearingSpender rule) means this payment can never be mined. With every
- *     other input cleanly unspent and the same ~30 s "missing everywhere" check, it is cancelled: each such input is
- *     first taken out of the action and left unspendable (detachInput, so the abort does not hand back a coin the
- *     chain spent), then the abort frees the rest and drops its never-to-exist change from the balance. A spend seen
- *     only in the mempool by one source keeps the hold, as before.
+ *     other input cleanly unspent, AT LEAST ONE input cleanly unspent (when every input is spent elsewhere the
+ *     "spender" may be a re-broadcast or malleated copy of this very payment: kept), and the same ~30 s "missing
+ *     everywhere" check, it is cancelled: each such input is first taken out of the action and left unspendable
+ *     (detachInput, so the abort does not hand back a coin the chain spent), then the abort frees the rest and drops
+ *     its never-to-exist change from the balance, and the detached coins are set unspendable once more after it
+ *     (reaffirmSpent). Detach and abort run only while this device's store is the active one and no storage switch
+ *     is under way (storageGate, read again between them). A spend seen only in the mempool by one source keeps the
+ *     hold, as before.
  *  1b. Store payments (13 Nov 2026): a nosend action the wallet's own record identifies as a Store payment (its
- *     description and memo output name the quote: storeAsk) whose quote the Store has never heard of is due as soon
- *     as STORE_MIN_AGE_S has passed since first sight, instead of the 24 h default; it then goes through every check
- *     above, and the Store is asked again, inside the payment's lock, just before the abort. A Store that has heard of
- *     it, or gives no clear answer, leaves it on the normal deadline (an unclear answer is asked again next run). This
- *     needs no per-device outbox, so it works after the outbox is lost and runs at every unlock and on the timer.
+ *     description and memo output name the quote: storeKind). Only on the device that MADE the payment (its Store
+ *     flow recorded the txid and quote id here: storeKind 'mine'; a site can't write that record) and only when the
+ *     Store has never heard of the quote (storeAsk) is it due as soon as STORE_MIN_AGE_S has passed since first sight;
+ *     it then goes through every check above, and the Store is asked again, inside the payment's lock, just before
+ *     the abort. That device's own Pay takes the same lock, so a release and a send of it can't both happen.
+ *     Every other device (the payment arrived by device sync: 'other-device') can't see that device's retry state
+ *     (its outbox, an intent the Store never got) and may not race its "Pay again": it holds a Store payment for
+ *     STORE_OTHER_DEVICE_TTL_S (3 days) instead of the 24 h default, releasing it at 24 h only when an input is
+ *     conclusively spent elsewhere (it can then never be mined, whoever sends it). A Store that has heard of it, or
+ *     gives no clear answer, leaves it on the normal deadline (an unclear answer is asked again next run). Runs at
+ *     every unlock and on the background's timer. Follow-up (needs a server change): docs/BSTORE.md "Withdrawn txids".
  *  3. A released transaction can still be broadcast by whoever holds it, as long as the wallet has not spent its
  *     inputs yet (BRC-177 calls this the race at expiry). So each release is watched for WATCH_S (14 days): if the
  *     original shows up on chain, the wallet's own recovery (recoverByTxid: proof attached, outputs set spendable)
@@ -69,6 +79,11 @@ export const MIN_INTERVAL_MS = 10 * 60_000;
  * and first sight is the first run that lists it, so a Pay in progress (backup ≤ 60 s, intent ≤ 20 s) is long done.
  */
 export const STORE_MIN_AGE_S = 10 * 60;
+/**
+ * The default deadline for a Store payment on a device that did not make it (1b): long enough for the paying device's
+ * "Pay again" after a store_unreachable, whose intent this device can't see. Still capped by MAX_HOLD_S.
+ */
+export const STORE_OTHER_DEVICE_TTL_S = 3 * 24 * 60 * 60;
 
 const TXID = /^[0-9a-f]{64}$/i;
 
@@ -236,10 +251,13 @@ export type NoSendAction = {
 };
 
 /**
- * What the Store says about a nosend action (1b): 'not-store' (not a Store payment by the wallet's own record),
- * 'never-heard' (the Store holds no such payment), 'heard' (paid or recorded), 'unclear' (no clear answer).
+ * Whose Store payment a nosend action is (1b), read on this device only: 'not-store' (not a Store payment by the
+ * wallet's own record), 'mine' (this device's Store flow made it: its txid and quote id are recorded here),
+ * 'other-device' (a Store payment this device didn't make, e.g. synced from the phone).
  */
-export type StoreWord = 'not-store' | 'never-heard' | 'heard' | 'unclear';
+export type StoreKind = 'not-store' | 'mine' | 'other-device';
+/** What the Store says (1b): 'never-heard' (it holds no such payment), 'heard' (paid or recorded), 'unclear'. */
+export type StoreWord = 'never-heard' | 'heard' | 'unclear';
 
 export type ExpiryDeps = {
   /** The wallet's nosend actions, with labels and inputs (toolbox listNoSendActions). */
@@ -258,7 +276,19 @@ export type ExpiryDeps = {
    * make it spendable again. Throws when it can't (the action is then kept). Required for the cancel in 1.
    */
   detachInput?: (txid: string, outpoint: string, spender: string) => Promise<void>;
-  /** 1b: is this a Store payment, and has the Store heard of it? Absent: no early Store release. */
+  /**
+   * After a cancel in 1: set the detached coin unspendable again (idempotent), so nothing in the abort (a toolbox that
+   * re-reads its rawTx inputs, say) can have made it spendable. A failure is logged; the release stands.
+   */
+  reaffirmSpent?: (outpoint: string, spender: string) => Promise<void>;
+  /**
+   * The active store's identity when detach + abort may run (this device's store active, no storage switch under way),
+   * else null. Read inside the lock before the detach and again before the abort; any change keeps the action.
+   */
+  storageGate?: () => string | null;
+  /** 1b: whose Store payment this is (local read). Absent: every action is 'not-store'. */
+  storeKind?: (a: NoSendAction) => Promise<StoreKind>;
+  /** 1b: has the Store heard of it? Asked only for 'mine'. Absent: no early Store release. */
   storeAsk?: (a: NoSendAction) => Promise<StoreWord>;
   /** The lock the final re-check and abort run under (withPayLock for Store payments). Default: none. */
   lock?: <T>(txid: string, fn: () => Promise<T>) => Promise<T>;
@@ -287,6 +317,7 @@ export type KeepReason =
   | 'changed-at-recheck'
   | 'store-heard'
   | 'store-unclear'
+  | 'storage-busy'
   | 'abort-failed';
 
 export type ExpiryReport = {
@@ -372,16 +403,32 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
   if (needsHeight && deps.height) height = await deps.height().catch(() => undefined);
 
   // 1. Which are due, and what the chain says about each due one.
-  type Due = { a: NoSendAction; ownParents: Set<string>; foreign: Map<string, string>; storeEarly: boolean };
+  type Due = {
+    a: NoSendAction;
+    ownParents: Set<string>;
+    foreign: Map<string, string>;
+    storeEarly: boolean;
+    /** Due only because an input is conclusively spent elsewhere (a Store payment made on another device, 1b). */
+    conflictOnly: boolean;
+    ttlS: number;
+  };
   const due: Due[] = [];
   const storeMinAgeS = deps.storeMinAgeS ?? STORE_MIN_AGE_S;
+  const baseTtlS = deps.defaultTtlS ?? DEFAULT_TTL_S;
   for (const a of actions) {
     report.checked++;
     const p = policyFromLabels(a.labels);
+    // A kind that can't be read counts as another device's payment: the longest hold.
+    const kind: StoreKind = deps.storeKind
+      ? await deps.storeKind(a).catch((): StoreKind => 'other-device')
+      : 'not-store';
+    const ttlS = kind === 'other-device' ? Math.max(baseTtlS, STORE_OTHER_DEVICE_TTL_S) : baseTtlS;
     let storeEarly = false;
-    if (!isExpired(p, state.first[a.txid], nowS, height, deps.defaultTtlS)) {
-      // 1b. A Store payment the Store has never heard of is due early; every chain check below still applies.
-      if (p.mode !== 'never' && deps.storeAsk && nowS >= state.first[a.txid] + storeMinAgeS) {
+    let conflictOnly = false;
+    if (!isExpired(p, state.first[a.txid], nowS, height, ttlS)) {
+      // 1b. A Store payment this device made, which the Store has never heard of, is due early; every chain check
+      // below still applies.
+      if (kind === 'mine' && p.mode !== 'never' && deps.storeAsk && nowS >= state.first[a.txid] + storeMinAgeS) {
         const w = await deps.storeAsk(a).catch((): StoreWord => 'unclear');
         if (w === 'heard' || w === 'unclear') {
           keep(a.txid, w === 'heard' ? 'store-heard' : 'store-unclear');
@@ -389,8 +436,11 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
         }
         storeEarly = w === 'never-heard';
         if (storeEarly) log(`[bwx-expiry] ${a.txid}: a Store payment the Store never heard of; checking the chain`);
+      } else if (kind === 'other-device' && isExpired(p, state.first[a.txid], nowS, height, baseTtlS)) {
+        // Another device's Store payment past the usual 24 h: released early only if it can never be mined (1).
+        conflictOnly = true;
       }
-      if (!storeEarly) {
+      if (!storeEarly && !conflictOnly) {
         keep(a.txid, p.mode === 'never' ? 'never' : 'not-due');
         continue;
       }
@@ -417,6 +467,10 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
       keep(a.txid, verdict);
       continue;
     }
+    if (conflictOnly && !verdict.foreign.size) {
+      keep(a.txid, 'not-due');
+      continue;
+    }
     if (verdict.foreign.size) {
       if (!deps.detachInput) {
         keep(a.txid, 'input-spent-elsewhere');
@@ -427,7 +481,7 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
           `[bwx-expiry] ${a.txid}: input ${o} was spent on chain by ${by} (confirmed); this payment can never be mined`,
         );
     }
-    due.push({ a, ownParents: verdict.ownParents, foreign: verdict.foreign, storeEarly });
+    due.push({ a, ownParents: verdict.ownParents, foreign: verdict.foreign, storeEarly, conflictOnly, ttlS });
   }
 
   // 2. Inputs from our own nosend parents count only when that parent is released in this run too.
@@ -513,16 +567,31 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
       keep(t, 'input-spent-elsewhere');
       return false;
     }
-    if (d.storeEarly && !isExpiredNow(d.a)) {
+    if (d.conflictOnly && !again.foreign.size && !isExpiredNow(d)) {
+      keep(t, 'changed-at-recheck');
+      return false;
+    }
+    if (d.storeEarly && !isExpiredNow(d)) {
       const w = await deps.storeAsk!(d.a).catch((): StoreWord => 'unclear');
       if (w !== 'never-heard') {
         keep(t, w === 'heard' ? 'store-heard' : 'store-unclear');
         return false;
       }
     }
+    // The same active store for the detach and the abort, and no storage switch under way.
+    const gate = () => (deps.storageGate ? deps.storageGate() : 'any');
+    const store = gate();
+    if (!store) {
+      keep(t, 'storage-busy');
+      return false;
+    }
     try {
       // Coins a confirmed foreign transaction spent: out of the action first, unspendable, so the abort can't free them.
       for (const [o, by] of again.foreign) await deps.detachInput!(t, o, by);
+      if (gate() !== store) {
+        keep(t, 'storage-busy');
+        return false;
+      }
       const r = (await deps.abort(t)) as { aborted?: unknown } | undefined;
       if (r && typeof r === 'object' && r.aborted === false) throw new Error('the wallet did not abort it');
     } catch (e) {
@@ -530,6 +599,10 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
       log(`[bwx-expiry] ${t}: abort refused by the wallet (${e instanceof Error ? e.message : String(e)})`);
       return false;
     }
+    for (const [o, by] of again.foreign)
+      await Promise.resolve(deps.reaffirmSpent?.(o, by)).catch((e: unknown) =>
+        log(`[bwx-expiry] ${t}: could not re-mark ${o} spent (${e instanceof Error ? e.message : String(e)})`),
+      );
     state.released[t] = nowS;
     delete state.first[t];
     report.released.push(t);
@@ -543,8 +616,8 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
     return true;
   }
 
-  function isExpiredNow(a: NoSendAction): boolean {
-    return isExpired(policyFromLabels(a.labels), state.first[a.txid] ?? nowS, nowS, height, deps.defaultTtlS);
+  function isExpiredNow(d: Due): boolean {
+    return isExpired(policyFromLabels(d.a.labels), state.first[d.a.txid] ?? nowS, nowS, height, d.ttlS);
   }
 
   async function settle(txid: string) {
@@ -570,6 +643,7 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
   ): Promise<'seen' | KeepReason | { ownParents: Set<string>; foreign: Map<string, string> }> {
     const ownParents = new Set<string>();
     const foreign = new Map<string, string>();
+    let clean = 0;
     for (const o of ins) {
       const [parent] = splitOutpoint(o)!;
       if (own.has(parent) && parent !== txid) {
@@ -590,7 +664,10 @@ export async function expireOnce(deps: ExpiryDeps): Promise<ExpiryReport> {
       if (s.state !== 'unspent') return 'input-unclear';
       // A 404 from the spent lookup also comes back for an outpoint the chain has never heard of.
       if (!(await anySeen(parent, lookups))) return 'parent-unknown';
+      clean++;
     }
+    // Every input spent elsewhere: the "spender" may be a re-broadcast or malleated copy of this very payment. Kept.
+    if (foreign.size && !clean) return 'input-spent-elsewhere';
     return { ownParents, foreign };
   }
 }
@@ -614,7 +691,7 @@ function orderChildrenFirst<T extends { a: { txid: string }; ownParents: Set<str
 
 // ── detaching a coin a confirmed foreign transaction spent (1) ──
 
-type DetachRow = { outputId: number; spentBy?: number | null };
+type DetachRow = { outputId: number; spendable?: boolean; spentBy?: number | null };
 type DetachTx = { transactionId: number; status: string };
 /** The few storage calls detachInput needs (a StorageProvider, as runAsStorageProvider hands it over). */
 export type DetachProvider = {
@@ -655,6 +732,30 @@ export const storageDetachInput =
           await sp.updateOutput(o.outputId, { spendable: false, spentBy: by ? by.transactionId : undefined });
     });
     await s.recordCleared?.(`${ptxid}_${vout}`, spender.toLowerCase()).catch(() => undefined);
+  };
+
+/**
+ * ExpiryDeps.reaffirmSpent on the wallet's storage: after the abort, any row for `outpoint` that is spendable with no
+ * spender is set unspendable again (linked to `spender` when storage holds it). Idempotent; this device's store only.
+ */
+export const storageReaffirmSpent =
+  (s: {
+    isActive: () => boolean;
+    userId: () => Promise<number>;
+    run: <T>(fn: (sp: DetachProvider) => Promise<T>) => Promise<T>;
+  }) =>
+  async (outpoint: string, spender: string): Promise<void> => {
+    const op = splitOutpoint(outpoint);
+    if (!op || !TXID.test(spender)) throw new Error('bad outpoint or txid');
+    if (!s.isActive()) throw new Error("this device's store is not the active one");
+    const userId = await s.userId();
+    const [ptxid, vout] = op;
+    await s.run(async (sp) => {
+      const [by] = await sp.findTransactions({ partial: { userId, txid: spender.toLowerCase() }, noRawTx: true });
+      for (const o of await sp.findOutputs({ partial: { userId, txid: ptxid, vout }, noScript: true }))
+        if (o.spendable === true && o.spentBy == null)
+          await sp.updateOutput(o.outputId, { spendable: false, spentBy: by ? by.transactionId : undefined });
+    });
   };
 
 /**

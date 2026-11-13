@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { KeyDeriver, PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
-import { askStoreHeardOf, storeAskFor, storePaymentOf } from './storeHeard';
+import { askStoreHeardOf, markStoreCreatedHere, storeAskFor, storeKindFor, storePaymentOf } from './storeHeard';
 
 const TX = 'ab'.repeat(32);
 const QUOTE = 'cd'.repeat(16);
@@ -49,6 +49,19 @@ describe('askStoreHeardOf', () => {
     expect(await ask(() => new Promise<Response>(() => undefined), { timeoutMs: 20 })).toBe('unclear');
     expect(await ask(answer(200, { unverified: true }), { api: '' })).toBe('unclear');
   });
+  test('a signature that never comes back is unclear within the deadline (never a stuck run)', async () => {
+    const hung = {
+      getPublicKey: () => new Promise(() => undefined),
+      createSignature: () => new Promise(() => undefined),
+    } as never;
+    const t0 = Date.now();
+    const r = await askStoreHeardOf(hung, answer(200, { unverified: true }), { kind: 'buy', quoteId: QUOTE }, TX, {
+      api,
+      timeoutMs: 30,
+    });
+    expect(r).toBe('unclear');
+    expect(Date.now() - t0).toBeLessThan(2_000);
+  });
   test('signed claim with no rawtx, to the right endpoint', async () => {
     let url = '';
     let body: Record<string, unknown> = {};
@@ -65,7 +78,7 @@ describe('askStoreHeardOf', () => {
 });
 
 describe('storeAskFor', () => {
-  test('not a Store payment → not-store, the Store is never asked', async () => {
+  test('not a Store payment → unclear (never early), the Store is never asked', async () => {
     let asked = 0;
     const ask = storeAskFor(
       wallet,
@@ -75,7 +88,7 @@ describe('storeAskFor', () => {
       },
       { api },
     );
-    expect(await ask({ txid: TX, description: 'Send', outputs: [] })).toBe('not-store');
+    expect(await ask({ txid: TX, description: 'Send', outputs: [] })).toBe('unclear');
     expect(asked).toBe(0);
     const store = {
       txid: TX,
@@ -85,5 +98,43 @@ describe('storeAskFor', () => {
     expect(await ask(store)).toBe('never-heard');
     expect(await storeAskFor(wallet, answer(200, { pending: true }), { api })(store)).toBe('heard');
     expect(await storeAskFor(wallet, answer(429, {}), { api })(store)).toBe('unclear');
+  });
+});
+
+describe('made on this device (storeKindFor)', () => {
+  const memKV = () => {
+    let v: Record<string, { quoteId: string; at: number }> = {};
+    return { get: async () => structuredClone(v), set: async (x: typeof v) => void (v = structuredClone(x)) };
+  };
+  const store = { txid: TX, description: 'Theme purchase · Cool', outputs: [{ lockingScript: memo('bwx-theme-buy') }] };
+  test("'mine' only for the txid AND quote id this device's Store flow recorded; synced payments are 'other-device'", async () => {
+    const kv = memKV();
+    const kind = storeKindFor(kv);
+    expect(await kind({ txid: TX, description: 'Send', outputs: [] })).toBe('not-store');
+    expect(await kind(store)).toBe('other-device'); // synced from the phone: no record here
+    await markStoreCreatedHere(kv, TX, QUOTE);
+    expect(await kind(store)).toBe('mine');
+    // A site's own action dressed as a Store payment, or another quote: no record for it.
+    expect(await kind({ ...store, txid: 'ef'.repeat(32) })).toBe('other-device');
+    expect(await kind({ ...store, outputs: [{ lockingScript: memo('bwx-theme-buy', 'ef'.repeat(16)) }] })).toBe(
+      'other-device',
+    );
+    expect(
+      await storeKindFor({
+        get: async () => {
+          throw new Error('storage');
+        },
+        set: async () => undefined,
+      })(store),
+    ).toBe('other-device');
+  });
+  test('old records are pruned; a write that does not stick throws', async () => {
+    const kv = memKV();
+    await markStoreCreatedHere(kv, 'ef'.repeat(32), QUOTE, 1_000);
+    await markStoreCreatedHere(kv, TX, QUOTE, 1_000 + 16 * 24 * 3600 * 1000);
+    expect(Object.keys(await kv.get())).toEqual([TX]);
+    await expect(
+      markStoreCreatedHere({ get: async () => ({}), set: async () => undefined }, TX, QUOTE),
+    ).rejects.toThrow(/stick/);
   });
 });

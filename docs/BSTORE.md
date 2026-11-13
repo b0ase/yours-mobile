@@ -112,3 +112,24 @@ prohibited list, fee split shown, store-build gating.
 Coming: buying or subscribing (buttons show "Coming"), submitting to the server (the button says "Selling opens soon"; Save
 draft keeps it on the device and says so), b review queue, live community listings, reports reaching the
 server, sticker packs, renewals.
+
+## Withdrawn txids (follow-up, needs a server change and RB's go-ahead to deploy)
+
+Since 13 Nov 2026 the wallet releases an unsent Store payment early (about 10 minutes) only on the device that made
+it, under that device's payment lock (`src/services/unsentExpiry.ts` 1b, `src/mobile/themeOrder/storeHeard.ts`).
+Every other device holds a synced Store payment for 3 days, because it can't see the paying device's retry state:
+after a `store_unreachable`, the phone may still tap Pay and broadcast the same transaction, and if the extension had
+released it and re-spent its coins, the two would double-spend.
+
+The proper fix is server-side, so every device can release at once:
+
+- `POST /api/theme-orders/withdraw` (signed by the identity key, like a claim): records a tombstone for
+  `(quote_id, txid)` before any device releases its coins. From then on the server refuses an intent or claim for
+  that txid (409 `tx_withdrawn`) and never broadcasts it.
+- Paying device: before "Pay again" sends an intent, it gets `tx_withdrawn` and stops (the coins were released
+  elsewhere); a new Pay makes a new payment.
+- Releasing device (any): withdraw first; release only after the server confirms the tombstone. A Store that already
+  recorded an intent for the txid refuses the withdraw (`heard`), and the payment stays held.
+- Then the 3-day hold for other devices can go back to the usual checks.
+
+Not built. Needs RB's word before the server change is deployed.

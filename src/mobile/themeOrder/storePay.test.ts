@@ -259,6 +259,23 @@ describe('review 4 Nov 2026', () => {
     expect(sends).toBe(0);
   });
 
+  test('a new payment is recorded as made on this device (unsentExpiry 1b); a failed record is not fatal', async () => {
+    const marked: string[] = [];
+    await recordNewPayment(entry(), base({ markCreated: async (e) => void marked.push(`${e.txid}:${e.quoteId}`) }));
+    expect(marked).toEqual([`${T}:${entry().quoteId}`]);
+    const logs: string[] = [];
+    await recordNewPayment(
+      entry(),
+      base({
+        log: (m) => logs.push(m),
+        markCreated: async () => {
+          throw new Error('storage');
+        },
+      }),
+    );
+    expect(logs.some((l) => l.includes('not recorded as made here'))).toBe(true);
+  });
+
   test('storeMemo reads the quote id from a Store memo output', () => {
     const memo = (tag: string, q: string) =>
       new Script()

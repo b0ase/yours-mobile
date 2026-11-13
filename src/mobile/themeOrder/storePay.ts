@@ -147,6 +147,11 @@ export type StorePayDeps = {
   backup: () => Promise<BackupAnswer>;
   /** Tell the Store the txid before broadcasting (claim with intent). Absent: no intent step (tests of other parts). */
   intent?: (e: OutboxEntry) => Promise<IntentAnswer>;
+  /**
+   * Record that THIS device made the payment (storeHeard.ts markStoreCreatedHere): only then may the wallet's own
+   * unsent-payment pass release it early here (services/unsentExpiry.ts 1b). A failure is logged, never fatal.
+   */
+  markCreated?: (e: OutboxEntry) => Promise<void>;
   /** Release a payment that never left the device (or only reached our own Store, which refused it). */
   releaseUnsent?: (txid: string) => Promise<void>;
   /** The wallet's status for an action: 'failed', 'nosend', 'unproven'…, or undefined when storage has no such action. */
@@ -181,16 +186,17 @@ export const STORE_PAY_MESSAGES = {
   // Owner, 10 Nov 2026: twice told "nothing was paid" while the unsent payment kept ~$1 of his balance locked. A
   // payment that could not be backed up is now released at once (backup_failed_released). Only when the chain can't be
   // asked (offline) is it kept, and then the next Store open releases it; it is never sent without a new Pay.
-  // Kept only when the network can't be checked right now. Said as it is: the Store releases it on an open a few
-  // minutes later once the network (and, for an older payment, the Store) confirm it never arrived; unsentExpiry
-  // releases any unsent payment about a day after the wallet first saw it, at a wallet open, on the same checks.
+  // Kept only when the network can't be checked right now. Said as it is (13 Nov 2026): on the device that made it,
+  // the wallet's own unsent-payment pass (services/unsentExpiry.ts 1b, at unlock and every ~10 minutes while open)
+  // releases it once the Store says it never heard of it and the network confirms it never arrived; a Store open does
+  // the same. Other devices hold it longer (3 days) so they never race this device's "Pay again".
   backup_failed:
-    "Your wallet couldn't save its backup, so the payment was not sent. Nothing was paid. Its amount is held until the wallet can confirm the network never got it: open the Store again in a few minutes while online, or it is released by itself about a day from now when the wallet opens. You can also tap Pay to try again.",
+    "Your wallet couldn't save its backup, so the payment was not sent. Nothing was paid. Its amount is held until the wallet can confirm the network never got it: on this device that is usually within about 20 minutes while the wallet is open and online. You can also tap Pay to try again.",
   backup_failed_released:
     "Your wallet couldn't save its backup, so the payment was not sent. Nothing was paid and your balance is back. Try again in a moment.",
   outbox_failed: "This device couldn't save the payment, so it was not sent. Nothing was paid. Try again in a moment.",
   store_unreachable:
-    "The Store couldn't be reached, so the payment has not been sent. Nothing was paid. It goes out once the Store answers: open the Store again, or tap Pay to try now.",
+    "The Store couldn't be reached, so the payment has not been sent. Nothing was paid. Tap Pay to try again once you're online. If you don't, the held amount comes back by itself within about 20 minutes while the wallet is open on this device.",
   intent_refused: 'The Store did not accept this payment, so it was not sent. Nothing was paid.',
   refused_so_far:
     "The network has refused the payment so far. It's kept: if it turns up on the network it is claimed automatically, and nothing more is taken.",
@@ -248,6 +254,11 @@ export async function recordNewPayment(entry: OutboxEntry, deps: StorePayDeps): 
     await deps.releaseUnsent?.(entry.txid).catch(() => undefined);
     throw storeError('outbox_failed', false);
   }
+  await Promise.resolve(deps.markCreated?.(entry)).catch((e: unknown) =>
+    deps.log?.(
+      `[bwx-store] ${entry.txid}: not recorded as made here (${e instanceof Error ? e.message : String(e)}); it waits for the longer deadline`,
+    ),
+  );
 }
 
 /**
