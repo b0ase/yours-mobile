@@ -12,6 +12,7 @@ import { setChatAccount, setChatReceiveAddress } from '../../mobile/chat/chatAcc
 import { withWalletReadCache } from '../../utils/walletReadCache';
 import { resetSessionCaches } from '../../utils/sessionCaches';
 import { PublicKey } from '@bsv/sdk';
+import { markBootReady, markBootStage } from '../../mobile/bootWatchdog';
 
 /** True when `publicKey` (hex) is the identity key of the account whose identity address is `identityAddress`. */
 const identityMatches = (publicKey: string, identityAddress: string) => {
@@ -26,7 +27,9 @@ const initializeServices = async (onUsbRemoved: () => void, isLocked: () => bool
   const chromeStorageService = new ChromeStorageService();
   // Startup timing (owner, 6 Oct 2026: 40 s blank side panel). Logged so a slow start can be diagnosed from the console.
   const t0 = performance.now();
+  markBootStage('services: reading storage');
   const all = await chromeStorageService.getAndSetStorage();
+  markBootStage('services: storage read');
   try {
     const bytes = JSON.stringify(all ?? {}).length;
     console.info(
@@ -129,8 +132,11 @@ export const ServiceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
         setServices({ ...initializedServices, isLocked, isReady, lockWallet });
         setIsReady(true);
+        // First useful screen (unlock or wallet) follows: the phone's boot watchdog stands down (mobile/bootWatchdog.ts).
+        markBootReady('services: ready');
       } catch (error) {
         console.error('Error initializing services:', error);
+        markBootStage('services: failed');
       }
     };
     initServices();

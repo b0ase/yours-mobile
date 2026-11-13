@@ -1,6 +1,8 @@
 /* global chrome */
 import './utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (utils/abortTimeout.ts): before anything else
 import { siteAfterNavigation } from './mobile/theme/tabSiteNav';
+import { IS_EXTENSION } from './mobile/extension';
+import { CLOSE_FOR_RELOAD_ACTION, CLOSE_FOR_RELOAD_CAP_MS, settleWithin } from './mobile/account/closeForReload';
 import { SheetFirstGate } from './services/sheetFirst';
 import { chromeConsentStore } from './services/siteTokens';
 import {
@@ -607,17 +609,28 @@ const notifyBalanceUpdate = () => {
  */
 let lockGeneration = 0;
 
-const dropWalletContext = (reason: string) => {
+/** Drops the live context at once and returns its close, for the one caller that waits on it (close for reload). */
+const dropWalletContextAndClose = (reason: string): Promise<void> => {
   lockGeneration++;
   void closeUsbBackupReader();
   const ctx = accountContext;
   accountContext = null;
   // Running site actions stop holding their sites (services/spendRecipients.ts); none of them is ever shown again.
   releaseSpendRuns();
-  if (!ctx) return;
+  if (!ctx) return Promise.resolve();
   console.log(`[background] dropWalletContext (${reason}): gone immediately`);
-  void ctx.close().catch((err) => console.error(`[background] close after ${reason}:`, err));
+  return ctx.close().catch((err) => console.error(`[background] close after ${reason}:`, err));
 };
+const dropWalletContext = (reason: string) => {
+  void dropWalletContextAndClose(reason);
+};
+
+/**
+ * Set when the page is about to reload into another account (WALLET_CLOSE_FOR_RELOAD, in-page backgrounds only):
+ * nothing may open the wallet again before the reload ends this background (owner's iPhone, 13 Nov 2026: a switch
+ * during the first account's boot left a permanent black screen).
+ */
+let closedForReload = false;
 
 // Initialize wallet on startup (will be null if locked)
 /**
@@ -684,6 +697,10 @@ const pendingImports = new Map<string, Promise<void>>();
 
 const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   console.log('[background] initializeWallet: starting, current accountContext:', !!accountContext);
+  if (closedForReload) {
+    console.log('[background] initializeWallet: closed for an account-switch reload; not opening');
+    return null;
+  }
   // Stage timings (owner, 6 Oct 2026: a restore took ~50 s); read them in the service worker console.
   const t0 = Date.now();
   const stage = (name: string) => console.log(`[background] initializeWallet: ${name} at ${((Date.now() - t0) / 1000).toFixed(1)}s`);
@@ -3199,6 +3216,8 @@ if (!(
       // Wallet lock/unlock
       'WALLET_LOCKED',
       'WALLET_UNLOCKED',
+      // The page reloads into another account next (mobile/account/closeForReload.ts). Wallet pages only.
+      CLOSE_FOR_RELOAD_ACTION,
       // Master backup/restore
       'MASTER_BACKUP',
       'MASTER_RESTORE',
@@ -3487,6 +3506,28 @@ if (!(
           dropWalletContext('WALLET_LOCKED');
           chromeStorageService.clearPassKey().catch(() => {});
           sendResponse({ type: 'WALLET_LOCKED', success: true });
+          return true;
+        }
+        case CLOSE_FOR_RELOAD_ACTION: {
+          // In-page backgrounds only (phone, web, Desktop): the reload that follows ends this background, so close the
+          // wallet's stores now instead of tearing them down mid-write. The extension's service worker outlives the
+          // page and SWITCH_ACCOUNT reopens it, so it never closes for good there.
+          if (IS_EXTENSION) {
+            sendResponse({ type: CLOSE_FOR_RELOAD_ACTION, success: false, error: 'Not used in the extension' });
+            return true;
+          }
+          closedForReload = true;
+          failPendingStreamGrants();
+          const opening = reinitPromise ?? initInFlight;
+          const closing = dropWalletContextAndClose(CLOSE_FOR_RELOAD_ACTION);
+          // An init still running (a switch during boot) closes its own wallet when it sees the bumped generation.
+          void settleWithin(
+            () => Promise.all([closing, opening?.catch(() => null)]),
+            CLOSE_FOR_RELOAD_CAP_MS - 250,
+          ).then((how) => {
+            console.log(`[background] ${CLOSE_FOR_RELOAD_ACTION}: ${how}`);
+            sendResponse({ type: CLOSE_FOR_RELOAD_ACTION, success: true, data: how });
+          });
           return true;
         }
         case 'WALLET_UNLOCKED':

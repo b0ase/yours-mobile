@@ -5,23 +5,47 @@ import { getPersonalLink } from '../names/personalToken';
 import { identityRowText } from '../names/identityText';
 import { setChatAccount, setChatReceiveAddress } from '../chat/chatAccount';
 import { markAccountUsed } from './accountMenu';
+import { IS_EXTENSION } from '../extension';
+import { markBootStage } from '../bootWatchdog';
+import {
+  CLOSE_FOR_RELOAD_ACTION,
+  claimAccountSwitch,
+  closeWalletForReload,
+  releaseAccountSwitch,
+} from './closeForReload';
+import type { LegacyWallet } from '../../contexts/ServiceContext';
+
+/**
+ * Closes the wallet (capped, closeForReload.ts) and reloads into the selected account. Outside the extension the
+ * background runs in this page, so it is asked to close its stores before the reload tears them down.
+ */
+export const closeAndReload = async (wallet: LegacyWallet | undefined) => {
+  markBootStage('switch: closing wallet');
+  await closeWalletForReload({
+    legacyClose: wallet?.close ? () => wallet.close?.() : undefined,
+    closeBackground: IS_EXTENSION ? undefined : () => chrome.runtime.sendMessage({ action: CLOSE_FOR_RELOAD_ACTION }),
+  });
+  markBootStage('switch: reloading');
+  window.location.reload();
+};
 
 /**
  * Account switching, shared by the account drawer (TopNav), the account strip above it and Settings.
- * Same sequence as upstream TopNav.handleSwitchAccount: close the wallet, switch, reload into the account.
+ * Same sequence as upstream TopNav.handleSwitchAccount: switch, close the wallet (awaited, capped), reload.
  */
 export const useAccountSwitch = (onSame?: () => void) => {
-  const { chromeStorageService, wallet, setIsSwitchingAccount } = useServiceContext();
+  const { chromeStorageService, wallet, setIsSwitchingAccount, isReady } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const current = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
 
   const switchAccount = async (identityAddress: string) => {
-    if (switchingTo) return;
+    if (switchingTo || !isReady) return;
     if (identityAddress === current) return onSame?.();
+    // One switch at a time across all switchers; a second tap while one is closing is ignored.
+    if (!claimAccountSwitch()) return;
     setSwitchingTo(identityAddress);
     setIsSwitchingAccount(true);
-    wallet?.close?.();
     try {
       await chromeStorageService.switchAccountForReload(identityAddress);
       // Act as the new account at once (before the reload): no request may reuse the old session.
@@ -31,12 +55,13 @@ export const useAccountSwitch = (onSame?: () => void) => {
       markAccountUsed(identityAddress);
     } catch (err) {
       console.error('[accounts] account switch failed:', err);
+      releaseAccountSwitch();
       setIsSwitchingAccount(false);
       setSwitchingTo(null);
       addSnackbar('Failed to switch account. Please try again.', 'error');
       return;
     }
-    window.location.reload();
+    await closeAndReload(wallet);
   };
   return { current, switchingTo, switchAccount };
 };

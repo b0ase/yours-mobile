@@ -190,6 +190,10 @@ import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAc
 import { chainActive } from './services/dappChain';
 import { healthStatus, SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
+import { settleWithin } from './utils/settleWithin';
+
+/** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
+const WATCH_STORES_CLOSE_CAP_MS = 2000;
 
 // Admin originator for the extension (bypasses all permission checks). The bare
 // extension ID, as ChromeCWI sends it: toolbox permission checks reject a URL
@@ -1906,12 +1910,16 @@ export const initWallet = async (
     walletClosed = true;
     admitClosed = true;
     receiveWatch.stop();
-    void watchKit
-      ?.then(async (k) => {
-        await k.store.close();
-        await k.classified.close();
-      })
-      .catch(() => undefined);
+    // The receive watch's processed-tx stores close with the wallet, capped so a stuck one never holds the close
+    // (an account-switch reload waits on this; mobile/account/closeForReload.ts).
+    const watchStoresClosed = settleWithin(
+      () =>
+        watchKit?.then(async (k) => {
+          await k.store.close();
+          await k.classified.close();
+        }),
+      WATCH_STORES_CLOSE_CAP_MS,
+    );
     keepActive?.stop();
     if (admitTimer) clearTimeout(admitTimer);
     admitTimer = undefined;
@@ -1919,6 +1927,7 @@ export const initWallet = async (
     moreTimer = undefined;
     await destroyWallet();
     stopBackupCheck();
+    await watchStoresClosed;
   };
 
   return {
