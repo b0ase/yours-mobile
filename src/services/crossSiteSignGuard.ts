@@ -9,6 +9,11 @@
  * site / callback / redirect field), that site must be the one
  * calling (or a parent/subdomain of it). Data that names no site is signed as before; free links inside content (a post with a URL) are not
  * treated as a binding, so signed posts keep working.
+ *
+ * Not covered here: relaying a BRC-103 session itself. evil.com can open a BRC-103 (AuthFetch) session with good.com's
+ * server and ask the wallet to sign its messages; those frames name no site, and a signature under 'auth message
+ * signature' verifies at any BRC-103 peer. Stopping that needs the peer's identity (the counterparty) tied to the
+ * calling site, not a reading of the data.
  */
 
 import { bareHost, scanSignData } from './signDataScan';
@@ -43,15 +48,22 @@ const decodeText = (data: unknown): string | null => {
  * Every site the data names (signDataScan.ts reads it as text, leniently, through encodings and AuthFetch frames), and
  * whether it was plain text. `exhausted`: crafted data needed more reading than the scan allows, so it can't be checked.
  */
-const namedHosts = (data: unknown): { hosts: string[]; lenient: boolean; exhausted: boolean } => {
+const namedHosts = (data: unknown, args: object): { hosts: string[]; lenient: boolean; exhausted: boolean } => {
   if (!Array.isArray(data) || data.length === 0 || data.length > MAX_SIGN_DATA)
     return { hosts: [], lenient: false, exhausted: false };
   if (!data.every((b) => typeof b === 'number' && b >= 0 && b <= 255))
     return { hosts: [], lenient: false, exhausted: false };
-  const { hosts, exhausted } = scanSignData(new Uint8Array(data as number[]));
+  const { hosts, exhausted } = scanSignData(new Uint8Array(data as number[]), { authMessage: isAuthMessage(args) });
   return { hosts, lenient: decodeText(data) === null, exhausted };
 };
 const NOT_TEXT = 'inside data that is not plain text';
+/** Protocol [2, 'auth message signature']: every @bsv/sdk Peer (BRC-103) signature. */
+const isAuthMessage = (args: object) => {
+  const p = (args as { protocolID?: unknown }).protocolID;
+  return (
+    Array.isArray(p) && p[0] === 2 && typeof p[1] === 'string' && p[1].trim().toLowerCase() === 'auth message signature'
+  );
+};
 const TOO_MUCH = `${UNCHECKABLE_REFUSAL} (too much encoded data to read)`;
 
 export const CROSS_SITE_REFUSAL = 'This message is for a different site than the one asking you to sign it';
@@ -101,7 +113,7 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
   // any site, and blind hashes, are refused; data naming no site signs as before.
   if (isPairedOriginator(originator) && !provenPairing(originator)) {
     if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
-    const { hosts: named, lenient, exhausted } = namedHosts(data);
+    const { hosts: named, lenient, exhausted } = namedHosts(data, args as object);
     if (exhausted) return TOO_MUCH;
     return named.length
       ? `${CROSS_SITE_REFUSAL} (${named[0]}${lenient ? `, ${NOT_TEXT}` : ''}; this pairing did not prove its site)`
@@ -112,7 +124,7 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
     // A caller with no parsable host (a single-label name, an extension id) can't be any site a message names: refuse
     // a blind hash or data that names a site; data naming no site signs as before.
     if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
-    const { hosts: named, lenient, exhausted } = namedHosts(data);
+    const { hosts: named, lenient, exhausted } = namedHosts(data, args as object);
     if (exhausted) return TOO_MUCH;
     return named.length ? `${CROSS_SITE_REFUSAL} (${named[0]}${lenient ? `, ${NOT_TEXT}` : ''})` : null;
   }
@@ -123,7 +135,7 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
     return BLIND_SIGN_REFUSAL;
   // Text or not (b-Aware triage 13 Nov 2026), every site the data names must be the caller's: one matching field must
   // not launder another, and bytes that aren't valid text are read leniently rather than waved through.
-  const { hosts, lenient, exhausted } = namedHosts(data);
+  const { hosts, lenient, exhausted } = namedHosts(data, args as object);
   if (exhausted) return TOO_MUCH;
   const other = hosts.find((h) => !sameSite(h, caller));
   return other ? `${CROSS_SITE_REFUSAL} (${other}${lenient ? `, ${NOT_TEXT}` : ''})` : null;

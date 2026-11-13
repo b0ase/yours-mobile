@@ -1,29 +1,30 @@
 /**
  * Which sites a piece of data to be signed names (used by crossSiteSignGuard.ts).
  *
- * b-Aware triage and review, 13 Nov 2026. The guard reads whatever an outside site asks it to sign, before any prompt,
- * so this must be cheap on every input and must read the data the way a lenient verifier at the named site could:
+ * b-Aware triage and reviews, 13 Nov 2026. The guard reads whatever an outside site asks it to sign, before any
+ * prompt, so this must be cheap on every input and must read the data the way a lenient verifier at the named site
+ * could:
  * - Linear work only. No regex here has overlapping quantifiers on attacker-sized runs; fields are found by a
  *   tokeniser, not a backtracking regex; and the whole scan has a character budget (MAX_SCAN_CHARS). Past it the scan
  *   stops and says so, and the guard refuses rather than signs.
  * - Every byte string is read twice: with junk (invalid UTF-8, control bytes) as spaces, and with control bytes
  *   dropped, which also reads ASCII sent as UTF-16 or split by NULs ("go\x01od.com"). Plain text reads once.
- * - Each reading is also read after a lenient decode pass (JSON \u and \x escapes, valid %XX runs, HTML entities),
- *   up to three passes for double encoding, and base64 / hex tokens are decoded and read the same way, two levels deep.
- * - An AuthFetch (BRC-104) request or response frame is recognised and read by part: its path, query and body.
- *   Its header values (authorization bearer tokens) are not read. Inside a frame, URL-shaped fields (url, uri, origin,
- *   redirect, callback, return_to, *_url ...) are ordinary request content (an image URL, a webhook, a link preview)
- *   and do not bind; domain / host / audience / realm / relying-party fields and login lines still do.
- * - Gzip and zlib data is inflated, bounded (raw deflate has no header and is not read).
- * Not read: raw deflate, other compression, and IDN hosts written in Unicode inside login lines (they are read in
- * fields).
+ * - Each reading is also read after lenient decode passes (JSON \u and \x escapes, valid %XX runs, HTML entities,
+ *   zero-width characters dropped), up to DECODE_PASSES for layered encoding, and base64 / hex tokens are decoded and
+ *   read the same way, two levels deep. Gzip and zlib data is inflated, bounded.
+ * - A URL value is read the way a WHATWG parser reads it: its host is whatever follows the LAST '@' before the first
+ *   / \ ? # or line break, so userinfo ("https://evil.com&@good.com") can't hide it.
+ * - Fields: key: value, key=value, "key" => value (Ruby), <key>value</key> (XML).
+ * - Bytes that aren't text (random blobs, encrypted envelopes) only count a host with a real top-level label (2+
+ *   letters or xn--), and Unicode in them is not converted to punycode, so junk doesn't read as a site name.
+ * Not read: raw deflate (no header to recognise), other compression. AuthFetch frames: see scanSignData.
  */
 
 import { Gunzip, Unzlib } from 'fflate';
 
 // Keys that say which site a message is for. uri/url/site/callback/redirect shapes added after the b-Aware
 // report of 24 Oct 2026 (b_feedback 51): a sign-in message naming its site through one of these was not checked.
-const STRONG_KEYS = [
+const BINDING_SET = new Set([
   'domain',
   'host',
   'hostname',
@@ -36,8 +37,6 @@ const STRONG_KEYS = [
   'rp_id',
   'rpid',
   'relying_party',
-];
-const URL_KEYS = [
   'origin',
   'uri',
   'url',
@@ -50,15 +49,12 @@ const URL_KEYS = [
   'return_to',
   'return_url',
   'return_uri',
-];
-const STRONG_SET = new Set(STRONG_KEYS);
-const ALL_SET = new Set([...STRONG_KEYS, ...URL_KEYS]);
+]);
 // b-Aware 29 Oct 2026 (squ11z1): camelCase and kebab-case keys (redirectUrl, callbackUrl, returnTo, rpId,
 // relyingParty, redirect-uri) were never seen. Every key is normalised to snake_case first; a key in the list, or
 // ending in a site-ish word (login_url, app_origin, expected_domain, post_login_redirect), binds.
-const ALL_SUFFIX =
+const BINDING_SUFFIX =
   /(?:^|_)(?:url|uri|origin|domain|host|hostname|audience|redirect|callback|return_to|realm|rp_id|relying_party)$/;
-const STRONG_SUFFIX = /(?:^|_)(?:domain|host|hostname|audience|realm|rp_id|relying_party)$/;
 
 /** camelCase / PascalCase / kebab-case / snake_case key to one snake_case form. */
 export const normaliseKey = (key: string) =>
@@ -68,16 +64,12 @@ export const normaliseKey = (key: string) =>
     .replace(/[-\s]+/g, '_')
     .toLowerCase();
 
-/** 'all': every binding key (text, raw binary). 'frame': inside an AuthFetch frame, URL-shaped keys don't bind. */
-export type KeyMode = 'all' | 'frame';
 const MAX_KEY = 64;
-const isBindingKey = (key: string, mode: KeyMode) => {
+const isBindingKey = (key: string) => {
   if (key.length > MAX_KEY) return false;
-  const set = mode === 'all' ? ALL_SET : STRONG_SET;
-  const suffix = mode === 'all' ? ALL_SUFFIX : STRONG_SUFFIX;
   // Also the plain lower-case key: "DoMaIn" normalises to do_ma_in.
   for (const k of new Set([normaliseKey(key), key.toLowerCase().replace(/-/g, '_')]))
-    if (set.has(k) || suffix.test(k)) return true;
+    if (BINDING_SET.has(k) || BINDING_SUFFIX.test(k)) return true;
   return false;
 };
 
@@ -85,19 +77,20 @@ const isBindingKey = (key: string, mode: KeyMode) => {
 // text: a prefix such as "Login: " or a JSON string around the line must not hide it.
 // Also IPv4 literals and "localhost" (b-Aware 25 Oct 2026, Widia): a challenge for 10.0.0.5 named no site before.
 // Labels are separated by a dot that the label class excludes, so a run of labels backtracks in linear time.
-const HOST = '((?:(?:[a-z0-9-]+\\.)+[a-z]{2,}|(?:\\d{1,3}\\.){3}\\d{1,3}|localhost)(?::\\d+)?)';
+// Unicode labels too (IDN, N5): "Sign in to bücher.de" names xn--bcher-kva.de.
+const HOST = '((?:(?:[\\p{L}\\p{N}-]+\\.)+\\p{L}{2,}|(?:\\d{1,3}\\.){3}\\d{1,3}|localhost)(?::\\d+)?)';
 // b-Aware 28 Oct 2026 (Jacob Anderson, 0qu5xz): "Sign into", "Log onto", "good.com - sign in", "Welcome to good.com"
 // and similar wordings named no site, so another site got the login signature.
 const SEP = '[\\s,:–—-]*';
 const SIGN_IN_LINES = [
   new RegExp(
     `(?:^|[\\s"'\`(:])${HOST}\\b${SEP}(?:wants you to sign in|(?:wallet |account )?(?:log ?in|sign[ -]?in)\\b|(?:requests|requires) (?:authentication|verification|a signature)\\b|wants to (?:connect|sign you in|sign in|log you in|log in|authenticate|verify)\\b)`,
-    'gim',
+    'gimu',
   ),
-  new RegExp(`\\b(?:sign|log) ?(?:in ?to|on ?to)\\s+${HOST}`, 'gi'),
+  new RegExp(`\\b(?:sign|log) ?(?:in ?to|on ?to)\\s+${HOST}`, 'giu'),
   new RegExp(
     `\\b(?:welcome to|authenticate(?: (?:to|with|for|on|at))?|verify (?:your )?(?:identity|wallet) (?:for|with|on)|authori[sz]e(?: (?:to|for|with|on))?|connect (?:to|with)|(?:sign|log)[ -]?(?:in|on|up) (?:with|via|at|on|for|through|using)|log[ -]?in (?:to|with|via|at|on|for)|continue (?:with|to))\\s+${HOST}`,
-    'gi',
+    'giu',
   ),
 ];
 const HOST_RE = /^(?:[a-z0-9-]+(\.[a-z0-9-]+)+|localhost)$/;
@@ -110,7 +103,7 @@ const MAX_VALUE = 1024;
  * WHATWG URL parser would (review 13 Nov 2026, A4): tabs and newlines dropped, backslashes as slashes, "https:good.com",
  * "https:/good.com" and "//good.com" all name good.com; a Unicode or percent-encoded host is converted (punycode).
  */
-export const bareHost = (value: string): string | null => {
+export const bareHost = (value: string, lenient = false): string | null => {
   let v = value
     .slice(0, MAX_VALUE)
     .replace(/[\t\n\r]/g, '')
@@ -131,6 +124,8 @@ export const bareHost = (value: string): string | null => {
   v = v.replace(/:\d*$/, '').toLowerCase();
   // eslint-disable-next-line no-control-regex
   if (/[^\x00-\x7f]|%/.test(v)) {
+    // Unicode read out of bytes that aren't text is junk, not an IDN.
+    if (lenient) return null;
     try {
       v = new URL(`http://${v}`).hostname;
     } catch {
@@ -138,7 +133,69 @@ export const bareHost = (value: string): string | null => {
     }
   }
   v = v.replace(/\.$/, '').replace(/(\.c[0-9a-f]{44})?\.paired\.invalid$/, '');
-  return HOST_RE.test(v) ? v : null;
+  if (!HOST_RE.test(v)) return null;
+  // In bytes that aren't text, a name needs a real top-level label ("iek.md1" and "z.m" out of a random blob don't).
+  if (lenient && !LENIENT_TLD.test(v)) return null;
+  return v;
+};
+const LENIENT_TLD = /(?:\.(?:[a-z]{2,}|xn--[a-z0-9-]+)|^localhost|^(?:\d{1,3}\.){3}\d{1,3})$/;
+
+/**
+ * The host of a URL value read the way a WHATWG parser reads it (review 13 Nov 2026, N1): after "scheme://", a special
+ * "scheme:" or "//", the authority runs to the first / \ ? # or line break, and the host is whatever follows its LAST
+ * '@'. Everything else in the authority (& | < , ; space quotes...) is userinfo. Null when `s` doesn't start one.
+ */
+const isAuthorityEnd = (c: number) => c === 47 || c === 92 || c === 63 || c === 35 || c === 10 || c === 13; // / \ ? # LF CR
+/** Per string, built once: where each authority would end, and the last '@' before each position. */
+type AuthorityIndex = { end: Int32Array; lastAt: Int32Array };
+const authorityIndex = (s: string): AuthorityIndex => {
+  const n = s.length;
+  const end = new Int32Array(n + 1);
+  end[n] = n;
+  for (let i = n - 1; i >= 0; i--) end[i] = isAuthorityEnd(s.charCodeAt(i)) ? i : end[i + 1];
+  const lastAt = new Int32Array(n + 1);
+  let la = -1;
+  for (let i = 0; i <= n; i++) {
+    lastAt[i] = la;
+    if (i < n && s.charCodeAt(i) === 64) la = i;
+  }
+  return { end, lastAt };
+};
+const authorityHost = (s: string, from: number, lenient: boolean, idx?: AuthorityIndex): string | null => {
+  const head = s.slice(from, from + 40);
+  const scheme = /^[ \t]*([a-z][a-z0-9+.-]*):/i.exec(head);
+  let at: number;
+  if (scheme && SPECIAL.has(scheme[1].toLowerCase())) at = from + scheme[0].length;
+  else if (scheme && /^[/\\]{2}/.test(head.slice(scheme[0].length))) at = from + scheme[0].length;
+  else if (/^[ \t]*[/\\]{2}/.test(head)) at = from;
+  else return null;
+  const c0 = (k: number) => s.charCodeAt(k);
+  while (at < s.length && (c0(at) === 47 || c0(at) === 92 || c0(at) === 32 || c0(at) === 9)) at++;
+  // No length cap (a long userinfo must not push the host out of reach): the index answers in constant time, and a
+  // quoted value is read once.
+  let end: number;
+  let lastAt: number;
+  if (idx) {
+    end = idx.end[at];
+    lastAt = idx.lastAt[end];
+  } else {
+    end = at;
+    lastAt = -1;
+    while (end < s.length && !isAuthorityEnd(c0(end))) {
+      if (c0(end) === 64) lastAt = end;
+      end++;
+    }
+  }
+  // The host: host characters (tabs are dropped by the parser) and a port, after the last '@'.
+  let h = lastAt >= at ? lastAt + 1 : at;
+  let host = '';
+  for (; h < end && host.length < 270; h++) {
+    const ch = s[h];
+    if (ch === '\t') continue;
+    if (!/[A-Za-z0-9.%:[\]-]/.test(ch) && ch.charCodeAt(0) < 0x80) break;
+    host += ch;
+  }
+  return host ? bareHost(`//${host}`, lenient) : null;
 };
 
 const isKeyStart = (c: number) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95; // A-Z a-z _
@@ -150,12 +207,26 @@ const isQuote = (c: number) => c === 34 || c === 39 || c === 96;
 const STOPS = new Set([...'"\'`,;}]&?#<>|'].map((c) => c.charCodeAt(0)));
 const isStop = (c: number) => isSpace(c) || STOPS.has(c);
 
+/** The content of a quoted value starting at `from` (just after the quote), JSON escapes kept. */
+const quoted = (s: string, from: number, q: number): string => {
+  let j = from;
+  while (j < s.length && s.charCodeAt(j) !== q) j += s.charCodeAt(j) === 92 ? 2 : 1;
+  return s.slice(from, Math.min(j, s.length));
+};
+const JSON_UNESCAPE = /\\(?:u([0-9a-fA-F]{4})|(.))/g;
+const jsonUnescape = (v: string) =>
+  v.replace(JSON_UNESCAPE, (_, u: string | undefined, c: string | undefined) =>
+    u ? String.fromCharCode(parseInt(u, 16)) : c === 't' ? '\t' : c === 'n' ? '\n' : c === 'r' ? '\r' : (c ?? ''),
+  );
+
 /**
- * key[:=]value pairs, found in one left-to-right pass (each character is looked at a fixed number of times). Same
- * shape as the old `["']?(key)["']?\s*[:=]\s*["']?(value)` regex, which backtracked quadratically on long words.
+ * key[:=]value pairs (also "key" => value and <key>value), found in one left-to-right pass: each character starts at
+ * most one key, and values are read a bounded length. Same shape as the old `["']?(key)["']?\s*[:=]\s*["']?(value)`
+ * regex, which backtracked quadratically on long words.
  */
-const fieldHosts = (s: string, mode: KeyMode, out: Set<string>) => {
+const fieldHosts = (s: string, lenient: boolean, out: Set<string>) => {
   const n = s.length;
+  let idx: AuthorityIndex | undefined;
   let i = 0;
   while (i < n) {
     const c = s.charCodeAt(i);
@@ -170,52 +241,72 @@ const fieldHosts = (s: string, mode: KeyMode, out: Set<string>) => {
     while (k < i && !isKeyStart(s.charCodeAt(k))) k++;
     if (k === i) continue;
     let j = i;
-    if (j < n && isQuote(s.charCodeAt(j))) j++;
-    while (j < n && isSpace(s.charCodeAt(j))) j++;
-    if (j >= n || (s.charCodeAt(j) !== 58 && s.charCodeAt(j) !== 61)) continue; // ':' or '='
-    j++;
-    while (j < n && isSpace(s.charCodeAt(j))) j++;
-    if (j < n && isQuote(s.charCodeAt(j))) j++;
-    const v = j;
-    while (j < n && !isStop(s.charCodeAt(j))) j++;
-    if (j > v && isBindingKey(s.slice(k, i), mode)) {
-      const value = s.slice(v, Math.min(j, v + MAX_VALUE));
-      let h = bareHost(value);
-      // A URL parser drops tabs and newlines, so "https://go<TAB>od.com" names good.com (review A4). Only when the
-      // part before the break names no host: in "Origin: https://a.com<LF>Nonce: 1" the line break ends the value.
-      if (!h && /^(?:[a-z][a-z0-9+.-]*:)?[/\\]{2}[^/\\?#]*$/i.test(value)) {
-        let e = j;
-        while (e < n && (s.charCodeAt(e) === 9 || s.charCodeAt(e) === 10 || s.charCodeAt(e) === 13)) e++;
-        if (e > j) {
-          let f = e;
-          while (f < n && !isStop(s.charCodeAt(f))) f++;
-          if (f > e) h = bareHost(value + s.slice(e, Math.min(f, e + MAX_VALUE)));
-        }
-      }
-      if (h) out.add(h);
+    const xml = runStart > 0 && s.charCodeAt(runStart - 1) === 60 && j < n && s.charCodeAt(j) === 62; // <key>
+    if (xml) j++;
+    else {
+      if (j < n && isQuote(s.charCodeAt(j))) j++;
+      while (j < n && isSpace(s.charCodeAt(j))) j++;
+      if (j >= n || (s.charCodeAt(j) !== 58 && s.charCodeAt(j) !== 61)) continue; // ':' or '='
+      j++;
+      if (j < n && s.charCodeAt(j) === 62) j++; // "=>"
+      while (j < n && isSpace(s.charCodeAt(j))) j++;
     }
-    // Carry on after the value (like a global regex), so a long value is read once.
+    const q = j < n && isQuote(s.charCodeAt(j)) ? s.charCodeAt(j) : 0;
+    if (q) j++;
+    const v = j;
+    if (!isBindingKey(s.slice(k, i))) {
+      // Not a binding: carry on from the value, which may hold fields of its own.
+      i = v;
+      continue;
+    }
+    while (j < n && !isStop(s.charCodeAt(j))) j++;
+    // A quoted URL is one string (JSON, a quoted attribute): its host is what a URL parser reads, nothing else, so
+    // "https://evil.com&@good.com" names only good.com. Unquoted, the value may also have been split at & or ; by a
+    // form parser, so both readings count (review N1).
+    const asUrl = q
+      ? authorityHost(jsonUnescape(quoted(s, v, q)), 0, lenient)
+      : authorityHost(s, v, lenient, (idx ??= authorityIndex(s)));
+    if (q && asUrl) {
+      out.add(asUrl);
+      i = Math.max(j, i);
+      continue;
+    }
+    const value = s.slice(v, Math.min(j, v + MAX_VALUE));
+    const found: (string | null)[] = [bareHost(value, lenient), asUrl];
+    // A URL parser drops tabs and newlines, so "https://go<TAB>od.com" names good.com (review A4). Only when the
+    // part before the break names no host: in "Origin: https://a.com<LF>Nonce: 1" the line break ends the value.
+    if (!found[0] && /^(?:[a-z][a-z0-9+.-]*:)?[/\\]{2}[^/\\?#]*$/i.test(value)) {
+      let e = j;
+      while (e < n && (s.charCodeAt(e) === 9 || s.charCodeAt(e) === 10 || s.charCodeAt(e) === 13)) e++;
+      if (e > j) {
+        let f = e;
+        while (f < n && !isStop(s.charCodeAt(f))) f++;
+        if (f > e) found.push(bareHost(value + s.slice(e, Math.min(f, e + MAX_VALUE)), lenient));
+      }
+    }
+    for (const h of found) if (h) out.add(h);
+    // Carry on after the value as first read (a global regex would), so a long value is read once.
     i = Math.max(j, i);
   }
 };
 
 // Every login line contains one of these words; most data contains none, so the line regexes are skipped.
 const LINE_WORDS = /sign|log|wants|requ|welcome|authent|verify|authori|connect|continue/i;
-const lineHosts = (s: string, out: Set<string>) => {
+const lineHosts = (s: string, lenient: boolean, out: Set<string>) => {
   if (!LINE_WORDS.test(s)) return;
   for (const re of SIGN_IN_LINES) {
     for (const m of s.matchAll(re)) {
-      const h = bareHost(m[1]);
+      const h = bareHost(m[1], lenient);
       if (h) out.add(h);
     }
   }
 };
 
 /** Every site the text says it is meant for (as written; no decoding). */
-export const boundHosts = (text: string, mode: KeyMode = 'all'): string[] => {
+export const boundHosts = (text: string): string[] => {
   const out = new Set<string>();
-  lineHosts(text, out);
-  fieldHosts(text, mode, out);
+  lineHosts(text, false, out);
+  fieldHosts(text, false, out);
   return [...out];
 };
 
@@ -255,16 +346,16 @@ const utf8Lossy = (bytes: Uint8Array) => new TextDecoder('utf-8').decode(bytes);
 
 // Control characters (C0 except tab/newline/return, DEL, C1) and U+FFFD.
 // eslint-disable-next-line no-control-regex
-const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f�]/g;
+const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\ufffd]/g;
 // What decodeOnce acts on; everything between is copied as one slice.
 // eslint-disable-next-line no-control-regex
-const SPECIAL_RE = /[\\%&+\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f�]/g;
+const SPECIAL_RE = /[\\%&+\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2060\ufeff\ufffd]/g;
 const keep = (ch: string) => (isControl(ch.charCodeAt(0)) ? '' : ch);
 
 /**
- * One lenient decode pass, linear: JSON / JS escapes (d, \x2e, \/, \", \\, \n), runs of valid %XX decoded
+ * One lenient decode pass, linear: JSON / JS escapes (\u0064, \x2e, \/, \", \\, \n), runs of valid %XX decoded
  * together as UTF-8 (a stray % no longer stops the rest: review A4), '+' as a space, HTML character references, and
- * control characters dropped.
+ * control and zero-width characters (soft hyphen, U+200B-U+200F, U+2060, BOM) dropped.
  */
 export const decodeOnce = (s: string): string => {
   const n = s.length;
@@ -404,7 +495,7 @@ const readHeaders = (b: Uint8Array, at: { i: number }) => {
 /**
  * The readable parts (path, query, body) of exactly one AuthFetch request (`serializeRequest`: 32-byte nonce, method,
  * path, search, headers, body) or response (32-byte request id, status, headers, body) frame; null when the data is
- * not one. Header values are skipped.
+ * not one.
  */
 export const authFetchParts = (b: Uint8Array): { text: string[]; body: Uint8Array | null } | null => {
   if (b.length < 32 + 4) return null;
@@ -437,12 +528,13 @@ export const authFetchParts = (b: Uint8Array): { text: string[]; body: Uint8Arra
 
 // ---- the scan ----
 
-/** Most characters one call reads, across every reading, decode pass and decoded token (8 x 64 KB). */
-export const MAX_SCAN_CHARS = 1 << 19;
+/** Most characters one call reads, across every reading, decode pass, decoded token and inflated stream (1M). */
+export const MAX_SCAN_CHARS = 1 << 20;
 const MAX_DEPTH = 2; // decoded tokens, and tokens inside those
 // Decoded tokens are read together, one buffer per string, split by a line that no host pattern crosses.
 const TOKEN_SEP = [10, 124, 10]; // "\n|\n"
-const DECODE_PASSES = 3;
+// Up to this many lenient decode passes (each stops early once nothing changes): layered %25 encodings.
+const DECODE_PASSES = 8;
 
 type Budget = { chars: number; tokens: Set<string>; exhausted: boolean };
 
@@ -470,7 +562,7 @@ const decodedTokens = (s: string, budget: Budget): Uint8Array | null => {
   return out;
 };
 
-const scanString = (s: string, depth: number, mode: KeyMode, budget: Budget, out: Set<string>) => {
+const scanString = (s: string, depth: number, lenient: boolean, budget: Budget, out: Set<string>) => {
   let cur = s;
   for (let pass = 0; pass <= DECODE_PASSES && !budget.exhausted; pass++) {
     if (budget.chars + cur.length > MAX_SCAN_CHARS) {
@@ -478,11 +570,11 @@ const scanString = (s: string, depth: number, mode: KeyMode, budget: Budget, out
       return;
     }
     budget.chars += cur.length;
-    lineHosts(cur, out);
-    fieldHosts(cur, mode, out);
+    lineHosts(cur, lenient, out);
+    fieldHosts(cur, lenient, out);
     if (depth < MAX_DEPTH) {
       const bytes = decodedTokens(cur, budget);
-      if (bytes) scanBytes(bytes, depth + 1, mode, budget, out);
+      if (bytes) scanBytes(bytes, depth + 1, budget, out);
       if (budget.exhausted) return;
     }
     const next = decodeOnce(cur);
@@ -491,10 +583,23 @@ const scanString = (s: string, depth: number, mode: KeyMode, budget: Budget, out
   }
 };
 
+/** Valid UTF-8 and at least 90% printable: text, read with the strict host rules. */
+const isText = (bytes: Uint8Array) => {
+  let t: string;
+  try {
+    t = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return false;
+  }
+  if (!t) return false;
+  const junk = t.match(CONTROL_RE)?.length ?? 0;
+  return (t.length - junk) / t.length >= 0.9;
+};
+
 // Gzip and zlib data is inflated (review A3), at most MAX_INFLATE bytes, fed in small pieces so a decompression bomb
 // stops after one piece's worth of output. More than that can't be read in full, so it counts as unreadable (the guard
 // refuses). Raw deflate has no header to recognise and is not read.
-const MAX_INFLATE = 64 * 1024;
+const MAX_INFLATE = 256 * 1024;
 const INFLATE_STEP = 256;
 export const inflateBounded = (b: Uint8Array): { bytes: Uint8Array; truncated: boolean } | null => {
   const gzip = b.length > 18 && b[0] === 0x1f && b[1] === 0x8b && b[2] === 8;
@@ -502,55 +607,68 @@ export const inflateBounded = (b: Uint8Array): { bytes: Uint8Array; truncated: b
   if (!gzip && !zlib) return null;
   const parts: Uint8Array[] = [];
   let total = 0;
-  let truncated = false;
+  let extra = 0; // output past MAX_INFLATE, counted and dropped
   try {
     const stream = gzip ? new Gunzip() : new Unzlib();
     stream.ondata = (chunk: Uint8Array) => {
-      const take = chunk.subarray(0, MAX_INFLATE - total);
-      if (take.length < chunk.length) truncated = true;
+      const take = chunk.subarray(0, Math.max(0, MAX_INFLATE - total));
+      extra += chunk.length - take.length;
       if (take.length) parts.push(take.slice());
       total += take.length;
     };
-    for (let i = 0; i < b.length && !truncated; i += INFLATE_STEP)
+    // Past the cap, keep feeding a little longer (at most MAX_EXTRA more output) to see whether the stream is real:
+    // random bytes that happen to look like a zlib header break down soon and are read as what came out
+    // (review N4); a real stream that is still going is too big to read and counts as truncated.
+    for (let i = 0; i < b.length && extra <= MAX_EXTRA; i += INFLATE_STEP)
       stream.push(b.subarray(i, i + INFLATE_STEP), i + INFLATE_STEP >= b.length);
   } catch {
-    /* corrupt or not really compressed: read what came out */
+    if (!total) return null;
+    return { bytes: join(parts, total), truncated: false };
   }
   if (!total) return null;
+  return { bytes: join(parts, total), truncated: extra > 0 };
+};
+const MAX_EXTRA = 1 << 20;
+const join = (parts: Uint8Array[], total: number) => {
   const out = new Uint8Array(total);
   let at = 0;
   for (const p of parts) {
     out.set(p, at);
     at += p.length;
   }
-  return { bytes: out, truncated };
+  return out;
 };
 
-function scanBytes(bytes: Uint8Array, depth: number, mode: KeyMode, budget: Budget, out: Set<string>) {
+function scanBytes(bytes: Uint8Array, depth: number, budget: Budget, out: Set<string>) {
+  const lenient = !isText(bytes);
   for (const r of readings(bytes)) {
-    scanString(r, depth, mode, budget, out);
+    scanString(r, depth, lenient, budget, out);
     if (budget.exhausted) return;
   }
   if (depth < MAX_DEPTH) {
     const inflated = inflateBounded(bytes);
     if (inflated?.truncated) budget.exhausted = true;
-    else if (inflated) scanBytes(inflated.bytes, depth + 1, mode, budget, out);
+    else if (inflated) scanBytes(inflated.bytes, depth + 1, budget, out);
   }
 }
 
 /**
  * Every site `data` names, read every way above. `exhausted`: the data needed more reading than MAX_SCAN_CHARS (only
  * crafted input does), so the answer is incomplete and the caller must not sign.
+ *
+ * `authMessage`: the call signs under protocol [2, 'auth message signature'], which is every @bsv/sdk Peer (BRC-103)
+ * signature. Such a signature only verifies at a BRC-103 peer, which never reads site names (review N2), so an exact
+ * AuthFetch (BRC-104) request or response frame under it names no site, whatever its body says (a profile's website, a
+ * DNS record's host, ?domain=). Under any other protocol a frame is just bytes and is read whole, nonce and headers
+ * included.
  */
 export const scanSignData = (
   data: Uint8Array,
+  opts: { authMessage?: boolean } = {},
 ): { hosts: string[]; exhausted: boolean; frame: boolean; chars: number } => {
+  if (opts.authMessage && authFetchParts(data)) return { hosts: [], exhausted: false, frame: true, chars: 0 };
   const budget: Budget = { chars: 0, tokens: new Set(), exhausted: false };
   const out = new Set<string>();
-  const frame = authFetchParts(data);
-  if (frame) {
-    for (const t of frame.text) if (t) scanString(t, 0, 'frame', budget, out);
-    if (frame.body?.length && !budget.exhausted) scanBytes(frame.body, 0, 'frame', budget, out);
-  } else scanBytes(data, 0, 'all', budget, out);
-  return { hosts: [...out], exhausted: budget.exhausted, frame: !!frame, chars: budget.chars };
+  scanBytes(data, 0, budget, out);
+  return { hosts: [...out], exhausted: budget.exhausted, frame: false, chars: budget.chars };
 };

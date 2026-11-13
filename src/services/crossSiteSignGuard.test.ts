@@ -429,6 +429,12 @@ describe('review 13 Nov: the scan is linear and bounded (A1)', () => {
     ['tabs inside URLs', fill('url=https://a\t', M)],
     ['sign in to a.a.a', fill('sign in to ' + 'a.'.repeat(300), M)],
     ['random', rand(M, 5)],
+    // URL values read to the end of their authority (re-review N1).
+    ['url=https:a dense', fill('url=https:a ', M)],
+    ['quoted URL without a closing quote', fill('"url":"https:', M)],
+    ['escaped quoted URLs', fill('url="https:\\\\', M)],
+    ['XML URL fields', fill('<url>https:', M)],
+    ['Ruby hash keys', fill('"domain"=>"', M)],
   ];
   test.each(worst)('%s: within the character budget and fast', (_name, data) => {
     const { chars } = scanSignData(new Uint8Array(data));
@@ -445,7 +451,7 @@ describe('review 13 Nov: the scan is linear and bounded (A1)', () => {
   });
 });
 
-describe('review 13 Nov: AuthFetch (BRC-104) frames sign unless they name another site (A2)', () => {
+describe('review 13 Nov: AuthFetch (BRC-104) frames sign under the BRC-103 protocol only (A2, N2, N3)', () => {
   // The exact framing of @bsv/sdk AuthFetch.serializeRequest / SimplifiedFetchTransport responses.
   const opt = (w: InstanceType<typeof Utils.Writer>, v?: string) => {
     if (!v) return w.writeVarIntNum(-1);
@@ -536,8 +542,59 @@ describe('review 13 Nov: AuthFetch (BRC-104) frames sign unless they name anothe
     ['a login line', request('POST', '/x', '', json, JSON.stringify({ message: 'good.com wants you to sign in' }))],
     ['?audience=', request('GET', '/token', '?audience=good.com', [])],
     ['an rpId', request('POST', '/webauthn', '', json, JSON.stringify({ rpId: 'good.com' }))],
-  ])('%s naming another site: refused', (_name, data) => {
-    expect(signs(data)).toContain('good.com');
+    // N3: real bodies with fields that would bind in a login challenge.
+    [
+      'a profile website',
+      request('POST', '/api/profile', '', json, JSON.stringify({ name: 'Bob', website: 'https://bob.dev' })),
+    ],
+    [
+      'a DNS record host',
+      request(
+        'POST',
+        '/api/records',
+        '',
+        json,
+        JSON.stringify({ type: 'A', host: 'www.mydomain.org', value: '1.2.3.4' }),
+      ),
+    ],
+    ['?domain= whois', request('GET', '/api/whois', '?domain=example.org', [])],
+    [
+      'a bookmarked site',
+      request('POST', '/api/bookmarks', '', json, JSON.stringify({ site: 'news.ycombinator.com' })),
+    ],
+  ])('%s: signs under auth message signature (a BRC-103 peer reads no site names)', (_name, data) => {
+    expect(signs(data)).toBeNull();
+    // Under any other protocol the same bytes are just data and are read whole.
+    expect(crossSiteSignRefusal('https://app.example', { protocolID: [2, 'good login'], data })).toContain(
+      'different site',
+    );
+  });
+
+  // N2: under another protocol a frame-shaped message hides nothing in its nonce, headers or path.
+  const raw = (s: string) => Array.from(new TextEncoder().encode(s));
+  const vi = (n: number) => (n < 0xfd ? [n] : [0xfd, n & 0xff, n >> 8]);
+  const str = (s: string) => [...vi(raw(s).length), ...raw(s)];
+  const ABSENT = Array(9).fill(0xff);
+  const fake = (nonce: number[], path: string | null, headers: [string, string][], body: string | null) => [
+    ...nonce,
+    ...str('POST'),
+    ...(path === null ? ABSENT : str(path)),
+    ...ABSENT,
+    ...vi(headers.length),
+    ...headers.flatMap(([k, v]) => [...str(k), ...str(v)]),
+    ...(body === null ? ABSENT : str(body)),
+  ];
+  const A = Array(32).fill(0x41);
+  test.each([
+    ['domain=good.com in the nonce', fake(raw(' domain=good.com '.padEnd(32, ' ')), '/', [], '')],
+    ['a domain in an x-bsv header', fake(A, '/', [['x-bsv-note', '{"domain":"good.com","nonce":"n"}']], '')],
+    ['a login line in authorization', fake(A, '/', [['authorization', 'good.com wants you to sign in']], '')],
+    ['a domain in the path', fake(A, '/login;domain=good.com', [], '')],
+    ['a domain in the body', fake(A, '/', [], JSON.stringify({ domain: 'good.com' }))],
+    ['a response with a domain header', [...A, 200, 1, ...str('x-bsv-a'), ...str('domain: good.com'), ...ABSENT]],
+  ])('frame-shaped %s under a login protocol: refused for evil.com', (_name, data) => {
+    expect(crossSiteSignRefusal('https://evil.com', { protocolID: [2, 'good login'], data })).toContain('good.com');
+    expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('good.com');
   });
 
   test('data that only looks like a frame is read whole, with every binding key', () => {
@@ -611,5 +668,143 @@ describe('review 13 Nov: readings the first fix missed (A3, A4)', () => {
     expect(
       crossSiteSignRefusal('https://www.bchatx.com', { data: bytes(JSON.stringify({ message: msg })) }),
     ).toBeNull();
+  });
+});
+
+// Re-review of 13 Nov 2026 (N1, N4, N5).
+describe('re-review 13 Nov: a URL host is read as a URL parser reads it (N1)', () => {
+  const urls = [
+    'https://evil.com&@good.com/login',
+    'https://a&b@good.com/login',
+    'https://evil.com;@good.com/',
+    'https://evil.com|@good.com/',
+    'https://evil.com,@good.com/',
+    'https://evil.com<@good.com/',
+    'https://evil.com @good.com/',
+    "https://evil.com'@good.com/",
+    'https://evil.com`@good.com/',
+    'https://evil.com}@good.com/',
+    'https://evil.com]@good.com/',
+    'https://u@evil.com@good.com/',
+    'https://user:pa&ss@good.com/x',
+    'https://evil.com?@good.com/', // the parser says evil.com
+    'https://evil.com#@good.com/', // evil.com
+    'https:evil.com&@good.com',
+    '//evil.com&@good.com/x',
+  ];
+  test.each(urls)('%s: the guard and new URL() agree on the host', (url) => {
+    const host = new URL(url.startsWith('//') ? `https:${url}` : url).hostname;
+    // Quoted (JSON): exactly the parser's host.
+    const json = bytes(JSON.stringify({ uri: url, nonce: 'n' }));
+    expect(crossSiteSignRefusal(`https://${host}`, { data: json })).toBeNull();
+    expect(crossSiteSignRefusal('https://other.example', { data: json })).toContain(host);
+    // Unquoted (a form, a text line): the parser's host always counts; a form parser's split may name another too.
+    for (const data of [bytes(`redirect_uri=${encodeURIComponent(url)}&state=1`), bytes(`uri=${url}`)]) {
+      expect(scanSignData(new Uint8Array(data)).hosts).toContain(host);
+      expect(crossSiteSignRefusal('https://other.example', { data })).not.toBeNull();
+    }
+  });
+  test('an escaped quote in the userinfo: the parser host is named (the decoded pass also names evil.com)', () => {
+    const data = bytes(JSON.stringify({ uri: 'https://evil.com"@good.com/', nonce: 'n' }));
+    expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('good.com');
+  });
+  test('the form from the review: redirect_uri=https%3A%2F%2Fevil.com%26%40good.com%2Fcb', () => {
+    const data = bytes('redirect_uri=https%3A%2F%2Fevil.com%26%40good.com%2Fcb&state=1');
+    expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('good.com');
+  });
+  test('a long userinfo does not push the host out of reach', () => {
+    const url = `https://evil.com${'x'.repeat(5000)}@good.com/login`;
+    for (const data of [
+      bytes(JSON.stringify({ uri: url })),
+      bytes(`uri=${url}`),
+      bytes(`redirect_uri=${encodeURIComponent(url)}`),
+    ])
+      expect(scanSignData(new Uint8Array(data)).hosts).toContain('good.com');
+  });
+  test('a later email on the same JSON line is not a URL host', () => {
+    const data = bytes(JSON.stringify({ uri: 'https://good.com', email: 'me@x.example', nonce: 'n' }));
+    expect(crossSiteSignRefusal('https://good.com', { data })).toBeNull();
+  });
+});
+
+describe('re-review 13 Nov: more spellings (N5)', () => {
+  test.each([
+    ['a Ruby hash', bytes('{"domain"=>"good.com", "nonce"=>"n"}')],
+    ['XML <Audience>', bytes('<Assertion><Audience>good.com</Audience><Nonce>n</Nonce></Assertion>')],
+    ['XML <domain>', bytes('<login><domain>good.com</domain></login>')],
+    ['five %25 layers', bytes('domain=good%25252525252Ecom')],
+    ['an IDN in a login line', bytes('Sign in to bücher.de\nNonce: 1')],
+    ['a zero-width character in the key', bytes(JSON.stringify({ ['dom​ain']: 'good.com' }))],
+    ['an ideographic full stop', bytes(JSON.stringify({ domain: 'good。com' }))],
+  ])('%s: refused for evil.com', (_name, data) => {
+    expect(crossSiteSignRefusal('https://evil.com', { data })).not.toBeNull();
+  });
+  test('own-site messages from the review still sign', () => {
+    const own: [string, string][] = [
+      [
+        'good.com',
+        'good.com wants you to sign in with your Bitcoin account:\n1abc\n\nURI: https://good.com/login\nVersion: 1\nNonce: 32891756\nIssued At: 2026-11-13T10:00:00Z',
+      ],
+      [
+        'https://app.good.com',
+        JSON.stringify({ domain: 'good.com', redirect_uri: 'https://app.good.com/cb?x=1&y=2#frag', nonce: 'n' }),
+      ],
+      ['https://good.com', 'client_id=abc&redirect_uri=https%3A%2F%2Fgood.com%2Fcb&state=xyz%ZZ&scope=openid+profile'],
+      [
+        'https://bit-sign.online',
+        JSON.stringify({
+          v: 1,
+          kind: 'nds-seal',
+          docHash: 'ab'.repeat(32),
+          signer: '$b0ase',
+          signedAt: '2026-11-13T10:00:00Z',
+          origin: 'https://bit-sign.online',
+        }),
+      ],
+      [
+        'https://bchatx.com',
+        '19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAutcheck this https://youtube.com/watch?v=abctext/markdownUTF-81PuQa7K62MiKCtssSLKy1kh56WWU7MtUR5SETappbchatx.comtypepostcontexturlurlhttps://youtube.com/watch?v=abc',
+      ],
+      ['https://bchatx.com', 'SET app bchatx.com type like context url url https://youtube.com/watch'],
+      ['https://good.com', JSON.stringify({ uri: 'https://user:pa&ss@good.com/x' })],
+    ];
+    for (const [caller, msg] of own) expect(crossSiteSignRefusal(caller, { data: bytes(msg) })).toBeNull();
+  });
+});
+
+describe('re-review 13 Nov: random binary is not read as naming a site (N4)', () => {
+  // xorshift32: reproducible, better spread than the LCG above.
+  const xs = (seed: number) => {
+    let x = seed >>> 0 || 1;
+    return (n: number) =>
+      Array.from({ length: n }, () => {
+        x ^= x << 13;
+        x >>>= 0;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        x >>>= 0;
+        return x & 0xff;
+      });
+  };
+  test('4,000 random 4 KB blobs and 300 random 64 KB blobs: none refused', () => {
+    let refused = 0;
+    const examples: string[] = [];
+    const r = xs(20261113);
+    for (let k = 0; k < 4300; k++) {
+      const data = r(k < 4000 ? 4096 : MAX_SIGN_DATA);
+      const why = crossSiteSignRefusal('https://app.example', { data });
+      if (why) {
+        refused++;
+        if (examples.length < 3) examples.push(why);
+      }
+    }
+    expect({ refused, examples }).toEqual({ refused: 0, examples: [] });
+  }, 60_000);
+  test('a gzip bomb is refused; a gzip of 200 KB of legitimate text is read', () => {
+    expect(
+      crossSiteSignRefusal('https://app.example', { data: Array.from(gzipSync(new Uint8Array(10_000_000))) }),
+    ).toContain('too much encoded data');
+    const log = new TextEncoder().encode('log line number something happened ok\n'.repeat(5500));
+    expect(crossSiteSignRefusal('https://app.example', { data: Array.from(gzipSync(log)) })).toBeNull();
   });
 });
