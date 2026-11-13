@@ -28,8 +28,10 @@ import { wocSpentStatus } from '../services/coinPreflight';
 import {
   conflictCheck,
   expireOnce,
+  storageAbortRemarking,
   storageDetachInput,
   storageReaffirmSpent,
+  type AbortProvider,
   STORE_MIN_AGE_S,
   wocSpent,
   type DetachProvider,
@@ -198,7 +200,11 @@ function wiring(
           labels: a.labels,
           inputs: (a.inputs ?? []).map((i) => ({ sourceOutpoint: i.sourceOutpoint })),
           description: a.description,
-          outputs: (a.outputs ?? []).map((o) => ({ lockingScript: o.lockingScript })),
+          outputs: (a.outputs ?? []).map((o) => ({
+            lockingScript: o.lockingScript,
+            satoshis: o.satoshis,
+            basket: o.basket ?? null,
+          })),
         }),
       );
     },
@@ -217,8 +223,7 @@ function wiring(
 const storeOf = (d: Awaited<ReturnType<typeof setup>>) => ({
   isActive: () => d.sm.isActiveStorageProvider(),
   userId: async () => (await d.sm.getAuth()).userId!,
-  run: <T>(fn: (sp: DetachProvider) => Promise<T>) =>
-    d.sm.runAsStorageProvider((sp) => fn(sp as unknown as DetachProvider)),
+  run: <T>(fn: (sp: DetachProvider & AbortProvider) => Promise<T>) => d.sm.runAsStorageProvider(fn),
 });
 const newWiring = (d: Awaited<ReturnType<typeof setup>>, chain: Parameters<typeof wiring>[1]) => ({
   conflict: conflictCheck({
@@ -233,6 +238,11 @@ const newWiring = (d: Awaited<ReturnType<typeof setup>>, chain: Parameters<typeo
   }),
   detachInput: storageDetachInput(storeOf(d)),
   reaffirmSpent: storageReaffirmSpent(storeOf(d)),
+  abortRemarking: storageAbortRemarking({ ...storeOf(d), auth: () => d.sm.getAuth(true) }),
+  // The phone's transaction pays someone else (not a re-signed copy of the Store payment).
+  spenderOutputs: async () => [
+    { lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(), satoshis: 777 },
+  ],
   storageGate: () => (d.sm.isActiveStorageProvider() ? d.sm.getActiveStore() : null),
 });
 
@@ -413,4 +423,46 @@ test('MEDIUM (cross-device): the phone made the Store payment; synced to the ext
   r = await run(phone, phoneKv);
   expect(r.released).toEqual([phone.txid]);
   expect((await phone.txOf(phone.txid)).status).toBe('failed');
+}, 30_000);
+
+test('review 3: between the abort and the re-mark no coin selection can see the chain-spent coin, even if the abort frees it', async () => {
+  const d = await setup('incident-1113-lock');
+  const F = Utils.toHex(Random(32));
+  const chain = {
+    spentBy: new Map([[`${d.fundTxid}.1`, F]]),
+    confirmed: new Set([F]),
+    seen: new Set([d.fundTxid, F]),
+  };
+  const nowS = Math.floor(Date.now() / 1000);
+  const kv = { s: { first: { [d.txid]: nowS - 3 * 86400 }, released: {} } as ExpiryState };
+  // A toolbox whose abort frees every input it finds in the raw tx (the detached coin too), as a later version may.
+  const dev = d.device as unknown as { abortAction: (auth: unknown, args: unknown) => Promise<unknown> };
+  const realAbort = dev.abortAction.bind(d.device);
+  let seenFreed: boolean | undefined;
+  let duringLock: Promise<{ outputs: { outpoint: string }[] }> | undefined;
+  dev.abortAction = async (auth, args) => {
+    const r = await realAbort(auth, args);
+    const [coin] = (await d.device.findOutputs({
+      partial: { txid: d.fundTxid, vout: 1 },
+    } as never)) as unknown as Out[];
+    await d.device.updateOutput((coin as unknown as { outputId: number }).outputId, {
+      spendable: true,
+      spentBy: undefined,
+    } as never);
+    seenFreed = (await d.coinOf(1)).spendable;
+    // Coin selection (and every wallet read) asks for the storage locks now: it must wait until the re-mark is done.
+    duringLock = d.wallet.listOutputs({ basket: 'default', limit: 100 }) as never;
+    return r;
+  };
+  // The listed outputs carry the wallet's baskets: the change is 'default' (left out of the copy check).
+  const listed = await wiring(d, chain, kv).listNoSend();
+  expect(listed[0].outputs?.some((o) => o.basket === 'default')).toBe(true);
+  const r = await expireOnce(wiring(d, chain, kv, { nowS: () => nowS, ...newWiring(d, chain) }));
+  expect(r.released).toEqual([d.txid]);
+  expect(seenFreed).toBe(true); // the simulated abort really freed it, inside the lock
+  const seen = await duringLock!;
+  expect(seen.outputs.map((o) => o.outpoint)).not.toContain(`${d.fundTxid}.1`);
+  expect(seen.outputs.map((o) => o.outpoint).sort()).toEqual([`${d.fundTxid}.0`, `${d.fundTxid}.2`].sort());
+  expect((await d.coinOf(1)).spendable).toBe(false);
+  expect(await d.wallet.balance()).toBe(2 * COIN);
 }, 30_000);
