@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { WebSocket } from 'ws';
 import { createHash } from 'node:crypto';
-import { createRelay, acceptableOrigin, clientIp } from './relay.mjs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createRelay, acceptableOrigin, clientIp, LIMITS } from './relay.mjs';
 
 const C = 'AAAAAAAAAAAAAAAAAAAAAA'; // 22 chars
 const exp = () => Math.floor(Date.now() / 1000) + 120;
@@ -14,7 +17,7 @@ async function boot(opts = {}) {
   const relay = createRelay({ server, legacyUntil: Infinity, ...opts });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `ws://127.0.0.1:${server.address().port}`;
-  return { base, done: () => (relay.close(), new Promise((r) => server.close(r))) };
+  return { base, relay, done: () => (relay.close(), new Promise((r) => server.close(r))) };
 }
 const open = (url, origin) =>
   new Promise((resolve, reject) => {
@@ -257,7 +260,10 @@ test('v2: a site rejoin with wc moves the binding; without the site claim it cha
   assert.deepEqual(v1.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol' });
   v1.ws.close();
   // A stranger can't rejoin as the site to move the binding.
-  await assert.rejects(open(`${base}/v1/c/${C}?role=site&claim=strangerstrangerstrang&wc=${digest(SESS2)}`, 'https://a.lol'), /403/);
+  await assert.rejects(
+    open(`${base}/v1/c/${C}?role=site&claim=strangerstrangerstrang&wc=${digest(SESS2)}`, 'https://a.lol'),
+    /403/,
+  );
   const site2 = await open(`${base}/v1/c/${C}?role=site&claim=${SITE}&wc=${digest(SESS)}`, 'https://a.lol');
   await until(() => site.ws.readyState === 3);
   await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`), /403/);
@@ -271,7 +277,10 @@ test('v2: a site rejoin with wc moves the binding; without the site claim it cha
 test('v2: a site claim pinned on this connect cannot move the binding (channel opened without a site claim)', async () => {
   const { base, done } = await boot({ legacyUntil: Date.now() + 60_000 });
   const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&wc=${digest(QRW)}`, 'https://a.lol'); // no site claim
-  const other = await open(`${base}/v1/c/${C}?role=site&claim=strangerstrangerstrang&wc=${digest(SESS2)}`, 'https://a.lol');
+  const other = await open(
+    `${base}/v1/c/${C}?role=site&claim=strangerstrangerstrang&wc=${digest(SESS2)}`,
+    'https://a.lol',
+  );
   await until(() => site.ws.readyState === 3);
   // The binding is still the QR one: a wallet with the stranger's session claim gets in only through the window,
   // unbound, and the scanning phone evicts it and binds.
@@ -303,7 +312,10 @@ test('v2: a squatter admitted by the window cannot bind; the QR phone still evic
 
 test('v2: nc is only for the wallet role and must be a digest; enforcement refuses a wallet without it', async () => {
   const { base, done } = await boot({ legacyUntil: 0, sessionClaimsFrom: 0 });
-  await assert.rejects(open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&nc=${digest(SESS)}`, 'https://a.lol'), /400/);
+  await assert.rejects(
+    open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&nc=${digest(SESS)}`, 'https://a.lol'),
+    /400/,
+  );
   const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
   await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=nothex`), /400/);
   await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`), /403/); // a wallet from before v2
@@ -315,6 +327,159 @@ test('v2: nc is only for the wallet role and must be a digest; enforcement refus
   again.ws.close();
   site.ws.close();
   await done();
+});
+
+test('v1 upgrade: a wallet holding its claim on an unbound channel binds nc on resume; then only the session claim', async () => {
+  const { base, done } = await boot({ legacyUntil: 0 });
+  // A site without wc (older connect / CLI) and a v1 session holding a random claim.
+  const K = 'randomv1walletclaim_001';
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  const v1 = await open(`${base}/v1/c/${C}?role=wallet&claim=${K}`);
+  await until(() => v1.inbox.length);
+  v1.ws.close();
+  await new Promise((r) => setTimeout(r, 30));
+  // The updated wallet resumes with its v1 claim plus nc: bound, and told so.
+  const up = await open(`${base}/v1/c/${C}?role=wallet&claim=${K}&nc=${digest(SESS)}`);
+  await until(() => up.inbox.length);
+  assert.deepEqual(up.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol', wcv: 2 });
+  up.ws.close();
+  await new Promise((r) => setTimeout(r, 30));
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${K}`), /403/);
+  const again = await open(`${base}/v1/c/${C}?role=wallet&claim=${SESS}&nc=${digest(SESS)}`);
+  await until(() => again.inbox.length);
+  assert.equal(again.inbox[0].wcv, 2);
+  again.ws.close();
+  site.ws.close();
+  await done();
+});
+
+test('v1 upgrade: a v1 session on the QR claim binds nc on resume (the QR claim then admits no one)', async () => {
+  const { base, done } = await boot({ legacyUntil: 0 });
+  const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+  const v1 = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`);
+  await until(() => v1.inbox.length);
+  assert.equal(v1.inbox[0].wcv, undefined);
+  v1.ws.close();
+  await new Promise((r) => setTimeout(r, 30));
+  const up = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS)}`);
+  await until(() => up.inbox.length);
+  assert.equal(up.inbox[0].wcv, 2);
+  up.ws.close();
+  await new Promise((r) => setTimeout(r, 30));
+  await assert.rejects(open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`), /403/);
+  site.ws.close();
+  await done();
+});
+
+// Relay restarts (review 13 Nov 2026): paired channels come back from the state file.
+const stateDir = mkdtempSync(join(tmpdir(), 'relay-state-'));
+const statePath = (name) => join(stateDir, `${name}.json`);
+const fileWritten = (path) =>
+  until(() => {
+    try {
+      return Object.keys(JSON.parse(readFileSync(path, 'utf8')).channels).length > 0;
+    } catch {
+      return false;
+    }
+  });
+
+test('restart: a paired channel keeps its origin and claims; whoever opens it first after a restart cannot take it', async () => {
+  const live = statePath('restart');
+  const a = await boot({ legacyUntil: 0, stateFile: live });
+  const site = await open(`${a.base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+  const phone = await open(`${a.base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS)}`);
+  await until(() => phone.inbox.length);
+  // Written after the change, without waiting for a clean stop: copy it as a crash would leave it.
+  await fileWritten(live);
+  const crashed = statePath('restart-crashed');
+  copyFileSync(live, crashed);
+  site.ws.close();
+  phone.ws.close();
+  await a.done();
+
+  const b = await boot({ legacyUntil: 0, stateFile: crashed });
+  assert.equal(b.relay.stats().channels, 1);
+  // Someone who knows the channel ID gets there first: other origin, or the right one with their own claim.
+  await assert.rejects(
+    open(`${b.base}/v1/c/${C}?role=site&e=${exp()}&claim=strangerstrangerstrang`, 'https://evil.lol'),
+    /403/,
+  );
+  await assert.rejects(
+    open(`${b.base}/v1/c/${C}?role=site&e=${exp()}&claim=strangerstrangerstrang&wc=${digest(SESS2)}`, 'https://a.lol'),
+    /403/,
+  );
+  await assert.rejects(open(`${b.base}/v1/c/${C}?role=wallet&claim=${QRW}&nc=${digest(SESS2)}`), /403/);
+  // The real site and phone come back; the phone is told the real origin.
+  const site2 = await open(
+    `${b.base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(SESS)}`,
+    'https://a.lol',
+  );
+  const phone2 = await open(`${b.base}/v1/c/${C}?role=wallet&claim=${SESS}&nc=${digest(SESS)}`);
+  await until(() => phone2.inbox.length);
+  assert.deepEqual(phone2.inbox[0], { t: 'relay', verifiedOrigin: 'https://a.lol', wcv: 2 });
+  site2.ws.close();
+  phone2.ws.close();
+  await b.done();
+});
+
+test('restart: a v1 session bound before RELAY_SESSION_CLAIMS_FROM is still admitted afterwards', async () => {
+  const path = statePath('enforce');
+  const a = await boot({ legacyUntil: 0, stateFile: path });
+  const site = await open(`${a.base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+  const v1 = await open(`${a.base}/v1/c/${C}?role=wallet&claim=${QRW}`); // a wallet that never updated
+  await until(() => v1.inbox.length);
+  site.ws.close();
+  v1.ws.close();
+  await a.done(); // a clean stop writes the file too
+
+  const b = await boot({ legacyUntil: 0, sessionClaimsFrom: 0, stateFile: path });
+  const site2 = await open(`${b.base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  const back = await open(`${b.base}/v1/c/${C}?role=wallet&claim=${QRW}`);
+  await until(() => back.inbox.length);
+  // A channel nobody bound before still needs nc.
+  const D = 'DDDDDDDDDDDDDDDDDDDDDD';
+  const s3 = await open(`${b.base}/v1/c/${D}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  await assert.rejects(open(`${b.base}/v1/c/${D}?role=wallet&claim=${QRW}`), /403/);
+  s3.ws.close();
+  site2.ws.close();
+  back.ws.close();
+  await b.done();
+});
+
+test('restart: a missing or corrupt file starts empty; bad and lapsed entries are skipped', async () => {
+  const missing = await boot({ legacyUntil: 0, stateFile: statePath('none') });
+  assert.equal(missing.relay.stats().channels, 0);
+  await missing.done();
+
+  const corrupt = statePath('corrupt');
+  writeFileSync(corrupt, '{"v":1,"channels":{"AAAA');
+  const c = await boot({ legacyUntil: 0, stateFile: corrupt });
+  assert.equal(c.relay.stats().channels, 0);
+  const site = await open(`${c.base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}`, 'https://a.lol');
+  site.ws.close();
+  await c.done();
+
+  const mixed = statePath('mixed');
+  const at = Date.now() - 1000;
+  const good = { o: 'https://a.lol', sc: digest(SITE), wl: digest(SESS), wb: digest(SESS), at };
+  writeFileSync(
+    mixed,
+    JSON.stringify({
+      v: 1,
+      channels: {
+        [C]: good,
+        BBBBBBBBBBBBBBBBBBBBBB: { ...good, o: 'http://evil.lol' },
+        CCCCCCCCCCCCCCCCCCCCCC: { ...good, wb: 'nothex' },
+        DDDDDDDDDDDDDDDDDDDDDD: { ...good, at: Date.now() - LIMITS.pairedIdleMs - 60_000 },
+        short: good,
+      },
+    }),
+  );
+  const m = await boot({ legacyUntil: 0, stateFile: mixed });
+  assert.equal(m.relay.stats().channels, 1);
+  await assert.rejects(open(`${m.base}/v1/c/${C}?role=site&claim=${SITE}`, 'https://evil.lol'), /403/);
+  await m.done();
+  rmSync(stateDir, { recursive: true, force: true });
 });
 
 test('x-real-ip is believed only from a trusted proxy', () => {

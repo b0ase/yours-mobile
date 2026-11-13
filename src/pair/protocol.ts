@@ -65,7 +65,12 @@ const PAIR_CODE_INFO = 'bwallet-pair-code-v2';
 export type PairMessage =
   | { t: 'req'; id: string; action: string; params: unknown }
   | { t: 'res'; id: string; result?: unknown; error?: { code: string; message: string } }
-  | { t: 'ready' }
+  /**
+   * `wcv: 2` (wallet claim v2): the relay holds the wallet role for this pairing's session claim, so the site re-binds
+   * it on reconnects. Sent on a resume too, so a site whose pairing started as v1 learns it after the phone upgrades.
+   * Older sites ignore it.
+   */
+  | { t: 'ready'; wcv?: 2 }
   | { t: 'ping' }
   | { t: 'close'; reason: string };
 

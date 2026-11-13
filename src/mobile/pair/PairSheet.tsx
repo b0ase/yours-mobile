@@ -56,13 +56,18 @@ export default function PairSheet({
       .then((p) => setStage({ k: 'confirm', p }))
       .catch((e: unknown) => setStage({ k: 'error', m: e instanceof Error ? e.message : String(e) }));
   };
-  // The site closed this QR, or signed in through another pairing meanwhile: the card is stale, so close it.
+  // The site closed this QR, or signed in through another pairing meanwhile: the card is stale, so close it. When the
+  // site ended it itself (its user said the codes didn't match), show why instead.
   const pending = stage.k === 'confirm' ? stage.p : null;
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
     let live = true;
-    pending?.onGone(() => live && closeRef.current());
+    pending?.onGone((m) => {
+      if (!live) return;
+      if (m) setStage({ k: 'error', m });
+      else closeRef.current();
+    });
     return () => {
       live = false;
     };

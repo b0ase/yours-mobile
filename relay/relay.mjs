@@ -3,7 +3,8 @@
  *
  * Two websockets per channel: the site (desktop page) and the wallet (bWallet on a phone). The relay
  * forwards their frames verbatim. Frames after the hello are end-to-end encrypted, so it can't read or
- * change them. It stores nothing on disk and logs counts only.
+ * change them. It logs counts only. With a state file (createRelay({ stateFile }), RELAY_STATE_FILE) it keeps each
+ * paired channel's origin and claim digests across restarts, never frames, keys or addresses.
  *
  * It ties the channel to the site socket's Origin header and tells the phone ({ t: 'relay', verifiedOrigin }).
  * Browsers set that header and page scripts can't change it, but any non-browser client can send whatever it
@@ -12,6 +13,7 @@
  * themselves (e.g. "open on computer" makes the computer prove a code shown only on the phone).
  */
 import { createHash } from 'node:crypto';
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { WebSocketServer } from 'ws';
 
 export const LIMITS = {
@@ -91,23 +93,104 @@ export function createRelay({
   legacyUntil = LEGACY_CLAIMS_UNTIL,
   sessionClaimsFrom = SESSION_CLAIMS_FROM,
   trustedProxies = DEFAULT_TRUSTED_PROXIES,
+  stateFile = null,
 } = {}) {
   const legacy = () => now() < legacyUntil;
   const sessionClaimsRequired = () => now() >= sessionClaimsFrom;
   const channels = new Map();
   const perIp = new Map();
   const wss = new WebSocketServer({ noServer: true, maxPayload: LIMITS.maxFrame });
+  let closed = false;
 
   const send = (ws, obj) => ws && ws.readyState === 1 && ws.send(JSON.stringify(obj));
+
+  const newChannel = (c) => ({
+    site: null,
+    wallet: null,
+    queue: { site: [], wallet: [] },
+    rate: { start: c.lastActive, n: 0 },
+    savedAt: c.lastActive,
+    ...c,
+  });
+
+  // Paired channels survive a restart (review 13 Nov 2026): without this, whoever opened the site role first after a
+  // restart re-created the channel with their own origin and claims, locking the real site out and unpairing the
+  // phone. Kept per channel: origin, the site and wallet claim digests, the wallet binding and the last activity
+  // (for the paired idle window). Written whole to a temporary file and renamed over the old one.
+  const writeState = () => {
+    if (!stateFile) return;
+    const out = {};
+    for (const [id, ch] of channels) {
+      if (!ch.paired) continue;
+      out[id] = { o: ch.origin, sc: ch.claims.site, wl: ch.claims.wallet, wb: ch.walletBinding, at: ch.lastActive };
+      ch.savedAt = ch.lastActive;
+    }
+    const tmp = `${stateFile}.${process.pid}.tmp`;
+    try {
+      writeFileSync(tmp, JSON.stringify({ v: 1, channels: out }), { mode: 0o600 });
+      renameSync(tmp, stateFile);
+    } catch (e) {
+      log({ stateWrite: 'failed', code: e?.code });
+    }
+  };
+  let saveQueued = false;
+  /** Write the state once after the current burst (a reconnect wave attaches many sockets at once). */
+  const save = () => {
+    if (!stateFile || closed || saveQueued) return;
+    saveQueued = true;
+    setImmediate(() => {
+      saveQueued = false;
+      if (!closed) writeState();
+    });
+  };
+  /** A missing, unreadable or corrupt file starts empty; bad or lapsed entries are skipped one by one. */
+  const restore = () => {
+    if (!stateFile) return;
+    let raw;
+    try {
+      raw = JSON.parse(readFileSync(stateFile, 'utf8'));
+    } catch (e) {
+      if (e?.code !== 'ENOENT') log({ stateRead: 'ignored', code: e?.code ?? 'parse' });
+      return;
+    }
+    const list = raw?.v === 1 && raw.channels && typeof raw.channels === 'object' ? raw.channels : {};
+    const digest = (x) => (x === null ? null : typeof x === 'string' && CLAIM_DIGEST.test(x) ? x : undefined);
+    const t = now();
+    for (const [id, s] of Object.entries(list)) {
+      if (!CHANNEL.test(id) || !s || typeof s !== 'object' || !acceptableOrigin(s.o)) continue;
+      if (!Number.isFinite(s.at) || s.at > t || t - s.at > LIMITS.pairedIdleMs) continue;
+      const sc = digest(s.sc);
+      const wl = digest(s.wl);
+      const wb = digest(s.wb);
+      if (sc === undefined || wl === undefined || wb === undefined) continue;
+      // No address is kept, so restored channels count against no one's per-IP limit.
+      channels.set(
+        id,
+        newChannel({
+          origin: s.o,
+          expiry: 0,
+          ip: null,
+          paired: true,
+          lastActive: s.at,
+          claims: { site: sc, wallet: wl },
+          walletBinding: wb,
+        }),
+      );
+    }
+  };
+  restore();
 
   const drop = (id) => {
     const ch = channels.get(id);
     if (!ch) return;
     for (const role of ROLES) ch[role]?.close(4000, 'channel closed');
     channels.delete(id);
-    perIp.set(ch.ip, Math.max(0, (perIp.get(ch.ip) ?? 1) - 1));
+    if (ch.ip !== null) perIp.set(ch.ip, Math.max(0, (perIp.get(ch.ip) ?? 1) - 1));
+    if (ch.paired) save();
   };
 
+  // Activity is saved at most hourly; the paired idle window is a month.
+  const STATE_ACTIVITY_MS = 60 * 60_000;
   const sweep = () => {
     const t = now();
     for (const [id, ch] of channels) {
@@ -115,6 +198,7 @@ export function createRelay({
       const bothGone = !ch.site && !ch.wallet;
       if (idle > LIMITS.pairedIdleMs || (!ch.paired && bothGone && idle > LIMITS.unpairedIdleMs)) drop(id);
       for (const role of ROLES) ch.queue[role] = ch.queue[role].filter((q) => t - q.at < LIMITS.queueMs);
+      if (ch.paired && ch.lastActive - ch.savedAt > STATE_ACTIVITY_MS) save();
     }
   };
   const timer = setInterval(sweep, 30_000);
@@ -142,11 +226,15 @@ export function createRelay({
 
   /**
    * May this wallet join bind the role to its session claim digest `nc`? Only the phone that proves it saw the QR
-   * (the bound claim), or the first wallet on a channel nobody bound (sites and CLIs without `wc`). Never a claim the
-   * relay admitted only because of the compatibility window: that would let a squatter pin the role before the phone.
+   * (the bound claim), the first wallet on a channel nobody bound (sites and CLIs without `wc`), or, on such a channel,
+   * the wallet already holding the role (a v1 session upgrading on resume). Never a claim the relay admitted only
+   * because of the compatibility window while a QR binding waits: that would let a squatter pin the role first.
    */
   const mayBind = (ch, role, claim, nc) =>
-    role === 'wallet' && !!nc && (qrBound(ch, role, claim) || (!ch.walletBinding && !ch.claims.wallet));
+    role === 'wallet' &&
+    !!nc &&
+    (qrBound(ch, role, claim) ||
+      (!ch.walletBinding && (!ch.claims.wallet || (!!claim && claimHash(claim) === ch.claims.wallet))));
 
   /** Decide whether an upgrade is allowed. Returns { ok, code, reason, ... }. */
   function admit(req) {
@@ -181,19 +269,15 @@ export function createRelay({
       // A new channel needs a site claim, so nobody else can take the site socket later (N3-1).
       if (claim === null && !legacy()) return { ok: false, code: 403, reason: 'claim required' };
       if ((perIp.get(ip) ?? 0) >= LIMITS.channelsPerIp) return { ok: false, code: 429, reason: 'too many channels' };
-      ch = {
+      ch = newChannel({
         origin,
         expiry: e * 1000,
         ip,
         paired: false,
-        site: null,
-        wallet: null,
-        queue: { site: [], wallet: [] },
         lastActive: t,
-        rate: { start: t, n: 0 },
         claims: { site: null, wallet: null },
         walletBinding: wc,
-      };
+      });
       channels.set(id, ch);
       perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
       return { ok: true, id, role, ch, claim };
@@ -242,6 +326,7 @@ export function createRelay({
     // Deliver what arrived while this side was away.
     const t = now();
     for (const q of ch.queue[role].splice(0)) if (t - q.at < LIMITS.queueMs) ws.send(q.data);
+    if (ch.paired) save();
 
     ws.on('message', (data, isBinary) => {
       if (isBinary) return ws.close(4002, 'text frames only');
@@ -265,7 +350,6 @@ export function createRelay({
     });
   }
 
-  let closed = false;
   server?.on('upgrade', (req, socket, head) => {
     // After close() the socket server refuses upgrades; answer it ourselves rather than hand ws a
     // late connection (Bun's ws shim crashes in abortHandshake on that path).
@@ -285,7 +369,11 @@ export function createRelay({
 
   return {
     stats: () => ({ channels: channels.size, sockets: wss.clients.size }),
+    /** Write the state file now (shutdown). */
+    flush: () => !closed && writeState(),
     close: () => {
+      // Kept on disk as it is: closing the sockets below must not empty the file.
+      if (!closed) writeState();
       closed = true;
       clearInterval(timer);
       for (const id of [...channels.keys()]) drop(id);
