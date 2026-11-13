@@ -3,7 +3,7 @@
  * relay) kept the grants under "<host>.paired.invalid", and the next pairing for that host inherited them.
  * Same local setup as disconnectRevoke.test.ts: fake WebSocket, in-memory grant store, throwaway keys, a .invalid host.
  */
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
 import { PAIR_VERSION, pairUrl } from '../../pair/protocol';
 import { InMemoryPermissionStore, LocalWalletPermissionsManager, normalizeOriginator } from '@1sat/wallet';
@@ -52,6 +52,9 @@ stubGlobals({
 // A private copy of sessions.ts for this file: bun shares one module registry across test files, and its
 // started flag, live sockets and document listener would otherwise carry over from whichever pair test ran first.
 const sessions = (await import('./sessions?lapseRevoke' as string)) as typeof import('./sessions');
+// Leave this copy inert when the file ends: its reconnect timers would otherwise fire during the next file and act on
+// that file's localStorage and WebSocket stubs (bun runs every test file in one process).
+afterAll(() => sessions.__resetPairingForTests());
 const { pairedOrigin } = await import('../../services/originKey');
 
 const settle = () => new Promise<void>((r) => setTimeout(r, 25));

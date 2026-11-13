@@ -81,6 +81,9 @@ stubGlobals({
 keepGlobals('localStorage', 'fetch');
 
 const sessions = (await import('./sessions?walletClaimV2' as string)) as typeof import('./sessions');
+// Leave this copy inert when the file ends: its reconnect timers would otherwise fire during the next file and act on
+// that file's localStorage and WebSocket stubs (bun runs every test file in one process).
+afterAll(() => sessions.__resetPairingForTests());
 const settle = () => new Promise<void>((r) => setTimeout(r, 25));
 const HOST = 'https://pairtest.example';
 sessions.setPairRevoker(async () => true);

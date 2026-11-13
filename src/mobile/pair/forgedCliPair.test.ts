@@ -3,7 +3,7 @@
  * and with it an agent grant, from the general scanner or a link that opened the app. A CLI pairing is now accepted
  * only when the owner started it from Agents or Settings, and only a CLI pairing can carry an agent grant.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
 import { PAIR_VERSION, pairUrl } from '../../pair/protocol';
 import { stubGlobals } from '../../testing/stubGlobals';
@@ -42,6 +42,9 @@ stubGlobals({
 });
 
 const sessions = (await import('./sessions?forgedCliPair' as string)) as typeof import('./sessions');
+// Leave this copy inert when the file ends: its reconnect timers would otherwise fire during the next file and act on
+// that file's localStorage and WebSocket stubs (bun runs every test file in one process).
+afterAll(() => sessions.__resetPairingForTests());
 const KEY = 'bwallet.pair.sessions';
 const stored = () => JSON.parse(mem.get(KEY) ?? '[]') as { origin: string; agent?: unknown }[];
 
@@ -56,6 +59,12 @@ const link = (o: string, c: string) =>
   });
 
 describe('forged CLI pairing', () => {
+  // Each test starts unpaired: with --randomize the CLI pairing the second test stores can run first.
+  beforeEach(() => {
+    sessions.closeAllPairings();
+    mem.clear();
+  });
+
   test('a CLI link from the general scanner or an opened link is refused before connecting', async () => {
     const before = FakeWS.all.length;
     await expect(sessions.beginPairing(link(CLI_ORIGIN, 'c'.repeat(22)))).rejects.toThrow(/Agents/);
@@ -73,7 +82,6 @@ describe('forged CLI pairing', () => {
   });
 
   test('a website pairing cannot be handed an agent grant', async () => {
-    mem.clear();
     const site = 'https://pairtest.example';
     const pending = sessions.beginPairing(link(site, 'e'.repeat(22)), { allowCli: true });
     FakeWS.all.at(-1)!.deliver({ t: 'relay', verifiedOrigin: site });

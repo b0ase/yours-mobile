@@ -121,7 +121,12 @@ const doc = {
 };
 const g = globalThis as Record<string, unknown>;
 const saved = { WebSocket: g.WebSocket, localStorage: g.localStorage, document: g.document };
+// The sessions cleanup (set below, once sessions.ts is loaded) runs first, then the globals go back. afterAll hooks run
+// in the order they were registered: as two hooks the restore ran first, pairedSites() found no localStorage and
+// forgot nothing. Registered before the import so the globals go back even if loading sessions.ts throws.
+let cleanUpSessions = () => {};
 afterAll(() => {
+  cleanUpSessions();
   for (const [k, v] of Object.entries(saved))
     if (v === undefined) delete g[k];
     else g[k] = v;
@@ -140,15 +145,17 @@ Object.assign(globalThis, {
 // warm depending on whether relay/e2e/pair.e2e.test.ts happened to load it first.)
 // A private copy (?replies): initPairing registers its foreground listener once per module instance, so with a
 // shared instance another pair test file could already have started it on that file's document stub.
-const { beginPairing, initPairing, forget, pairedSites, setAgentPairDeps } = (await import(
+const { beginPairing, initPairing, forget, pairedSites, setAgentPairDeps, __resetPairingForTests } = (await import(
   './sessions?replies' as string
 )) as typeof import('./sessions');
 // Sessions are revived only for the account that paired them (accountBind.test.ts).
 setAgentPairDeps({ ctx: undefined, currentId: '1ReplyTestAccount', accountCount: 1 });
 // Leave no live socket or reconnect timer behind for later test files.
-afterAll(() => {
+cleanUpSessions = () => {
   for (const s of pairedSites()) forget(s.c, false);
-});
+  // Then make this copy inert: a reconnect timer from a socket closed earlier is not in `live`, so forget() can't stop it.
+  __resetPairingForTests();
+};
 
 test('sessions: never re-runs an answered call; holds a reply while the socket is closed and sends it on reconnect', async () => {
   const site = PrivateKey.fromRandom();
