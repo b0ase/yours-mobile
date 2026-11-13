@@ -83,13 +83,16 @@ import {
   type AdmitReport,
   type AdmitStore,
   type InboundVerifier,
+  pendingAdmissions,
 } from './services/inboundSync';
 import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
 import {
   FULL_PASS_NEXT_SLICE_MS,
+  markOf,
   paymentYields,
   requestFullPass,
   requestTailPass,
+  syncStateFor,
   withDeadlines,
   withFullPassMode,
 } from './services/fullPass';
@@ -143,6 +146,7 @@ import {
   normOutpoint,
   restoreMoved,
   setArriving,
+  arrivingOutputs,
 } from './services/receiveGuard';
 import {
   accountedVia,
@@ -181,6 +185,16 @@ import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './ser
 import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
 import { chainActive } from './services/dappChain';
 import { healthStatus, SYNC_HEALTH_KEY } from './services/storageHealth';
+import {
+  arrivingFromAdmissions,
+  DEVICE_SYNC_KEY,
+  heldPayments,
+  nextDeviceSyncHealth,
+  STUCK_SHOW_MS,
+  type BalanceTruth,
+  type DeviceSyncHealth,
+  type TruthStore,
+} from './services/balanceTruth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 
 // Admin originator for the extension (bypasses all permission checks). The bare
@@ -275,6 +289,11 @@ export interface AccountContext {
    * that storage lacks is checked against the device store on every read, so nothing counts twice (owner, 5 Nov 2026).
    */
   balanceSplit: () => Promise<BalanceSplit>;
+  /**
+   * The balance card's truth lines (services/balanceTruth.ts): payments holding coins unsent, coins arriving from the
+   * other device, the last device-sync pull. Reads only.
+   */
+  balanceTruth: () => Promise<BalanceTruth>;
   /**
    * Instant receive (services/receiveWatch.ts): the UI in front (APP_FOREGROUND) watches the receive addresses every
    * ~3 s; APP_BACKGROUND stops it.
@@ -759,7 +778,39 @@ export const initWallet = async (
     yieldTo: ownPayments,
     busy: chainActive,
     log: (...a) => console.warn(...a),
+    // The balance card's "Synced with your other devices" line (services/balanceTruth.ts). Display only.
+    onPull: (r) => void recordPull(r),
   });
+  /**
+   * Persist the pull's outcome for the balance card. A pull that went through while its pass from the start has not
+   * moved for STUCK_SHOW_MS (fullPass.ts stuckMs) keeps the last good time and reads as stuck (8 Nov 2026 freeze).
+   */
+  async function recordPull(r: { ok: true } | { ok: false; error: string }) {
+    try {
+      const key = DEVICE_SYNC_KEY(keys.identityAddress);
+      let stuck = false;
+      if (r.ok) {
+        try {
+          const own = ownStore();
+          const reader = managed._backups?.[0]?.storage as { getSettings?: () => { storageIdentityKey?: string } };
+          const backupSik = reader?.getSettings?.()?.storageIdentityKey;
+          if (own && backupSik) {
+            const { identityKey } = await storage.getAuth();
+            const mark = markOf(await syncStateFor(own as never, identityKey, backupSik));
+            stuck = typeof mark.startedAt === 'number' && (mark.stuckMs ?? 0) >= STUCK_SHOW_MS;
+          }
+        } catch {
+          // can't tell: the pull went through, so it counts
+        }
+      }
+      const prev = (await chrome.storage.local.get(key))[key] as DeviceSyncHealth | undefined;
+      await chrome.storage.local.set({
+        [key]: nextDeviceSyncHealth(prev, r.ok ? { ok: true, stuck } : r, Date.now()),
+      });
+    } catch {
+      // display only
+    }
+  }
   // A full pass paused (a slice used up, or a heal left it): the next slice a moment later, sends in between.
   let moreTimer: ReturnType<typeof setTimeout> | undefined;
   stopBackupCheck.verifier.onMore = () => {
@@ -1904,6 +1955,38 @@ export const initWallet = async (
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
     balanceSplit: () => balanceSplit(baseWallet, { accountedFor, spenderCarries: carriesVia(deviceReads) }),
+    balanceTruth: async () => {
+      const now = Date.now();
+      const r = await deviceReads().catch(() => undefined);
+      const store = r?.store as unknown as TruthStore | undefined;
+      // Each part on its own: one that can't be read shows nothing, never hides the others.
+      const held = store && r ? await heldPayments(store, r.userId, now).catch(() => []) : [];
+      let arrivingSats = 0;
+      const device = deviceStore();
+      if (store && r && device) {
+        try {
+          const { identityKey } = await storage.getAuth();
+          const entries = await pendingAdmissions(device, identityKey);
+          arrivingSats = await arrivingFromAdmissions(
+            store,
+            r.userId,
+            entries,
+            arrivingOutputs().map((o) => o.spender),
+          );
+        } catch {
+          arrivingSats = 0;
+        }
+      }
+      const key = DEVICE_SYNC_KEY(keys.identityAddress);
+      const got: Record<string, unknown> = await chrome.storage.local.get(key).catch(() => ({}));
+      const sync = (got[key] ?? null) as DeviceSyncHealth | null;
+      return {
+        held,
+        arrivingSats,
+        syncApplies: storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
+        sync,
+      };
+    },
     receiveWatch: { foreground: (on) => receiveWatch.foreground(on) },
     syncDevices: () => deviceSync.syncNow(),
     admitBackupRows,

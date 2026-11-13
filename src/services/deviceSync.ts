@@ -44,6 +44,11 @@ export type DeviceSyncDeps = {
   clearTimer?: (t: unknown) => void;
   /** Tests: the clock a run is timed on (SLOW_SYNC_MS). */
   now?: () => number;
+  /**
+   * After every pull: it went through (all its pages, yields included), or it failed. For the balance card's "Synced
+   * with your other devices" line (services/balanceTruth.ts); display only, never awaited.
+   */
+  onPull?: (r: { ok: true } | { ok: false; error: string }) => void;
 };
 
 export const PUSH_DELAY_MS = 20_000;
@@ -81,6 +86,15 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   let pendingPush = false;
   /** When a push last went through (ms), 0 before the first: "Up to date" needs one with nothing waiting. */
   let lastPushOkAt = 0;
+  /** When a pull last went through (ms), 0 before the first. */
+  let lastPullOkAt = 0;
+  const reportPull = (r: { ok: true } | { ok: false; error: string }) => {
+    try {
+      deps.onPull?.(r);
+    } catch {
+      /* display only */
+    }
+  };
 
   const retryLater = (capMs = Infinity) => {
     const wait = Math.min(capMs, BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)]);
@@ -107,6 +121,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     };
     const first = notNow();
     if (first) return first;
+    let pulledOk = false;
     try {
       // An own payment running now goes first: this run takes the storage queue after it.
       const before = await myTurn();
@@ -123,6 +138,9 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
           if (stop) return stop;
         }
         pulled = true;
+        pulledOk = true;
+        lastPullOkAt = Date.now();
+        reportPull({ ok: true });
       }
       const t1 = now();
       pendingPush = false;
@@ -145,6 +163,8 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       if (!pendingPush) lastPushOkAt = Date.now();
       return { ok: true, pulled, pushed: true };
     } catch (e) {
+      // A pull that failed (not a push after a good pull): the card's sync line keeps its last good time.
+      if (mode === 'full' && !pulledOk) reportPull({ ok: false, error: errText(e) });
       failures++;
       pendingPush = true;
       // A backup that answered too slowly (or is still answering): retry within TIMEOUT_BACKOFF_CAP_MS, never at the
@@ -224,7 +244,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       else pendingPush = true; // a back-off retry is already scheduled and will carry it
     },
     /** For tests and diagnostics. */
-    state: () => ({ failures, pendingPush, scheduled: !!pushTimer, running: !!running, lastPushOkAt }),
+    state: () => ({ failures, pendingPush, scheduled: !!pushTimer, running: !!running, lastPushOkAt, lastPullOkAt }),
   };
 }
 

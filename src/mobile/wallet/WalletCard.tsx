@@ -59,6 +59,7 @@ import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
 import { pendingSatsNow, subscribePendingSats } from '../../utils/pendingBalance';
 import { PendingLine } from './PendingLine';
+import { BalanceTruthLines } from '../../components/BalanceTruthLines';
 import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
@@ -865,6 +866,15 @@ const WalletCardInner = ({
           </button>
         </div>
       </div>
+      {/* Under the card, one small line each when it applies: held by an unsent payment, arriving from the other device,
+          last sync with the other devices (services/balanceTruth.ts, plan fix 5, 13 Nov 2026). */}
+      {known && (
+        <BalanceTruthLines
+          fmt={(n) => (unit === 'usd' && rate > 0 ? formatUSD((n * rate) / 100_000_000) : cardSats(n))}
+          hidden={balanceHidden}
+          refreshKey={sats}
+        />
+      )}
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
       {adjusting && (
