@@ -11,6 +11,13 @@
  * already has, or whose status can't be read cleanly, is never touched (knownOnChain fails closed). A permanent
  * rejection is already failed by the toolbox itself (OneSatServices REJECTED -> invalidTx), inputs released.
  *
+ * A copy of another device's payment (change write-ahead, services/changeWriteAhead.ts: transaction 'sending', proof
+ * request 'nosend'): this device never sends it and the toolbox counts no attempts on a 'nosend' request (its proof
+ * task, CheckNoSends, never does), so the attempts rule could never pass and a payment whose broadcast never landed
+ * (its device lost before its next push) stayed 'sending' on a restored copy for ever: inputs locked, change counted
+ * (re-review of 18c93dd9). Such a copy is judged by age alone (GIVE_UP_MS); the network check is the same, so one the
+ * network has, or may have, is never released.
+ *
  * The repeat guard (repeatGuard.ts) is unchanged: its window (1 h) ends long before GIVE_UP_MS, so a cancel here
  * can't let a site build an identical second payment while the first is still going out.
  */
@@ -26,6 +33,8 @@ export type QueuedSend = {
   createdAt: number;
   /** The proven-tx request's broadcast attempts (0 when unknown). */
   attempts: number;
+  /** The proven-tx request's status ('nosend': a copy of another device's payment, never sent from here). */
+  reqStatus?: string;
   description?: string;
   satoshis?: number;
 };
@@ -33,9 +42,11 @@ export type QueuedSend = {
 export type StuckVerdict = 'wait' | 'give-up';
 
 /** Pure: should the wallet give up on this queued send now? (Chain state is checked separately, after.) */
-export function stuckVerdict(s: Pick<QueuedSend, 'createdAt' | 'attempts'>, now: number): StuckVerdict {
+export function stuckVerdict(s: Pick<QueuedSend, 'createdAt' | 'attempts' | 'reqStatus'>, now: number): StuckVerdict {
   if (!Number.isFinite(s.createdAt)) return 'wait';
-  return now - s.createdAt >= GIVE_UP_MS && s.attempts >= MIN_ATTEMPTS ? 'give-up' : 'wait';
+  if (now - s.createdAt < GIVE_UP_MS) return 'wait';
+  // A copy never sent from here has no attempts to count: its age alone (the network check still follows).
+  return s.attempts >= MIN_ATTEMPTS || s.reqStatus === 'nosend' ? 'give-up' : 'wait';
 }
 
 export type ReleaseDeps = {
@@ -88,7 +99,11 @@ export async function releaseStuckSends(deps: ReleaseDeps): Promise<ReleaseRepor
       try {
         await deps.cancel(s);
         report.released.push(s);
-        log(`[stuckSends] gave up on ${s.txid} after ${s.attempts} attempts; inputs released`);
+        log(
+          s.reqStatus === 'nosend'
+            ? `[stuckSends] gave up on ${s.txid}, another device's payment the network never had; inputs released`
+            : `[stuckSends] gave up on ${s.txid} after ${s.attempts} attempts; inputs released`,
+        );
       } catch (e) {
         console.warn('[stuckSends] cancel failed for', s.txid, e);
       }

@@ -68,6 +68,7 @@ import {
 } from '../../services/unsentExpiry';
 import { chainLookups, expiryLookups, releaseLookups } from '../../services/unsentGuard';
 import { abortTargetKnownOnChain, knownOnChain } from '../../services/recoverFailed';
+import { releaseStuckSends, type QueuedSend } from '../../services/stuckSends';
 import {
   AUTO_RESYNC_GAP_MS,
   OWN_PENDING_STATUSES,
@@ -573,6 +574,22 @@ export class World {
   }
 
   /**
+   * The wallet's own send queued for the Monitor to broadcast (acceptDelayedBroadcast, as bigDelayed's big mints are):
+   * the toolbox writes it with its request already 'unsent'; sendWaiting() posts it.
+   */
+  async sendDelayed(from: Device | 'A' | 'B', sats: number) {
+    const d = this.dev(from);
+    this.step(`${d.name} queues a send of ${sats} (delayed broadcast)`);
+    const r = await d.wallet.createAction({
+      description: `Delayed send ${sats}`,
+      outputs: [{ lockingScript: this.externalScript(), satoshis: sats, outputDescription: 'payment' }],
+      options: { acceptDelayedBroadcast: true },
+    });
+    const tx = Transaction.fromAtomicBEEF(r.tx as number[]);
+    return { txid: r.txid!, inputs: inputsOf(tx), tx };
+  }
+
+  /**
    * A Store payment: signStorePayment (noSend, written to storage at once) and the outbox entry, then the app stops
    * (killed, or the backup failed): never told the Store, never broadcast. `outbox: false`: no entry on this device (a
    * noSend signed elsewhere in the app, by an old build, or an outbox the page lost).
@@ -732,6 +749,45 @@ export class World {
     const out = await m.runTask('SendWaiting').catch((e: unknown) => `failed after posting: ${String(e)}`);
     if (out) this.log(`[${d.name}] SendWaiting: ${out.replace(/\n/g, ' | ').slice(0, 300)}`);
     return d.posted.slice(before);
+  }
+
+  /**
+   * The stuck-send release on `on` (services/stuckSends.ts releaseStuckSends with initWallet's stuckDeps: outgoing
+   * 'sending' payments and their request's attempts and status, the network check over the chain lookups, the cancel).
+   */
+  async releaseStuck(on: Device | 'A' | 'B') {
+    const d = this.dev(on);
+    this.step(`${d.name} gives up on queued sends the network never had`);
+    const f = this.chain.fetch;
+    const sm = d.sm as unknown as { runAsStorageProvider: <T>(fn: (sp: StorageIdb) => Promise<T>) => Promise<T> };
+    return releaseStuckSends({
+      listQueued: () =>
+        sm.runAsStorageProvider(async (sp) => {
+          const out: QueuedSend[] = [];
+          for (const t of await sp.findTransactions({ partial: { status: 'sending', isOutgoing: true }, noRawTx: true })) {
+            if (!t.txid) continue;
+            const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
+            out.push({
+              transactionId: t.transactionId,
+              txid: t.txid,
+              createdAt: new Date(t.created_at).getTime(),
+              attempts: req?.attempts ?? 0,
+              reqStatus: req?.status,
+              description: t.description,
+              satoshis: t.satoshis,
+            });
+          }
+          return out;
+        }),
+      knownOnChain: (txid) => knownOnChain(txid, chainLookups(f)),
+      cancel: (q) =>
+        sm.runAsStorageProvider(async (sp) => {
+          for (const req of await sp.findProvenTxReqs({ partial: { txid: q.txid } }))
+            await sp.updateProvenTxReq(req.provenTxReqId, { status: 'invalid' });
+          await sp.updateTransactionStatus('failed', q.transactionId);
+        }),
+      log: (m) => this.log(`[${d.name}] ${m}`),
+    });
   }
 
   /** `on` gives up on a payment (as the stuck-send release does): request 'invalid', payment failed, inputs freed. */

@@ -410,7 +410,7 @@ describe('what the backup is told (asSending)', () => {
     expect(req.status).toBe('unprocessed');
   });
 
-  test('a payment in another state keeps it (a sendWith of a nosend, a delayed "sending"); bytes already there stay', async () => {
+  test('a transaction in another state keeps it (a sendWith of a nosend, a delayed "sending"); bytes already there stay', async () => {
     const chunk = {
       transactions: [
         { txid: TX, status: 'nosend', rawTx: [1] },
@@ -426,13 +426,30 @@ describe('what the backup is told (asSending)', () => {
     expect(out.provenTxReqs).toEqual([{ txid: TX, status: 'nosend' }]);
   });
 
+  test('a delayed send (request already "unsent", queued by the toolbox) or one tried before ("sending") goes as "nosend" too', async () => {
+    const chunk = {
+      transactions: [{ txid: TX, status: 'sending', rawTx: [1] }],
+      provenTxReqs: [
+        { txid: TX, status: 'unsent' },
+        { txid: TX2, status: 'sending' },
+        { txid: OLD, status: 'unsent' }, // not being posted: untouched
+      ],
+    };
+    const out = await asSending(chunk, new Set([TX, TX2]), async () => undefined);
+    expect(out.provenTxReqs).toEqual([
+      { txid: TX, status: 'nosend' },
+      { txid: TX2, status: 'nosend' },
+      { txid: OLD, status: 'unsent' },
+    ]);
+  });
+
   test('a page with none of them goes as it is', async () => {
     const chunk = { transactions: [{ txid: OLD, status: 'unprocessed' }] };
     expect(await asSending(chunk, new Set([TX]), async () => [1])).toBe(chunk);
   });
 });
 
-describe('pushView: the write-ahead deadline, up to the first committed page', () => {
+describe('pushView: the write-ahead deadline, only until the first data page is sent', () => {
   test('each request gets what is left; one asked for after the deadline fails without being sent', async () => {
     let t = 1_000;
     let sent = 0;
@@ -447,13 +464,39 @@ describe('pushView: the write-ahead deadline, up to the first committed page', (
     expect(sent).toBe(1);
   });
 
-  test('the first data page is still held to it', async () => {
-    const backup = { processSyncChunk: () => new Promise(() => undefined) };
-    const v = pushView(backup, { inFlight: createInFlight(), deadlineAt: Date.now() + 30 });
-    await expect(v.processSyncChunk({}, {})).rejects.toThrow('did not answer in time');
+  test('the first data page is never started with too little left; one started gets the ordinary limit', async () => {
+    let t = 1_000;
+    let sent = 0;
+    const backup = {
+      processSyncChunk: async () => {
+        sent++;
+        t += 5_000; // answers after the deadline
+        return { done: false };
+      },
+    };
+    const late = pushView(backup, { inFlight: createInFlight(), deadlineAt: 1_000 + 1_999, now: () => t });
+    await expect(late.processSyncChunk({}, {})).rejects.toThrow('did not answer in time');
+    expect(sent).toBe(0); // never sent: nothing for the backup to commit late
+    const v = pushView(backup, { inFlight: createInFlight(), deadlineAt: 1_000 + 2_000, now: () => t });
+    await v.processSyncChunk({}, {}); // started in time: not cut by the deadline (a cut page may commit late)
+    expect(sent).toBe(1);
   });
 
-  test('once a page is committed the cycle is never cut by it (a cycle cut mid-way is the never-paused hazard)', async () => {
+  test('a first page that outlasts the deadline is never given up on at it (the backup could commit it later)', async () => {
+    const f = createInFlight();
+    let answer: (v: unknown) => void = () => undefined;
+    const backup = { processSyncChunk: () => new Promise((r) => (answer = r)) };
+    const v = pushView(backup, { inFlight: f, deadlineAt: Date.now() + 2_050 });
+    let settled = false;
+    const p = v.processSyncChunk({}, {}).then(() => (settled = true));
+    await sleep(2_200); // past the deadline
+    expect(settled).toBe(false);
+    answer({ done: true });
+    await p;
+    expect(await f.settled(0)).toBe(true); // nothing left "in flight"
+  });
+
+  test('once a page is sent the cycle is never cut by it (a cycle cut mid-way is the never-paused hazard)', async () => {
     let t = 1_000;
     const pages: number[] = [];
     const backup = {
@@ -464,8 +507,8 @@ describe('pushView: the write-ahead deadline, up to the first committed page', (
       },
     };
     const v = pushView(backup, { inFlight: createInFlight(), deadlineAt: 1_000 + 8_000, now: () => t });
-    await v.processSyncChunk({}, 1); // committed at 6 s
-    await v.processSyncChunk({}, 2); // asked at 6 s, answered at 11 s: past the deadline, finished anyway
+    await v.processSyncChunk({}, 1); // sent at 0 s, committed at 5 s
+    await v.processSyncChunk({}, 2); // asked at 5 s, answered at 10 s: past the deadline, finished anyway
     await v.processSyncChunk({}, 3); // asked after the deadline: sent all the same
     expect(pages).toEqual([1, 2, 3]);
   });

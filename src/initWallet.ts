@@ -2072,6 +2072,7 @@ export const initWallet = async (
             txid: t.txid,
             createdAt: new Date(t.created_at).getTime(),
             attempts: req?.attempts ?? 0,
+            reqStatus: req?.status,
             description: t.description,
             satoshis: t.satoshis,
           });

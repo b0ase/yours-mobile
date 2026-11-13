@@ -27,12 +27,16 @@
  *    storage-provider lock is held (the Monitor). No writer lock held at all: the cycle takes the locks itself. A writer
  *    lock held by someone the caller can't be shown to be (review, LOW): no push at all (running inside another call's
  *    lock would let it write mid-cycle; waiting for it could be waiting on ourselves): flagged, the urgent retry pushes.
- *  - A deadline, WRITE_AHEAD_MS (8 s), up to and including the cycle's first data page (each request gets what is left
- *    of it; none starts after it). Once a page is committed the cycle finishes under the device sync's ordinary
- *    per-request limits (review, MEDIUM): a cycle cut after a committed page leaves the backup's checkpoint mid-cycle,
- *    the "push cycle is never paused" hazard (pushView.ts): a coin updated before the next cycle sorts before the saved
- *    position, is never sent, and the backup keeps it spendable. So a payment waits at most ~8 s for a backup that is
- *    slow from the start, longer only while a big backlog (more than one page, 64 rows) drains to an answering backup.
+ *  - A deadline, WRITE_AHEAD_MS (8 s), on what runs before any data is sent: the small requests get what is left of
+ *    it, and the first data page is started only with FIRST_PAGE_MIN_MS (2 s) or more left (pushView). A page once
+ *    sent, and the rest of the cycle, run under the device sync's ordinary per-request limits (review and re-review,
+ *    MEDIUM): a data page cut by a deadline may still be committed by the backup afterwards, which leaves its
+ *    checkpoint mid-cycle (every cycle is a data page plus a closing page), the "push cycle is never paused" hazard
+ *    (pushView.ts): a coin updated before the next cycle sorts before the saved position, is never sent, and the
+ *    backup keeps it spendable. COST: with a backup that answers slowly (not one that is down: that fails fast, or at
+ *    the small requests' deadline), a payment waits up to ~6 s for the small requests plus up to PUSH_CALL_MS (60 s)
+ *    per data page, two pages for a usual cycle, more while a backlog drains (64 rows a page). It still goes out, and
+ *    a backup that times out leaves its request "in flight", so the next payments skip the write-ahead at once.
  *  - A backup still answering an earlier timed-out request: no wait at all (review, MEDIUM-LOW: the wait held the writer
  *    lock, which blocks reads too, so every payment took 8 s more and screens froze, for up to IN_FLIGHT_MAX_AGE_MS).
  *    After a failed push the write-ahead is skipped for COOL_OFF_MS (each payment flagged at once) until a push goes
@@ -57,10 +61,12 @@
  * is what the backup and every copy restored or pulled from it keep (the transaction row does follow later pushes:
  * unproven, completed, failed). It was 'unsent' (review, 13 Nov 2026, MEDIUM-HIGH, shown in the two-device sim): every
  * copy's Monitor (SendWaiting) broadcast it, so a payment this device had given up on (refused for a while, inputs
- * freed, perhaps paid again) could go out from another device. 'nosend' = "not this store's to send": no copy ever
- * sends it; the toolbox's 'nosend' proof task (CheckNoSends) collects its proof once mined, and gives up after its
- * attempt limit ('invalid': failed, inputs freed) for one that never was; the stuck-send release (stuckSends.ts) covers
- * a copy's 'sending' payment the network never had. 'unknown' (also never sent) was not used: the toolbox reads a
+ * freed, perhaps paid again) could go out from another device; a delayed send's request, already 'unsent' when the
+ * Monitor posts it, goes the same way (re-review). 'nosend' = "not this store's to send": no copy ever sends it, and
+ * the toolbox's 'nosend' proof task (CheckNoSends) collects its proof once mined. That task counts no attempts on a
+ * 'nosend' request, so it never gives one up: a copy of a payment the network never had is released by the stuck-send
+ * release (stuckSends.ts) by age alone (24 h), only when the network has no copy (fails closed). 'unknown' (also never
+ * sent) was not used: the toolbox reads a
  * payment's bytes from its request only in a known set of states (getRawTxForSlice / getProvenOrRawTx: 'unsent',
  * 'sending', 'nosend', 'unmined', 'completed'…, never 'unknown'), so no copy could read its change's scripts or build a
  * spend of it until mined; the sim shows the restored device refusing all its change.
@@ -392,9 +398,19 @@ export async function asSending(
       }),
     );
   if (anyReq)
-    out.provenTxReqs = chunk.provenTxReqs!.map((q) => (ours(q) && q.status === 'unprocessed' ? { ...q, status: 'nosend' } : q));
+    out.provenTxReqs = chunk.provenTxReqs!.map((q) =>
+      ours(q) && TO_SEND.has(String(q.status)) ? { ...q, status: 'nosend' } : q,
+    );
   return out;
 }
+
+/**
+ * Request states that would make a copy send the payment (its Monitor's SendWaiting posts 'unsent' and 'sending'), or
+ * that a payment about to be posted is in: 'unprocessed' (createAction / signAction), 'unsent' (a delayed send, which
+ * shareReqsWithWorld queued: acceptDelayedBroadcast, bigDelayed's big mints; re-review of 18c93dd9, MEDIUM-HIGH),
+ * 'sending' (one queued and tried before). All go to the backup as 'nosend'. Others ('nosend' of a sendWith…) stay.
+ */
+const TO_SEND = new Set(['unprocessed', 'unsent', 'sending']);
 
 /** The backup (through pushView) with each page it is sent passed through asSending first. */
 function asSendingView<T extends object>(
