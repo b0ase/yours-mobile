@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   DEFAULT_TTL_S,
   MAX_HOLD_S,
+  STORE_MIN_AGE_S,
   WATCH_S,
+  conflictCheck,
   emptyState,
   expireOnce,
   isExpired,
@@ -10,12 +12,14 @@ import {
   resetExpiryLimit,
   runUnsentExpiry,
   splitOutpoint,
+  storageDetachInput,
   wocHeight,
   wocSpent,
   type ExpiryDeps,
   type ExpiryState,
   type NoSendAction,
   type SpendState,
+  type StoreWord,
 } from './unsentExpiry';
 import type { Sighting } from './unsentGuard';
 
@@ -548,5 +552,343 @@ describe('BRC-177 block height and the 14-day cap', () => {
     const r = await expireOnce(w.deps);
     expect(w.aborted).toEqual([]);
     expect(r.released).toEqual([]);
+  });
+});
+
+// ── 13 Nov 2026 (tx 446): a payment one of whose inputs a confirmed foreign tx spent can never be mined ──
+describe('conflicted payments (an input spent on chain by a different, confirmed tx)', () => {
+  /** A world where conflict + detach are wired; `conclusive` lists the outpoints whose foreign spend counts. */
+  function conflictWorld() {
+    const w = world();
+    const conclusive = new Set<string>();
+    const detached: string[] = [];
+    let detachFails = false;
+    w.deps.conflict = async (o, by) => conclusive.has(`${o}>${by}`);
+    w.deps.detachInput = async (t, o, by) => {
+      if (detachFails) throw new Error('store busy');
+      detached.push(`${t}:${o}>${by}`);
+    };
+    return {
+      w,
+      conclusive,
+      detached,
+      failDetach: () => {
+        detachFails = true;
+      },
+    };
+  }
+  const due = async (w: ReturnType<typeof world>, a: NoSendAction) => {
+    w.actions = [a];
+    await expireOnce(w.deps);
+    w.advance(DEFAULT_TTL_S);
+  };
+
+  test('3 inputs, one spent by a confirmed foreign tx, two unspent, the payment 404 everywhere → detached, then aborted', async () => {
+    const { w, conclusive, detached } = conflictWorld();
+    await due(w, act(A, [`${P}.0`, `${P}.1`, `${Q}.0`]));
+    w.spends.set(`${P}.1`, X);
+    conclusive.add(`${P}.1>${X}`);
+    const r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+    expect(w.aborted).toEqual([A]);
+    // Detached BEFORE the abort, so the abort can't hand the spent coin back.
+    expect(detached).toEqual([`${A}:${P}.1>${X}`]);
+    expect(w.logs.some((l) => l.includes('cancelled (aborted)'))).toBe(true);
+  });
+
+  test('OLD BEHAVIOUR without a conflict check: kept for ever (input-spent-elsewhere)', async () => {
+    const w = world();
+    await due(w, act(A, [`${P}.0`, `${P}.1`, `${Q}.0`]));
+    w.spends.set(`${P}.1`, X);
+    for (let i = 0; i < 3; i++) {
+      const r = await expireOnce(w.deps);
+      expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+      w.advance(DEFAULT_TTL_S);
+    }
+    expect(w.aborted).toEqual([]);
+  });
+
+  test('a spend that is not conclusive (mempool, one source) → kept, nothing detached or aborted', async () => {
+    const { w, detached } = conflictWorld();
+    await due(w, act(A, [`${P}.0`, `${P}.1`]));
+    w.spends.set(`${P}.1`, X);
+    const r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+    expect(w.aborted).toEqual([]);
+    expect(detached).toEqual([]);
+  });
+
+  test('CRITICAL: the payment itself is known (seen) → never aborted, handed to sendWith', async () => {
+    const { w, conclusive, detached } = conflictWorld();
+    await due(w, act(A, [`${P}.0`, `${P}.1`]));
+    w.spends.set(`${P}.1`, X);
+    conclusive.add(`${P}.1>${X}`);
+    w.seen.add(A);
+    const r = await expireOnce(w.deps);
+    expect(w.aborted).toEqual([]);
+    expect(detached).toEqual([]);
+    expect(r.settled).toEqual([A]);
+  });
+
+  test('CRITICAL: the payment unclear on any retry (a 429, a timeout) → kept; released on a later run', async () => {
+    const { w, conclusive, detached } = conflictWorld();
+    await due(w, act(A, [`${P}.0`, `${P}.1`]));
+    w.spends.set(`${P}.1`, X);
+    conclusive.add(`${P}.1>${X}`);
+    let calls = 0;
+    const flaky = async (t: string): Promise<Sighting> =>
+      t === A && ++calls === 2 ? 'unclear' : t === A ? 'missing' : 'seen';
+    w.deps.lookups = [flaky];
+    let r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'chain-has-it-or-unclear' }]);
+    expect(w.aborted).toEqual([]);
+    expect(detached).toEqual([]);
+    r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+  });
+
+  test('another input unclear → kept; another input spent by the payment itself → settle', async () => {
+    const { w, conclusive } = conflictWorld();
+    await due(w, act(A, [`${P}.0`, `${P}.1`]));
+    w.spends.set(`${P}.1`, X);
+    conclusive.add(`${P}.1>${X}`);
+    w.unclear.add(`${P}.0`);
+    let r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'input-unclear' }]);
+    w.unclear.clear();
+    w.spends.set(`${P}.0`, A);
+    r = await expireOnce(w.deps);
+    expect(r.settled).toEqual([A]);
+    expect(w.aborted).toEqual([]);
+  });
+
+  test('a spender that is one of our own unsent actions never counts as a conflict', async () => {
+    const { w, conclusive } = conflictWorld();
+    w.actions = [act(A, [`${P}.0`]), act(B, [`${Q}.0`])];
+    await expireOnce(w.deps);
+    w.advance(DEFAULT_TTL_S);
+    w.spends.set(`${P}.0`, B);
+    conclusive.add(`${P}.0>${B}`);
+    const r = await expireOnce(w.deps);
+    expect(r.kept).toContainEqual({ txid: A, reason: 'input-spent-elsewhere' });
+    expect(w.aborted).not.toContain(A);
+  });
+
+  test('no detachInput wired, or detaching fails → kept, never aborted', async () => {
+    const a = conflictWorld();
+    a.w.deps.detachInput = undefined;
+    await due(a.w, act(A, [`${P}.0`, `${P}.1`]));
+    a.w.spends.set(`${P}.1`, X);
+    a.conclusive.add(`${P}.1>${X}`);
+    let r = await expireOnce(a.w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'input-spent-elsewhere' }]);
+    expect(a.w.aborted).toEqual([]);
+
+    const b = conflictWorld();
+    b.failDetach();
+    await due(b.w, act(A, [`${P}.0`, `${P}.1`]));
+    b.w.spends.set(`${P}.1`, X);
+    b.conclusive.add(`${P}.1>${X}`);
+    r = await expireOnce(b.w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'abort-failed' }]);
+    expect(b.w.aborted).toEqual([]);
+  });
+
+  test('the wallet answering aborted:false (it saw the tx on chain) is not a release', async () => {
+    const { w, conclusive } = conflictWorld();
+    w.deps.abort = async () => ({ aborted: false });
+    await due(w, act(A, [`${P}.0`, `${P}.1`]));
+    w.spends.set(`${P}.1`, X);
+    conclusive.add(`${P}.1>${X}`);
+    const r = await expireOnce(w.deps);
+    expect(r.released).toEqual([]);
+    expect(r.kept).toEqual([{ txid: A, reason: 'abort-failed' }]);
+  });
+
+  test('not due yet → nothing is asked of the chain or detached', async () => {
+    const { w, conclusive, detached } = conflictWorld();
+    w.actions = [act(A, [`${P}.0`, `${P}.1`])];
+    w.spends.set(`${P}.1`, X);
+    conclusive.add(`${P}.1>${X}`);
+    const r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    expect(detached).toEqual([]);
+  });
+});
+
+describe('conflictCheck: the automatic coin check rule', () => {
+  const O = `${P}.1`;
+  const check = (ix: string | null | undefined | 'throw', woc: { txid: string; confirmed: boolean } | null | 'throw') =>
+    conflictCheck({
+      index: async () => {
+        if (ix === 'throw') throw new Error('429');
+        return [ix];
+      },
+      woc: async () => {
+        if (woc === 'throw') throw new Error('timeout');
+        return woc;
+      },
+    })(O, X);
+  test('WhatsOnChain confirmed (index silent or agreeing) → conclusive', async () => {
+    expect(await check(undefined, { txid: X, confirmed: true })).toBe(true);
+    expect(await check(null, { txid: X, confirmed: true })).toBe(true);
+    expect(await check('throw', { txid: X, confirmed: true })).toBe(true);
+    expect(await check(X, { txid: X, confirmed: true })).toBe(true);
+  });
+  test('both sources name the same spender in the mempool → conclusive', async () => {
+    expect(await check(X, { txid: X, confirmed: false })).toBe(true);
+  });
+  test('one source only, sources disagree, or a lookup fails → not conclusive', async () => {
+    expect(await check(undefined, { txid: X, confirmed: false })).toBe(false);
+    expect(await check(X, null)).toBe(false);
+    expect(await check(X, 'throw')).toBe(false);
+    expect(await check(B, { txid: X, confirmed: true })).toBe(false);
+    expect(await check(X, { txid: B, confirmed: true })).toBe(false);
+    expect(await check('throw', 'throw')).toBe(false);
+  });
+});
+
+describe('storageDetachInput', () => {
+  test("only rows the action holds, only while it is 'nosend', never on a store that isn't active", async () => {
+    const updates: [number, unknown][] = [];
+    const cleared: string[] = [];
+    let status = 'nosend';
+    let active = true;
+    const sp = {
+      findTransactions: async ({ partial }: { partial: { txid: string } }) =>
+        partial.txid === A
+          ? [{ transactionId: 446, status }]
+          : partial.txid === X
+            ? [{ transactionId: 500, status: 'completed' }]
+            : [],
+      findOutputs: async () => [
+        { outputId: 1, spentBy: 446 },
+        { outputId: 2, spentBy: 999 },
+      ],
+      updateOutput: async (id: number, patch: unknown) => {
+        updates.push([id, patch]);
+        return 1;
+      },
+    };
+    const detach = storageDetachInput({
+      isActive: () => active,
+      userId: async () => 1,
+      run: (fn) => fn(sp as never),
+      recordCleared: async (o, by) => void cleared.push(`${o}>${by}`),
+    });
+    await detach(A, `${P}.1`, X);
+    expect(updates).toEqual([[1, { spendable: false, spentBy: 500 }]]);
+    expect(cleared).toEqual([`${P}_1>${X}`]);
+    status = 'failed';
+    await expect(detach(A, `${P}.1`, X)).rejects.toThrow(/failed/);
+    status = 'nosend';
+    active = false;
+    await expect(detach(A, `${P}.1`, X)).rejects.toThrow(/active/);
+    expect(updates.length).toBe(1);
+  });
+});
+
+// ── 13 Nov 2026: Store payments the Store never heard of, by the wallet's own record (no outbox) ──
+describe('Store payments released early (storeAsk)', () => {
+  function storeWorld(words: StoreWord[]) {
+    const w = world();
+    const asked: string[] = [];
+    const locked: string[] = [];
+    let i = 0;
+    w.deps.storeAsk = async (a) => {
+      asked.push(a.txid);
+      return words[Math.min(i++, words.length - 1)];
+    };
+    w.deps.lock = async (t, fn) => {
+      locked.push(t);
+      return fn();
+    };
+    return { w, asked, locked };
+  }
+
+  test('outbox wiped: the Store never heard of it → released at the first run after STORE_MIN_AGE_S', async () => {
+    const { w, locked } = storeWorld(['never-heard']);
+    w.actions = [act(A, [`${P}.0`, `${Q}.0`])];
+    let r = await expireOnce(w.deps); // first sight
+    expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    w.advance(STORE_MIN_AGE_S);
+    r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+    expect(w.aborted).toEqual([A]);
+    expect(locked).toEqual([A]);
+  });
+
+  test('a 429 from the Store first → kept (store-unclear); released on the retry', async () => {
+    const { w } = storeWorld(['unclear', 'never-heard']);
+    w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(w.deps);
+    w.advance(STORE_MIN_AGE_S);
+    let r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'store-unclear' }]);
+    expect(w.aborted).toEqual([]);
+    w.advance(600);
+    r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+  });
+
+  test('a 429 from the chain first → kept; released on the retry', async () => {
+    const { w } = storeWorld(['never-heard']);
+    w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(w.deps);
+    w.advance(STORE_MIN_AGE_S);
+    w.unclear.add(A);
+    let r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'chain-has-it-or-unclear' }]);
+    w.unclear.clear();
+    r = await expireOnce(w.deps);
+    expect(r.released).toEqual([A]);
+  });
+
+  test('CRITICAL: the Store heard of it → kept until the normal deadline; the chain having it → sendWith', async () => {
+    const { w } = storeWorld(['heard']);
+    w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(w.deps);
+    w.advance(STORE_MIN_AGE_S);
+    let r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'store-heard' }]);
+    expect(w.aborted).toEqual([]);
+
+    const s = storeWorld(['never-heard']);
+    s.w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(s.w.deps);
+    s.w.advance(STORE_MIN_AGE_S);
+    s.w.seen.add(A);
+    r = await expireOnce(s.w.deps);
+    expect(r.settled).toEqual([A]);
+    expect(s.w.aborted).toEqual([]);
+  });
+
+  test('CRITICAL: the Store hears of it between the first ask and the abort (a Pay) → kept, inside the lock', async () => {
+    const { w, asked } = storeWorld(['never-heard', 'heard']);
+    w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(w.deps);
+    w.advance(STORE_MIN_AGE_S);
+    const r = await expireOnce(w.deps);
+    expect(asked).toEqual([A, A]);
+    expect(r.kept).toEqual([{ txid: A, reason: 'store-heard' }]);
+    expect(w.aborted).toEqual([]);
+  });
+
+  test("not a Store payment, too young, or a 'never' label → the normal deadline", async () => {
+    const { w, asked } = storeWorld(['not-store']);
+    w.actions = [act(A, [`${P}.0`])];
+    await expireOnce(w.deps);
+    let r = await expireOnce(w.deps);
+    expect(asked).toEqual([]); // too young: not even asked
+    w.advance(STORE_MIN_AGE_S);
+    r = await expireOnce(w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'not-due' }]);
+    const n = storeWorld(['never-heard']);
+    n.w.actions = [act(A, [`${P}.0`], ['p nosend expiry never'])];
+    await expireOnce(n.w.deps);
+    n.w.advance(STORE_MIN_AGE_S);
+    r = await expireOnce(n.w.deps);
+    expect(r.kept).toEqual([{ txid: A, reason: 'never' }]);
+    expect(n.asked).toEqual([]);
   });
 });

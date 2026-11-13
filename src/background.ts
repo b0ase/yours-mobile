@@ -922,9 +922,11 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       // (BRC-177, services/unsentExpiry.ts). Rate-limited inside.
       await ctx
         .expireUnsent()
-        .then((x) =>
-          x.released.length || x.settled.length || x.lateSeen.length ? console.log('[background] nosend expiry:', x) : undefined,
-        )
+        .then((x) => {
+          if (!x.released.length && !x.settled.length && !x.lateSeen.length) return;
+          console.log('[background] nosend expiry:', x);
+          notifyBalanceUpdate();
+        })
         .catch((err: unknown) => console.warn('[background] nosend expiry failed:', err));
       // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
       // Anything still queued keeps the send-retry alarm on (services/sendRetry.ts).
@@ -1976,7 +1978,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeAutoCoinResync();
   // Coins from the backup waiting on the chain: their next try, even if the worker slept through its timer (16d D2).
   if (alarm.name === AUTO_COIN_RESYNC_ALARM) void accountContext?.admitBackupRows().catch(() => undefined);
+  // Unsent payments (services/unsentExpiry.ts) are looked at again while the wallet stays open, not only at unlock: a
+  // check the network or the Store couldn't answer (timeout, 429) is retried here instead of holding the coins until
+  // the next unlock (13 Nov 2026). At most every 10 minutes (rate-limited inside); never while storage is switching.
+  if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeExpireUnsent();
 });
+const maybeExpireUnsent = async (): Promise<void> => {
+  const ctx = accountContext;
+  if (!ctx || storageSwitch) return;
+  try {
+    const x = await ctx.expireUnsent();
+    if (x.released.length || x.settled.length || x.lateSeen.length) {
+      console.log('[background] nosend expiry:', x);
+      notifyBalanceUpdate();
+    }
+  } catch (err) {
+    console.warn('[background] nosend expiry failed:', err);
+  }
+};
 (globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
   if (pageHidden() === false) void maybeAutoCoinResync(true);
   if (pageHidden() === false) void accountContext?.admitBackupRows().catch(() => undefined);

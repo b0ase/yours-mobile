@@ -19,6 +19,7 @@ import {
   type UnsentWallet,
 } from '../../services/unsentGuard';
 import type { MyOrder, OrderForm } from './form';
+import { askStoreHeardOf, claimAction, claimOp, STORE_PAYMENT_DESC, STORE_PROTOCOL } from './storeHeard';
 import {
   localOutbox,
   pruneOutbox,
@@ -79,11 +80,8 @@ const MESSAGES: Record<string, string> = {
   update_required: 'Please update bWalletX to buy from the Store.',
 };
 
-/**
- * The Store protocol this client speaks (review 4 Nov 2026, F12): the wallet broadcasts, after a backup and a claim
- * intent. Sent in every signed quote and claim; the server answers 426 update_required to clients without it.
- */
-export const STORE_PROTOCOL = '2';
+// STORE_PROTOCOL, STORE_PAYMENT_DESC and the claim names live in storeHeard.ts (shared with the background's release).
+export { STORE_PROTOCOL, STORE_PAYMENT_DESC } from './storeHeard';
 
 /** The wallet's backup push (background STORE_BACKUP_BEFORE_SEND, services/deviceSync.ts). Fails closed. */
 export const backupThroughWallet = async (): Promise<BackupAnswer> => {
@@ -158,9 +156,6 @@ export async function actionStatusOf(wallet: ActionsWallet, txid: string): Promi
   if (found) return found.status;
   return head.totalActions <= ACTION_STATUS_WINDOW ? undefined : 'unknown';
 }
-
-const claimAction = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'theme-buy-claim' : 'theme-orders-claim');
-const claimOp = (kind: OutboxEntry['kind']) => (kind === 'buy' ? 'buy-claim' : 'claim');
 
 /**
  * Fill the parts of the Store deps that need the wallet and the Store (review 4 Nov 2026):
@@ -541,8 +536,6 @@ async function finishBuy(ctx: OneSatContext, f: Fetch, entry: OutboxEntry, deps:
 export const ownedThemes = async (f: Fetch, wallet: Signer) =>
   post<{ packs: string[]; configured: boolean }>(f, 'owned', await signRequest(wallet, 'theme-buy-owned', {}));
 
-/** The descriptions payQuote / payBuyQuote give their payments (wallet/txHistory.ts labels them by these). */
-export const STORE_PAYMENT_DESC = /^(Theme purchase · |bWalletX theme edition$)/;
 const TXID_RE = /^[0-9a-f]{64}$/i;
 /** A pending claim is asked again at most this often. */
 export const RECLAIM_EVERY_MS = 10 * 60 * 1000;
@@ -567,26 +560,14 @@ export type SettleReport = {
  * it can't see. 'yes' = paid, or recorded as pending (an intent or a claim); 'no' = it holds no such payment; 'unclear'
  * = no clear answer (never release on that).
  */
-async function storeHeardOf(
+function storeHeardOf(
   ctx: OneSatContext,
   f: Fetch,
   memo: { kind: OutboxEntry['kind']; quoteId: string },
   txid: string,
 ): Promise<'yes' | 'no' | 'unclear'> {
-  try {
-    const signed = await signRequest(ctx.wallet, claimAction(memo.kind), {
-      quote_id: memo.quoteId,
-      txid,
-      store: STORE_PROTOCOL,
-    });
-    const r = await post<{ pending?: boolean; unverified?: boolean }>(f, claimOp(memo.kind), signed);
-    return r.unverified ? 'no' : 'yes';
-  } catch (e) {
-    if (!(e instanceof ThemeOrderError)) return 'unclear';
-    if (e.code === 'tx_used') return 'yes'; // the txid is recorded (on another row)
-    if (['rawtx', 'quote_not_found', 'payment_pending', 'quote_used'].includes(e.code)) return 'no';
-    return 'unclear';
-  }
+  // One rule for the Store screen and the background's release (storeHeard.ts); this build's Store address.
+  return askStoreHeardOf(ctx.wallet, f, memo, txid, { api: BWALLET_PAYMAIL_API });
 }
 
 /** Txids the Store has confirmed paid (so the scan doesn't ask again). Small, per identity, best effort. */

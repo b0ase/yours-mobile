@@ -98,7 +98,7 @@ import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
 import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
-import { ENVELOPES_ENABLED } from './mobile/storeBuild';
+import { ENVELOPES_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
 import { normalizeOriginator, parsePrivateKey } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
@@ -178,7 +178,19 @@ import {
 } from './services/seedChange';
 import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
-import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
+import {
+  conflictCheck,
+  runUnsentExpiry,
+  storageDetachInput,
+  storageKV,
+  wocHeight,
+  type DetachProvider,
+  type ExpiryReport,
+  type NoSendAction,
+} from './services/unsentExpiry';
+import { storeAskFor } from './mobile/themeOrder/storeHeard';
+import { withPayLock } from './mobile/themeOrder/storePay';
+import { deadline } from './utils/abortTimeout';
 import { chainActive } from './services/dappChain';
 import { healthStatus, SYNC_HEALTH_KEY } from './services/storageHealth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
@@ -1966,6 +1978,9 @@ export const initWallet = async (
                 labels: [],
                 includeLabels: true,
                 includeInputs: true,
+                // The description and memo output identify a Store payment (storeAsk below).
+                includeOutputs: true,
+                includeOutputLockingScripts: true,
                 limit: 500,
                 offset,
               });
@@ -1974,12 +1989,51 @@ export const initWallet = async (
                   txid: a.txid,
                   labels: a.labels,
                   inputs: (a.inputs ?? []).map((i) => ({ sourceOutpoint: i.sourceOutpoint })),
+                  description: a.description,
+                  outputs: (a.outputs ?? []).map((o) => ({ lockingScript: o.lockingScript })),
                 });
               if (page.actions.length < 500) break;
             }
             return out;
           },
           abort: (txid) => baseWallet.abortAction({ reference: txid }),
+          // 13 Nov 2026 (tx 446): an input a confirmed foreign transaction spent means the payment can never be mined.
+          // The automatic coin check's rule decides "confirmed" (WhatsOnChain confirmed, or WhatsOnChain and the 1Sat
+          // index naming the same spender); each lookup has a 5 s deadline (iOS 15-safe).
+          conflict: conflictCheck({
+            index: (() => {
+              const txo = (
+                toolboxServices as unknown as {
+                  txo?: { getSpends?: (o: string[]) => Promise<(string | null | undefined)[]> };
+                }
+              ).txo;
+              return txo?.getSpends ? (o: string[]) => txo.getSpends!.call(txo, o) : undefined;
+            })(),
+            woc: async (op) => {
+              const d = deadline(5_000);
+              try {
+                return await wocSpentStatus(op.replace('.', '_'), d.signal);
+              } finally {
+                d.clear();
+              }
+            },
+          }),
+          detachInput: storageDetachInput({
+            isActive: () => storage.isActiveStorageProvider(),
+            userId: async () => (await storage.getAuth()).userId!,
+            run: (fn) => storage.runAsStorageProvider((sp) => fn(sp as unknown as DetachProvider)),
+            recordCleared: (outpoint, spender) =>
+              recordAutoCleared(
+                { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+                account?.pubKeys?.identityPubKey ?? '',
+                { [outpoint]: spender },
+              ),
+          }),
+          // Store payments the Store never heard of, by the wallet's own record (no outbox needed): released at the
+          // first run after STORE_MIN_AGE_S, on every chain check; under the payment's lock so a Pay can't interleave.
+          ...(THEME_STORE_PAID_ENABLED
+            ? { storeAsk: storeAskFor(baseWallet, (u, i) => fetch(u, i)), lock: withPayLock }
+            : {}),
           sendWith: (txid) =>
             baseWallet.createAction({
               description: 'Payment the network has',

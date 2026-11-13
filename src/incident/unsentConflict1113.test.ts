@@ -1,0 +1,339 @@
+/**
+ * INCIDENT REPLAY, 13 Nov 2026 (boase@bwalletX.com, wallet tx 446).
+ *
+ * A Store theme payment was signed with noSend on the extension and never broadcast: 'nosend', three inputs, each
+ * spentBy=446, its change counted but never spendable. The owner's phone then spent ONE of those three coins in a
+ * transaction that was mined. On the extension, services/unsentExpiry.ts found that input "spent elsewhere" and kept
+ * the hold on every run ('input-spent-elsewhere'), for ever: the other two coins stayed locked and the balance showed
+ * change that can never exist. The payment itself was a 404 on WhatsOnChain and ARC. A manual
+ * abortAction({ reference: txid }) released it.
+ *
+ * Replayed here on the REAL wallet-toolbox (StorageIdb on fake-indexeddb, real signing), with the run wired as
+ * initWallet wires it (listNoSendActions with inputs/outputs, abortAction, conflictCheck over the real
+ * wocSpentStatus, storageDetachInput on the wallet's storage manager). Chain answers are mocked:
+ *   coin 1 (fund:1): spent by F, a foreign transaction WhatsOnChain calls "confirmed" and the 1Sat index names too;
+ *   coins 0 and 2: unspent (WhatsOnChain /spent 404, index null);
+ *   the payment: 404 on WhatsOnChain and ARC (and 1Sat).
+ * After ONE run: the action is 'failed', coins 0 and 2 are spendable, coin 1 is not, and the balance equals the chain.
+ *
+ * Also the Store's own release (fix 2), with no outbox at all: a 429 first, released on the retry; and a payment the
+ * Store has heard of stays held.
+ */
+import 'fake-indexeddb/auto';
+import { expect, test } from 'bun:test';
+import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Random, Script, Transaction, Utils } from '@bsv/sdk';
+import { StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
+import { forceLegacyActionBatch } from '../services/actionBatchMode';
+import { wocSpentStatus } from '../services/coinPreflight';
+import {
+  conflictCheck,
+  expireOnce,
+  storageDetachInput,
+  STORE_MIN_AGE_S,
+  wocSpent,
+  type DetachProvider,
+  type ExpiryDeps,
+  type ExpiryState,
+  type NoSendAction,
+} from '../services/unsentExpiry';
+import type { Sighting } from '../services/unsentGuard';
+import { storeAskFor } from '../mobile/themeOrder/storeHeard';
+
+const HEIGHT = 975_400;
+const COIN = 400_000;
+const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
+
+const services = new Proxy(
+  {
+    chain: 'main',
+    getChainTracker: async () => ({ isValidRootForHeight: async () => true, currentHeight: async () => HEIGHT + 1 }),
+    getHeight: async () => HEIGHT + 1,
+    getHeaderForHeight: async () => new Array(80).fill(0),
+    nLockTimeIsFinal: async () => true,
+    hashOutputScript: (s: string) => s,
+    // The payment never reached the network (the toolbox's own abort check asks this).
+    getStatusForTxids: async (txids: string[]) => ({
+      status: 'success',
+      results: txids.map((txid) => ({ txid, status: 'unknown', depth: 0 })),
+    }),
+  } as Record<string, unknown>,
+  {
+    get: (t, p) =>
+      p in t || typeof p === 'symbol' || p === 'then'
+        ? t[p as string]
+        : async () => {
+            throw new Error(`mock ${String(p)}`);
+          },
+  },
+) as never;
+
+type Out = { txid?: string; vout: number; spendable: boolean; spentBy?: number | null; satoshis: number };
+type Tx = { transactionId: number; txid?: string; status: string };
+
+const memoHex = (quoteId: string) =>
+  `006a0d${Utils.toHex(Utils.toArray('bwx-theme-buy', 'utf8'))}20${Utils.toHex(Utils.toArray(quoteId, 'utf8'))}`;
+
+/** One device: a wallet holding three mined coins of COIN sats (fund:0..2), and a Store payment spending all three. */
+async function setup(name: string) {
+  const root = PrivateKey.fromRandom();
+  const kd = new KeyDeriver(root);
+  const device = new StorageIdb(StorageProvider.createStorageBaseOptions('main'));
+  (device as unknown as { dbName: string }).dbName = name;
+  await device.migrate(name, `sik-${name}`);
+  await device.makeAvailable();
+  device.setServices(services);
+  const sm = new WalletStorageManager(kd.identityKey, device, []);
+  await sm.makeAvailable();
+  sm.setServices(services);
+  const wallet = new Wallet({ chain: 'main', keyDeriver: kd, storage: sm, services } as never);
+  expect(forceLegacyActionBatch(wallet)).toBe(true);
+
+  const anyone = new PrivateKey(1).toPublicKey().toString();
+  const fund = new Transaction();
+  fund.addInput({
+    sourceTXID: Utils.toHex(Random(32)),
+    sourceOutputIndex: 0,
+    unlockingScript: new Script(),
+    sequence: 0xffffffff,
+  });
+  const remits: { derivationPrefix: string; derivationSuffix: string }[] = [];
+  for (let i = 0; i < 3; i++) {
+    const derivationPrefix = Utils.toBase64(Random(8));
+    const derivationSuffix = Utils.toBase64(Random(8));
+    remits.push({ derivationPrefix, derivationSuffix });
+    const priv = kd.derivePrivateKey([2, '3241645161d8'], `${derivationPrefix} ${derivationSuffix}`, anyone);
+    fund.addOutput({ lockingScript: new P2PKH().lock(priv.toPublicKey().toAddress()), satoshis: COIN });
+  }
+  fund.merklePath = new MerklePath(HEIGHT - 10, [[{ offset: 0, hash: fund.id('hex'), txid: true }]]);
+  const fb = new Beef();
+  fb.mergeTransaction(fund);
+  const fundTxid = fund.id('hex');
+  await wallet.internalizeAction({
+    tx: fb.toBinaryAtomic(fundTxid),
+    outputs: remits.map((r, outputIndex) => ({
+      outputIndex,
+      protocol: 'wallet payment' as const,
+      paymentRemittance: { ...r, senderIdentityKey: anyone },
+    })),
+    description: 'Paymail payment',
+  });
+  expect(await wallet.balance()).toBe(3 * COIN);
+
+  // The Store payment (signed with noSend: stored at once as 'nosend', all three coins locked).
+  const quoteId = Utils.toHex(Random(16));
+  const pay = await wallet.createAction({
+    description: 'Theme purchase · Cool',
+    outputs: [
+      {
+        lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+        satoshis: 2 * COIN + 300_000, // needs all three coins
+        outputDescription: 'Theme',
+      },
+      { lockingScript: memoHex(quoteId), satoshis: 0, outputDescription: 'Theme purchase reference' },
+    ],
+    options: { noSend: true, randomizeOutputs: false },
+  });
+  const txid = pay.txid!;
+
+  const txOf = async (t: string) => ((await device.findTransactions({ partial: { txid: t } })) as unknown as Tx[])[0];
+  const coinOf = async (vout: number) =>
+    ((await device.findOutputs({ partial: { txid: fundTxid, vout } } as never)) as unknown as Out[])[0];
+  const action = await txOf(txid);
+  expect(action.status).toBe('nosend');
+  for (const v of [0, 1, 2]) {
+    const c = await coinOf(v);
+    expect(c.spendable).toBe(false);
+    expect(c.spentBy).toBe(action.transactionId);
+  }
+  return { wallet, sm, device, kd, fundTxid, txid, quoteId, txOf, coinOf };
+}
+
+/** The run's deps as initWallet wires them; `chain` decides what WhatsOnChain, ARC and the 1Sat index answer. */
+function wiring(
+  d: Awaited<ReturnType<typeof setup>>,
+  chain: { spentBy: Map<string, string>; confirmed: Set<string>; seen: Set<string> },
+  kvState: { s: ExpiryState | null },
+  extra: Partial<ExpiryDeps> = {},
+): ExpiryDeps {
+  // A fake fetch for WhatsOnChain /tx/<txid>/<vout>/spent (wocSpent and wocSpentStatus both read it).
+  const f = async (url: string) => {
+    const m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(url);
+    if (!m) return new Response('', { status: 500 });
+    const by = chain.spentBy.get(`${m[1]}.${m[2]}`);
+    if (!by) return new Response('Not Found', { status: 404 });
+    return Response.json({ txid: by, vin: 0, status: chain.confirmed.has(by) ? 'confirmed' : 'unconfirmed' });
+  };
+  const look = async (t: string): Promise<Sighting> => (chain.seen.has(t) ? 'seen' : 'missing');
+  return {
+    listNoSend: async () => {
+      const page = await d.wallet.listNoSendActions({
+        labels: [],
+        includeLabels: true,
+        includeInputs: true,
+        includeOutputs: true,
+        includeOutputLockingScripts: true,
+        limit: 500,
+      });
+      return page.actions.map(
+        (a): NoSendAction => ({
+          txid: a.txid,
+          labels: a.labels,
+          inputs: (a.inputs ?? []).map((i) => ({ sourceOutpoint: i.sourceOutpoint })),
+          description: a.description,
+          outputs: (a.outputs ?? []).map((o) => ({ lockingScript: o.lockingScript })),
+        }),
+      );
+    },
+    abort: (t) => d.wallet.abortAction({ reference: t }),
+    kv: { load: async () => (kvState.s ? structuredClone(kvState.s) : null), save: async (s) => void (kvState.s = s) },
+    // WhatsOnChain + ARC (+ 1Sat): the payment is a 404 everywhere; the funding tx is mined.
+    lookups: [look, look, look],
+    spent: wocSpent((u) => f(u)),
+    delaysMs: [0, 1, 1],
+    sleep: async () => undefined,
+    log: () => undefined,
+    ...extra,
+  };
+}
+
+const newWiring = (d: Awaited<ReturnType<typeof setup>>, chain: Parameters<typeof wiring>[1]) => ({
+  conflict: conflictCheck({
+    index: async (ops: string[]) => ops.map((o) => chain.spentBy.get(o) ?? null),
+    woc: (op: string) =>
+      wocSpentStatus(op.replace('.', '_'), undefined, (async (u: string) => {
+        const m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(u);
+        const by = m && chain.spentBy.get(`${m[1]}.${m[2]}`);
+        if (!by) return new Response('Not Found', { status: 404 });
+        return Response.json({ txid: by, vin: 0, status: chain.confirmed.has(by) ? 'confirmed' : 'unconfirmed' });
+      }) as unknown as typeof fetch),
+  }),
+  detachInput: storageDetachInput({
+    isActive: () => d.sm.isActiveStorageProvider(),
+    userId: async () => (await d.sm.getAuth()).userId!,
+    run: (fn) => d.sm.runAsStorageProvider((sp) => fn(sp as unknown as DetachProvider)),
+  }),
+});
+
+test('13 Nov tx 446: one input spent by a foreign mined tx, two unspent, payment 404 → after one run: failed, two coins spendable, balance = chain', async () => {
+  const d = await setup('incident-1113-conflict');
+  const F = Utils.toHex(Random(32)); // the phone's mined transaction
+  const chain = {
+    spentBy: new Map([[`${d.fundTxid}.1`, F]]),
+    confirmed: new Set([F]),
+    seen: new Set([d.fundTxid, F]),
+  };
+  // The action was days old: earlier runs had already seen it (first sight 3 days ago).
+  const nowS = Math.floor(Date.now() / 1000);
+  const kv = { s: { first: { [d.txid]: nowS - 3 * 86400 }, released: {} } as ExpiryState };
+
+  // The released 5.2.54 wiring (no conflict check): kept for ever, exactly as on the owner's extension.
+  let r = await expireOnce(wiring(d, chain, kv, { nowS: () => nowS }));
+  expect(r.kept).toEqual([{ txid: d.txid, reason: 'input-spent-elsewhere' }]);
+  expect((await d.txOf(d.txid)).status).toBe('nosend');
+
+  // With the fix: ONE run.
+  r = await expireOnce(wiring(d, chain, kv, { nowS: () => nowS, ...newWiring(d, chain) }));
+  expect(r.released).toEqual([d.txid]);
+
+  // The action is failed; its never-to-exist change is gone from the balance.
+  const action = await d.txOf(d.txid);
+  expect(action.status).toBe('failed');
+  const change = (await d.device.findOutputs({
+    partial: { transactionId: action.transactionId },
+  } as never)) as unknown as Out[];
+  for (const o of change) expect(o.spendable).toBe(false);
+  // The two coins the chain still has are spendable again; the one the phone spent is not.
+  for (const v of [0, 2]) {
+    const c = await d.coinOf(v);
+    expect(c.spendable).toBe(true);
+    expect(c.spentBy ?? null).toBeNull();
+  }
+  const spent = await d.coinOf(1);
+  expect(spent.spendable).toBe(false);
+  expect(spent.spentBy ?? null).toBeNull();
+  // Balance = chain: coins 0 and 2.
+  expect(await d.wallet.balance()).toBe(2 * COIN);
+  // And the next run has nothing left to do.
+  r = await expireOnce(wiring(d, chain, kv, { nowS: () => nowS, ...newWiring(d, chain) }));
+  expect(r.checked).toBe(0);
+}, 30_000);
+
+test('13 Nov tx 446, but the payment is known on the network → never aborted', async () => {
+  const d = await setup('incident-1113-known');
+  const F = Utils.toHex(Random(32));
+  const chain = {
+    spentBy: new Map([[`${d.fundTxid}.1`, F]]),
+    confirmed: new Set([F]),
+    seen: new Set([d.fundTxid, F, d.txid]),
+  };
+  const nowS = Math.floor(Date.now() / 1000);
+  const kv = { s: { first: { [d.txid]: nowS - 3 * 86400 }, released: {} } as ExpiryState };
+  const sent: string[] = [];
+  const r = await expireOnce(
+    wiring(d, chain, kv, { nowS: () => nowS, sendWith: async (t) => void sent.push(t), ...newWiring(d, chain) }),
+  );
+  expect(r.released).toEqual([]);
+  expect(sent).toEqual([d.txid]);
+  expect((await d.txOf(d.txid)).status).toBe('nosend');
+  expect((await d.coinOf(1)).spentBy).toBe((await d.txOf(d.txid)).transactionId);
+}, 30_000);
+
+test('Store payment, outbox wiped, the Store answers 429 first → kept; released on the retry; balance back', async () => {
+  const d = await setup('incident-1113-store');
+  const chain = { spentBy: new Map<string, string>(), confirmed: new Set<string>(), seen: new Set([d.fundTxid]) };
+  const t0 = Math.floor(Date.now() / 1000);
+  let now = t0;
+  const kv = { s: null as ExpiryState | null };
+  const answers = [
+    () => Response.json({ error: 'rate_limited' }, { status: 429 }),
+    () => Response.json({ unverified: true }),
+  ];
+  const calls: { url: string; body: { fields?: { quote_id?: string; txid?: string }; rawtx?: unknown } }[] = [];
+  const f = async (url: string, init?: RequestInit) => {
+    calls.push({ url, body: JSON.parse(String(init?.body ?? '{}')) });
+    return answers[Math.min(calls.length - 1, answers.length - 1)]();
+  };
+  const deps = () =>
+    wiring(d, chain, kv, {
+      nowS: () => now,
+      storeAsk: storeAskFor(d.wallet as never, f, { api: 'https://store.test' }),
+    });
+  let r = await expireOnce(deps()); // first sight: too young
+  expect(r.kept).toEqual([{ txid: d.txid, reason: 'not-due' }]);
+  expect(calls.length).toBe(0);
+  now += STORE_MIN_AGE_S;
+  r = await expireOnce(deps()); // the Store answers 429
+  expect(r.kept).toEqual([{ txid: d.txid, reason: 'store-unclear' }]);
+  expect((await d.txOf(d.txid)).status).toBe('nosend');
+  now += 600;
+  r = await expireOnce(deps()); // retried: the Store never heard of it
+  expect(r.released).toEqual([d.txid]);
+  expect((await d.txOf(d.txid)).status).toBe('failed');
+  expect(await d.wallet.balance()).toBe(3 * COIN);
+  // Asked from the wallet's own record: the memo's quote id and the txid, never the rawtx.
+  expect(calls[1].url).toBe('https://store.test/api/theme-orders/buy-claim');
+  expect(calls[1].body.fields?.quote_id).toBe(d.quoteId);
+  expect(calls[1].body.fields?.txid).toBe(d.txid);
+  expect(calls[1].body.rawtx).toBeUndefined();
+}, 30_000);
+
+test('Store payment the Store has heard of → kept (before its normal deadline)', async () => {
+  const d = await setup('incident-1113-store-heard');
+  const chain = { spentBy: new Map<string, string>(), confirmed: new Set<string>(), seen: new Set([d.fundTxid]) };
+  let now = Math.floor(Date.now() / 1000);
+  const kv = { s: null as ExpiryState | null };
+  const f = async () => Response.json({ pending: true });
+  const deps = () =>
+    wiring(d, chain, kv, {
+      nowS: () => now,
+      storeAsk: storeAskFor(d.wallet as never, f, { api: 'https://store.test' }),
+    });
+  await expireOnce(deps());
+  now += STORE_MIN_AGE_S;
+  for (let i = 0; i < 3; i++) {
+    const r = await expireOnce(deps());
+    expect(r.kept).toEqual([{ txid: d.txid, reason: 'store-heard' }]);
+    now += 600;
+  }
+  expect((await d.txOf(d.txid)).status).toBe('nosend');
+}, 30_000);
