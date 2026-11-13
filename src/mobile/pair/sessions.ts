@@ -400,8 +400,10 @@ type Live = {
   retry?: ReturnType<typeof setTimeout>;
   /** Reopened for a stored session (connect), not a fresh pairing. */
   resumed?: boolean;
-  /** A v1 session asking the relay to bind its session claim on this connect (see connect): that claim. */
-  upgrade?: string;
+  /** This pairing's session claim (protocol.ts sessionWalletClaim); its digest goes to the site in every `ready`. */
+  session?: string;
+  /** A v1 session's connect: the relay may answer that it now holds the session claim (see connect). */
+  upgrade?: boolean;
   /** The relay admitted this socket (its verifiedOrigin frame arrived). */
   relayed?: boolean;
 };
@@ -409,8 +411,14 @@ const live = new Map<string, Live>();
 /** v1 sessions whose next connect sends the session claim as the claim (connect explains why). Memory only. */
 const upgradeWithSession = new Set<string>();
 
-/** `ready`, saying wcv 2 when the relay holds this pairing's session claim, so the site re-binds it on reconnects. */
-const readyFor = (l: Live): PairMessage => (l.stored.wcv === 2 ? { t: 'ready', wcv: 2 } : { t: 'ready' });
+/**
+ * `ready` with `wcv: 2` and the session claim's digest: the site (if it is new enough) stores that the pairing is v2
+ * and re-binds the wallet role to that digest on its next connect, with the site claim it opened the channel with.
+ * That is how a v1 session upgrades (review 13 Nov 2026): the relay never lets a v1 claim bind on its own, because
+ * whoever saw the QR holds the same claim. Older sites ignore both fields.
+ */
+const readyFor = (l: Live): PairMessage =>
+  l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session) } : { t: 'ready' };
 
 const update = (c: string, patch: Partial<StoredSession>) =>
   save(load().map((s) => (s.c === c ? { ...s, ...patch } : s)));
@@ -542,7 +550,7 @@ function attach(l: Live) {
       if (v && v !== stored.origin) return forget(stored.c, false); // the channel changed hands: refuse
       if (v && !l.relayed) {
         l.relayed = true;
-        if (l.upgrade) onUpgradeAnswer(l, l.upgrade, rf.wcv === 2);
+        if (l.upgrade && l.session) onUpgradeAnswer(l, l.session, rf.wcv === 2);
       }
       // The site's tab came back (iOS kills its socket while the user is in bWallet, e.g. after a return-to-site):
       // say `ready` again so it resumes and resends, without relying on the relay's 60 s queue.
@@ -595,18 +603,17 @@ function attach(l: Live) {
 }
 
 /**
- * The relay answered a v1 session's upgrade connect. `bound` (wcv 2): from now on only the session claim admits this
- * phone, so keep it, and tell the site in a sealed `ready` so it re-binds the role on its reconnects too. Otherwise
- * (an older relay) keep whichever claim it just admitted.
+ * The relay admitted a v1 session's connect. `bound` (wcv 2): the role is bound to our session claim (the site
+ * re-bound it, or the channel was re-created unbound), so from now on only that claim admits this phone: keep it.
+ * Otherwise keep whichever claim the relay just admitted.
  */
 function onUpgradeAnswer(l: Live, session: string, bound: boolean) {
   const c = l.stored.c;
   upgradeWithSession.delete(c);
-  l.upgrade = undefined;
+  l.upgrade = false;
   if (bound) {
     l.stored = { ...l.stored, claim: session, wcv: 2 };
     update(c, { claim: session, wcv: 2 });
-    void reply(l, readyFor(l));
   } else if (l.stored.claim) update(c, { claim: l.stored.claim });
 }
 
@@ -634,9 +641,9 @@ function connect(c: string) {
       const held = stored.claim ?? newClaim();
       if (!stored.claim) update(c, { claim: held });
       // v2: also send the session claim's digest, so a channel the relay re-created stays bound to this phone.
-      // v1 (review 13 Nov 2026): send it too, so the relay can bind the role to it now (it answers wcv 2) rather than
-      // the session waiting for a new QR. If that answer was lost (the socket dropped first), the relay holds only the
-      // session claim and refuses the old one, so after a refusal the next connect tries the session claim instead.
+      // v1 (review 13 Nov 2026): send it too (the relay binds it only on a channel nobody bound, e.g. re-created). The
+      // site re-binds the role to it after our `ready` (readyFor), and the relay then refuses the old claim, so after a
+      // refusal the next connect tries the session claim; the relay's wcv 2 then makes it the stored claim.
       const session =
         stored.wcv === 2 ? held : sessionWalletClaim(PrivateKey.fromHex(stored.phoneKey), stored.sitePub, c);
       const claim = stored.wcv !== 2 && upgradeWithSession.has(c) ? session : held;
@@ -645,7 +652,8 @@ function connect(c: string) {
         sealer,
         stored: { ...stored, claim },
         resumed: true,
-        ...(stored.wcv !== 2 && { upgrade: session }),
+        session,
+        upgrade: stored.wcv !== 2,
       });
     } finally {
       connecting.delete(c);
@@ -836,7 +844,7 @@ function connectPairing(
             ...(proven && { proven: true }),
           };
           save([...load().filter((s) => s.c !== link.c), stored]);
-          const l: Live = { ws, sealer: sealer!, stored, relayed: true };
+          const l: Live = { ws, sealer: sealer!, stored, relayed: true, session: sessionClaim };
           attach(l);
           void reply(l, readyFor(l));
         },

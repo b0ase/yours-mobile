@@ -12,8 +12,9 @@
  * it as proof of who is on the other end (audit C2); protocols that send secrets must authenticate the peer
  * themselves (e.g. "open on computer" makes the computer prove a code shown only on the phone).
  */
-import { createHash } from 'node:crypto';
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
+import { open as openFile, rename, unlink } from 'node:fs/promises';
 import { WebSocketServer } from 'ws';
 
 export const LIMITS = {
@@ -25,6 +26,7 @@ export const LIMITS = {
   maxQrLifetimeS: 300,
   unpairedIdleMs: 2 * 60_000,
   pairedIdleMs: 31 * 24 * 60 * 60_000, // CLI pairings last up to 30 days
+  stateChannels: 50_000, // most channels kept in the state file (the most recently active)
 };
 
 const CHANNEL = /^[A-Za-z0-9_-]{22}$/; // 16 random bytes, base64url
@@ -94,6 +96,7 @@ export function createRelay({
   sessionClaimsFrom = SESSION_CLAIMS_FROM,
   trustedProxies = DEFAULT_TRUSTED_PROXIES,
   stateFile = null,
+  stateWriteMs = 1000,
 } = {}) {
   const legacy = () => now() < legacyUntil;
   const sessionClaimsRequired = () => now() >= sessionClaimsFrom;
@@ -110,38 +113,101 @@ export function createRelay({
     queue: { site: [], wallet: [] },
     rate: { start: c.lastActive, n: 0 },
     savedAt: c.lastActive,
+    // True when the site claim was brought by the socket that opened the channel (or restored as such): only that
+    // claim may move the wallet binding. A claim pinned later, on a channel opened without one, holds the site role only.
+    siteBinds: false,
     ...c,
   });
 
   // Paired channels survive a restart (review 13 Nov 2026): without this, whoever opened the site role first after a
   // restart re-created the channel with their own origin and claims, locking the real site out and unpairing the
-  // phone. Kept per channel: origin, the site and wallet claim digests, the wallet binding and the last activity
-  // (for the paired idle window). Written whole to a temporary file and renamed over the old one.
-  const writeState = () => {
-    if (!stateFile) return;
+  // phone. Kept per channel: origin, the site and wallet claim digests, the wallet binding, whether the site claim may
+  // re-bind the wallet (`sb`) and the last activity (for the paired idle window). Only channels with both a site claim
+  // and a wallet binding are kept (nothing else is worth defending), at most LIMITS.stateChannels, most recent first.
+  // No addresses are kept, so a restored channel counts against no one's per-IP limit: a restart resets that quota,
+  // bounded by the cap above.
+  const kept = (ch) => ch.paired && !!ch.claims.site && !!ch.walletBinding;
+  const snapshot = () => {
+    const list = [...channels].filter(([, ch]) => kept(ch));
+    list.sort((a, b) => b[1].lastActive - a[1].lastActive);
     const out = {};
-    for (const [id, ch] of channels) {
-      if (!ch.paired) continue;
-      out[id] = { o: ch.origin, sc: ch.claims.site, wl: ch.claims.wallet, wb: ch.walletBinding, at: ch.lastActive };
+    for (const [id, ch] of list.slice(0, LIMITS.stateChannels)) {
+      out[id] = {
+        o: ch.origin,
+        sc: ch.claims.site,
+        wl: ch.claims.wallet,
+        wb: ch.walletBinding,
+        sb: ch.siteBinds,
+        at: ch.lastActive,
+      };
       ch.savedAt = ch.lastActive;
     }
-    const tmp = `${stateFile}.${process.pid}.tmp`;
+    return JSON.stringify({ v: 1, channels: out });
+  };
+  // A fresh, unguessable temporary name opened exclusively (never follows a planted link), synced, then renamed.
+  const tmpPath = () => `${stateFile}.${randomBytes(8).toString('hex')}.tmp`;
+  const writeNow = (json) => {
+    const tmp = tmpPath();
+    let fd;
     try {
-      writeFileSync(tmp, JSON.stringify({ v: 1, channels: out }), { mode: 0o600 });
+      fd = openSync(tmp, 'wx', 0o600);
+      writeSync(fd, json);
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
       renameSync(tmp, stateFile);
     } catch (e) {
+      if (fd !== undefined) closeSync(fd);
+      try {
+        unlinkSync(tmp);
+      } catch {
+        /* never made */
+      }
       log({ stateWrite: 'failed', code: e?.code });
     }
   };
-  let saveQueued = false;
-  /** Write the state once after the current burst (a reconnect wave attaches many sockets at once). */
+  const writeLater = async (json) => {
+    const tmp = tmpPath();
+    let fh;
+    try {
+      fh = await openFile(tmp, 'wx', 0o600);
+      await fh.writeFile(json);
+      await fh.sync();
+      await fh.close();
+      fh = null;
+      await rename(tmp, stateFile);
+    } catch (e) {
+      await fh?.close().catch(() => {});
+      await unlink(tmp).catch(() => {});
+      log({ stateWrite: 'failed', code: e?.code });
+    }
+  };
+  let saveTimer = null;
+  let writing = false;
+  let again = false;
+  let finalJson = null; // what close() wrote, put back if an earlier write lands after it
+  /** Write once after changes settle (debounced, asynchronous, one write at a time). */
   const save = () => {
-    if (!stateFile || closed || saveQueued) return;
-    saveQueued = true;
-    setImmediate(() => {
-      saveQueued = false;
-      if (!closed) writeState();
-    });
+    if (!stateFile || closed || saveTimer) return;
+    saveTimer = setTimeout(runSave, stateWriteMs);
+    saveTimer.unref?.();
+  };
+  const runSave = async () => {
+    saveTimer = null;
+    if (closed) return;
+    if (writing) {
+      again = true;
+      return;
+    }
+    writing = true;
+    await writeLater(snapshot());
+    writing = false;
+    if (closed) {
+      if (finalJson !== null) writeNow(finalJson);
+    } else if (again) {
+      again = false;
+      save();
+    }
   };
   /** A missing, unreadable or corrupt file starts empty; bad or lapsed entries are skipped one by one. */
   const restore = () => {
@@ -156,14 +222,16 @@ export function createRelay({
     const list = raw?.v === 1 && raw.channels && typeof raw.channels === 'object' ? raw.channels : {};
     const digest = (x) => (x === null ? null : typeof x === 'string' && CLAIM_DIGEST.test(x) ? x : undefined);
     const t = now();
+    const ok = [];
     for (const [id, s] of Object.entries(list)) {
       if (!CHANNEL.test(id) || !s || typeof s !== 'object' || !acceptableOrigin(s.o)) continue;
       if (!Number.isFinite(s.at) || s.at > t || t - s.at > LIMITS.pairedIdleMs) continue;
-      const sc = digest(s.sc);
       const wl = digest(s.wl);
-      const wb = digest(s.wb);
-      if (sc === undefined || wl === undefined || wb === undefined) continue;
-      // No address is kept, so restored channels count against no one's per-IP limit.
+      if (!digest(s.sc) || !digest(s.wb) || wl === undefined) continue;
+      ok.push([id, s, wl]);
+    }
+    ok.sort((a, b) => b[1].at - a[1].at);
+    for (const [id, s, wl] of ok.slice(0, LIMITS.stateChannels))
       channels.set(
         id,
         newChannel({
@@ -172,11 +240,11 @@ export function createRelay({
           ip: null,
           paired: true,
           lastActive: s.at,
-          claims: { site: sc, wallet: wl },
-          walletBinding: wb,
+          claims: { site: s.sc, wallet: wl },
+          walletBinding: s.wb,
+          siteBinds: s.sb === true,
         }),
       );
-    }
   };
   restore();
 
@@ -186,7 +254,7 @@ export function createRelay({
     for (const role of ROLES) ch[role]?.close(4000, 'channel closed');
     channels.delete(id);
     if (ch.ip !== null) perIp.set(ch.ip, Math.max(0, (perIp.get(ch.ip) ?? 1) - 1));
-    if (ch.paired) save();
+    if (kept(ch)) save();
   };
 
   // Activity is saved at most hourly; the paired idle window is a month.
@@ -198,7 +266,7 @@ export function createRelay({
       const bothGone = !ch.site && !ch.wallet;
       if (idle > LIMITS.pairedIdleMs || (!ch.paired && bothGone && idle > LIMITS.unpairedIdleMs)) drop(id);
       for (const role of ROLES) ch.queue[role] = ch.queue[role].filter((q) => t - q.at < LIMITS.queueMs);
-      if (ch.paired && ch.lastActive - ch.savedAt > STATE_ACTIVITY_MS) save();
+      if (kept(ch) && ch.lastActive - ch.savedAt > STATE_ACTIVITY_MS) save();
     }
   };
   const timer = setInterval(sweep, 30_000);
@@ -225,16 +293,17 @@ export function createRelay({
   };
 
   /**
-   * May this wallet join bind the role to its session claim digest `nc`? Only the phone that proves it saw the QR
-   * (the bound claim), the first wallet on a channel nobody bound (sites and CLIs without `wc`), or, on such a channel,
-   * the wallet already holding the role (a v1 session upgrading on resume). Never a claim the relay admitted only
-   * because of the compatibility window while a QR binding waits: that would let a squatter pin the role first.
+   * May this wallet join bind the role to its session claim digest `nc`? Only the phone that proves it saw the QR (the
+   * bound claim) while that QR is still live, or the first wallet on a channel nobody bound (sites and CLIs without
+   * `wc`). Never a claim the relay admitted only because of the compatibility window: that would let a squatter pin
+   * the role before the phone. Never a v1 session's claim later on (review 13 Nov 2026): whoever saw the QR holds the
+   * same claim and could bind their own `nc`, locking the phone out for good. A v1 session upgrades through its site
+   * instead (the site proves its claim and re-binds with `wc`; see attach).
    */
   const mayBind = (ch, role, claim, nc) =>
     role === 'wallet' &&
     !!nc &&
-    (qrBound(ch, role, claim) ||
-      (!ch.walletBinding && (!ch.claims.wallet || (!!claim && claimHash(claim) === ch.claims.wallet))));
+    ((qrBound(ch, role, claim) && now() <= ch.expiry) || (!ch.walletBinding && !ch.claims.wallet));
 
   /** Decide whether an upgrade is allowed. Returns { ok, code, reason, ... }. */
   function admit(req) {
@@ -277,6 +346,7 @@ export function createRelay({
         lastActive: t,
         claims: { site: null, wallet: null },
         walletBinding: wc,
+        siteBinds: claim !== null,
       });
       channels.set(id, ch);
       perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
@@ -299,8 +369,10 @@ export function createRelay({
   function attach(ws, { role, ch, claim, wc = null, nc = null }) {
     // Re-check: another socket may have claimed the role between admit and the upgrade finishing.
     if (!claimOk(ch, role, claim ?? null)) return ws.close(4003, 'role claimed');
-    // Only a site claim the relay already held may move the wallet binding, never one this attach is pinning now.
-    const siteProven = role === 'site' && !!claim && !!ch.claims.site && ch.claims.site === claimHash(claim);
+    // Only a site claim the relay already held may move the wallet binding, never one this attach is pinning now, and
+    // only the one that opened the channel (a claim pinned later on a channel opened without one never may).
+    const siteProven =
+      role === 'site' && ch.siteBinds && !!claim && !!ch.claims.site && ch.claims.site === claimHash(claim);
     let bound = false;
     if (mayBind(ch, role, claim, nc)) {
       // Wallet claim v2: from now on only the session claim admits the wallet; the QR claim is spent.
@@ -319,14 +391,16 @@ export function createRelay({
     ch.lastActive = now();
     if (role === 'wallet') {
       ch.paired = true;
-      // `wcv` tells the wallet its session claim is now the one bound here (an older relay never says so).
-      send(ws, { t: 'relay', verifiedOrigin: ch.origin, ...(bound && { wcv: WALLET_CLAIM_V2 }) });
+      // `wcv` tells the wallet its session claim is the one bound here: just bound, or bound earlier (by this wallet
+      // or by the site re-binding it) and brought again. An older relay never says so.
+      const holds = !!nc && ch.walletBinding === nc && !!claim && claimHash(claim) === nc;
+      send(ws, { t: 'relay', verifiedOrigin: ch.origin, ...((bound || holds) && { wcv: WALLET_CLAIM_V2 }) });
     }
     send(ch[other(role)], { t: 'relay', peer: 'joined', role });
     // Deliver what arrived while this side was away.
     const t = now();
     for (const q of ch.queue[role].splice(0)) if (t - q.at < LIMITS.queueMs) ws.send(q.data);
-    if (ch.paired) save();
+    if (kept(ch)) save();
 
     ws.on('message', (data, isBinary) => {
       if (isBinary) return ws.close(4002, 'text frames only');
@@ -369,11 +443,14 @@ export function createRelay({
 
   return {
     stats: () => ({ channels: channels.size, sockets: wss.clients.size }),
-    /** Write the state file now (shutdown). */
-    flush: () => !closed && writeState(),
+    /** Write the state file now, synchronously (shutdown). */
+    flush: () => {
+      if (stateFile && !closed) writeNow(snapshot());
+    },
     close: () => {
       // Kept on disk as it is: closing the sockets below must not empty the file.
-      if (!closed) writeState();
+      if (stateFile && !closed) writeNow((finalJson = snapshot()));
+      if (saveTimer) clearTimeout(saveTimer);
       closed = true;
       clearInterval(timer);
       for (const id of [...channels.keys()]) drop(id);

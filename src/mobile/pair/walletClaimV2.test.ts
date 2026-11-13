@@ -164,39 +164,33 @@ const siteReads = async (ws: FakeWS, from: Sealer) => {
 const siteSealer = async (S: PrivateKey, phonePub: string, c: string) =>
   new Sealer((await deriveSession(S, phonePub, c)).key, 'site');
 
-describe('v1 sessions upgrade on resume (review 13 Nov 2026)', () => {
-  test('a v1 session sends nc on resume; on wcv 2 it keeps the session claim and tells the site in a sealed ready', async () => {
+describe('v1 sessions upgrade through the site (review 13 Nov 2026)', () => {
+  test('a v1 session tells the site its session claim digest in every sealed ready, and still sends nc on resume', async () => {
     const c = 'WCVUPAAAAAAAAAAAAAAAAA';
     const { p, S, k, hello } = await scan(c, false); // paired through an older relay: v1
     p.confirm();
     await settle();
     expect(stored(c)).toMatchObject({ claim: walletClaimFor(c, k) });
+    const session = sessionWalletClaim(S, hello.k, c);
+    const want = { t: 'ready', wcv: 2, nc: claimDigestSync(session) };
     const reader = await siteSealer(S, hello.k, c);
-    await siteReads(sock(c), reader); // the first ready
+    expect(await siteReads(sock(c), reader)).toContainEqual(want); // the first ready
     sock(c).close();
     sessions.onPairVisibility();
     await settle();
     const ws = sock(c);
     const u = new URL(ws.url);
-    const session = sessionWalletClaim(S, hello.k, c);
     expect(u.searchParams.get('claim')).toBe(walletClaimFor(c, k));
     expect(u.searchParams.get('nc')).toBe(claimDigestSync(session));
-    ws.deliver({ t: 'relay', verifiedOrigin: HOST, wcv: 2 });
+    // The relay doesn't hold the session claim yet (the site hasn't re-bound): the session stays v1 on its claim.
+    ws.deliver({ t: 'relay', verifiedOrigin: HOST });
     await settle();
-    expect(stored(c)).toMatchObject({ claim: session, wcv: 2 });
-    const read = await siteReads(ws, reader);
-    expect(read).toContainEqual({ t: 'ready', wcv: 2 });
-    // The next resume is a plain v2 one, and its ready says so too.
-    ws.close();
-    sessions.onPairVisibility();
-    await settle();
-    const re = new URL(sock(c).url);
-    expect(re.searchParams.get('claim')).toBe(session);
-    expect(re.searchParams.get('nc')).toBe(claimDigestSync(session));
-    expect(await siteReads(sock(c), reader)).toContainEqual({ t: 'ready', wcv: 2 });
+    expect(stored(c)).toMatchObject({ claim: walletClaimFor(c, k) });
+    expect(stored(c)?.wcv).toBeUndefined();
+    expect(await siteReads(ws, reader)).toContainEqual(want);
   });
 
-  test('the relay bound it but the answer was lost: after a refusal the next connect uses the session claim', async () => {
+  test('after the site re-binds, the old claim is refused; the next connect uses the session claim and keeps it', async () => {
     const c = 'WCVUPBBBBBBBBBBBBBBBBB';
     const { p, S, k, hello } = await scan(c, false);
     p.confirm();
@@ -206,13 +200,20 @@ describe('v1 sessions upgrade on resume (review 13 Nov 2026)', () => {
     await settle();
     const session = sessionWalletClaim(S, hello.k, c);
     expect(new URL(sock(c).url).searchParams.get('claim')).toBe(walletClaimFor(c, k));
-    sock(c).close(); // dropped (or refused) before the relay's answer arrived
+    sock(c).close(); // refused (the relay now holds only the session claim): closed before any relay frame
     sessions.onPairVisibility();
     await settle();
     expect(new URL(sock(c).url).searchParams.get('claim')).toBe(session);
     sock(c).deliver({ t: 'relay', verifiedOrigin: HOST, wcv: 2 });
     await settle();
     expect(stored(c)).toMatchObject({ claim: session, wcv: 2 });
+    // The next resume is a plain v2 one.
+    sock(c).close();
+    sessions.onPairVisibility();
+    await settle();
+    const re = new URL(sock(c).url);
+    expect(re.searchParams.get('claim')).toBe(session);
+    expect(re.searchParams.get('nc')).toBe(claimDigestSync(session));
   });
 
   test('an older relay on resume (no wcv): the session stays v1 on its claim', async () => {

@@ -66,11 +66,11 @@ export type PairMessage =
   | { t: 'req'; id: string; action: string; params: unknown }
   | { t: 'res'; id: string; result?: unknown; error?: { code: string; message: string } }
   /**
-   * `wcv: 2` (wallet claim v2): the relay holds the wallet role for this pairing's session claim, so the site re-binds
-   * it on reconnects. Sent on a resume too, so a site whose pairing started as v1 learns it after the phone upgrades.
-   * Older sites ignore it.
+   * `wcv: 2` + `nc` (wallet claim v2): the wallet's session claim digest. A site stores that the pairing is v2 (after
+   * checking `nc` against its own derivation) and sends it as `wc` on its next connects, re-binding the wallet role to
+   * it; that is also how a pairing that started as v1 upgrades. Older sites ignore both.
    */
-  | { t: 'ready'; wcv?: 2 }
+  | { t: 'ready'; wcv?: 2; nc?: string }
   | { t: 'ping' }
   | { t: 'close'; reason: string };
 

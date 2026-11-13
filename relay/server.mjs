@@ -30,7 +30,8 @@ const relay = createRelay({
     : DEFAULT_TRUSTED_PROXIES,
   stateFile: process.env.RELAY_STATE_FILE ?? fileURLToPath(new URL('./relay-state.json', import.meta.url)),
 });
-// Save the last changes on a normal stop (pm2/systemd send SIGTERM); the file is otherwise written after each change.
+// Save the last changes on a normal stop (pm2/systemd send SIGTERM); otherwise the file is written about a second after
+// changes settle.
 for (const sig of ['SIGTERM', 'SIGINT'])
   process.once(sig, () => {
     relay.flush();

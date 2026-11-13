@@ -172,7 +172,8 @@ test('sessions: never re-runs an answered call; holds a reply while the socket i
   p.confirm();
   await until('ready sent', () => ws1.sent.length >= 2);
   const open = async (raw: string) => siteSealer.open(JSON.parse(raw));
-  expect(await open(ws1.sent[1])).toEqual({ t: 'ready' });
+  // Every ready names the session claim (wcv 2 + its digest), so the site can re-bind it.
+  expect(await open(ws1.sent[1])).toMatchObject({ t: 'ready', wcv: 2 });
 
   // A createAction whose answer is ready only after the phone's socket has gone (app backgrounded).
   let release!: () => void;
@@ -200,7 +201,7 @@ test('sessions: never re-runs an answered call; holds a reply while the socket i
   await until('held reply and ready sent', () => ws2.sent.length >= 2);
   expect(await open(ws2.sent[0])).toEqual({ t: 'res', id: 'r1', result: { txid: 'tx1' } });
   // The rejoin then says ready, so the site resends anything else it is waiting on.
-  expect(await open(ws2.sent[1])).toEqual({ t: 'ready' });
+  expect(await open(ws2.sent[1])).toMatchObject({ t: 'ready', wcv: 2 });
   ws2.sent.splice(1, 1);
 
   // The site, unsure, re-sends the same request id: answered again (freshly sealed), not re-run.
