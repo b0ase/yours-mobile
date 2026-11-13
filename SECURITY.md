@@ -59,7 +59,8 @@ backup, the BRC-100 dApp bridge (`src/inject.ts`, `src/content.ts`, `src/mobile/
 OpNS names, the mobile apps, the extension and the web wallet.
 
 Out of scope: the marketing sites, rate limiting, self-XSS, findings that need a rooted or jailbroken device or
-physical access, social engineering of our staff or users, automated scanner output without a working reproduction,
+physical access, social engineering of our staff or users, automated scanner output without a working reproduction
+(a working reproduction, or a code trace precise enough for us to confirm; a trace we cannot confirm earns credit only),
 and third-party services we do not run (indexers, exchanges, the Yours Wallet upstream).
 
 ## Safe harbour
