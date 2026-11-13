@@ -1,21 +1,36 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Beef, LockingScript, Transaction } from '@bsv/sdk';
 import { OrdLockV2 } from '@1sat/templates';
 
 const calls: Array<Record<string, unknown>> = [];
+// bun module mocks are process-wide: keep every real export, and hand these back to the real ones once this file is
+// done, so later files that import @1sat/actions or ordlockVersion get the real code.
+const realActions = { ...(await import('@1sat/actions')) };
+const realOrdlock = { ...(await import('../market/ordlockVersion')) };
+let active = true;
+afterAll(() => {
+  active = false;
+});
+type Exec = { execute: (...a: never[]) => unknown };
+const fake = (name: keyof typeof realActions, f: (...a: never[]) => unknown): Exec => ({
+  execute: (...a: never[]) => (active ? f(...a) : (realActions[name] as unknown as Exec).execute(...a)),
+});
 mock.module('@1sat/actions', () => ({
-  buyOrdinal: {
-    execute: async (_ctx: unknown, input: Record<string, unknown>) => {
-      calls.push(input);
-      return { txid: 'f'.repeat(64) };
-    },
-  },
-  cancelOpnsListing: { execute: async () => ({}) },
-  listOpns: { execute: async () => ({ outputs: [] }) },
-  sellOpns: { execute: async () => ({}) },
-  sendOpns: { execute: async () => ({}) },
+  ...realActions,
+  buyOrdinal: fake('buyOrdinal', async (_ctx: unknown, input: Record<string, unknown>) => {
+    calls.push(input);
+    return { txid: 'f'.repeat(64) };
+  }),
+  cancelOpnsListing: fake('cancelOpnsListing', async () => ({})),
+  listOpns: fake('listOpns', async () => ({ outputs: [] })),
+  sellOpns: fake('sellOpns', async () => ({})),
+  sendOpns: fake('sendOpns', async () => ({})),
 }));
-mock.module('../market/ordlockVersion', () => ({ assertOrdLockV2: async () => undefined }));
+mock.module('../market/ordlockVersion', () => ({
+  ...realOrdlock,
+  assertOrdLockV2: (...a: Parameters<typeof realOrdlock.assertOrdLockV2>) =>
+    active ? Promise.resolve(undefined) : realOrdlock.assertOrdLockV2(...a),
+}));
 
 const { buyOpnsListing } = await import('./opnsBuy');
 

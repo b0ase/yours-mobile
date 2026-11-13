@@ -1,13 +1,21 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { Utils } from '@bsv/sdk';
 
 const outputs: { outpoint: string; tags?: string[]; customInstructions?: string }[] = [];
 // Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
 // import other names from it.
 const realActions = { ...(await import('@1sat/actions')) };
+// ...and hand listOrdinals back to the real one once this file is done.
+let active = true;
+afterAll(() => {
+  active = false;
+});
 mock.module('@1sat/actions', () => ({
   ...realActions,
-  listOrdinals: { execute: async () => ({ outputs }) },
+  listOrdinals: {
+    execute: (...a: Parameters<typeof realActions.listOrdinals.execute>) =>
+      active ? Promise.resolve({ outputs }) : realActions.listOrdinals.execute(...a),
+  },
 }));
 const { isListed, keyOf, ownerSigner } = await import('./ownership');
 const { PodcastListedError } = await import('./podcasts');
