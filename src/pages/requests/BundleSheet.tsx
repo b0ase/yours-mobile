@@ -13,6 +13,8 @@ import {
   ALLOWANCE_CHOICES_USD,
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
+  isOneUseRequest,
+  isSharedKeyRequest,
   sheetCanTrust,
   sheetAnswer,
   sheetHash,
@@ -485,10 +487,15 @@ export const BundleSheet = (props: {
       (l) => request.items.find((r) => r.requestID === l.requestID)?.type === 'certificate',
     );
     const red = (t: string) => <span style={{ color: '#FF6B6B' }}>{t}</span>;
+    // Keys every app shares (b-Aware, Limenelo, 13 Nov 2026): a signature other sites may take as you.
+    const shared = request.items.some((r) => isSharedKeyRequest(r));
+    const onlyOnce = shared && request.items.filter((r) => isSharedKeyRequest(r)).every((r) => isOneUseRequest(r));
     title = privileged ? (
       <>Wants {red('full control')} of your keys</>
     ) : privateCert ? (
       <>Wants your {red('private details')}</>
+    ) : shared ? (
+      <>Wants a signature {red('other sites accept')}</>
     ) : (
       <>Wants {red('more than usual')}</>
     );
@@ -501,6 +508,23 @@ export const BundleSheet = (props: {
           >
             <Cross />
             Could move your money
+          </div>
+        )}
+        {shared && (
+          <div className="flex flex-col" style={{ gap: 8 }} data-testid="shared-key-warning">
+            <div
+              className="flex items-center gap-2.5"
+              style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
+            >
+              <Cross />
+              Other sites could sign you in with it
+            </div>
+            {onlyOnce && (
+              <div className="flex items-center gap-2" style={{ fontSize: 14, color: CARD.soft }}>
+                <Check size={18} />
+                Just this once: next time asks again
+              </div>
+            )}
           </div>
         )}
         {riskyLines.map((l) => lineRow(l, true))}

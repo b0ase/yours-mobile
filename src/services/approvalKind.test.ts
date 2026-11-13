@@ -7,7 +7,8 @@ const proto = (id: string, extra: Partial<BundleRequest> = {}): BundleRequest =>
   requestID: id,
   type: 'protocol',
   originator: o,
-  protocolID: [1, 'bchatx auth'],
+  // Level 2: level-1 keys are shared by every app and get the careful card (permissionBundle.ts isSharedKeyRequest).
+  protocolID: [2, 'bchatx auth'],
   ...extra,
 });
 const kind = (items: BundleRequest[]) => approvalKindForSheet(buildSheetModel({ originator: o, items }));

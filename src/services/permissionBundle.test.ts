@@ -75,7 +75,8 @@ const proto = (id: string, originator = 'bmovies.app', extra: Partial<BundleRequ
   requestID: id,
   type: 'protocol',
   originator,
-  protocolID: [1, 'bmovies ticket'],
+  // Level 2: level-1 keys are shared by every app and are never pre-ticked (isSharedKeyRequest, 13 Nov 2026).
+  protocolID: [2, 'bmovies ticket'],
   ...extra,
 });
 /** The view of the card the user actually gets for this model (as BundleSheet builds it, Details closed). */
