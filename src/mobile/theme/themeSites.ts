@@ -28,6 +28,8 @@ export const THEME_SITES: readonly ThemeSite[] = [
   { id: 'box402', host: 'box402.com' },
   { id: 'vexvoid', host: 'vexvoid.com' },
   { id: 'vexvoid-store', host: 'vexvoid.store' },
+  // V3XV0ID AV Client (Electron VJ mixer) pairs with origin https://mixer.vexvoid.com (VexVoid session, 13 Nov 2026).
+  { id: 'vexvoid-mixer', host: 'mixer.vexvoid.com' },
   { id: 'v01d', host: 'v01d.store' },
   { id: 'npg', host: 'ninjapunkgirls.com' },
   { id: 'npg-store', host: 'ninjapunkgirls.store' },
