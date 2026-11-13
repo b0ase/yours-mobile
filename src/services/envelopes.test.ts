@@ -10,6 +10,8 @@ import {
   chromeEnvelopeBackend,
   closeEnvelopeInAccounts,
   ENVELOPE_LOCK_UNAVAILABLE,
+  ENVELOPE_TIMED_OUT,
+  EnvelopeUnavailableError,
   requireSharedEnvelopeLock,
   fillEnvelope,
   guardEnvelopes,
@@ -537,3 +539,116 @@ describe('13 Nov 2026: one envelope lock per storage key, across store instances
     expect(worker).toContain("if (sharedEnvelopeLock) (await import('../services/envelopes')).requireSharedEnvelopeLock();");
   });
 });
+
+/** A backend over a shared cell whose next load or save can be made to hang (never answer). */
+const hangable = (cell: ReturnType<typeof sharedCell>, key: string) => {
+  const inner = cell.backend(key);
+  const ctl = { hangLoad: false, hangSave: false, saves: 0 };
+  const never = new Promise<never>(() => {});
+  const backend: EnvelopeBackend = {
+    key,
+    load: () => (ctl.hangLoad ? never : inner.load()),
+    save: (st) => {
+      ctl.saves++;
+      return ctl.hangSave ? never : inner.save(st);
+    },
+  };
+  return { backend, ctl };
+};
+
+describe('review of fix/envelope-queue (13 Nov 2026): deadlines, carrying on, falling back to the sheet', () => {
+  test('F1: a read that never answers is refused at the deadline and gives the lock up', async () => {
+    const cell = sharedCell();
+    const h = hangable(cell, 'bwxEnvelopes:acct-hang-read');
+    const store = new EnvelopeStore(h.backend, Date.now, { timeoutMs: 50 });
+    await store.fill(A, 100);
+    h.ctl.hangLoad = true;
+    await expect(store.trySpend(A, 100)).rejects.toThrow(ENVELOPE_TIMED_OUT);
+    h.ctl.hangLoad = false;
+    // Nothing was written, the lock is free: the next op reads fresh state and runs.
+    expect(await store.trySpend(A, 100)).toBe(true);
+    expect(cell.raw()?.envelopes[A].balanceSats).toBe(0);
+  });
+
+  test('F1: a write that never answers keeps the lock (no unlocked read around it); later ops time out, never hang', async () => {
+    const cell = sharedCell();
+    const h = hangable(cell, 'bwxEnvelopes:acct-hang-write');
+    const store = new EnvelopeStore(h.backend, Date.now, { timeoutMs: 50 });
+    const other = new EnvelopeStore(cell.backend('bwxEnvelopes:acct-hang-write'), Date.now, { timeoutMs: 50 });
+    await store.fill(A, 100);
+    h.ctl.hangSave = true;
+    const first = store.trySpend(A, 100);
+    await expect(first).rejects.toBeInstanceOf(EnvelopeUnavailableError);
+    // The other store would read the old 100 if it could get in: it can't, it is told "unavailable" instead.
+    await expect(other.trySpend(A, 100)).rejects.toThrow(ENVELOPE_TIMED_OUT);
+    expect(cell.raw()?.envelopes[A].balanceSats).toBe(100);
+  });
+
+  test('F1: an op that timed out while waiting for the lock never runs later (nothing written after "no")', async () => {
+    const cell = sharedCell();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow: EnvelopeBackend = {
+      key: 'bwxEnvelopes:acct-late',
+      load: async () => {
+        await gate;
+        return cell.raw();
+      },
+      save: (st) => cell.backend().save(st),
+    };
+    await new EnvelopeStore(cell.backend('bwxEnvelopes:acct-late')).fill(A, 100);
+    const holder = new EnvelopeStore(slow, Date.now, { timeoutMs: 10_000 }).get(A); // holds the lock
+    const waiter = new EnvelopeStore(cell.backend('bwxEnvelopes:acct-late'), Date.now, { timeoutMs: 30 });
+    await expect(waiter.trySpend(A, 100)).rejects.toThrow(ENVELOPE_TIMED_OUT);
+    release();
+    await holder;
+    await new Promise((r) => setTimeout(r, 20));
+    expect(cell.raw()?.envelopes[A].balanceSats).toBe(100);
+  });
+
+  test('F4: lock unavailable on the web → the normal sheet for this payment, never an unlocked spend', async () => {
+    requireSharedEnvelopeLock();
+    try {
+      const cell = sharedCell();
+      const store = new EnvelopeStore(cell.backend('bwxEnvelopes:acct-f4'));
+      const f = fakeManager();
+      const g = guardEnvelopes(f.m, { envelopes: store, adminOriginator: 'admin', normalize: (o) => o });
+      expect(await g.ensureSpendingAuthorization({ originator: A, satoshis: 10 } as never)).toBe(false);
+      expect(f.flowCalls).toHaveLength(1);
+      expect(f.flowCalls[0].spending.satoshis).toBe(10);
+      await expect(
+        g.ensureSpendingAuthorization({ originator: A, satoshis: 10, seekPermission: false } as never),
+      ).rejects.toThrow('needs your approval');
+      expect(cell.raw()).toBeUndefined();
+    } finally {
+      requireSharedEnvelopeLock(false);
+    }
+  });
+
+  test('F4: an envelope that does not answer in time also falls back to the sheet', async () => {
+    const cell = sharedCell();
+    const h = hangable(cell, 'bwxEnvelopes:acct-f4-timeout');
+    const store = new EnvelopeStore(h.backend, Date.now, { timeoutMs: 30 });
+    await store.fill(A, 100);
+    h.ctl.hangLoad = true;
+    const f = fakeManager();
+    const g = guardEnvelopes(f.m, { envelopes: store, adminOriginator: 'admin', normalize: (o) => o });
+    expect(await g.ensureSpendingAuthorization({ originator: A, satoshis: 10 } as never)).toBe(false);
+    expect(f.flowCalls).toHaveLength(1);
+    expect(cell.raw()?.envelopes[A].balanceSats).toBe(100);
+  });
+
+  test('F2: Revoke all closes every account it can, then reports the one it could not', async () => {
+    const backends = new Map<string, EnvelopeBackend>();
+    const be = (id: string): EnvelopeBackend =>
+      id === 'broken'
+        ? { key: 'bwxEnvelopes:broken', load: async () => Promise.reject(new Error('read failed')), save: async () => {} }
+        : backends.get(id) ?? (backends.set(id, memBackend()), backends.get(id)!);
+    await new EnvelopeStore(be('x2')).fill(A, 300);
+    await new EnvelopeStore(be('z2')).fill(A, 200);
+    await expect(closeEnvelopeInAccounts(['x2', 'broken', 'z2'], A, be)).rejects.toThrow('1 account(s): read failed');
+    expect(await new EnvelopeStore(be('x2')).get(A)).toBeUndefined();
+    expect(await new EnvelopeStore(be('z2')).get(A)).toBeUndefined();
+  });
+});
+

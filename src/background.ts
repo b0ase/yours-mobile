@@ -106,6 +106,7 @@ import {
   markMicropayments,
   closeEnvelopeInAccounts,
 } from './services/envelopes';
+import { rejectStillPending, runEveryStep } from './services/everyStep';
 import {
   ADDRESS_RESYNC_ALARM,
   ADDRESS_RESYNC_PERIOD_MINUTES,
@@ -4966,30 +4967,46 @@ if (!(
       const wpm = (await ensureWallet(true)) as LocalWalletPermissionsManager;
       // Open sheets for this originator are denied first, so approving one afterwards writes nothing.
       denyPendingPromptsFor(message.originator);
-      const revoked = await wpm.revokeAllForOriginator(message.originator);
-      // Forget site removes its basket grants and site-trust record too, whatever form the originator was
-      // stored under, and drops the manager's short-lived memory of recent grants.
-      await revokeBasketGrantsFor(message.originator);
       // Envelopes and streaming grants are spend rights too: Forget site / Revoke all / unpair ends them (Coin
       // return) and revokes the site's streaming grants (b-Aware rows 53, 62, 24 Oct 2026).
       const site = normalizeOriginator(message.originator);
-      // Session memory too: its basket-read No's and its manifest sheet (services/sessionDenials.ts).
-      await basketDenials.forget(site);
-      manifestOnce.forget(site);
-      // "Let this site see my $SYM balance" answers (services/siteTokens.ts) go too: it must ask again.
-      await chromeConsentStore().forget(site);
-      await accountContext?.envelopes.close(site);
-      await updateStreamState((st) => ({ state: revokeGrantsForOriginator(st, site, Date.now()), result: undefined }));
-      // Grants are per account; a device-wide pairing is withdrawn from the other accounts' stores too.
-      if (message.allAccounts) {
-        const ids = chromeStorageService
-          .getAllAccounts()
-          .map((a) => a.addresses?.identityAddress)
-          .filter((x): x is string => !!x);
-        await revokeOriginatorInAccounts(ids, site);
-        await closeEnvelopeInAccounts(ids, site);
-      }
-      sendResponse({ type: 'PERMISSIONS_REVOKE_ALL', success: true, data: { revokedCount: revoked.length } });
+      const ids = message.allAccounts
+        ? chromeStorageService
+            .getAllAccounts()
+            .map((a) => a.addresses?.identityAddress)
+            .filter((x): x is string => !!x)
+        : [];
+      let revokedCount = 0;
+      // Every step runs whatever the others do, and the failures are reported at the end (review F2, 13 Nov 2026):
+      // one step that throws (an envelope close on a web wallet without Web Locks) never leaves grants in place.
+      const failed = await runEveryStep([
+        ['site grants', async () => void (revokedCount = (await wpm.revokeAllForOriginator(message.originator)).length)],
+        // Forget site removes its basket grants and site-trust record too, whatever form the originator was
+        // stored under, and drops the manager's short-lived memory of recent grants.
+        ['basket grants', () => revokeBasketGrantsFor(message.originator)],
+        // Session memory too: its basket-read No's and its manifest sheet (services/sessionDenials.ts).
+        ['basket answers', () => basketDenials.forget(site)],
+        ['manifest sheet', () => manifestOnce.forget(site)],
+        // "Let this site see my $SYM balance" answers (services/siteTokens.ts) go too: it must ask again.
+        ['token consent', () => chromeConsentStore().forget(site)],
+        [
+          'streaming grants',
+          () => updateStreamState((st) => ({ state: revokeGrantsForOriginator(st, site, Date.now()), result: undefined })),
+        ],
+        // Grants are per account; a device-wide pairing is withdrawn from the other accounts' stores too.
+        ...(message.allAccounts ? ([['other accounts', () => revokeOriginatorInAccounts(ids, site)]] as const) : []),
+        // Envelopes last: no grant waits on them.
+        ['envelope', () => accountContext?.envelopes.close(site)],
+        ...(message.allAccounts ? ([['other accounts\' envelopes', () => closeEnvelopeInAccounts(ids, site)]] as const) : []),
+      ]);
+      if (failed.length)
+        sendResponse({
+          type: 'PERMISSIONS_REVOKE_ALL',
+          success: false,
+          error: `Everything else was revoked, but these steps failed: ${failed.join('; ')}`,
+          data: { revokedCount },
+        });
+      else sendResponse({ type: 'PERMISSIONS_REVOKE_ALL', success: true, data: { revokedCount } });
     } catch (error) {
       console.error('[PERMISSIONS_REVOKE_ALL] Error:', error);
       sendResponse({
@@ -5780,7 +5797,12 @@ if (!(
         // host-only permission key, so "shop.com:8443" would otherwise fill "shop.com"'s envelope; b-Aware row 58).
         const spendReq = result.granted.find((r) => (r as BundleRequest).type === 'spending') as BundleRequest;
         const site = normalizeOriginator(spendReq.displayOriginator ?? bundle.originator);
-        if (sats > 0) await accountContext.envelopes.fill(site, sats);
+        // A fill that fails (review F3, 13 Nov 2026) leaves the approved payment on its normal path: it is granted
+        // once, below, and only the earmark is missing, so the site's next payment asks again.
+        if (sats > 0)
+          await accountContext.envelopes
+            .fill(site, sats)
+            .catch((error) => console.error('[background] envelope fill failed; the approved payment goes on:', error));
       }
       // "Don't ask again": routine requests from this site are granted without a sheet from now on.
       if (
@@ -5830,8 +5852,21 @@ if (!(
       ]);
     })();
 
+    let workFailed = false;
+    const BUNDLE_UNFINISHED =
+      'Something went wrong finishing this approval. Any request it could not finish was refused; ask the site to try again.';
     work
-      .catch((error) => console.error('[background] bundle response failed:', error))
+      .catch((error) => {
+        workFailed = true;
+        console.error('[background] bundle response failed:', error);
+        // Every waiting request gets an outcome (review F3): any this answer did not settle is refused, so nothing is
+        // paid for it and its caller is not left waiting. Requests already settled are not in the map any more.
+        rejectStillPending(
+          [...result.granted, ...result.denied].map((r) => r.requestID),
+          pendingPermissionRequests,
+          new Error(BUNDLE_UNFINISHED),
+        );
+      })
       .finally(() => {
         sendResponse(
           result.stale
@@ -5840,7 +5875,13 @@ if (!(
                 success: false,
                 error: 'This request changed while you were answering, so nothing was allowed. Ask the site to try again.',
               }
-            : { type: 'BUNDLE_PERMISSION_RESPONSE', success: true },
+            : workFailed
+              ? {
+                  type: 'BUNDLE_PERMISSION_RESPONSE',
+                  success: false,
+                  error: BUNDLE_UNFINISHED,
+                }
+              : { type: 'BUNDLE_PERMISSION_RESPONSE', success: true },
         );
         // A stale answer keeps the window open (holdPopupOpenUntil, set above) so the sheet can show why; it closes itself.
         if (!result.stale) closeDappPopupIfNoUi();

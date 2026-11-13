@@ -163,11 +163,19 @@ export class Hub {
     }
   }
 
-  /** Broadcast to every endpoint except `except`. */
+  /**
+   * Broadcast to every endpoint except `except`. One endpoint that throws (a detached frame) never stops the others or
+   * the caller: a storage reply after it must still be sent (review of fix/envelope-queue, F1).
+   */
   broadcast(msg: ToEndpoint, except?: string) {
     const json = JSON.stringify(msg);
     for (const [id, endpoint] of this.endpoints) {
-      if (id !== except) endpoint.post(json);
+      if (id === except) continue;
+      try {
+        endpoint.post(json);
+      } catch (error) {
+        console.warn('[hub] endpoint post failed:', id, error);
+      }
     }
   }
 
@@ -210,7 +218,11 @@ export class Hub {
   };
 
   private send(to: string, msg: ToEndpoint) {
-    this.endpoints.get(to)?.post(JSON.stringify(msg));
+    try {
+      this.endpoints.get(to)?.post(JSON.stringify(msg));
+    } catch (error) {
+      console.warn('[hub] endpoint post failed:', to, error);
+    }
   }
 
   private routeSend(from: string, reqId: number, message: unknown) {
@@ -265,12 +277,17 @@ export class Hub {
     return this.persistQueue;
   }
 
+  /** An op over every key (get(null), clear): it may touch fresh keys only another tab has written so far. */
+  private static allKeys(op: 'get' | 'set' | 'remove' | 'clear', arg: unknown): boolean {
+    return op === 'clear' || (op === 'get' && (arg === null || arg === undefined));
+  }
+
   /** The fresh keys (HubOptions.freshLocalKeys) a storage.local op reads or writes. */
   private freshKeysOf(op: 'get' | 'set' | 'remove' | 'clear', arg: unknown): string[] {
     const fresh = this.freshLocalKeys;
     if (!fresh) return [];
     let keys: string[];
-    if (op === 'clear' || arg === null || arg === undefined) keys = [...this.local.keys()];
+    if (Hub.allKeys(op, arg) || arg === null || arg === undefined) keys = [...this.local.keys()];
     else if (typeof arg === 'string') keys = [arg];
     else if (Array.isArray(arg)) keys = arg.filter((k): k is string => typeof k === 'string');
     else keys = Object.keys(arg as Record<string, unknown>);
@@ -303,18 +320,33 @@ export class Hub {
 
   private async onStorage(from: string, msg: Extract<ToHub, { t: 'storage' }>) {
     await this.storageReady;
-    const fresh = msg.area === 'local' ? this.freshKeysOf(msg.op, msg.arg) : [];
-    if (fresh.length === 0) return this.runStorageOp(from, msg);
+    const local = msg.area === 'local';
+    const all = local && !!this.freshLocalKeys && Hub.allKeys(msg.op, msg.arg);
+    const fresh = local ? this.freshKeysOf(msg.op, msg.arg) : [];
+    if (fresh.length === 0 && !all) return this.runStorageOp(from, msg);
     // Re-read, apply and persist in one queued step, so this tab's own writes land before its next re-read.
     const job = this.freshQueue.then(async () => {
       let seen: StorageChanges;
       try {
-        seen = await this.refreshFresh(fresh);
+        // get(null) / clear: also the fresh keys another tab created after this hub loaded (review F6).
+        const keys = all
+          ? [
+              ...new Set([
+                ...fresh,
+                ...Object.keys(await this.backend.load())
+                  .filter((k) => k.startsWith(LOCAL_PREFIX))
+                  .map((k) => k.slice(LOCAL_PREFIX.length))
+                  .filter((k) => this.freshLocalKeys!(k)),
+              ]),
+            ]
+          : fresh;
+        seen = await this.refreshFresh(keys);
       } catch (error) {
         this.send(from, { t: 'storageResult', reqId: msg.reqId, error: String(error) });
         return;
       }
-      // Another tab changed these keys: tell this tab's contexts, as Chrome fires onChanged everywhere.
+      // Another tab changed these keys: tell this tab's contexts (Chrome fires onChanged everywhere), in order, before
+      // this op's own change. broadcast() never throws, so the reply below is always sent.
       if (Object.keys(seen).length > 0) this.broadcast({ t: 'storageChanged', area: 'local', changes: seen });
       await this.runStorageOp(from, msg);
     });

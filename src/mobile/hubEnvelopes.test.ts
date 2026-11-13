@@ -45,7 +45,7 @@ const filled = (sats: number): string =>
   } satisfies EnvelopeState);
 
 /** A tab: its own hub, and its background's envelope backend talking to that hub as chrome.storage.local does. */
-const openTab = (backend: LocalBackend, fresh: boolean) => {
+const openTab = (backend: LocalBackend, fresh: boolean, opts: { badFrame?: boolean } = {}) => {
   const hub = new Hub(async () => undefined, backend, {
     persistSession: false,
     freshLocalKeys: fresh ? (k) => k.startsWith(ENVELOPES_KEY_PREFIX) : undefined,
@@ -63,6 +63,14 @@ const openTab = (backend: LocalBackend, fresh: boolean) => {
       else w?.resolve(msg.result);
     },
   });
+  // A frame whose window went away: posting to it throws (review F1).
+  if (opts.badFrame)
+    hub.register('frame-1', {
+      sender: { id: 'x', url: 'http://yours-mobile/popup.html', origin: 'http://yours-mobile' },
+      post: () => {
+        throw new Error('detached frame');
+      },
+    });
   const storage = (op: 'get' | 'set', arg: unknown) =>
     new Promise<unknown>((resolve, reject) => {
       const id = ++reqId;
@@ -74,7 +82,7 @@ const openTab = (backend: LocalBackend, fresh: boolean) => {
     load: async () => ((await storage('get', KEY)) as Record<string, unknown>)[KEY],
     save: async (state) => void (await storage('set', { [KEY]: state })),
   };
-  return { hub, store: new EnvelopeStore(envelopeBackend) };
+  return { hub, storage, store: new EnvelopeStore(envelopeBackend, Date.now, { timeoutMs: 500 }) };
 };
 
 const storedBalance = (items: Map<string, string>) =>
@@ -152,4 +160,29 @@ describe('web wallet: two tabs never spend one envelope balance twice', () => {
       'freshLocalKeys:\n    !Capacitor.isNativePlatform() && !IS_TAURI ? (key) => key.startsWith(ENVELOPES_KEY_PREFIX) : undefined',
     );
   });
+
+  // The reviewer's probe (env-review/probe/probe.test.ts), as a repo test.
+  test('F1: a frame that throws on post never stops the reply, so the envelope lock is never held for ever', async () => {
+    const browser = browserStorage({ [PREFIXED]: filled(100) });
+    const a = openTab(browser.backend, true, { badFrame: true });
+    const b = openTab(browser.backend, true);
+    await a.store.get(SITE); // tab A's copy loaded
+    expect(await b.store.trySpend(SITE, 10)).toBe(true); // tab B writes: A's next read broadcasts what it saw
+    const settle = <T>(p: Promise<T>) =>
+      Promise.race([p, new Promise<'TIMEOUT'>((r) => setTimeout(() => r('TIMEOUT'), 300))]);
+    expect(await settle(a.store.trySpend(SITE, 10))).toBe(true);
+    expect(await settle(b.store.trySpend(SITE, 10))).toBe(true);
+    expect(storedBalance(browser.items)).toBe(70);
+  });
+
+  test('F6: get(null) sees an envelope key another tab created after this tab loaded', async () => {
+    const browser = browserStorage();
+    const a = openTab(browser.backend, true);
+    const b = openTab(browser.backend, true);
+    await a.storage('get', null); // A loaded with no envelopes
+    await b.store.fill(SITE, 100);
+    const all = (await a.storage('get', null)) as Record<string, EnvelopeState>;
+    expect(all[KEY]?.envelopes[SITE]?.balanceSats).toBe(100);
+  });
 });
+

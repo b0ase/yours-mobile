@@ -163,6 +163,19 @@ const localLocks = new Map<string, Promise<unknown>>();
 let sharedLockRequired = false;
 export const ENVELOPE_LOCK_UNAVAILABLE =
   'Envelopes need a browser with Web Locks here, so this payment was not taken from the envelope.';
+export const ENVELOPE_TIMED_OUT = 'The envelope did not answer in time, so this payment was not taken from it.';
+/** How long an envelope operation may take, lock wait included, before its caller is told "unavailable". */
+export const ENVELOPE_TIMEOUT_MS = 15_000;
+
+/**
+ * The envelope could not be used safely right now (no shared lock, or it did not answer in time). Nothing was taken
+ * from it: a payment falls back to its normal approval sheet (guardEnvelopes), never to an unlocked spend.
+ */
+export class EnvelopeUnavailableError extends Error {
+  readonly envelopeUnavailable = true;
+}
+export const isEnvelopeUnavailable = (e: unknown): boolean =>
+  e instanceof EnvelopeUnavailableError || (e as { envelopeUnavailable?: unknown } | null)?.envelopeUnavailable === true;
 /**
  * The web wallet calls this in each tab's background worker: other tabs run their own worker over the same storage,
  * so only navigator.locks serialises them. Without it every envelope operation is refused (fail closed).
@@ -180,13 +193,16 @@ export const requireSharedEnvelopeLock = (on = true) => {
  * process. Same pattern as storePay.ts withPayLock. Not re-entrant: never take it twice in one call chain. A lock
  * that cannot be taken rejects, so the spend is refused (fail closed), never run unlocked.
  */
-export function withEnvelopeLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+export function withEnvelopeLock<T>(name: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   const locks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
-  if (locks && typeof locks.request === 'function') return locks.request(`bwx-envelopes:${name}`, {}, fn);
+  // `signal`: a caller that gave up while still waiting leaves the queue without running.
+  if (locks && typeof locks.request === 'function')
+    return locks.request(`bwx-envelopes:${name}`, signal ? { signal } : {}, fn);
   // Web wallet without Web Locks (Safari before 15.4): a module queue covers this tab only, so refuse.
-  if (sharedLockRequired) return Promise.reject(new Error(ENVELOPE_LOCK_UNAVAILABLE));
+  if (sharedLockRequired) return Promise.reject(new EnvelopeUnavailableError(ENVELOPE_LOCK_UNAVAILABLE));
   const before = localLocks.get(name) ?? Promise.resolve();
-  const run = before.then(fn, fn);
+  const start = () => (signal?.aborted ? Promise.reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT)) : fn());
+  const run = before.then(start, start);
   const tail = run.catch(() => undefined);
   localLocks.set(name, tail);
   void tail.then(() => {
@@ -214,20 +230,62 @@ const lockNameFor = (backend: EnvelopeBackend): string => {
  */
 export class EnvelopeStore {
   private readonly lockName: string;
+  private readonly timeoutMs: number;
   constructor(
     private readonly backend: EnvelopeBackend,
     private readonly now: () => number = Date.now,
+    opts: { timeoutMs?: number } = {},
   ) {
     this.lockName = lockNameFor(backend);
+    this.timeoutMs = opts.timeoutMs ?? ENVELOPE_TIMEOUT_MS;
   }
 
+  /**
+   * One read-check-write under the key's lock, with a deadline (review of fix/envelope-queue, F1: a storage call that
+   * never answered held the lock, and every envelope op in every tab hung). The caller is told EnvelopeUnavailableError
+   * at the deadline, whether it was still waiting for the lock (it then leaves the queue) or running. Inside the lock:
+   * - a read that does not answer in time gives the lock up: nothing was written, so the next op reads fresh state;
+   * - once the deadline has passed nothing is written (the caller was already told no);
+   * - a write already sent keeps the lock until it settles, so no other op can read around it (no unlocked spend).
+   */
   private run<T>(fn: (s: EnvelopeState) => { state?: EnvelopeState; result: T }): Promise<T> {
-    return withEnvelopeLock(this.lockName, async () => {
-      const state = parseEnvelopeState(await this.backend.load());
-      const out = fn(state);
-      if (out.state && out.state !== state) await this.backend.save(out.state);
-      return out.result;
+    const ac = typeof AbortController === 'function' ? new AbortController() : undefined;
+    let late = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => {
+        late = true;
+        ac?.abort();
+        reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT));
+      }, this.timeoutMs);
     });
+    const job = withEnvelopeLock(
+      this.lockName,
+      async () => {
+        let readTimer: ReturnType<typeof setTimeout> | undefined;
+        const raw = await Promise.race([
+          this.backend.load(),
+          new Promise<never>((_, reject) => {
+            readTimer = setTimeout(() => reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT)), this.timeoutMs);
+          }),
+        ]).finally(() => clearTimeout(readTimer));
+        const state = parseEnvelopeState(raw);
+        const out = fn(state);
+        if (out.state && out.state !== state) {
+          if (late) throw new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT);
+          await this.backend.save(out.state);
+        }
+        return out.result;
+      },
+      ac?.signal,
+    ).catch((e: unknown) => {
+      // A lock request the deadline aborted rejects with AbortError: that is the timeout, said as such.
+      throw late && !isEnvelopeUnavailable(e) && (e as { name?: string } | null)?.name === 'AbortError'
+        ? new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT)
+        : e;
+    });
+    job.catch(() => undefined); // the deadline may have answered the caller already
+    return Promise.race([job, timedOut]).finally(() => clearTimeout(deadline));
   }
 
   get(originator: string): Promise<Envelope | undefined> {
@@ -300,8 +358,15 @@ export const closeEnvelopeInAccounts = async (
   backendFor: (accountId: string) => EnvelopeBackend = chromeEnvelopeBackend,
 ): Promise<number> => {
   let released = 0;
+  const failed: string[] = [];
+  // One account that can't be closed never stops the others (review F2); the failure is reported at the end.
   for (const id of new Set(accountIds.filter(Boolean)))
-    released += await new EnvelopeStore(backendFor(id)).close(originator);
+    try {
+      released += await new EnvelopeStore(backendFor(id)).close(originator);
+    } catch (e) {
+      failed.push(e instanceof Error ? e.message : String(e));
+    }
+  if (failed.length) throw new Error(`Envelope not closed in ${failed.length} account(s): ${failed.join('; ')}`);
   return released;
 };
 
@@ -362,7 +427,15 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
     if (!args?.originator || args.originator === deps.adminOriginator || !(args.satoshis > 0))
       return (original as (a: SpendArgs) => Promise<boolean>).call(manager, args);
     const originator = deps.normalize(args.originator);
-    if (await deps.envelopes.trySpend(originator, args.satoshis)) return true;
+    // An envelope that can't be used safely (no shared lock, no answer in time) is treated as "doesn't fit": the
+    // normal sheet for this payment, never an unlocked spend (review F4).
+    let fits = false;
+    try {
+      fits = await deps.envelopes.trySpend(originator, args.satoshis);
+    } catch (e) {
+      if (!isEnvelopeUnavailable(e)) throw e;
+    }
+    if (fits) return true;
     if (args.seekPermission === false)
       throw new Error(`Spending authorization needs your approval for ${args.satoshis} (seekPermission=false).`);
     return (flow as (r: unknown) => Promise<boolean>).call(manager, {
