@@ -4,7 +4,8 @@
  */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { PrivateKey } from '@bsv/sdk';
+import { PrivateKey, ProtoWallet } from '@bsv/sdk';
+import { StorageClient } from '@bsv/wallet-toolbox-client';
 import { AuthFetch } from '@bsv/sdk/auth';
 import { installStoragePaymentAutoRetry, type StoragePaymentRequiredInfo } from '@1sat/wallet';
 import { installStorageClientPaymentAutoRetry } from '../../node_modules/@1sat/wallet/dist/storagePaymentAutoRetry.js';
@@ -14,14 +15,23 @@ import {
   STORAGE_PAY_MAX_PER_DAY_SATS,
   STORAGE_PAY_MAX_PER_REQUEST_SATS,
   STORAGE_PAY_REFUSED_NOTICE,
+  STORAGE_402_REFUSED,
+  TOP_UP_REFUSED_KEY,
   backupFullNotice,
   createStoragePayLedger,
+  readTopUpRefused,
   refuseBackupStorageAutoPay,
+  refuseStorageAuthFetchPayments,
+  refuseStorageClientPayments,
+  statusAuthFetch,
   storagePaymentHook,
   type KnownStoragePrice,
+  type StoragePayLedger,
+  type StoragePayLedgerStore,
   type StoragePaymentHookDeps,
 } from './storagePaymentGuard';
 import { getErrorMessage } from '../utils/tools';
+import { isPausedOrUnknown, resetKillSwitchCache } from '../mobile/config/killSwitch';
 
 const REMOTE = 'https://storage.example';
 const serverKey = PrivateKey.fromRandom().toPublicKey().toString();
@@ -86,6 +96,7 @@ const setup = (deps: Partial<StoragePaymentHookDeps> & { noHook?: boolean } = {}
     notice: (t) => notices.push(t),
     now: () => clock.t,
     ledger: createStoragePayLedger(),
+    store: undefined,
     log: () => undefined,
     ...deps,
   });
@@ -315,6 +326,213 @@ describe('wiring', () => {
     expect(src.match(/onStoragePaymentRequired: storagePaymentHook\(/g)?.length).toBe(2);
     expect(src.includes('createWebWallet({ ...walletConfig, backups: [] })')).toBe(true);
     expect(src.includes('refuseBackupStorageAutoPay(StorageClient')).toBe(true);
+    expect(src.includes('refuseStorageClientPayments(StorageClient)')).toBe(true);
+    expect(src.match(/refuseStorageAuthFetchPayments\((baseWallet|backupWallet), storageUrls\(/g)?.length).toBe(2);
     expect(src.indexOf('refuseBackupStorageAutoPay(StorageClient')).toBeLessThan(src.indexOf('createWebWallet('));
+  });
+});
+
+// ── HTTP 402 (review of PR 545) ─────────────────────────────────────────────────────────────────────────────────
+
+/** AuthFetch.fetch stand-in: the server answers 402 asking for `sats` to `key`, and 200 once a payment is attached. */
+const fake402 = (sats: number, key: string) => {
+  const spy = spyOn(AuthFetch.prototype, 'fetch').mockImplementation(async function (
+    this: AuthFetch,
+    url: string,
+    config: { method?: string; headers?: Record<string, string> } = {},
+  ) {
+    fetched.push({ url, method: config.method });
+    if (config.headers?.['x-bsv-payment'])
+      return new Response(JSON.stringify(statusBody()), { headers: { 'x-bsv-auth-identity-key': key } });
+    const r402 = new Response('', {
+      status: 402,
+      headers: {
+        'x-bsv-payment-version': '1.0',
+        'x-bsv-payment-satoshis-required': String(sats),
+        'x-bsv-auth-identity-key': key,
+        'x-bsv-payment-derivation-prefix': 'cHJlZml4',
+      },
+    });
+    return (this as unknown as { handlePaymentAndRetry: (...a: unknown[]) => Promise<Response> }).handlePaymentAndRetry(
+      url,
+      config,
+      r402,
+    );
+  });
+  restoreFetch = () => spy.mockRestore();
+};
+
+/** A wallet that can derive keys and HMACs (ProtoWallet) and records every createAction instead of paying. */
+const recordingWallet = () => {
+  const proto = new ProtoWallet(PrivateKey.fromRandom());
+  const actions: { description?: string; outputs?: { satoshis: number }[] }[] = [];
+  const wallet = {
+    getPublicKey: (a: never, o?: string) => proto.getPublicKey(a, o),
+    createHmac: (a: never, o?: string) => proto.createHmac(a, o),
+    verifyHmac: (a: never, o?: string) => proto.verifyHmac(a, o),
+    createSignature: (a: never, o?: string) => proto.createSignature(a, o),
+    verifySignature: (a: never, o?: string) => proto.verifySignature(a, o),
+    createAction: async (args: { description?: string; outputs?: { satoshis: number }[] }) => {
+      actions.push(args);
+      if (args.description?.startsWith('storage payment')) return { txid: 'ab'.repeat(32) };
+      if (args.description?.startsWith('Payment for request to')) return { tx: [1, 2, 3] };
+      throw new Error('WalletStorageClient rpcCall: network error 507');
+    },
+    signAction: async () => ({}),
+    internalizeAction: async () => ({}),
+  };
+  const paid = () => actions.filter((a) => !a.description?.startsWith('a send')).map((a) => a.outputs?.[0]?.satoshis);
+  return { wallet, paid };
+};
+
+/** A StorageClient subclass with the toolbox's own authenticatedFetch (whatever another test file patched). */
+const freshStorageClientClass = () => {
+  class Fresh extends StorageClient {}
+  let base: object | null = Object.getPrototypeOf(StorageClient.prototype);
+  while (base && !Object.prototype.hasOwnProperty.call(base, 'authenticatedFetch')) base = Object.getPrototypeOf(base);
+  (Fresh.prototype as unknown as Record<string, unknown>).authenticatedFetch = (
+    base as Record<string, unknown>
+  ).authenticatedFetch;
+  return Fresh;
+};
+const rpc = (client: StorageClient) =>
+  (client as unknown as { rpcCall: (m: string, p: unknown[]) => Promise<unknown> })
+    .rpcCall('makeAvailable', [])
+    .catch((e: unknown) => e as Error);
+
+describe('402 from a storage server', () => {
+  test('repro: a real StorageClient pays a 402 for whatever amount and key the server names', async () => {
+    fake402(50_000_000, otherKey);
+    const { wallet, paid } = recordingWallet();
+    const Client = freshStorageClientClass();
+    await rpc(new Client(wallet as never, REMOTE));
+    expect(paid()).toEqual([50_000_000]);
+  });
+
+  test('a real StorageClient with the guard: refused, nothing paid', async () => {
+    fake402(50_000_000, otherKey);
+    const { wallet, paid } = recordingWallet();
+    const Client = freshStorageClientClass();
+    const undo = refuseStorageClientPayments(Client);
+    try {
+      const err = await rpc(new Client(wallet as never, REMOTE));
+      expect(paid()).toEqual([]);
+      expect(String((err as Error)?.message ?? err)).toContain(STORAGE_402_REFUSED);
+    } finally {
+      undo();
+    }
+  });
+
+  test('the factory’s /account/status call: a 402 there is not paid (hook in the order initWallet uses)', async () => {
+    fake402(50_000_000, otherKey);
+    const { wallet, paid } = recordingWallet();
+    installStoragePaymentAutoRetry({
+      wallet: wallet as never,
+      getActiveRemoteUrl: () => REMOTE,
+      onStoragePaymentRequired: storagePaymentHook({
+        known: [PINNED],
+        paused: async () => false,
+        store: undefined,
+        ledger: createStoragePayLedger(),
+        log: () => undefined,
+      }),
+    });
+    expect(refuseStorageAuthFetchPayments(wallet, () => [REMOTE])).toBe(true);
+    await wallet.createAction({ description: 'a send', outputs: [{ satoshis: 1 }] }).catch(() => undefined);
+    expect(paid()).toEqual([]);
+  });
+
+  test('refuseStorageAuthFetchPayments leaves other payments alone', async () => {
+    const { wallet, paid } = recordingWallet();
+    refuseStorageAuthFetchPayments(wallet, () => [REMOTE]);
+    const brc105 = (origin: string) => ({
+      description: `Payment for request to ${origin}`,
+      labels: ['brc105 00 11'],
+      outputs: [{ satoshis: 5, outputDescription: 'HTTP request payment' }],
+    });
+    await expect(wallet.createAction(brc105(REMOTE))).rejects.toThrow(STORAGE_402_REFUSED);
+    await expect(wallet.createAction({ ...brc105(REMOTE), description: 'something else' })).rejects.toThrow();
+    await expect(wallet.createAction(brc105('https://paid-api.example'))).resolves.toBeDefined();
+    expect(paid()).toEqual([5]);
+  });
+
+  test('status and liveness checks (Storage page, provider picker) never pay a 402', async () => {
+    fake402(50_000_000, otherKey);
+    const { wallet, paid } = recordingWallet();
+    await expect(statusAuthFetch(wallet).fetch(`${REMOTE}/account/status`, { method: 'GET' })).rejects.toThrow(
+      STORAGE_402_REFUSED,
+    );
+    expect(paid()).toEqual([]);
+    for (const f of ['src/components/ProviderPicker.tsx', 'src/hooks/useRemoteStatus.ts']) {
+      const src = readFileSync(f, 'utf8');
+      expect(src.includes('new AuthFetch(')).toBe(false);
+      expect(src.includes('statusAuthFetch(wallet)')).toBe(true);
+    }
+  });
+});
+
+describe('pause, persistence, the Storage page warning', () => {
+  test('the pause check fails closed: unreadable status counts as paused', async () => {
+    resetKillSwitchCache();
+    expect(await isPausedOrUnknown('spending', async () => Promise.reject(new Error('offline')))).toBe(true);
+    resetKillSwitchCache();
+    expect(await isPausedOrUnknown('spending', async () => new Response(JSON.stringify({ paused: [] })))).toBe(false);
+    resetKillSwitchCache();
+    expect(
+      await isPausedOrUnknown('spending', async () => new Response(JSON.stringify({ paused: ['spending'] }))),
+    ).toBe(true);
+    resetKillSwitchCache();
+  });
+
+  test('the caps survive a restart: a new ledger reads the saved one before deciding', async () => {
+    fakeStatus(statusBody());
+    let saved: StoragePayLedger | undefined;
+    const store: StoragePayLedgerStore = {
+      load: async () => (saved ? structuredClone(saved) : undefined),
+      save: async (l) => {
+        saved = structuredClone(l);
+      },
+    };
+    const first = setup({ store });
+    await first.write();
+    expect(first.paid).toEqual([100]);
+    await new Promise((r) => setTimeout(r, 0));
+    // "Restart": a fresh ledger in memory, same clock, same saved state.
+    const second = setup({ store, now: () => first.clock.t + 1 });
+    await second.write();
+    expect(second.paid).toEqual([]);
+  });
+
+  test('a refusal leaves the Storage page a warning that lasts', async () => {
+    const area: Record<string, unknown> = {};
+    const g = globalThis as Record<string, unknown>;
+    const had = Object.getOwnPropertyDescriptor(g, 'chrome');
+    Object.defineProperty(g, 'chrome', {
+      configurable: true,
+      writable: true,
+      value: {
+        storage: {
+          local: {
+            get: (k: string, cb: (r: Record<string, unknown>) => void) => cb({ [k]: area[k] }),
+            set: (o: Record<string, unknown>, cb?: () => void) => {
+              Object.assign(area, o);
+              cb?.();
+            },
+          },
+        },
+      },
+    });
+    try {
+      fakeStatus(statusBody());
+      const { write, clock } = setup({ known: undefined });
+      await write();
+      await new Promise((r) => setTimeout(r, 0));
+      expect((area[TOP_UP_REFUSED_KEY] as { kind?: string })?.kind).toBe('active');
+      expect((await readTopUpRefused(clock.t + 3_600_000))?.kind).toBe('active');
+      expect(await readTopUpRefused(clock.t + 4 * 24 * 3_600_000)).toBeUndefined();
+    } finally {
+      if (had) Object.defineProperty(g, 'chrome', had);
+      else delete g.chrome;
+    }
   });
 });

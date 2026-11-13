@@ -85,7 +85,14 @@ import {
   type InboundVerifier,
 } from './services/inboundSync';
 import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
-import { backupFullNotice, refuseBackupStorageAutoPay, storagePaymentHook } from './services/storagePaymentGuard';
+import {
+  backupFullNotice,
+  refuseBackupStorageAutoPay,
+  refuseStorageAuthFetchPayments,
+  refuseStorageClientPayments,
+  storagePaymentHook,
+} from './services/storagePaymentGuard';
+import { KNOWN_PROVIDERS } from './components/storageProviders';
 import {
   FULL_PASS_NEXT_SLICE_MS,
   paymentYields,
@@ -417,7 +424,19 @@ tagStorageClientErrors(StorageClient);
  */
 let storageNotice: ((text: string) => void) | undefined;
 refuseBackupStorageAutoPay(StorageClient, (url) => backupFullNotice(storageNotice)(url));
+// …and no storage server is paid through HTTP 402: a StorageClient's AuthFetch can't create actions.
+refuseStorageClientPayments(StorageClient);
 type WalletConfigWithStorageHook = WebWalletConfig & { onStoragePaymentRequired: StoragePaymentHook };
+/** Every storage URL this wallet may talk to: a BRC-105 (402) payment to any of them is refused. */
+const storageUrls =
+  (storage: unknown, config: { activeRemote?: string; backups?: string[] }) => (): (string | undefined)[] => [
+    config.activeRemote,
+    ...(config.backups ?? []),
+    ...KNOWN_PROVIDERS.flatMap((p) => [p.url, p.accountUrl]),
+    ...((storage as { _stores?: { storage?: { endpointUrl?: string } }[] })._stores ?? []).map(
+      (m) => m.storage?.endpointUrl,
+    ),
+  ];
 
 /**
  * Rows a backup store sends become spendable on this device only when the chain or this account's own keys say so
@@ -482,7 +501,9 @@ export const openAccountStorageForBackup = async (
     skipInitialMonitor: true,
     onStoragePaymentRequired: storagePaymentHook(),
   };
-  const { storage, destroy, monitor } = await createWebWallet(backupConfig);
+  const { storage, destroy, monitor, wallet: backupWallet } = await createWebWallet(backupConfig);
+  if (!refuseStorageAuthFetchPayments(backupWallet, storageUrls(storage, { activeRemote, backups })))
+    console.error('[initWallet] storage 402 payments are not refused');
 
   // Stop monitor work so BackupSync/runOnce does not contend with getSyncChunk.
   try {
@@ -564,6 +585,9 @@ export const initWallet = async (
     console.warn('[initWallet] backup storage failed to connect; opening without it:', err);
     return createWebWallet({ ...walletConfig, backups: [] });
   });
+  // The factory's own storage calls (/account/status, /account/payment) never pay a 402 (storagePaymentGuard.ts).
+  if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups })))
+    console.error('[initWallet] storage 402 payments are not refused');
   // This device's store stays the enabled active store for its payments, receipts and backup pushes, whatever another
   // device wrote into the backup (P0, 5 Nov 2026: the owner's 1p test was refused with WERR_NOT_ACTIVE after the backup
   // connected late; services/deviceActive.ts). First on the manager, so the later wrappers (the coin check) run over it.
