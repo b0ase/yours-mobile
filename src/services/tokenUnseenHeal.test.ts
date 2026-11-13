@@ -129,7 +129,7 @@ describe('healUnseenTokenOutputs', () => {
     expect(r.errors.join(' ')).toContain('Unable to process submitted transaction');
   });
 
-  test('a mined transfer whose chain lookup failed, rebroadcast and refused as "missing inputs": kept (the chain has it)', async () => {
+  test('a mined transfer whose chain lookup failed, rebroadcast and refused as "missing inputs": kept and submitted', async () => {
     const { deps, calls } = make({
       local: [out(MINED, 0, '25')],
       states: { [`${MINED}.0`]: 'unknown' },
@@ -142,7 +142,10 @@ describe('healUnseenTokenOutputs', () => {
     expect(calls.broadcast).toEqual([MINED]);
     expect(calls.relinquished).toEqual([]);
     expect(r.dropped).toEqual([]);
-    expect(r.errors.join(' ')).toContain('kept');
+    // The chain has it: the stored copy goes to the overlay, so the coin stops being overlay-unknown.
+    expect(r.submitted).toEqual([MINED]);
+    expect(calls.submitted.length).toBe(1);
+    expect(r.errors).toEqual([]);
   });
 
   test('a refused rebroadcast while the chain lookup is unclear (or missing): kept', async () => {
