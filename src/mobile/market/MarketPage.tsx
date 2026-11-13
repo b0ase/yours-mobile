@@ -14,7 +14,7 @@ import {
   ArrowLeft,
   Coins,
   Flag,
-  Flame,
+  ArrowLeftRight,
   Image as ImageIcon,
   Palette,
   Rocket,
@@ -72,7 +72,6 @@ import {
   marketTradingEnabled,
 } from '../storeBuild';
 import { MyTokenListings } from '../sell/MyTokenListings';
-import { TokenFacts } from '../exchange/TokenFacts';
 import { TokenDetails } from '../exchange/TokenDetails';
 import { TokenBoard } from '../exchange/TokenBoard';
 import { STALE_LISTING_MESSAGE, listingSpendState } from './tokenPage';
@@ -197,6 +196,9 @@ const MarketPage = () => {
   const [rooms, setRooms] = useState<HotRoom[] | null>(null);
   const [error, setError] = useState('');
   const [room, setRoom] = useState<HotRoom | null>(null);
+  // The room on screen, read after an await (openRoom) to drop a stale market answer.
+  const roomRef = useRef<HotRoom | null>(null);
+  roomRef.current = room;
   const [market, setMarket] = useState<RoomMarket | null>(null);
   const [gamesOpen, setGamesOpen] = useState(false);
   // Strategies / Contracts / Bonds: panels that replace the token list (bWalletX only).
@@ -324,9 +326,14 @@ const MarketPage = () => {
 
   const openRoom = async (r: HotRoom, ticket: { ticket: Ticket; holder: boolean } | null = null) => {
     setTicketPage(ticket);
+    // Re-opening the same room (pull to refresh, after a buy) keeps its listings on screen while they reload,
+    // instead of blanking them to "Loading listings…" and back.
+    const same = roomRef.current?.ref.key === r.ref.key;
+    roomRef.current = r;
     setRoom(r);
-    setMarket(null);
-    setMarket(await roomMarket(r.ref));
+    if (!same) setMarket(null);
+    const m = await roomMarket(r.ref);
+    if (roomRef.current?.ref.key === r.ref.key) setMarket(m);
   };
 
   // Open a token / collection page by id (never by ticker: tickers aren't unique).
@@ -742,7 +749,9 @@ const MarketPage = () => {
       {tokenRows.length === 0 && (rooms === null || directory === null) && (
         <p className="text-xs text-[#98A2B3] text-center py-8">Loading tokens…</p>
       )}
-      {loadingBoard && tokenRows.length > 0 && <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>}
+      {loadingBoard && tokenRows.length > 0 && !boardMode && (
+        <p className="text-[10px] text-[#667085] text-center">Still ranking…</p>
+      )}
       {error && (
         <div className="flex flex-col gap-1.5">
           <p className="text-xs text-[#F97066]">{error}</p>
@@ -783,6 +792,7 @@ const MarketPage = () => {
           rate={cachedExchangeRate()}
           onOpen={(r) => void openRoom(r)}
           onBuy={(r) => void openRoom(r)}
+          settled={!loadingBoard}
         />
       )}
       {visibleTokens.map((r, i) => {
@@ -805,10 +815,7 @@ const MarketPage = () => {
             <span className="w-6 text-[11px] font-semibold text-[#667085]">{i + 1}</span>
             <Art outpoint={r.icon} kind="bsv21" collectionId={r.ref.id} />
             <div className="min-w-0 flex-1">
-              <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>
-                {r.title}
-                {r.heat > 0 && <Flame size={11} className="inline ml-1" style={{ color: '#A1FF8B' }} />}
-              </div>
+              <div className={`text-sm font-semibold text-white ${ELLIPSIS}`}>{r.title}</div>
               <div className={`text-[11px] text-[#98A2B3] ${ELLIPSIS}`}>{['Token', ...stats].join(' · ')}</div>
               {dupFor(r.title) && (
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -942,12 +949,14 @@ const MarketPage = () => {
           onPick={(id) => openRoomById('bsv21', id)}
         />
       )}
-      {room.ref.kind === 'bsv21' && !ticketPage && <TokenLinks tokenId={room.ref.id} sym={room.title} />}
       {room.ref.kind === 'bsv21' && !ticketPage && (
-        <TokenFacts tokenId={room.ref.id} sym={room.title.replace(/^\$/, '')} priceSats={market?.floorSats ?? null} />
-      )}
-      {room.ref.kind === 'bsv21' && !ticketPage && !isPersonalTokenId(room.ref.id, personalLinks) && (
-        <TokenDetails tokenId={room.ref.id} sym={room.title.replace(/^\$/, '')} rate={cachedExchangeRate()} />
+        <TokenDetails
+          tokenId={room.ref.id}
+          sym={room.title.replace(/^\$/, '')}
+          rate={cachedExchangeRate()}
+          facts={{ priceSats: market?.floorSats ?? null }}
+          audit={!isPersonalTokenId(room.ref.id, personalLinks)}
+        />
       )}
       {room.ref.kind === 'bsv21' && !ticketPage && SELL_ENABLED && TRADING && (
         <button
@@ -976,7 +985,7 @@ const MarketPage = () => {
           ? "Personal token · holding one opens its holders' room. Not an investment; issuers may reward holders with airdrops."
           : `Floor ${market?.floorLabel ?? '—'} · ${market?.live ?? 0} live · ${market?.buyableCount ?? 0} buyable in-app`}
       </div>
-      {market === null && <p className="text-xs text-[#98A2B3] text-center py-6">Loading listings…</p>}
+      {market === null && <p className="text-xs text-[#98A2B3] text-center py-6 min-h-[120px]">Loading listings…</p>}
       {market?.listings.length === 0 && (
         <p className="text-xs text-[#98A2B3] text-center py-6">
           {ticketPage ? 'No tickets listed for sale right now. Ask a holder to send you one.' : 'No live listings.'}
@@ -1026,6 +1035,8 @@ const MarketPage = () => {
             )}
           </div>
         ))}
+      {/* Links load from the chain and can grow: below the listings, so they never push them down. */}
+      {room.ref.kind === 'bsv21' && !ticketPage && <TokenLinks tokenId={room.ref.id} sym={room.title} />}
     </section>
   );
 
@@ -1131,7 +1142,7 @@ const MarketPage = () => {
       <div className="w-full px-4 pt-16 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold text-white flex items-center gap-1.5">
-            <Flame size={18} style={{ color: '#A1FF8B' }} /> {marketLabel()}
+            <ArrowLeftRight size={18} style={{ color: 'var(--bw-accent)' }} /> {marketLabel()}
           </h1>
         </div>
         {section === 'trending' && !room && categoryTiles}

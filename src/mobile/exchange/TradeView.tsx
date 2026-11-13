@@ -33,7 +33,6 @@ import { useLocation } from 'react-router-dom';
 import { TokenIcon } from './TokenIcon';
 import { TokenIdentity } from '../tokens/TokenIdPanel';
 import { PriceChart } from './PriceChart';
-import { TokenFacts } from './TokenFacts';
 import { TokenDetails } from './TokenDetails';
 import { STALE_LISTING_MESSAGE, dropSpent, listingSpendState, nextAsk } from '../market/tokenPage';
 import { chartSeries } from './chartSeries';
@@ -291,8 +290,7 @@ export const TradeView = ({
           Launched on the bWalletX Launchpad. {LAUNCH_DISCLAIMER}
         </p>
       )}
-      <TokenFacts tokenId={id} sym={sym} dec={dec} rate={rate} priceSats={price} held={held} />
-      <TokenDetails tokenId={id} sym={sym} rate={rate} trades={trades} />
+      <TokenDetails tokenId={id} sym={sym} rate={rate} trades={trades} facts={{ dec, priceSats: price, held }} />
       <IndexerFundPanel tokenId={id} ticker={sym} />
       {launched && <CreatorVesting tokenId={id} />}
 
@@ -328,8 +326,8 @@ export const TradeView = ({
             <PriceChart series={chartSeries(trades, { lowestAsk: market?.floorSats })} priceLabel={unitPriceLabel} />
           </div>
 
-          {/* Order book: sell orders (live listings), cheapest first */}
-          <div className={`${CARD} p-3`}>
+          {/* Order book: sell orders (live listings), cheapest first. Min height: "Loading…" → rows doesn't jump. */}
+          <div className={`${CARD} p-3 min-h-[120px]`}>
             <div className="text-sm font-bold text-white mb-2">
               {isNoCurve(id) ? 'Listings from players' : 'Order book'}
             </div>
@@ -408,7 +406,7 @@ export const TradeView = ({
 
         {/* Buy / sell panel */}
         <div className="flex flex-col gap-4">
-          <div id={BUY_ANCHOR} className={`${CARD} p-4 flex flex-col gap-3 scroll-mt-4`}>
+          <div id={BUY_ANCHOR} className={`${CARD} p-4 flex flex-col gap-3 scroll-mt-4 min-h-[148px]`}>
             <div className="text-sm font-bold text-white">Buy ${sym}</div>
             {!TRADING ? (
               <p className="text-xs" style={{ color: MUTED }}>
