@@ -85,6 +85,7 @@ import {
   type InboundVerifier,
 } from './services/inboundSync';
 import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
+import { backupFullNotice, refuseBackupStorageAutoPay, storagePaymentHook } from './services/storagePaymentGuard';
 import {
   FULL_PASS_NEXT_SLICE_MS,
   paymentYields,
@@ -100,7 +101,7 @@ import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
-import { normalizeOriginator, parsePrivateKey } from '@1sat/wallet';
+import { normalizeOriginator, parsePrivateKey, type StoragePaymentHook } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
   syncMessages,
@@ -410,6 +411,15 @@ export interface InitWalletOptions {
 tagStorageClientErrors(StorageClient);
 
 /**
+ * Storage top-ups (HTTP 507) are never paid without a check (services/storagePaymentGuard.ts, b-Aware 12 Nov 2026).
+ * A backup store's 507 never starts a payment; the active store's goes through storagePaymentHook, passed on every
+ * wallet created here (the factory treats a missing hook as yes).
+ */
+let storageNotice: ((text: string) => void) | undefined;
+refuseBackupStorageAutoPay(StorageClient, (url) => backupFullNotice(storageNotice)(url));
+type WalletConfigWithStorageHook = WebWalletConfig & { onStoragePaymentRequired: StoragePaymentHook };
+
+/**
  * Rows a backup store sends become spendable on this device only when the chain or this account's own keys say so
  * (services/inboundSync.ts, b-Aware A3). Set up BEFORE the wallet factory runs: it merges a store that disagrees about
  * which is active into the device store at boot. Returns the unregister, and the check itself: admitPending runs
@@ -459,7 +469,7 @@ export const openAccountStorageForBackup = async (
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
-  const { storage, destroy, monitor } = await createWebWallet({
+  const backupConfig: WalletConfigWithStorageHook = {
     privateKey: keys.identityWif,
     chain: 'main',
     feeModel: { model: 'sat/kb', value: chromeStorageService.getCustomFeeRate() },
@@ -470,7 +480,9 @@ export const openAccountStorageForBackup = async (
     // No boot runOnce: its BackupSync (which now also runs for a remote active store; toolbox patch) would contend
     // with the backup's getSyncChunk. stopTasks below only ends a task loop; it cannot recall a runOnce in flight.
     skipInitialMonitor: true,
-  });
+    onStoragePaymentRequired: storagePaymentHook(),
+  };
+  const { storage, destroy, monitor } = await createWebWallet(backupConfig);
 
   // Stop monitor work so BackupSync/runOnce does not contend with getSyncChunk.
   try {
@@ -520,7 +532,8 @@ export const initWallet = async (
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
-  const walletConfig: WebWalletConfig = {
+  if (options?.notice) storageNotice = options.notice;
+  const walletConfig: WalletConfigWithStorageHook = {
     privateKey: keys.identityWif,
     chain,
     feeModel: { model: 'sat/kb', value: chromeStorageService.getCustomFeeRate() },
@@ -528,6 +541,7 @@ export const initWallet = async (
     backups,
     storageIdentityKey,
     taskStateStore: createIndexedDbTaskStateStore(),
+    onStoragePaymentRequired: storagePaymentHook({ notice: options?.notice }),
   };
 
   const t0 = Date.now();
