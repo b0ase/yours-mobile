@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatRoom } from './messages';
 import {
+  B_HANDLE,
+  bDirectOf,
   canCall,
   canMessage,
   dmRooms,
@@ -76,6 +78,24 @@ describe('dmRooms', () => {
     const dms = dmRooms(rooms);
     expect(dms.map((r) => r.ticker)).toEqual(['C', 'A']);
     expect(unreadTotal(dms)).toBe(3);
+  });
+});
+
+describe('bDirectOf (your own 1:1 with b, pinned at the top of DMs)', () => {
+  test('finds "$me ↔ $b" whichever side b is named on', () => {
+    expect(B_HANDLE).toBe('b');
+    const mine = room({ ticker: 'MEB', name: '$me ↔ $b' });
+    const owners = room({ ticker: 'BB0ASEX', name: '$b ↔ $b0asex' });
+    expect(bDirectOf([room({ ticker: 'C', name: '$me ↔ $you' }), mine], 'me')?.ticker).toBe('MEB');
+    expect(bDirectOf([owners], 'b0asex')?.ticker).toBe('BB0ASEX');
+  });
+  test('none yet → null (the row still shows; the first tap creates the room)', () => {
+    expect(bDirectOf([room({ ticker: 'C', name: '$me ↔ $you' })], 'me')).toBeNull();
+    expect(bDirectOf([], 'me')).toBeNull();
+  });
+  test('a person whose handle merely starts with b is not b', () => {
+    expect(bDirectOf([room({ ticker: 'BOB', name: '$me ↔ $bob' })], 'me')).toBeNull();
+    expect(bDirectOf([room({ ticker: 'G', name: 'b group' })], 'me')).toBeNull();
   });
 });
 

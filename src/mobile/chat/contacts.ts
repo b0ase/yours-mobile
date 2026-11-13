@@ -1,4 +1,4 @@
-import { isDirectRoom, normHandle, roomActivity, type ChatRoom } from './messages';
+import { dmPeer, isDirectRoom, normHandle, roomActivity, type ChatRoom } from './messages';
 
 /**
  * DMs + Contacts (owner: "private messages and friends and contact lists are all the same
@@ -176,6 +176,13 @@ export const dmRooms = (rooms: ChatRoom[]): ChatRoom[] =>
       return isDirectRoom(r);
     })
     .sort((a, b) => roomActivity(b) - roomActivity(a));
+
+/** b's handle: your own 1:1 with b is pinned at the top of DMs (bit-sign lib/b-direct-rules.ts). */
+export const B_HANDLE = 'b';
+
+/** The viewer's 1:1 with b among their DM rooms ("$me ↔ $b"), or null when it hasn't been opened yet. */
+export const bDirectOf = (rooms: ChatRoom[], me: string): ChatRoom | null =>
+  rooms.find((r) => (dmPeer(r, me) || '').toLowerCase() === B_HANDLE) ?? null;
 
 export const unreadTotal = (rooms: ChatRoom[]) => rooms.reduce((n, r) => n + (r.unread ?? 0), 0);
 
