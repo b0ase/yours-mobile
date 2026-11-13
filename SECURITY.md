@@ -5,7 +5,7 @@ take or spend someone's money, read their keys, or make the wallet sign somethin
 to hear from you first, and we pay for it.
 
 The full policy, the reward table and our responses to advisories live at **https://bwalletx.com/b-Aware**
-(machine-readable: `/.well-known/security.txt`). This file is the short form of policy version 4 (26 October 2026).
+(machine-readable: `/.well-known/security.txt`). This file is the short form of policy version 5 (13 November 2026).
 
 ## Report a vulnerability
 
@@ -49,8 +49,8 @@ a two-minute ID check. We never see your ID documents: Veriff holds them, and yo
 certificate that says you are verified.
 
 This rule applies to every unpaid reward of 1 BSV or more from 26 October 2026, including reports made before then.
-Anonymous reporters still get credit, but not payments of 1 BSV or more. Rewards are paid when the programme's funding
-arrives, in the order set by the quarterly pool above.
+Anonymous reporters still get credit, but not payments of 1 BSV or more. The programme has a fixed budget. If it runs out,
+we'll say so on this page before we accept new reports. Reports already accepted are paid on the terms above.
 
 ## Scope
 
@@ -80,3 +80,6 @@ listed, dated, on https://bwalletx.com/b-Aware#advisories.
   live, or within 30 days of triage if the fix takes longer, whichever is sooner. This replaces "30 days after the fix
   is live on every channel / 60 days after we confirm your report" and the monthly payment batch. The more favourable
   term applies to every report made while both were published.
+- 13 November 2026: version 5. Payment no longer waits for programme funding: the programme has a fixed budget, we
+  say so on the b-Aware page before accepting new reports if it runs out, and reports already accepted are paid on the
+  terms above.
