@@ -39,6 +39,9 @@ import { cacheBlockHeaders, prefetchHeadersOnInternalize } from './services/head
 import {
   backupBeforeSend,
   createDeviceSync,
+  FOREGROUND_STALE_MS,
+  PULL_STALE_MS,
+  PULL_TIMER_MS,
   notifyOnWalletChanges,
   pullThenAdmitSoon,
   type BackupBeforeSend,
@@ -92,7 +95,10 @@ import {
   requestTailPass,
   withDeadlines,
   withFullPassMode,
+  type FullPassPlan,
 } from './services/fullPass';
+import { afterPull } from './services/pullIntegrity';
+import { createSyncHealth, registerSyncHealth, type SyncHealth } from './services/syncHealth';
 import { ownPayments } from './services/ownPayments';
 import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
 import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
@@ -299,6 +305,8 @@ export interface AccountContext {
     paused: boolean;
     /** A heal or a device sync is running: it holds the storage locks, so a coin check would only queue behind it. */
     storageBusy: boolean;
+    /** How the pulls from the backup are doing (services/syncHealth.ts): last caught-up pull, stuck, coins missing. */
+    health?: SyncHealth;
   };
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
@@ -564,9 +572,9 @@ export const initWallet = async (
    * A full re-pull from a backup when one is due (services/fullPass.ts): a daily one, a store's first, or one a failure
    * asked for. Never in the way of the sync itself: a failure here is logged and the sync goes on.
    */
-  const fullPassIfDue = async (readerSik: string | undefined, failed = false) => {
+  const fullPassIfDue = async (readerSik: string | undefined, failed = false): Promise<FullPassPlan | undefined> => {
     const own = ownStore();
-    if (!own || !readerSik) return;
+    if (!own || !readerSik) return undefined;
     try {
       const { identityKey } = await storage.getAuth();
       const r = await requestFullPass({
@@ -586,8 +594,12 @@ export const initWallet = async (
         console.warn('[deviceSync] pulling the last 48 hours of the backup again (the daily deep pull)');
       if (r === 'abandoned')
         console.warn('[deviceSync] a pull from the start had stopped moving: given up, the ordinary pulls run again');
+      if (r === 'stuck')
+        console.warn('[deviceSync] a pull has not moved for 30 minutes of uptime; it keeps being retried (syncHealth)');
+      return r;
     } catch (e) {
       console.warn('[deviceSync] a full pass could not be asked for:', e);
+      return undefined;
     }
   };
   /** The last heal's merge failed: the next heal asks for a full pass (b). */
@@ -708,6 +720,29 @@ export const initWallet = async (
       return f;
     },
   });
+  // How the pulls are doing, for a one-line status (services/syncHealth.ts): the last pull that caught up, stuck.
+  const pullHealth = createSyncHealth();
+  registerSyncHealth(pullHealth);
+  /** The backup's output rows for one of its transactions (the coin check after a pull, services/pullIntegrity.ts). */
+  const backupOutputsOf = async (backupTxId: number) => {
+    const m = managed._backups?.[0] as
+      | {
+          storage: {
+            findOutputsAuth(
+              auth: { identityKey: string; userId?: number },
+              args: { partial: { transactionId: number }; noScript: boolean },
+            ): Promise<{ vout: number; updated_at?: unknown }[]>;
+          };
+          user?: { userId: number };
+        }
+      | undefined;
+    if (!m) throw new Error('backup storage is not connected');
+    const { identityKey } = await storage.getAuth();
+    return m.storage.findOutputsAuth(
+      { identityKey, userId: m.user?.userId },
+      { partial: { transactionId: backupTxId }, noScript: true },
+    );
+  };
   const deviceSync = createDeviceSync({
     applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
     // A backup naming another store is healed first; a set-aside one only reconnects on its probe and back-off, never
@@ -716,40 +751,71 @@ export const initWallet = async (
     // What the pull left for the chain to settle runs soon after, outside every storage lock; not awaited here (F-A).
     pull: pullThenAdmitSoon(
       async () => {
-        const reader = managed._backups?.[0]?.storage;
-        if (!reader) throw new Error('backup storage is not connected');
-        const { identityKey } = await storage.getAuth();
-        // What this pull lists is asked about every few seconds for a while, not after the 1-minute doubling: a sweep
-        // the other device made must not hide its dollar here for minutes (review 20, M5; services/inboundSync.ts).
-        admitPrompt = { from: Date.now(), until: Date.now() + PROMPT_ADMIT_MS };
-        // Once a day (and on a store's first open, or when a failure asked) the pull starts from the beginning; such
-        // a pass runs in slices so payments never wait on it (services/fullPass.ts).
-        const backupSik = (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
-          ?.storageIdentityKey;
-        await fullPassIfDue(backupSik);
-        // Rows another copy pushed late, with times older than the cursor (extension, 6 Nov 2026: 8734977f never
-        // arrived): every TAIL_CHECK_EVERY_MS, found by the backup's insert order with one-row probes, and pulled from
-        // the first one (services/pullTail.ts). Its own deadlines; never while a pass is under way.
-        const own = ownStore();
-        if (own && backupSik) {
-          const plan = await requestTailPass({
-            manager: storage,
-            store: own as never,
-            identityKey,
-            readerSik: backupSik,
-            reader: withDeadlines(reader as object) as never,
-          }).catch(() => 'unknown');
-          if (plan === 'tail')
-            console.warn(
-              '[deviceSync] the backup has rows this device never had (pushed late): pulling from the first',
-            );
+        pullHealth.attempt();
+        try {
+          const reader = managed._backups?.[0]?.storage;
+          if (!reader) throw new Error('backup storage is not connected');
+          const { identityKey } = await storage.getAuth();
+          // What this pull lists is asked about every few seconds for a while, not after the 1-minute doubling: a sweep
+          // the other device made must not hide its dollar here for minutes (review 20, M5; services/inboundSync.ts).
+          admitPrompt = { from: Date.now(), until: Date.now() + PROMPT_ADMIT_MS };
+          // Once a day (and on a store's first open, or when a failure asked) the pull starts from the beginning; such
+          // a pass runs in slices so payments never wait on it (services/fullPass.ts).
+          const backupSik = (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
+            ?.storageIdentityKey;
+          pullHealth.plan(await fullPassIfDue(backupSik));
+          // Rows another copy pushed late, with times older than the cursor (extension, 6 Nov 2026: 8734977f never
+          // arrived): every TAIL_CHECK_EVERY_MS, found by the backup's insert order with one-row probes, and pulled from
+          // the first one (services/pullTail.ts). Its own deadlines; never while a pass is under way.
+          const own = ownStore();
+          if (own && backupSik) {
+            const plan = await requestTailPass({
+              manager: storage,
+              store: own as never,
+              identityKey,
+              readerSik: backupSik,
+              reader: withDeadlines(reader as object) as never,
+            }).catch(() => 'unknown');
+            if (plan === 'tail')
+              console.warn(
+                '[deviceSync] the backup has rows this device never had (pushed late): pulling from the first',
+              );
+          }
+          // Each backup request has a deadline, so a stalled backup frees the storage locks in seconds (review 23, M2).
+          const bounded = withDeadlines(reader as object) as Parameters<typeof storage.syncFromReader>[1];
+          // Own payments go first (fullPass afterPage): a pull that ended for one carries on in this run after it.
+          const yieldsBefore = paymentYields();
+          await withFullPassMode(ownSik(), 'slice', () => storage.syncFromReader(identityKey, bounded));
+          // A pull can't half-arrive (services/pullIntegrity.ts): once it has caught up, payments it brought are checked
+          // for their coins against the backup, and coins still missing are pulled again (a heal pass, in slices).
+          if (own && backupSik) {
+            const report = await afterPull({
+              manager: storage,
+              store: own as never,
+              identityKey,
+              readerSik: backupSik,
+              backupOutputs: backupOutputsOf,
+              stop: ownPayments.waiting,
+            }).catch((e: unknown) => {
+              console.warn('[sync-integrity] the coin check after the pull did not run:', e);
+              return undefined;
+            });
+            pullHealth.succeeded(report);
+            if (report?.plan === 'healing') {
+              console.warn(
+                `[deviceSync] ${report.missingTx} payment(s) arrived without some of their coins: pulling them again`,
+              );
+              stopBackupCheck.verifier.onMore?.();
+            } else if (report?.plan === 'full-due')
+              console.warn(
+                '[deviceSync] coins still missing after re-pulls: the backup is pulled again from the start',
+              );
+          } else pullHealth.succeeded();
+          return paymentYields() > yieldsBefore ? ('yielded' as const) : undefined;
+        } catch (e) {
+          pullHealth.failed(e);
+          throw e;
         }
-        // Each backup request has a deadline, so a stalled backup frees the storage locks in seconds (review 23, M2).
-        const bounded = withDeadlines(reader as object) as Parameters<typeof storage.syncFromReader>[1];
-        // Own payments go first (fullPass afterPage): a pull that ended for one carries on in this run after it.
-        const yieldsBefore = paymentYields();
-        await withFullPassMode(ownSik(), 'slice', () => storage.syncFromReader(identityKey, bounded));
-        return paymentYields() > yieldsBefore ? ('yielded' as const) : undefined;
       },
       () => admitIn(0),
     ),
@@ -760,6 +826,13 @@ export const initWallet = async (
     busy: chainActive,
     log: (...a) => console.warn(...a),
   });
+  // Pulls also when the last good one is an hour old, while the wallet stays open (review of fix 5: a phone app, web
+  // tab or extension worker could go hours without the other devices' changes). Paced; a site mid-action defers it.
+  const stalePullTimer = setInterval(() => {
+    // Never before the held-back syncs may start (startSyncsAfter), never on a closed wallet.
+    if (!admitClosed && syncsOpen) void deviceSync.pullIfStale(PULL_STALE_MS)?.catch(() => undefined);
+  }, PULL_TIMER_MS);
+  (stalePullTimer as { unref?: () => void }).unref?.();
   // A full pass paused (a slice used up, or a heal left it): the next slice a moment later, sends in between.
   let moreTimer: ReturnType<typeof setTimeout> | undefined;
   stopBackupCheck.verifier.onMore = () => {
@@ -1867,6 +1940,8 @@ export const initWallet = async (
   const close = async () => {
     walletClosed = true;
     admitClosed = true;
+    clearInterval(stalePullTimer);
+    registerSyncHealth(undefined);
     receiveWatch.stop();
     void watchKit
       ?.then(async (k) => {
@@ -1904,7 +1979,13 @@ export const initWallet = async (
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
     balanceSplit: () => balanceSplit(baseWallet, { accountedFor, spenderCarries: carriesVia(deviceReads) }),
-    receiveWatch: { foreground: (on) => receiveWatch.foreground(on) },
+    receiveWatch: {
+      foreground: (on) => {
+        receiveWatch.foreground(on);
+        // A wallet page in front (APP_FOREGROUND, every 30 s while visible): a pull when the last good one is 5 min old.
+        if (on && syncsOpen && !admitClosed) void deviceSync.pullIfStale(FOREGROUND_STALE_MS)?.catch(() => undefined);
+      },
+    },
     syncDevices: () => deviceSync.syncNow(),
     admitBackupRows,
     backupState: () => {
@@ -1917,6 +1998,8 @@ export const initWallet = async (
         // A backup set aside after a failed merge, reconnecting on its back-off (review 19, F4).
         paused: keepActive?.paused().paused ?? false,
         storageBusy: (keepActive?.healing() ?? false) || st.running,
+        // The pulls: the last one that caught up, stuck, payments still waiting for coins (services/syncHealth.ts).
+        health: pullHealth.get(),
       };
     },
     backupBeforeSend: () =>

@@ -53,6 +53,18 @@ export const PUSH_DELAY_MS = 20_000;
  */
 export const SLOW_SYNC_MS = 2_000;
 export const BACKOFF_MS = [60_000, 120_000, 240_000, 480_000, 960_000, 1_800_000];
+/**
+ * A pull when the last good one is older than this: on a timer (PULL_TIMER_MS) while the wallet is open, so a phone app,
+ * web tab or extension worker that stays open never goes hours without the other devices' changes (review of fix 5,
+ * 13 Nov 2026: pulls ran only at open, on a full-pass slice, on a foreign spend, on a restore switch or by hand).
+ */
+export const PULL_STALE_MS = 60 * 60_000;
+/** How often the open wallet asks pullIfStale(PULL_STALE_MS). */
+export const PULL_TIMER_MS = 10 * 60_000;
+/** A wallet page coming to the front pulls when the last good pull is older than this (the page repeats every 30 s). */
+export const FOREGROUND_STALE_MS = 5 * 60_000;
+/** pullIfStale starts at most one pull per this long (failures keep their own back-off). */
+export const PULL_MIN_GAP_MS = 2 * 60_000;
 /** A push that failed on a deadline (services/pushView.ts) is retried within this, whatever the failure count. */
 export const TIMEOUT_BACKOFF_CAP_MS = 240_000;
 /** The backup didn't answer in time, or is still answering an earlier request (services/pushView.ts, fullPass.ts). */
@@ -81,6 +93,15 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   let pendingPush = false;
   /** When a push last went through (ms), 0 before the first: "Up to date" needs one with nothing waiting. */
   let lastPushOkAt = 0;
+  /**
+   * A full sync (pull, then push) that failed or was deferred: its retry is a full sync too, never only a push (review of
+   * fix 5: every retry went through schedule() as a push, so a failed pull at open was not tried again for hours).
+   */
+  let pendingFull = false;
+  /** When a pull last went through, and when one was last tried (ms; 0 before the first). */
+  let lastPullOkAt: number | undefined;
+  let lastPullAttemptAt = 0;
+  let lastStaleAskAt = -Infinity;
 
   const retryLater = (capMs = Infinity) => {
     const wait = Math.min(capMs, BACKOFF_MS[Math.min(failures - 1, BACKOFF_MS.length - 1)]);
@@ -89,9 +110,10 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   };
 
   /** Not this device's turn to sync (checked at the start and again after every wait for an own payment). */
-  const notNow = (): DeviceSyncResult | null => {
+  const notNow = (mode: 'full' | 'push' = 'push'): DeviceSyncResult | null => {
     if (!deps.applies()) return { ok: true, pulled: false, pushed: false };
     if (deps.busy?.()) {
+      if (mode === 'full') pendingFull = true; // deferred: tried again as a pull
       schedule(PUSH_DELAY_MS);
       return { ok: false, error: 'a site action is in progress; sync deferred' };
     }
@@ -101,11 +123,12 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
   const run = async (mode: 'full' | 'push'): Promise<DeviceSyncResult> => {
     const idle = () => deps.yieldTo?.idle() ?? Promise.resolve();
     /** Own payments first (services/ownPayments.ts), then the account, lock and dApp-chain checks again. */
+    let pullDone = false;
     const myTurn = async () => {
       await idle();
-      return notNow();
+      return notNow(mode === 'full' && !pullDone ? 'full' : 'push');
     };
-    const first = notNow();
+    const first = notNow(mode);
     if (first) return first;
     try {
       // An own payment running now goes first: this run takes the storage queue after it.
@@ -116,6 +139,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       const t0 = now();
       let yields = 0;
       if (mode === 'full') {
+        lastPullAttemptAt = now();
         // A pull that yielded to an own payment (after a merged page) carries on here, after it, from its checkpoint.
         while ((await deps.pull()) === 'yielded') {
           yields++;
@@ -123,6 +147,9 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
           if (stop) return stop;
         }
         pulled = true;
+        pullDone = true;
+        pendingFull = false;
+        lastPullOkAt = now();
       }
       const t1 = now();
       pendingPush = false;
@@ -147,6 +174,7 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     } catch (e) {
       failures++;
       pendingPush = true;
+      if (mode === 'full' && !pullDone) pendingFull = true; // the retry pulls again
       // A backup that answered too slowly (or is still answering): retry within TIMEOUT_BACKOFF_CAP_MS, never at the
       // 30-minute end of the ladder. A push that waits for a transaction to move on: within WAIT_BACKOFF_MS. A Store
       // payment's pushNow never waits for the back-off either way.
@@ -193,7 +221,9 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
     if (pushTimer) clearTimer(pushTimer);
     pushTimer = setTimer(() => {
       pushTimer = null;
-      if (pendingPush) void once('push');
+      // A failed or deferred pull is retried as a pull (full stays full); otherwise the waiting push.
+      if (pendingFull) void once('full');
+      else if (pendingPush) void once('push');
     }, ms);
   }
 
@@ -223,8 +253,33 @@ export function createDeviceSync(deps: DeviceSyncDeps) {
       if (failures === 0) schedule(PUSH_DELAY_MS);
       else pendingPush = true; // a back-off retry is already scheduled and will carry it
     },
+    /**
+     * Pull (a full sync) when the last good pull is older than `maxAgeMs`: the open wallet's timer (PULL_STALE_MS every
+     * PULL_TIMER_MS) and a wallet page coming to the front (FOREGROUND_STALE_MS). Paced: at most one per PULL_MIN_GAP_MS,
+     * never past a failure's back-off (its retry is already a pull), never while a pull runs; a site mid-action defers it
+     * (retried as a pull). Resolves null when it didn't start one.
+     */
+    pullIfStale: (maxAgeMs = PULL_STALE_MS): Promise<DeviceSyncResult> | null => {
+      if (!deps.applies()) return null;
+      const t = now();
+      if (lastPullOkAt !== undefined && t - lastPullOkAt < maxAgeMs) return null;
+      if (running && runningMode === 'full') return null;
+      if (failures > 0 && pushTimer) return null; // the back-off's retry is a pull
+      if (t - lastStaleAskAt < PULL_MIN_GAP_MS) return null;
+      lastStaleAskAt = t;
+      return once('full');
+    },
     /** For tests and diagnostics. */
-    state: () => ({ failures, pendingPush, scheduled: !!pushTimer, running: !!running, lastPushOkAt }),
+    state: () => ({
+      failures,
+      pendingPush,
+      pendingFull,
+      scheduled: !!pushTimer,
+      running: !!running,
+      lastPushOkAt,
+      lastPullOkAt: lastPullOkAt ?? 0,
+      lastPullAttemptAt,
+    }),
   };
 }
 
