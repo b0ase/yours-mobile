@@ -13,7 +13,7 @@ const files = { apk: { sha256: H('a'), size: 24_000_000 }, zip: { sha256: H('b')
 
 describe('scripts/write-latest-json.mjs', () => {
   test('keeps the Android updater fields and adds channels the banner reads', () => {
-    const j = buildLatest({ version: '5.2.56', versionCode: 145, ...files });
+    const j = buildLatest({ version: '5.2.56', versionCode: 145, ...files, iosPrivate: true });
     // The Android direct updater (directUpdate.ts) still parses it unchanged.
     expect(parseLatest(j)).toEqual({
       version: '5.2.56',
@@ -34,6 +34,14 @@ describe('scripts/write-latest-json.mjs', () => {
     expect(planNotice({ surface: 'extension', current: '5.2.51', releases: r, dismissed: null, now: 0 })?.version).toBe(
       '5.2.56',
     );
+  });
+  test('ios-private is listed only when asked; otherwise the previous entry stays (blocked iOS build)', () => {
+    const fresh = buildLatest({ version: '5.2.56', versionCode: 145, ...files });
+    expect(fresh.channels['ios-private']).toBeUndefined();
+    expect(parseChannelReleases(fresh)['ios-private']).toBeUndefined();
+    const prev = { versionCode: 144, channels: { 'ios-private': { version: '5.2.54' } } };
+    const kept = buildLatest({ version: '5.2.56', versionCode: 145, ...files, prev });
+    expect(kept.channels['ios-private']).toEqual({ version: '5.2.54' });
   });
   test('carries over other channels from the previous file, never store ones', () => {
     const prev = {
@@ -68,10 +76,10 @@ describe('scripts/write-latest-json.mjs', () => {
 
 describe('scripts/check-owner-builds.sh', () => {
   const SCRIPT = resolve(import.meta.dir, '../../../scripts/check-owner-builds.sh');
-  const fixture = (unpackedVersion: string) => {
+  const fixture = (unpackedVersion: string, folderName = 'bwalletx-extension-5.2.46') => {
     const root = mkdtempSync(join(tmpdir(), 'bwx-chrome-'));
     const chrome = join(root, 'Chrome');
-    const folder = join(root, 'bwalletx-extension-5.2.46');
+    const folder = join(root, folderName);
     mkdirSync(folder, { recursive: true });
     writeFileSync(join(folder, 'manifest.json'), JSON.stringify({ name: 'bWalletX', version: unpackedVersion }));
     const prof = (dir: string, settings: unknown) => {
@@ -108,14 +116,31 @@ describe('scripts/check-owner-builds.sh', () => {
     expect(out).toContain(folder);
     expect(out).toContain('5.2.51  ->  OLD');
     expect(out).toContain('old (Chrome updates it)');
-    expect(out).toContain('not loaded (folder gone)');
-    expect(out).toContain(`cp -R dist/bwalletx-extension-5.2.56/. "${folder}/"`);
+    expect(out).toContain('FOLDER GONE');
+    expect(out).toContain('NEEDS ATTENTION: 1 profile(s)');
+    expect(out).toContain('Load unpacked');
+    expect(out).toContain(`cp -R dist/bwalletx-extension-5.2.56/. ${folder}/`);
+    expect(out).toContain('press Reload in EACH profile');
     expect(out).toContain('NEVER press Remove');
+  });
+  test('folder paths with spaces or quotes are shell-quoted in the printed lines', () => {
+    const { chrome, folder } = fixture('5.2.51', "it's mine $HOME");
+    const out = run(chrome, '5.2.56').stdout.toString();
+    expect(out).toContain(`cp -R dist/bwalletx-extension-5.2.56/. '${folder.replace(/'/g, "'\"'\"'")}/'`);
+  });
+  test('an unreadable Preferences file is reported, not skipped silently', () => {
+    const { chrome } = fixture('5.2.56');
+    writeFileSync(join(chrome, 'Default', 'Preferences'), '{"extensions": {');
+    const out = run(chrome, '5.2.56').stdout.toString();
+    expect(out).toMatch(/WARNING: could not read .*Default\/Preferences/);
   });
   test('passes when every unpacked build is current', () => {
     const { chrome } = fixture('5.2.56');
     const r = run(chrome, '5.2.56');
     expect(r.status).toBe(0);
-    expect(r.stdout.toString()).toContain('All unpacked bWalletX builds are current.');
+    const out = r.stdout.toString();
+    // A gone folder warns but never fails the check.
+    expect(out).toContain('NEEDS ATTENTION');
+    expect(out).toContain('All unpacked bWalletX builds on disk are current.');
   });
 });

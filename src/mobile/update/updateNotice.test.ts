@@ -194,6 +194,8 @@ describe('extension steps', () => {
     const steps = extensionSteps('5.2.56').join(' ');
     expect(steps).toContain('bwalletx-extension-5.2.56.zip');
     expect(steps).toContain('folder this extension already loads from');
+    expect(steps).toContain('Loaded from');
+    expect(steps).toMatch(/don't put the new folder inside the old one/);
     expect(steps).not.toMatch(/\bRemove\b/);
     expect(EXTENSION_NEVER_REMOVE).toMatch(/Don't press Remove/);
   });

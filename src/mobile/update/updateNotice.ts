@@ -168,7 +168,7 @@ export const planNotice = (p: {
  */
 export const extensionSteps = (version: string): string[] => [
   `Download bwalletx-extension-${version}.zip and unzip it.`,
-  'Copy everything inside it into the folder this extension already loads from, replacing the files.',
+  'Copy everything inside it into the folder this extension already loads from, replacing the files. That folder is shown under bWalletX on chrome://extensions (turn on Developer mode, see "Loaded from"). Copy the files themselves: don\'t put the new folder inside the old one.',
   'Come back here and tap Reload (or press ↻ on bWalletX in chrome://extensions).',
 ];
 export const EXTENSION_NEVER_REMOVE =

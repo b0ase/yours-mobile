@@ -7,8 +7,9 @@
 #
 # release-version defaults to the extension version in https://bwalletx.com/download/latest.json, else this repo's
 # package.json. Exit 1 when any profile loads an unpacked build older than that. Chrome Web Store installs are listed
-# but never fail the check (Chrome updates them; the Web Store trails review), nor do profiles whose unpacked folder
-# no longer exists (Chrome loads nothing there).
+# but never fail the check (Chrome updates them; the Web Store trails review). Profiles whose unpacked folder no
+# longer exists are listed under NEEDS ATTENTION (warn, exit unchanged): their wallet records still exist under the
+# fixed ID, so restore a build there (or Load unpacked the release folder), then Reload; never Remove.
 # CHROME_DIR overrides ~/Library/Application Support/Google/Chrome (tests).
 set -euo pipefail
 
@@ -25,7 +26,7 @@ if [ -z "$RELEASE" ]; then
 fi
 
 exec python3 - "$CHROME_DIR" "$RELEASE" <<'PY'
-import glob, json, os, re, sys
+import glob, json, os, re, shlex, sys
 
 chrome, release = sys.argv[1], sys.argv[2]
 # bWalletX extension IDs: the unpacked build (fixed by the manifest `key`, scripts/build.ts) and the Web Store listing.
@@ -39,11 +40,18 @@ def older(a, b):
     n = max(len(x), len(y))
     return x + [0] * (n - len(x)) < y + [0] * (n - len(y))
 
-def load(path):
+unreadable = []
+
+def load(path, note=True):
+    """A missing file is {}; one that exists but won't parse (Chrome mid-write) is {} AND reported."""
+    if not os.path.exists(path):
+        return {}
     try:
         with open(path) as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        if note:
+            unreadable.append((path, type(e).__name__))
         return {}
 
 names = {}
@@ -51,7 +59,7 @@ local_state = load(os.path.join(chrome, "Local State"))
 for prof, info in ((local_state.get("profile") or {}).get("info_cache") or {}).items():
     names[prof] = info.get("name", "")
 
-rows, stale = [], []
+rows, stale, gone = [], [], []
 def natural(p):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", os.path.basename(p))]
 
@@ -67,6 +75,7 @@ for prof_dir in sorted(glob.glob(os.path.join(chrome, "*")), key=natural):
         unpacked = s.get("location") == 4
         folder = path if os.path.isabs(path) else os.path.join(prof_dir, "Extensions", path)
         if unpacked and not manifest:
+            # Unpacked: this is the manifest ON DISK, not necessarily what Chrome has loaded (see the Reload note).
             manifest = load(os.path.join(folder, "manifest.json"))
         name = str(manifest.get("name", ""))
         if not (ext_id in KNOWN or "bwallet" in path.lower() or re.search(r"bwallet", name, re.I)):
@@ -76,19 +85,24 @@ for prof_dir in sorted(glob.glob(os.path.join(chrome, "*")), key=natural):
         kind = "unpacked" if unpacked else ("web store" if s.get("from_webstore") or ext_id in KNOWN else "other")
         disabled = bool(s.get("disable_reasons")) or s.get("state") == 0
         if unpacked and not exists:
-            status = "not loaded (folder gone)"
+            status = "FOLDER GONE (Chrome shows it in error; its wallet records still exist)"
+            gone.append((prof, names.get(prof, ""), folder))
         elif not version:
             status = "UNKNOWN"
         elif older(version, release):
             status = "OLD" if unpacked else "old (Chrome updates it)"
         else:
-            status = "ok"
+            status = "ok on disk" if unpacked else "ok"
         if unpacked and status in ("OLD", "UNKNOWN"):
             stale.append((prof, folder, version))
         rows.append((prof, names.get(prof, ""), ext_id, kind, folder, version or "?", status, disabled))
 
 print(f"bWalletX release: {release}")
 print(f"Chrome profiles: {chrome}\n")
+for path, err in unreadable:
+    print(f"WARNING: could not read {path} ({err}); Chrome may be writing it. Its profile may be missing below; run again.")
+if unreadable:
+    print()
 if not rows:
     print("No bWalletX extension found in any profile.")
 for prof, name, ext_id, kind, folder, version, status, disabled in rows:
@@ -98,16 +112,32 @@ for prof, name, ext_id, kind, folder, version, status, disabled in rows:
     print(f"  folder   {folder}")
     print(f"  version  {version}  ->  {status}\n")
 
+src = f"dist/bwalletx-extension-{release}/."
+if gone:
+    # Warn, never fail: nothing old is running there, but the owner must act before anyone presses Remove.
+    print(f"NEEDS ATTENTION: {len(gone)} profile(s) point at an unpacked folder that no longer exists.")
+    print("Chrome lists bWalletX there in error with a Remove button; the wallet records are still kept under the")
+    print("fixed extension ID. For each one, either:")
+    print("  a) put a build back at that exact path, then Reload in that profile:")
+    for folder in sorted({f for _, _, f in gone}):
+        print(f"       mkdir -p {shlex.quote(folder)} && cp -R {shlex.quote(src)} {shlex.quote(folder + '/')}")
+    print(f"  b) or chrome://extensions > Load unpacked > choose dist/bwalletx-extension-{release}/ (same key, so the same")
+    print("     ID and the same wallet), then Reload.")
+    print("  NEVER press Remove: it deletes that profile's wallet records.\n")
+
 if stale:
-    print(f"{len(stale)} profile(s) load an older unpacked bWalletX than {release}.\n")
+    print(f"{len(stale)} profile(s) have an older unpacked bWalletX than {release} in their folder.\n")
     print("Update each folder IN PLACE (same folder = same extension ID + key = same wallet data):")
     print(f"  1. Build or unzip the release: dist/bwalletx-extension-{release}/ (or bwalletx-extension-{release}.zip).")
-    print("  2. Copy the new build over the loaded folder, e.g.")
+    print("  2. Copy the new build over the loaded folder (its contents, not the folder inside it):")
     for folder in sorted({f for _, f, _ in stale}):
-        print(f'       cp -R dist/bwalletx-extension-{release}/. "{folder}/"')
+        print(f"       cp -R {shlex.quote(src)} {shlex.quote(folder + '/')}")
     print("  3. In each profile: chrome://extensions > bWalletX > Reload (the ↻ arrow), or the banner's Reload button.")
     print("  NEVER press Remove: it deletes that profile's wallet records. The folder name may stay old; the")
-    print("  manifest version inside is what counts (this script reads it).")
+    print("  manifest version inside is what counts.")
+print("NOTE: for unpacked builds this reads manifest.json on disk, not what Chrome has loaded. After copying a new")
+print("build in, press Reload in EACH profile listed above, or Chrome keeps running the old code.")
+if stale:
     sys.exit(1)
-print("All unpacked bWalletX builds are current.")
+print("All unpacked bWalletX builds on disk are current." + (" (See NEEDS ATTENTION above.)" if gone else ""))
 PY

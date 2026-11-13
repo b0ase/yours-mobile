@@ -5,7 +5,11 @@
  * reads them unchanged) plus a `channels` map that the "newer bWalletX" banner reads (src/mobile/update/updateNotice.ts).
  *
  *   node scripts/write-latest-json.mjs <version> <versionCode> --site <bwalletx-site dir>
- *        [--sums dist/SHA256SUMS-direct] [--dry-run]
+ *        [--sums dist/SHA256SUMS-direct] [--ios-private] [--dry-run]
+ *
+ * --ios-private: also list this version for the Ad Hoc iOS build. Pass it only when the ios-private archive was built
+ * and installed this release; without it the previous ios-private entry (if any) is kept, so a blocked iOS build is
+ * never advertised.
  *
  * Before writing it checks that the site already holds download/bwalletx-android-<version>.apk and
  * download/bwalletx-extension-<version>.zip (step 7 copies them first), and that the APK's SHA-256 equals the
@@ -39,7 +43,7 @@ export const sumFor = (sumsText, version) => {
  * The latest.json object. `prev` is the current file (or null); its non-store channels other than the four written
  * here are kept. Throws on a bad version, versionCode or hash so a broken file is never published.
  */
-export const buildLatest = ({ version, versionCode, apk, zip, prev = null }) => {
+export const buildLatest = ({ version, versionCode, apk, zip, prev = null, iosPrivate = false }) => {
   if (!VERSION.test(String(version))) throw new Error(`bad version: ${version}`);
   if (!Number.isInteger(versionCode) || versionCode <= 0) throw new Error(`bad versionCode: ${versionCode}`);
   for (const [what, f] of [
@@ -77,7 +81,7 @@ export const buildLatest = ({ version, versionCode, apk, zip, prev = null }) => 
         notes_url,
       },
       'android-direct': { version, versionCode, notes_url },
-      'ios-private': { version, notes_url },
+      ...(iosPrivate ? { 'ios-private': { version, notes_url } } : {}),
       web: { version, notes_url },
     },
   };
@@ -98,14 +102,19 @@ const main = (argv) => {
     args.splice(i, 2);
     return v;
   };
-  const dry = args.includes('--dry-run');
-  if (dry) args.splice(args.indexOf('--dry-run'), 1);
+  const bool = (name) => {
+    const i = args.indexOf(name);
+    if (i >= 0) args.splice(i, 1);
+    return i >= 0;
+  };
+  const dry = bool('--dry-run');
+  const iosPrivate = bool('--ios-private');
   const site = flag('--site');
   const sums = flag('--sums');
   const [version, codeStr] = args;
   if (!version || !codeStr || !site) {
     console.error(
-      'usage: node scripts/write-latest-json.mjs <version> <versionCode> --site <bwalletx-site> [--sums SHA256SUMS-direct] [--dry-run]',
+      'usage: node scripts/write-latest-json.mjs <version> <versionCode> --site <bwalletx-site> [--sums SHA256SUMS-direct] [--ios-private] [--dry-run]',
     );
     process.exit(2);
   }
@@ -123,7 +132,7 @@ const main = (argv) => {
   }
   const out = join(dl, 'latest.json');
   const prev = existsSync(out) ? JSON.parse(readFileSync(out, 'utf8')) : null;
-  const latest = buildLatest({ version, versionCode: Number(codeStr), apk, zip: fileInfo(zipPath), prev });
+  const latest = buildLatest({ version, versionCode: Number(codeStr), apk, zip: fileInfo(zipPath), prev, iosPrivate });
   const text = `${JSON.stringify(latest, null, 2)}\n`;
   if (!dry) writeFileSync(out, text);
   process.stdout.write(text);
