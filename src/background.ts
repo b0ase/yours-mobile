@@ -186,6 +186,8 @@ import {
   type AutoResyncReader,
   type WocAnswer,
 } from './services/autoCoinResync';
+import { SELF_CHECK_EVENT, createSelfCheckRunner, type SelfCheckRead } from './services/selfCheck';
+import { cleanCommit, manifestVersion } from './utils/versionLabel';
 import { withCoinResyncLock } from './services/coinResyncLock';
 import { payTimer } from './services/payTiming';
 import { ownPayments } from './services/ownPayments';
@@ -480,6 +482,7 @@ async function autoResyncDeps(
   ctx: AccountContext,
   identityKey: string,
   cleared: Record<string, string>,
+  onRead?: (read: SelfCheckRead) => void,
 ): Promise<AutoResyncDeps | null> {
   const txo = (
     ctx.syncContext.services as unknown as {
@@ -500,6 +503,7 @@ async function autoResyncDeps(
     [...PENDING_STATUSES],
   );
   if (!read) return null;
+  onRead?.(read);
   const { userId } = read;
   const setSpendable = (outpoint: string, spendable: boolean, spender?: string) =>
     ctx.storage.runAsStorageProvider(async (sp) => {
@@ -910,8 +914,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     void localReady.finally(() => {
       if (storageSwitch === localReady) storageSwitch = null;
     });
-    // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check the default basket
-    // at most every 30 minutes per account (persisted), fail closed (services/autoCoinResync.ts). Off the unlock path:
+    // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check the default and
+    // deposit baskets: at least a light run at every unlock (the self-check, services/selfCheck.ts), a full one at
+    // most every 30 minutes per account (persisted), fail closed (services/autoCoinResync.ts). Off the unlock path:
     // after this device's store is active, and a while after unlock so the first balance read and the address sync
     // are not queued behind its scan of every coin (owner's big wallet, 19 Oct 2026).
     {
@@ -919,7 +924,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       void localReady
         .then(() => new Promise((r) => setTimeout(r, AUTO_RESYNC_DELAY_MS)))
         // Locked or switched account since: skip (the timer and the next foreground try again).
-        .then(() => (lockGeneration !== gen || accountContext !== ctx ? undefined : maybeAutoCoinResync()));
+        .then(() =>
+          lockGeneration !== gen || accountContext !== ctx ? undefined : maybeAutoCoinResync(false, true),
+        );
     }
     void (async () => {
       await localReady;
@@ -1956,38 +1963,73 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (pageHidden() === false) maybeResyncAddresses();
 });
 
-/**
+/*
  * Coins spent elsewhere (another device, same seed) stay "spendable" here until checked (services/autoCoinResync.ts).
  * A full check at most every 30 min, a light batched-index check at most every 5 min, per account (persisted). Runs
  * after unlock, on a timer, and when the app or popup comes to the front (COIN_CHECK_DUE), so the balance drops by
  * itself without REFRESH WALLET (owner, 29 Oct 2026: phone $3.47 vs extension $1.95, same account). Never throws.
  */
-let autoCoinResyncBusy = false;
-/** foreground: the app/popup came to the front; with no run due, the biggest coins are still checked (≤ once a minute). */
-const maybeAutoCoinResync = async (foreground = false): Promise<void> => {
-  const ctx = accountContext;
-  if (!ctx || autoCoinResyncBusy) return;
-  const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
-  if (!key) return;
-  autoCoinResyncBusy = true;
+/** The self-check's build stamp (services/selfCheck.ts fingerprint): the version, and the commit where known. */
+const selfCheckBuildId = () => {
+  const commit = typeof __BUILD_COMMIT__ === 'string' ? cleanCommit(__BUILD_COMMIT__) : '';
+  return commit ? `${manifestVersion()} · ${commit}` : manifestVersion();
+};
+const unlockedIdentityKey = (): string => {
   try {
-    const r = await runAutoResyncIfDue(
-      key,
-      { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
-      (cleared) => (accountContext === ctx ? autoResyncDeps(ctx, key, cleared) : Promise.resolve(null)),
-      Date.now(),
-      { foreground },
-    );
-    if (r && (r.released || r.restored)) {
-      console.warn('[background] auto coin resync:', r);
-      notifyBalanceUpdate();
-    }
-  } catch (err) {
-    console.error('[background] auto coin resync failed:', err);
-  } finally {
-    autoCoinResyncBusy = false;
+    return chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
+  } catch {
+    return '';
   }
 };
+const selfCheckKv = {
+  get: (k: string) => chrome.storage.local.get(k),
+  set: (items: Record<string, unknown>) => chrome.storage.local.set(items),
+};
+/**
+ * The coin check and its self-check result (services/selfCheck.ts createSelfCheckRunner): one run at a time, a call
+ * while busy queues one follow-up, the result is stored per account and announced to open pages only while that
+ * account is still the unlocked one.
+ * foreground: the app/popup came to the front; with no run due, the biggest coins are still checked (≤ once a minute).
+ * unlock: a light run when the last one is older than AUTO_RESYNC_UNLOCK_FLOOR_MS, else the stored result again.
+ */
+const runSelfCheck = createSelfCheckRunner<AccountContext>({
+  kv: selfCheckKv,
+  current: () => {
+    const ctx = accountContext;
+    const key = unlockedIdentityKey();
+    return ctx && key ? { key, ctx } : null;
+  },
+  isCurrent: (key, ctx) => accountContext === ctx && unlockedIdentityKey() === key,
+  run: (key, ctx, o, onRead) =>
+    runAutoResyncIfDue(
+      key,
+      selfCheckKv,
+      (cleared) => (accountContext === ctx ? autoResyncDeps(ctx, key, cleared, onRead) : Promise.resolve(null)),
+      Date.now(),
+      o,
+    ),
+  buildId: selfCheckBuildId,
+  announce: (result) => {
+    if (result.differsBySats || result.unsentHolds.count || result.stuckSyncs)
+      console.warn('[background] self-check:', {
+        differsBySats: result.differsBySats,
+        mismatches: result.mismatchCount,
+        unsentHolds: result.unsentHolds,
+        stuckSyncs: result.stuckSyncs,
+      });
+    chrome.runtime.sendMessage({ action: SELF_CHECK_EVENT, data: result }).catch(() => undefined);
+  },
+  onChanged: (r) => {
+    console.warn('[background] auto coin resync:', { released: r.released, restored: r.restored });
+    notifyBalanceUpdate();
+  },
+  accounts: () =>
+    Object.values(chromeStorageService.storage?.accounts ?? {})
+      .map((a) => a?.pubKeys?.identityPubKey)
+      .filter((k): k is string => !!k),
+  onError: (err) => console.error('[background] auto coin resync failed:', err),
+});
+const maybeAutoCoinResync = (foreground = false, unlock = false): Promise<void> => runSelfCheck({ foreground, unlock });
 chrome.alarms.create(AUTO_COIN_RESYNC_ALARM, { periodInMinutes: AUTO_RESYNC_LIGHT_GAP_MS / 60_000 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeAutoCoinResync();

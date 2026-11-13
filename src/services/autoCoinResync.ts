@@ -1,9 +1,11 @@
 /**
- * Automatic check of the default basket's coins against the chain, at unlock (owner's iPhone, 19 Oct 2026: ~$51 of
- * coins spent from another device holding the same seed still showed as balance, found one failed send at a time).
+ * Automatic check of the default (and deposit) basket's coins against the chain, at unlock (owner's iPhone, 19 Oct
+ * 2026: ~$51 of coins spent from another device holding the same seed still showed as balance, found one failed send
+ * at a time).
  *
  * Stricter than the manual Resync coins, because nobody asked for it:
- * - Only the default basket. Tokens, locks and OrdLocks are left to Repair Sync's token-aware passes.
+ * - Only the default basket and the deposit basket ('1sat-deposit', counted in the balance; self-check, 13 Nov 2026).
+ *   Tokens, locks and OrdLocks are left to Repair Sync's token-aware passes.
  * - A spender counts from the 1sat spend index (batched, 429 backoff; it can name a mempool spend, which the restore
  *   pass below undoes if that spend is dropped) only when WhatsOnChain names the same spender (mainnet; elsewhere the
  *   index alone), or else a CONFIRMED WhatsOnChain spend ("status": "confirmed" on
@@ -19,6 +21,7 @@
  *   WhatsOnChain spend, or when both sources name the same spender.
  * Any lookup that fails leaves the coin as it is.
  */
+import { DEPOSIT_BASKET, FUNDING_BASKET } from '@1sat/types';
 import { mapPool, withRetry } from './storageReconcile';
 import { withCoinResyncLock } from './coinResyncLock';
 
@@ -144,11 +147,39 @@ export function bigCoins(
   return out;
 }
 
+/**
+ * What a run found that differs between the wallet's records and the chain (the self-check, services/selfCheck.ts):
+ *  - 'marked-spent': spent on chain under the rule above; the records were fixed in this run.
+ *  - 'restored': cleared earlier, both lookups now call it unspent; back to spendable in this run.
+ *  - 'unconfirmed-spend': a lookup names a spender (not one of the wallet's own actions) but the rule could not clear
+ *    it (the sources disagree, or the spend is unconfirmed). Left as it is; the records may differ from the chain.
+ *  - 'update-failed': cleared by the rule but writing it to storage failed. Left as it is; the next run tries again.
+ */
+export type CoinMismatchKind = 'marked-spent' | 'restored' | 'unconfirmed-spend' | 'update-failed';
+export type CoinMismatch = { outpoint: string; sats: number; kind: CoinMismatchKind };
+
 export type AutoResyncReport = {
   checked: number;
   released: number;
   restored: number;
   cleared: Record<string, string>;
+  /** The run's mode (full / light / foreground). */
+  mode?: AutoResyncMode;
+  /** Coins whose records differ (or differed, before this run fixed them) from the chain. */
+  mismatches?: CoinMismatch[];
+  /**
+   * Coins this run could not verify to its level (`verifiedBy`), left as they are: the index failed (whatever
+   * WhatsOnChain said), the index named a spender and WhatsOnChain failed, or (full runs) WhatsOnChain failed.
+   */
+  unchecked?: number;
+  /**
+   * How far every checked coin was verified: 'index+woc' (a full run with WhatsOnChain: each coin the index calls
+   * unspent was also looked up on WhatsOnChain), else 'index' (a light run, or no WhatsOnChain off mainnet: coins the
+   * index calls unspent were taken at its word, apart from the biggest).
+   */
+  verifiedBy?: 'index' | 'index+woc';
+  /** Coins the rule cleared that storage no longer listed as spendable (an in-flight send got there first). */
+  gone?: string[];
 };
 
 /** Pure core. Never throws for lookup failures (fail closed per coin). */
@@ -194,22 +225,52 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
   const cleared = { ...d.cleared };
   let released = 0;
   let restored = 0;
+  let unchecked = 0;
+  const mismatches: CoinMismatch[] = [];
+  const gone: string[] = [];
+  const satsOf = (o: string) => (Number(d.sats?.[o]) > 0 ? Number(d.sats![o]) : 0);
   for (const o of coins) {
     // An index that can't answer leaves a coin alone, except a big one: WhatsOnChain alone can still clear it below,
     // with a confirmed spend.
-    if (!index.has(o) && !big.has(o)) continue;
+    if (!index.has(o) && !big.has(o)) {
+      unchecked++;
+      continue;
+    }
+    // What WhatsOnChain said for this coin, if it was asked (for the self-check's report only, never a verdict).
+    let woc: WocAnswer | undefined;
+    let wocAsked = false;
     // One source never clears a coin on its own; a WhatsOnChain mempool spend alone never does (clearingSpender).
     const by = await clearingSpender(
       index.get(o),
-      d.woc ? () => askWoc(o) : undefined,
+      d.woc
+        ? async () => {
+            wocAsked = true;
+            woc = await askWoc(o);
+            return woc;
+          }
+        : undefined,
       isSpender,
       mode === 'full' || big.has(o),
     );
-    if (!by) continue;
-    const n = await d.markSpent(o, by).catch(() => 0);
+    if (!by) {
+      // Not cleared (no change). For the report only: a spender one lookup names and the other answered against is a
+      // difference we could not settle; a coin a lookup failed for is unchecked, never a difference.
+      const wocFailed = wocAsked && woc === undefined;
+      if (index.has(o) && ((woc && isSpender(woc.txid)) || (isSpender(index.get(o)) && wocAsked && !wocFailed)))
+        mismatches.push({ outpoint: o, sats: satsOf(o), kind: 'unconfirmed-spend' });
+      else if (!index.has(o) || isSpender(index.get(o)) || (wocFailed && mode === 'full')) unchecked++;
+      continue;
+    }
+    const n = await d.markSpent(o, by).catch(() => null);
+    if (n === null) {
+      mismatches.push({ outpoint: o, sats: satsOf(o), kind: 'update-failed' });
+      continue;
+    }
+    if (n === 0) gone.push(o);
     if (n > 0) {
       released += n;
       cleared[o] = by;
+      mismatches.push({ outpoint: o, sats: satsOf(o), kind: 'marked-spent' });
     }
   }
   // Undo: a coin we cleared that both lookups now call unspent goes back to spendable.
@@ -220,7 +281,10 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
     // record of it). Nothing to restore (n = 0: already spendable, or gone) ends the record.
     const n = await d.markUnspent(o).catch(() => null);
     if (n === null) continue;
-    if (n > 0) restored += n;
+    if (n > 0) {
+      restored += n;
+      mismatches.push({ outpoint: o, sats: satsOf(o), kind: 'restored' });
+    }
     delete cleared[o];
   }
   // A coin set aside for a parent the network couldn't find: back as soon as that parent is seen (17d M1).
@@ -230,10 +294,14 @@ export async function autoResyncCoins(d: AutoResyncDeps): Promise<AutoResyncRepo
     if (seen !== true) continue;
     const n = await d.markUnspent(o).catch(() => null);
     if (n === null) continue;
-    if (n > 0) restored += n;
+    if (n > 0) {
+      restored += n;
+      mismatches.push({ outpoint: o, sats: satsOf(o), kind: 'restored' });
+    }
     delete cleared[o];
   }
-  return { checked: coins.length, released, restored, cleared };
+  const verifiedBy = mode === 'full' && d.woc ? 'index+woc' : 'index';
+  return { checked: coins.length, released, restored, cleared, mode, mismatches, unchecked, verifiedBy, gone };
 }
 
 export const AUTO_RESYNC_KEY = 'bwxAutoCoinResync';
@@ -256,15 +324,26 @@ export type AutoResyncState = Record<
   { at?: number; lightAt?: number; fgAt?: number; cleared?: Record<string, string> }
 >;
 
-/** Pure: which run is due now: a full one, a light one, a foreground one (only when asked for), or none. */
+/**
+ * An unlock makes a light run due once this long has passed since the last full or light run. runInitializeWallet
+ * (which says "unlock") also runs on worker cold starts, account switches, storage switches and restores; within the
+ * floor the stored self-check result is announced again instead (services/selfCheck.ts).
+ */
+export const AUTO_RESYNC_UNLOCK_FLOOR_MS = 90_000;
+
+/**
+ * Pure: which run is due now: a full one, a light one, a foreground one (only when asked for), or none. At unlock
+ * (`unlock`) a light run (one batched index pass over every coin, the self-check) is due once
+ * AUTO_RESYNC_UNLOCK_FLOOR_MS has passed since the last run: a fresh result after unlock, not a run per worker restart.
+ */
 export const autoResyncMode = (
   s: { at?: number; lightAt?: number; fgAt?: number } | undefined,
   now: number,
-  o: { foreground?: boolean } = {},
+  o: { foreground?: boolean; unlock?: boolean } = {},
 ): AutoResyncMode | null => {
   if (shouldAutoResync(s?.at, now)) return 'full';
   const last = Math.max(s?.at ?? 0, s?.lightAt ?? 0);
-  if (now - last >= AUTO_RESYNC_LIGHT_GAP_MS) return 'light';
+  if (now - last >= (o.unlock ? AUTO_RESYNC_UNLOCK_FLOOR_MS : AUTO_RESYNC_LIGHT_GAP_MS)) return 'light';
   if (!o.foreground) return null;
   return now - Math.max(last, s?.fgAt ?? 0) >= AUTO_RESYNC_FOREGROUND_GAP_MS ? 'foreground' : null;
 };
@@ -287,7 +366,7 @@ export async function runAutoResyncIfDue(
   kv: KV,
   load: (cleared: Record<string, string>) => Promise<AutoResyncDeps | null>,
   now = Date.now(),
-  o: { foreground?: boolean } = {},
+  o: { foreground?: boolean; unlock?: boolean } = {},
 ): Promise<AutoResyncReport | null> {
   const read = async () => ((await kv.get(AUTO_RESYNC_KEY))[AUTO_RESYNC_KEY] as AutoResyncState | undefined) ?? {};
   const state = await read();
@@ -361,6 +440,11 @@ export const AUTO_RESYNC_DELAY_MS = 45_000;
 export const AUTO_RESYNC_PAGE = 500;
 
 type Row = { txid?: string; vout: number; satoshis?: number; spendable: boolean; spentBy?: number | null };
+
+/** The baskets the check covers: managed change and the deposit basket (both count in the balance). */
+export const AUTO_RESYNC_BASKETS = [FUNDING_BASKET, DEPOSIT_BASKET] as const;
+/** Statuses of the wallet's own actions that were never sent: their inputs are held ("unsent holds"). */
+export const UNSENT_HOLD_STATUSES = ['nosend', 'unsigned'] as const;
 /** The few reads the check needs from the active store (a WalletStorageProvider reader). */
 export interface AutoResyncReader {
   findUsers: (a: { partial: { identityKey: string } }) => Promise<{ userId: number }[]>;
@@ -374,23 +458,29 @@ export interface AutoResyncReader {
     partial: { userId: number };
     status: string[];
     noRawTx: true;
-  }) => Promise<{ transactionId: number; txid?: string }[]>;
+  }) => Promise<{ transactionId: number; txid?: string; status?: string }[]>;
+  /** This device's sync states (a StorageProvider has it); for the self-check's stuck-sync count. */
+  findSyncStates?: (a: { partial: { userId: number } }) => Promise<unknown[]>;
 }
 
 export type AutoResyncRead = {
   userId: number;
   coins: string[];
-  /** Satoshis of each spendable coin (for bigCoins). */
+  /** Satoshis of each coin read (spendable or not; bigCoins only looks at the spendable ones). */
   sats: Record<string, number>;
   ownPendingTxids: Set<string>;
   ownPendingInputs: Set<string>;
+  /** The wallet's own never-sent actions (nosend / unsigned) holding coins in these baskets: how many, their sats. */
+  holds: { count: number; sats: number };
+  /** This device's sync state rows (for the stuck-sync count); undefined when they couldn't be read. */
+  syncStates?: unknown[];
 };
 
 /**
- * Read the default basket's coins for the check, cheaply: reader locks only (never the storage-provider lock that
- * also blocks writers and sync), no locking scripts, one pass over the basket in pages with the lock released between
- * pages. Null when the device's own store is not active (remote-active web/native before the switch) or the
- * account/basket is not there yet.
+ * Read the default and deposit baskets' coins for the check, cheaply: reader locks only (never the storage-provider
+ * lock that also blocks writers and sync), no locking scripts, one pass over each basket in pages with the lock
+ * released between pages. Null when the device's own store is not active (remote-active web/native before the switch)
+ * or the account/baskets are not there yet.
  */
 export async function readAutoResyncCoins(
   storage: {
@@ -400,46 +490,75 @@ export async function readAutoResyncCoins(
   identityKey: string,
   pendingStatuses: string[],
   page = AUTO_RESYNC_PAGE,
+  baskets: readonly string[] = AUTO_RESYNC_BASKETS,
 ): Promise<AutoResyncRead | null> {
   if (!storage.isActiveStorageProvider()) return null;
   const head = await storage.runAsReader(async (r) => {
     const user = (await r.findUsers({ partial: { identityKey } }))[0];
     if (!user) return null;
-    const [basket] = await r.findOutputBaskets({ partial: { userId: user.userId, name: 'default' } });
-    if (!basket) return null;
+    const basketIds: number[] = [];
+    for (const name of baskets) {
+      const [basket] = await r.findOutputBaskets({ partial: { userId: user.userId, name } });
+      if (basket) basketIds.push(basket.basketId);
+    }
+    // Neither basket there yet: nothing to check.
+    if (!basketIds.length) return null;
     const pending = await r.findTransactions({
       partial: { userId: user.userId },
       status: pendingStatuses,
       noRawTx: true,
     });
-    return { userId: user.userId, basketId: basket.basketId, pending };
+    // Only for the self-check's report: a failure here never stops the coin check.
+    let syncStates: unknown[] | undefined;
+    if (typeof r.findSyncStates === 'function')
+      syncStates = await r.findSyncStates({ partial: { userId: user.userId } }).catch(() => undefined);
+    return { userId: user.userId, basketIds, pending, syncStates };
   });
   if (!head) return null;
   const pendingIds = new Set(head.pending.map((t) => t.transactionId));
+  const unsentIds = new Set(
+    head.pending
+      .filter((t) => (UNSENT_HOLD_STATUSES as readonly string[]).includes(String(t.status)))
+      .map((t) => t.transactionId),
+  );
   const ownPendingTxids = new Set(head.pending.map((t) => t.txid).filter((t): t is string => !!t));
   const coins: string[] = [];
   const sats: Record<string, number> = {};
   const ownPendingInputs = new Set<string>();
-  for (let offset = 0; ; offset += page) {
-    // The store may switch (or lock) between pages: stop rather than read another store.
-    if (!storage.isActiveStorageProvider()) return null;
-    const rows = await storage.runAsReader((r) =>
-      r.findOutputs({
-        partial: { userId: head.userId, basketId: head.basketId },
-        noScript: true,
-        paged: { limit: page, offset },
-      }),
-    );
-    for (const o of rows) {
-      if (!o.txid) continue;
-      const op = `${o.txid}_${o.vout}`;
-      if (o.spendable) {
-        coins.push(op);
+  const holdTxs = new Set<number>();
+  let holdSats = 0;
+  for (const basketId of head.basketIds) {
+    for (let offset = 0; ; offset += page) {
+      // The store may switch (or lock) between pages: stop rather than read another store.
+      if (!storage.isActiveStorageProvider()) return null;
+      const rows = await storage.runAsReader((r) =>
+        r.findOutputs({
+          partial: { userId: head.userId, basketId },
+          noScript: true,
+          paged: { limit: page, offset },
+        }),
+      );
+      for (const o of rows) {
+        if (!o.txid) continue;
+        const op = `${o.txid}_${o.vout}`;
         sats[op] = Number(o.satoshis) || 0;
+        if (o.spendable) coins.push(op);
+        if (o.spentBy != null && pendingIds.has(o.spentBy)) ownPendingInputs.add(op);
+        if (o.spentBy != null && unsentIds.has(o.spentBy)) {
+          holdTxs.add(o.spentBy);
+          holdSats += sats[op];
+        }
       }
-      if (o.spentBy != null && pendingIds.has(o.spentBy)) ownPendingInputs.add(op);
+      if (rows.length < page) break;
     }
-    if (rows.length < page) break;
   }
-  return { userId: head.userId, coins, sats, ownPendingTxids, ownPendingInputs };
+  return {
+    userId: head.userId,
+    coins,
+    sats,
+    ownPendingTxids,
+    ownPendingInputs,
+    holds: { count: holdTxs.size, sats: holdSats },
+    syncStates: head.syncStates,
+  };
 }
