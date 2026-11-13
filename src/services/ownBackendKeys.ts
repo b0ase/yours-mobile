@@ -49,16 +49,59 @@ export const isFirstPartyHost = (url: string | undefined) => {
 };
 
 /**
- * The storage stores a WalletStorageManager has in use: each remote store's server key once its StorageClient has
- * connected (AuthFetch verified it); a remote on a host not seeded above is pending until then.
+ * How long a configured server that hasn't connected (and whose key was never saved) keeps sites' BRC-103 signing
+ * refused (polish, 13 Nov 2026). Past it the guard stops waiting: a custom backup that never connects must not block
+ * every site for the whole session. The small risk this leaves: a server the wallet itself has never reached, on this
+ * device or any earlier session, isn't protected after the first two minutes; once the wallet reaches it, its key is
+ * saved and protected for good.
  */
-export const storageServers = (storage: unknown): OwnServer[] =>
+export const OWN_SERVER_PENDING_MS = 2 * 60_000;
+
+// Keys the wallet's own clients verified for configured hosts this session (origin -> key). Covers the moment the SDK
+// drops a stale session (its peer entry goes, the key mustn't) and each new bMail client before it reconnects.
+const verified = new Map<string, string>();
+const validKey = (k: unknown): string | null =>
+  typeof k === 'string' && PUBKEY.test(k.trim().toLowerCase()) ? k.trim().toLowerCase() : null;
+
+/** One configured host: the live key if its client has one, else this session's, else the saved one, else pending. */
+const configuredServer = (
+  url: string,
+  authFetch: unknown,
+  opts: { saved?: string | null; onLearn?: (origin: string, key: string) => void; pendingUntil?: number },
+): OwnServer[] => {
+  const origin = originOf(url);
+  const live = validKey(peerKeyOf(authFetch, url));
+  const saved = validKey(opts.saved);
+  if (origin && live) {
+    if (verified.get(origin) !== live) verified.set(origin, live);
+    if (live !== saved) opts.onLearn?.(origin, live);
+  }
+  const keys = [...new Set([live, origin ? verified.get(origin) : undefined, saved].filter((k): k is string => !!k))];
+  if (keys.length) return keys.map((key) => ({ key }));
+  const waiting = opts.pendingUntil === undefined || Date.now() < opts.pendingUntil;
+  return [{ key: null, pending: waiting && !isFirstPartyHost(url) }];
+};
+
+/**
+ * The storage stores a WalletStorageManager has in use: each remote store's server key once its StorageClient has
+ * connected (AuthFetch verified it), or the key saved when it first did (`saved`, origin -> key, kept in the account's
+ * storage config; `onLearn` saves a new one). A remote on a host not seeded above, with neither, is pending until
+ * `pendingUntil`.
+ */
+export const storageServers = (
+  storage: unknown,
+  opts: { saved?: Record<string, string>; onLearn?: (origin: string, key: string) => void; pendingUntil?: number } = {},
+): OwnServer[] =>
   ((storage as { _stores?: { storage?: { endpointUrl?: string; authClient?: unknown } }[] } | null)?._stores ?? [])
     .map((m) => m.storage)
-    .filter((c): c is { endpointUrl?: string; authClient?: unknown } => !!c && typeof c.endpointUrl === 'string')
-    .map((c) => {
-      const key = peerKeyOf(c.authClient, c.endpointUrl);
-      return { key, pending: !key && !isFirstPartyHost(c.endpointUrl) };
+    .filter((c): c is { endpointUrl: string; authClient?: unknown } => !!c && typeof c.endpointUrl === 'string')
+    .flatMap((c) => {
+      const origin = originOf(c.endpointUrl);
+      return configuredServer(c.endpointUrl, c.authClient, {
+        saved: origin ? opts.saved?.[origin] : undefined,
+        onLearn: opts.onLearn,
+        pendingUntil: opts.pendingUntil,
+      });
     });
 
 /** Protocol [2, 'auth message signature']: every @bsv/sdk Peer (BRC-103) signature. */
@@ -97,15 +140,43 @@ export const peerKeyOf = (authFetch: unknown, url: string | undefined): string |
   return typeof key === 'string' ? key : null;
 };
 
+// A bMail host override's key, saved once its client has connected (origin -> key), so later sessions and each new
+// client aren't pending. Written only from the wallet's own client for the configured host.
+const SAVED_HOST_KEYS = 'bwx.own-server-keys';
+const savedHostKeys = (): Record<string, string> => {
+  try {
+    const v = JSON.parse(typeof localStorage === 'undefined' ? '{}' : (localStorage.getItem(SAVED_HOST_KEYS) ?? '{}'));
+    return v && typeof v === 'object' ? (v as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+};
+const saveHostKey = (origin: string, key: string) => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(SAVED_HOST_KEYS, JSON.stringify({ ...savedHostKeys(), [origin]: key }));
+  } catch {
+    /* kept for this session only */
+  }
+};
+
 /**
- * Track the wallet's own client for a configured host (bMail, Spaces doors): its server key counts once connected. A
- * host other than the seeded first-party ones is pending until then.
+ * Track the wallet's own client for a configured host (bMail, Spaces doors): its server key counts once connected, and
+ * is saved for later sessions. A host other than the seeded first-party ones with no key yet is pending, for at most
+ * OWN_SERVER_PENDING_MS from the first time it is tracked.
  */
+const trackedSince = new Map<string, number>();
 export const trackOwnAuthFetch = (name: string, authFetch: unknown, url: string) => {
-  setOwnServerSource(name, () => {
-    const key = peerKeyOf(authFetch, url);
-    return [{ key, pending: !key && !isFirstPartyHost(url) }];
-  });
+  const origin = originOf(url);
+  if (origin && !trackedSince.has(origin)) trackedSince.set(origin, Date.now());
+  const pendingUntil = (origin ? (trackedSince.get(origin) ?? Date.now()) : Date.now()) + OWN_SERVER_PENDING_MS;
+  setOwnServerSource(name, () =>
+    configuredServer(url, authFetch, {
+      saved: origin ? savedHostKeys()[origin] : undefined,
+      onLearn: saveHostKey,
+      pendingUntil,
+    }),
+  );
 };
 
 const ownKeys = (): { keys: Set<string>; pending: boolean } => {
@@ -168,4 +239,8 @@ export const clearLearnedOwnBackends = () => {
 };
 
 /** Tests only. */
-export const _resetOwnBackends = () => sources.clear();
+export const _resetOwnBackends = () => {
+  sources.clear();
+  verified.clear();
+  trackedSince.clear();
+};

@@ -135,3 +135,101 @@ describe("no site signs in as the user to the wallet's own servers (review 13 No
     }
   });
 });
+
+describe('polish (13 Nov 2026): "pending" never sticks', () => {
+  const g = globalThis as Record<string, unknown>;
+  let savedLocal: unknown;
+  beforeEach(() => {
+    savedLocal = g.localStorage;
+    const m = new Map<string, string>();
+    g.localStorage = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    };
+  });
+  afterEach(() => {
+    g.localStorage = savedLocal;
+  });
+  const ORIGIN = 'https://my-backup.example.org';
+
+  test('a custom store that never connects is pending only until its time limit', () => {
+    const storage = { _stores: [{ storage: { endpointUrl: `${ORIGIN}/`, authClient: { peers: {} } } }] };
+    setOwnServerSource('storage', () => storageServers(storage, { pendingUntil: Date.now() + 60_000 }));
+    expect(isOwnBackend(SITE_SERVER_KEY)).toBe(false);
+    const { m } = manager();
+    return Promise.all([
+      expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).rejects.toThrow(OWN_BACKEND_PENDING),
+      (async () => {
+        setOwnServerSource('storage', () => storageServers(storage, { pendingUntil: Date.now() - 1 }));
+        await expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).resolves.toEqual({ signature: [9] });
+      })(),
+    ]);
+  });
+
+  test('its key is saved when it first connects, and a later session uses the saved key (never pending)', async () => {
+    const client = { endpointUrl: ORIGIN, authClient: { peers: {} as Record<string, unknown> } };
+    const storage = { _stores: [{ storage: client }] };
+    const saved: Record<string, string> = {};
+    const learned: [string, string][] = [];
+    const source = () =>
+      storageServers(storage, {
+        saved,
+        onLearn: (o, k) => {
+          learned.push([o, k]);
+          saved[o] = k;
+        },
+        pendingUntil: Date.now() + 60_000,
+      });
+    setOwnServerSource('storage', source);
+    client.authClient.peers[ORIGIN] = { identityKey: CUSTOM_STORAGE_KEY };
+    expect(isOwnBackend(CUSTOM_STORAGE_KEY)).toBe(true);
+    expect(isOwnBackend(CUSTOM_STORAGE_KEY)).toBe(true);
+    expect(learned).toEqual([[ORIGIN, CUSTOM_STORAGE_KEY]]); // saved once
+    // The SDK drops a stale session: its peer entry goes, the key stays.
+    delete client.authClient.peers[ORIGIN];
+    const { m } = manager();
+    await expect(m.createSignature(auth(CUSTOM_STORAGE_KEY), SITE)).rejects.toThrow(OWN_BACKEND_REFUSAL);
+    await expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).resolves.toEqual({ signature: [9] });
+    // A new session (nothing in memory), not connected yet: the saved key counts and nothing is pending.
+    _resetOwnBackends();
+    setOwnServerSource('storage', () => storageServers(storage, { saved, pendingUntil: Date.now() + 60_000 }));
+    await expect(m.createSignature(auth(CUSTOM_STORAGE_KEY), SITE)).rejects.toThrow(OWN_BACKEND_REFUSAL);
+    await expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).resolves.toEqual({ signature: [9] });
+  });
+
+  test('a bMail host override: each new client keeps the key, and later sessions use the saved one', async () => {
+    const host = 'https://mb.selfhost.example';
+    const first = { peers: { [host]: { identityKey: CUSTOM_STORAGE_KEY } } };
+    trackOwnAuthFetch('bmail', first, host);
+    expect(isOwnBackend(CUSTOM_STORAGE_KEY)).toBe(true);
+    // The next mbox() call makes a new client that hasn't connected: not pending, key still refused.
+    trackOwnAuthFetch('bmail', { peers: {} }, host);
+    const { m } = manager();
+    await expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).resolves.toEqual({ signature: [9] });
+    await expect(m.createSignature(auth(CUSTOM_STORAGE_KEY), SITE)).rejects.toThrow(OWN_BACKEND_REFUSAL);
+    // Next session: memory empty, the key saved in localStorage.
+    _resetOwnBackends();
+    trackOwnAuthFetch('bmail', { peers: {} }, host);
+    await expect(m.createSignature(auth(CUSTOM_STORAGE_KEY), SITE)).rejects.toThrow(OWN_BACKEND_REFUSAL);
+    await expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).resolves.toEqual({ signature: [9] });
+  });
+
+  test('a bMail host override that never connects stops waiting after the time limit', async () => {
+    const realNow = Date.now;
+    const t0 = realNow();
+    try {
+      Date.now = () => t0;
+      trackOwnAuthFetch('bmail', { peers: {} }, 'https://never.selfhost.example');
+      const { m } = manager();
+      await expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).rejects.toThrow(OWN_BACKEND_PENDING);
+      // Each new client keeps the first-tracked time, so the limit isn't reset by every mbox() call.
+      Date.now = () => t0 + 60_000;
+      trackOwnAuthFetch('bmail', { peers: {} }, 'https://never.selfhost.example');
+      Date.now = () => t0 + 2 * 60_000 + 1;
+      await expect(m.createSignature(auth(SITE_SERVER_KEY), SITE)).resolves.toEqual({ signature: [9] });
+    } finally {
+      Date.now = realNow;
+    }
+  });
+});

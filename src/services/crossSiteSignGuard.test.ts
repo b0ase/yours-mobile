@@ -891,3 +891,30 @@ describe('B1: userinfo with a space, & or ; still names the host after the @', (
     expect(performance.now() - t).toBeLessThan(250);
   });
 });
+
+// Polish (13 Nov 2026): more than one word, or a bracket or quote, between a soft end and the next '@' is not userinfo.
+describe('polish: a URL followed by an email on the same line names only the URL host', () => {
+  test.each([
+    'Origin: https://good.com contact bob@x.com',
+    'URI: https://good.com sent by bob@x.com',
+    'uri: https://good.com (bob@x.com)',
+    'Sign in at https://good.com\nurl: https://good.com as bob@x.com',
+    'url: https://good.com for $bob (bob@bwalletx.com)',
+    'Origin: https://good.com, account bob@x.com',
+    'Origin: https://good.com | bob@x.com',
+    'Origin: https://good.com - bob@x.com',
+    'site: https://good.com user bob@x.com',
+    'origin: https://good.com user.email: bob@x.com',
+    'origin: https://good.com "email": "bob@x.com"',
+    'origin: https://good.com {"email":"bob@x.com"}',
+  ])('%s: signs for good.com', (msg) => {
+    expect(crossSiteSignRefusal('https://good.com', { data: bytes(msg) })).toBeNull();
+  });
+  test.each([
+    'uri: https://evil.com @good.com/login',
+    'uri: https://evil.com x@good.com/login',
+    'uri: https://evil.com   @good.com/login',
+  ])('%s: still refused for evil.com', (msg) => {
+    expect(crossSiteSignRefusal('https://evil.com', { data: bytes(msg) })).toContain('good.com');
+  });
+});

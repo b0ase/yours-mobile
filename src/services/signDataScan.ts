@@ -176,6 +176,7 @@ type AuthorityIndex = {
   nextAt: Int32Array; // next '@'
   lastAt: Int32Array; // last '@' before
   nextField: Int32Array; // next start of a field: a key after a soft end, followed by '=' or ': '
+  pastSoft: Int32Array; // first position at or after i that is not a soft end (the end of a run of them)
 };
 const authorityIndex = (s: string, isSoft: (c: number) => boolean): AuthorityIndex => {
   const n = s.length;
@@ -183,7 +184,8 @@ const authorityIndex = (s: string, isSoft: (c: number) => boolean): AuthorityInd
   const soft = new Int32Array(n + 1);
   const nextAt = new Int32Array(n + 1);
   const nextField = new Int32Array(n + 1);
-  hard[n] = soft[n] = nextAt[n] = nextField[n] = n;
+  const pastSoft = new Int32Array(n + 1);
+  hard[n] = soft[n] = nextAt[n] = nextField[n] = pastSoft[n] = n;
   const c = (i: number) => s.charCodeAt(i);
   const keyChar = (k: number) =>
     (k >= 65 && k <= 90) || (k >= 97 && k <= 122) || (k >= 48 && k <= 57) || k === 95 || k === 45;
@@ -203,6 +205,7 @@ const authorityIndex = (s: string, isSoft: (c: number) => boolean): AuthorityInd
     soft[i] = isSoft(c(i)) ? i : soft[i + 1];
     nextAt[i] = c(i) === 64 ? i : nextAt[i + 1];
     nextField[i] = fieldAt[i] ? i : nextField[i + 1];
+    pastSoft[i] = isSoft(c(i)) ? pastSoft[i + 1] : i;
   }
   const lastAt = new Int32Array(n + 1);
   let la = -1;
@@ -210,8 +213,9 @@ const authorityIndex = (s: string, isSoft: (c: number) => boolean): AuthorityInd
     lastAt[i] = la;
     if (i < n && c(i) === 64) la = i;
   }
-  return { hard, soft, nextAt, lastAt, nextField };
+  return { hard, soft, nextAt, lastAt, nextField, pastSoft };
 };
+const OPENERS = new Set([...'([{<"\'`'].map((c) => c.charCodeAt(0)));
 const authorityHost = (s: string, from: number, lenient: boolean, idx?: AuthorityIndex): string | null => {
   let head = s.slice(from, from + 48);
   // A blob: URL's origin is the URL inside it.
@@ -234,11 +238,20 @@ const authorityHost = (s: string, from: number, lenient: boolean, idx?: Authorit
   let lastAt: number;
   if (idx) {
     end = idx.hard[at];
-    // Read through soft ends while what follows each is userinfo (an '@' comes before any new field).
+    // Read through soft ends while what follows each is userinfo: one word at most before the '@' ("evil.com @good",
+    // "evil.com x@good"), no new field, and not an opening bracket or quote. "good.com contact bob@x.com" and
+    // "good.com (bob@x.com)" end at the first space (polish, 13 Nov 2026: they named x.com). Admitted gaps: a
+    // userinfo shaped like a field ("evil.com Foo: bar@good"), two words or a bracket ("evil.com (@good").
     // At most 64 steps per value (keeps crafted chains linear); past that the whole run is read as userinfo.
     for (let soft = idx.soft[at], steps = 0; soft < end && steps < 64; soft = idx.soft[soft + 1], steps++) {
       const nextAt = idx.nextAt[soft];
-      if (nextAt >= end || idx.nextField[soft] < nextAt) {
+      const word = idx.pastSoft[soft]; // where the text after this run of soft ends starts
+      if (
+        nextAt >= end ||
+        idx.nextField[soft] < nextAt ||
+        idx.soft[word] < nextAt ||
+        (word < nextAt && OPENERS.has(c0(word)))
+      ) {
         end = soft;
         break;
       }

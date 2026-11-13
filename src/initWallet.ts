@@ -125,7 +125,12 @@ import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
-import { clearLearnedOwnBackends, setOwnServerSource, storageServers } from './services/ownBackendKeys';
+import {
+  clearLearnedOwnBackends,
+  OWN_SERVER_PENDING_MS,
+  setOwnServerSource,
+  storageServers,
+} from './services/ownBackendKeys';
 import { normalizeOriginator, parsePrivateKey, type StoragePaymentHook } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
 import {
@@ -643,8 +648,26 @@ export const initWallet = async (
   // The factory's own storage calls (/account/status, /account/payment) never pay a 402 (storagePaymentGuard.ts).
   if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups })))
     console.error('[initWallet] storage 402 payments are not refused');
-  // The stores this wallet signs in to (its online storage and backups): no site may sign in to them as the user.
-  setOwnServerSource('storage', () => storageServers(storage));
+  // The stores this wallet signs in to (its online storage and backups): no site may sign in to them as the user. Each
+  // store's key is saved in the account's storage config when it first connects, so later sessions aren't pending.
+  const ownerAddress = account?.addresses?.identityAddress;
+  const savedOnce = new Set<string>();
+  const ownStoresSince = Date.now();
+  setOwnServerSource('storage', () =>
+    storageServers(storage, {
+      saved: chromeStorageService.getCurrentAccountObject().account?.storageConfig?.serverKeys,
+      onLearn: (origin, key) => {
+        if (!ownerAddress || savedOnce.has(`${origin} ${key}`)) return;
+        savedOnce.add(`${origin} ${key}`);
+        void chromeStorageService
+          .updateNested('accounts', {
+            [ownerAddress]: { storageConfig: { serverKeys: { [origin]: key } } } as unknown as Account,
+          })
+          .catch(() => savedOnce.delete(`${origin} ${key}`));
+      },
+      pendingUntil: ownStoresSince + OWN_SERVER_PENDING_MS,
+    }),
+  );
   // This device's store stays the enabled active store for its payments, receipts and backup pushes, whatever another
   // device wrote into the backup (P0, 5 Nov 2026: the owner's 1p test was refused with WERR_NOT_ACTIVE after the backup
   // connected late; services/deviceActive.ts). First on the manager, so the later wrappers (the coin check) run over it.
