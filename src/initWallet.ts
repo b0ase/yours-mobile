@@ -845,6 +845,7 @@ export const initWallet = async (
     inFlightFor: pushInFlightFor,
   });
   /** A payment's rows reach the backup before it is broadcast (services/changeWriteAhead.ts); set up below. */
+  // eslint-disable-next-line prefer-const -- assigned once further down; the push closure below can run before that, so a later const would throw (TDZ)
   let writeAhead: ChangeWriteAhead | undefined;
   // How the pulls are doing, for a one-line status (services/syncHealth.ts): the last pull that caught up, stuck.
   const pullHealth = createSyncHealth();
