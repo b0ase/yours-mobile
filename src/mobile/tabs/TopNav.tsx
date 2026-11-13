@@ -123,6 +123,7 @@ const TopNavBar = () => {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [mintOpen, setMintOpen] = useState(false);
   const [pairOpen, setPairOpen] = useState(false);
+  const [pairCli, setPairCli] = useState(false);
   // Phone: ☰ "Scan to connect a website" opens the one Scan sheet (pay codes, people, pairing).
   // Extension keeps the paste-first pairing screen (a desktop can't scan its own screen).
   const [scanOpen, setScanOpen] = useState(false);
@@ -738,7 +739,9 @@ const TopNavBar = () => {
           pairLabel={PAIR_LABEL}
           onPair={() => {
             setToolsOpen(false);
-            openScan();
+            // The owner chose to connect the CLI here, so this scanner accepts a CLI code (the general one refuses it).
+            setPairCli(true);
+            setPairOpen(true);
           }}
         />
       )}
@@ -752,8 +755,10 @@ const TopNavBar = () => {
         <Suspense fallback={null}>
           <PairSheet
             initial={pairLink ?? undefined}
+            allowCli={pairCli}
             onClose={() => {
               setPairOpen(false);
+              setPairCli(false);
               setPairLink(null);
             }}
           />
