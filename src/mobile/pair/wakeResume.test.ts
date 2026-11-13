@@ -79,6 +79,9 @@ keepGlobals('localStorage');
 // A private copy of sessions.ts (see lapseRevoke.test.ts): its started flag, live sockets, hiddenAt and mirror cache
 // would otherwise carry over from whichever pair test ran first.
 const sessions = (await import('./sessions?wakeResume' as string)) as typeof import('./sessions');
+// Leave this copy inert when the file ends: its reconnect timers would otherwise fire during the next file and act on
+// that file's localStorage and WebSocket stubs (bun runs every test file in one process).
+afterAll(() => sessions.__resetPairingForTests());
 const guard = await import('../../services/pairedPromptGuard');
 const { pairedOrigin } = await import('../../services/originKey');
 

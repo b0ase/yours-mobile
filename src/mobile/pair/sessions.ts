@@ -464,7 +464,7 @@ const update = (c: string, patch: Partial<StoredSession>) =>
   save(loadAll().map((s) => (s.c === c ? { ...s, ...patch } : s)));
 
 /** Answered / in-flight / unsent replies per channel (memory only). See replies.ts. */
-const replies = new ReplyBook();
+let replies = new ReplyBook(); // let: __resetPairingForTests swaps in an empty book
 /** Per-channel send chain: frames are sealed and sent one at a time so counters reach the site in order. */
 const sendChains = new Map<string, Promise<void>>();
 
@@ -632,13 +632,14 @@ function attach(l: Live) {
   else ws.onopen = opened;
   ws.onclose = () => {
     if (live.get(stored.c) !== l) return;
+    const at = epoch;
     live.delete(stored.c);
     // Refused before the relay said anything: the relay may hold another of our claims now, so the next try brings
     // the next one (connect).
     if (!l.relayed) claimTry.set(stored.c, (claimTry.get(stored.c) ?? 0) + 1);
     // Still paired: try again (the relay holds frames for 60 s while we're away).
     if (load().some((s) => s.c === stored.c) && document.visibilityState === 'visible')
-      l.retry = setTimeout(() => connect(stored.c), 3000);
+      l.retry = setTimeout(() => at === epoch && connect(stored.c), 3000);
   };
 }
 
@@ -656,6 +657,13 @@ function onUpgradeAnswer(l: Live, session: string, bound: boolean) {
   } else if (l.stored.claim) update(c, { claim: l.stored.claim });
 }
 
+/**
+ * Bumped only by __resetPairingForTests. A reconnect timer or key derivation started before the bump does nothing:
+ * `bun test` runs every file in one process, and a retry left by one file's copy of this module fired during the next
+ * file and acted on that file's localStorage and WebSocket stubs. Never changes in the app.
+ */
+let epoch = 0;
+
 /** Channels whose key is being derived for a reconnect (the socket isn't in `live` until that finishes). */
 const connecting = new Set<string>();
 
@@ -669,9 +677,11 @@ function connect(c: string) {
   const stored = load().find((s) => s.c === c);
   if (!stored) return;
   connecting.add(c);
+  const at = epoch;
   void (async () => {
     try {
       const { key } = await deriveSession(PrivateKey.fromHex(stored.phoneKey), stored.sitePub, stored.c);
+      if (at !== epoch) return; // reset meanwhile (tests only, __resetPairingForTests)
       if (!load().some((s) => s.c === c)) return; // forgotten meanwhile
       const sealer = new Sealer(key, 'wallet');
       sealer.restore({ sent: stored.sent, lastSeen: stored.lastSeen });
@@ -969,4 +979,36 @@ export function closeAllPairings() {
   }
   mirrorSessions([]);
   emit();
+}
+
+/**
+ * Tests only: put this module copy back to its freshly loaded state and make it inert. Live sockets are detached and
+ * closed without a retry, pending reconnect timers and key derivations started earlier do nothing (epoch), and the
+ * open account, revoker and started flag are forgotten, so nothing left behind can read or write the globals the next
+ * test file installs. Stored sessions are left alone (they live in the caller's localStorage stub).
+ */
+export function __resetPairingForTests() {
+  epoch++;
+  for (const l of live.values()) {
+    if (l.retry) clearTimeout(l.retry);
+    l.ws.onclose = null;
+    l.ws.onmessage = null;
+    try {
+      l.ws.close();
+    } catch {
+      /* already gone */
+    }
+  }
+  live.clear();
+  replies = new ReplyBook();
+  claimTry.clear();
+  connecting.clear();
+  sendChains.clear();
+  listeners.clear();
+  agentDeps = { ctx: undefined, currentId: undefined };
+  revoke = defaultRevoke;
+  rateCache = { at: 0, rate: 0 };
+  lastMirror = '';
+  hiddenAt = undefined;
+  started = false;
 }
