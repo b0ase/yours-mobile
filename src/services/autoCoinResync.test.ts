@@ -211,7 +211,8 @@ describe('readAutoResyncCoins (web/native storage, big wallets)', () => {
     const calls = { reads: 0, pages: [] as number[], held: 0, maxHeld: 0 };
     const reader: AutoResyncReader = {
       findUsers: async () => [{ userId: 1 }],
-      findOutputBaskets: async () => [{ basketId: 9 }],
+      // Only the default basket here; the deposit basket has its own test below.
+      findOutputBaskets: async (a) => (a.partial.name === 'default' ? [{ basketId: 9 }] : []),
       findTransactions: async () => [{ transactionId: 77, txid: T('e') }],
       findOutputs: async (a) => {
         calls.pages.push(a.paged.offset);
@@ -250,6 +251,41 @@ describe('readAutoResyncCoins (web/native storage, big wallets)', () => {
     expect(r!.coins.length).toBe(rows.filter((o) => o.spendable).length);
     expect([...r!.ownPendingInputs]).toEqual([`${T('3')}_3`]);
     expect([...r!.ownPendingTxids]).toEqual([T('e')]);
+  });
+
+  test('reads the deposit basket too; counts unsent holds; hands over the sync states', async () => {
+    const dep = T('d');
+    const reader: AutoResyncReader = {
+      findUsers: async () => [{ userId: 1 }],
+      findOutputBaskets: async (a) =>
+        a.partial.name === 'default' ? [{ basketId: 9 }] : a.partial.name === '1sat-deposit' ? [{ basketId: 10 }] : [],
+      findTransactions: async () => [
+        { transactionId: 446, txid: T('4'), status: 'nosend' },
+        { transactionId: 447, txid: T('5'), status: 'sending' },
+      ],
+      findOutputs: async (a) =>
+        a.paged.offset > 0
+          ? []
+          : a.partial.basketId === 9
+            ? [
+                { txid: T('1'), vout: 0, satoshis: 500, spendable: true },
+                { txid: T('2'), vout: 0, satoshis: 700, spendable: false, spentBy: 446 },
+                { txid: T('3'), vout: 0, satoshis: 900, spendable: false, spentBy: 447 },
+              ]
+            : [{ txid: dep, vout: 1, satoshis: 1200, spendable: true }],
+      findSyncStates: async () => [{ syncStateId: 1 }],
+    };
+    const storage = {
+      isActiveStorageProvider: () => true,
+      runAsReader: <X>(f: (r: AutoResyncReader) => Promise<X>) => f(reader),
+    };
+    const r = await readAutoResyncCoins(storage, 'idk', ['nosend', 'sending']);
+    expect(r!.coins).toEqual([`${T('1')}_0`, `${dep}_1`]);
+    expect(r!.sats[`${dep}_1`]).toBe(1200);
+    expect([...r!.ownPendingInputs].sort()).toEqual([`${T('2')}_0`, `${T('3')}_0`]);
+    // Only the never-sent action counts as an unsent hold (a 'sending' one is on its way).
+    expect(r!.holds).toEqual({ count: 1, sats: 700 });
+    expect(r!.syncStates).toEqual([{ syncStateId: 1 }]);
   });
 
   test('store switched mid-read: stops, no verdicts from a half read', async () => {
