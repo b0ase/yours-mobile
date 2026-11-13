@@ -5047,11 +5047,13 @@ if (!(
     if (response.granted) {
       // Grant the permission through the manager
       // No expiry given: the grant lasts GRANT_DEFAULT_DAYS (services/grantExpiry.ts, audit 24 Oct B1), never for ever.
+      // A one-signature request (services/sharedKeySigning.ts) answers that signature only, whatever expiry came back.
       accountContext?.wallet
-        .grantPermission({
-          requestID: response.requestID,
-          expiry: withDefaultExpiry(response.expiry),
-        })
+        .grantPermission(
+          isOneUseRequestID(response.requestID)
+            ? oneUseGrant(response.requestID)
+            : { requestID: response.requestID, expiry: withDefaultExpiry(response.expiry) },
+        )
         .then(() => {
           pending.resolve();
         })

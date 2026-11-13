@@ -4,6 +4,8 @@ import {
   MAIN_VIEW_TARGETS,
   buildFixture,
   cardPictureUri,
+  CLOSE_CHROME_HOOK_MS,
+  closeChrome,
   chromePath,
   launchChrome,
   measure,
@@ -44,9 +46,7 @@ describe.skipIf(!chromePath())('main wallet view in a connected site’s light t
     dir = await buildFixture();
     browser = await launchChrome();
   }, 180_000);
-  afterAll(async () => {
-    await browser?.close();
-  });
+  afterAll(() => closeChrome(browser), CLOSE_CHROME_HOOK_MS);
 
   test('every reported element reads: text 4.5:1, icons 3:1, against what is painted behind it', async () => {
     const page = await openView(browser as Browser, dir, { theme: ARTECHEX, identityPubKey: KEY });
@@ -85,9 +85,7 @@ describe.skipIf(!chromePath())('light packs that now share every light-pack rule
     dir = await buildFixture();
     browser = await launchChrome();
   }, 180_000);
-  afterAll(async () => {
-    await browser?.close();
-  });
+  afterAll(() => closeChrome(browser), CLOSE_CHROME_HOOK_MS);
   for (const pack of ['nautical', 'whiteblack']) {
     test(`${pack}: the main view reads, the red LIVE pill keeps white text`, async () => {
       const page = await openView(browser as Browser, dir, { theme: null, identityPubKey: KEY, pack });
@@ -110,9 +108,7 @@ describe.skipIf(!chromePath())('store edition (yellow card) in every light pack 
     dir = await buildFixture({ store: true });
     browser = await launchChrome();
   }, 180_000);
-  afterAll(async () => {
-    await browser?.close();
-  });
+  afterAll(() => closeChrome(browser), CLOSE_CHROME_HOOK_MS);
   test('the yellow card keeps its black ink and black chips; the rest of the view reads', async () => {
     const bad: string[] = [];
     for (const fx of [

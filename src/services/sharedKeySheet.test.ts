@@ -1,15 +1,19 @@
 /**
- * The connect sheet's protocol lines (b-Aware, Limenelo, 13 Nov 2026, HIGH; Juann E-2, Low).
+ * The connect sheet's protocol lines (b-Aware, Limenelo, 13 Nov 2026, HIGH; Juann E-2, Low; review of ae664e79).
  *
  * Before: every counterparty-'anyone' request was one pre-ticked "Prove it's you (a signature anyone can check)" line
- * on the SIGN IN card, whatever it was for (a decrypt too), and a level-1 sign-in protocol such as [1, 'bitcoin auth']
+ * on the SIGN IN card, whatever it was for (a decrypt too), and a level-1 sign-in protocol such as 'bitcoin auth'
  * (whose grant covers 'anyone' signatures other services accept as you) was a pre-ticked sign-in.
- * After: each line names its operation; keys every app shares are never pre-ticked, are red, and say in words that
- * other sites could accept the signature; our own sign-ins and BRC-103 keep their one tap.
+ * After:
+ *  - each line names its operation;
+ *  - keys every app shares (level 1; level 2 for 'anyone' in any spelling) are never pre-ticked, in calm words;
+ *  - a one-signature request alone on its sheet gets the SIGN ONCE card: one tap, the risk said in words;
+ *  - our own sign-ins and BRC-103 keep their one tap.
  *
  * Requests are built the way the toolbox raises them (usageType set; a level-1 request has no counterparty).
  */
 import { describe, expect, test } from 'bun:test';
+import { PrivateKey } from '@bsv/sdk';
 import { approvalKindForSheet } from './approvalKind';
 import {
   buildSheetModel,
@@ -23,6 +27,7 @@ import {
 import { ProtocolCalls } from './pinnedMint';
 
 const SITE = 'evil.example';
+const G = new PrivateKey(1).toPublicKey().toString();
 const req = (requestID: string, extra: Partial<BundleRequest>): BundleRequest => ({
   requestID,
   type: 'protocol',
@@ -43,77 +48,106 @@ const bitcoinAuth = req('proto:evil.example:false:1,bitcoin auth::signing', {
   protocolID: [1, 'bitcoin auth'],
   usageType: 'signing',
 });
+const once = (id = 'once:evil.example:1,bitcoin auth:x.1') =>
+  req(id, { protocolID: [1, 'bitcoin auth'], usageType: 'signing', oneUse: true });
 
 describe('keys every app shares are never pre-ticked', () => {
-  test("[1, 'bitcoin auth'] signing: unticked, red, careful card, no longer a sign-in", () => {
+  test("level-1 'bitcoin auth' (standing): unticked, no longer a sign-in, one tap grants nothing", () => {
     const s = sheet(bitcoinAuth);
     expect(isSharedKeyRequest(bitcoinAuth)).toBe(true);
     expect(s.line.checked).toBe(false); // was true
-    expect(s.line.risky).toBe(true);
     expect(s.line.signIn).toBe(false); // was true
-    expect(s.kind).toBe('careful'); // was 'signin'
-    expect(oneTap(s)[bitcoinAuth.requestID]).toBe(false); // a tap on the button alone grants nothing
+    expect(s.kind).not.toBe('signin'); // was 'signin'
+    expect(s.line.text).toBe(`Sign with your "bitcoin auth" keys for ${SITE}`);
+    expect(oneTap(s)[bitcoinAuth.requestID]).toBe(false);
   });
 
-  test('the line names the site and says other sites could accept it, in plain words', () => {
-    const { line } = sheet(bitcoinAuth);
-    expect(line.text).toContain(SITE);
-    expect(line.text).toContain('Other sites could accept');
-    expect(line.text).not.toContain("Prove it's you");
-    expect(line.text).not.toMatch(/counterparty|BRC|level|derive/i); // the jargon stays under Details
-    expect(line.detail).toContain('protocol "bitcoin auth" level 1');
+  test('calm, not red: a standing shared line is not the careful card (no red storm)', () => {
+    const s = sheet(bitcoinAuth);
+    expect(s.line.risky).toBe(false);
+    expect(s.kind).toBe('connect');
   });
 
   test('ticking it, then Allow, grants it (the user chooses knowingly)', () => {
     const s = sheet(bitcoinAuth);
-    const d = sheetAnswer(s.model, 'allow', { [bitcoinAuth.requestID]: true }, false, sheetView(s.model, true));
+    const d = sheetAnswer(s.model, 'allow', { [bitcoinAuth.requestID]: true }, true, sheetView(s.model, false));
     expect(d.decisions[bitcoinAuth.requestID]).toBe(true);
   });
 
-  test('a one-signature request: "Sign once", unticked, careful', () => {
-    const once = req('once:evil.example:2,message signing:x.1', {
-      protocolID: [2, 'message signing'],
-      counterparty: 'anyone',
-      usageType: 'signing',
-      oneUse: true,
-    });
-    const s = sheet(once);
-    expect(s.line.text).toMatch(/^Sign once as you for evil\.example/);
-    expect(s.line.checked).toBe(false);
-    expect(s.kind).toBe('careful');
-    expect(oneTap(s)[once.requestID]).toBe(false);
+  test("level-2 'anyone' outside our sign-ins: unticked, in any spelling of 'anyone'", () => {
+    for (const counterparty of ['anyone', G, G.toUpperCase()]) {
+      const r = req('a', { protocolID: [2, 'acme feed'], counterparty, usageType: 'signing' });
+      const s = sheet(r);
+      expect(isSharedKeyRequest(r)).toBe(true);
+      expect(s.line.checked).toBe(false); // was true ("Prove it's you")
+      expect(s.line.text).toBe(`Sign as you for ${SITE} ("acme feed"), a signature anyone can check`);
+    }
   });
 
-  test('a level-1 decrypt is shared too (its grant lets the site sign), and says so', () => {
+  test('a level-1 decrypt is shared too (the grant covers every use of the protocol)', () => {
     const r = req('d', { protocolID: [1, 'docs vault'], usageType: 'encrypting', calls: ['decrypt'] });
     const s = sheet(r);
-    expect(s.line.text).toBe(
-      `Decrypt with your "docs vault" keys. This also lets ${SITE} sign as you, and other sites could accept it`,
-    );
+    expect(s.line.text).toBe(`Decrypt with your "docs vault" keys for ${SITE}`);
     expect(s.line.checked).toBe(false);
   });
 
-  test('not shared: the public identity key, the first-post signature, level-1 labels', () => {
+  test('not shared: the public identity key, the first-post signature, labels, a known-safe level-1 name', () => {
     const id = req('i', { protocolID: [1, 'identity key retrieval'], counterparty: 'self', usageType: 'identityKey' });
     const sigma = req('s', { protocolID: [1, 'sigma'], counterparty: 'self', usageType: 'signing' });
     const label = req('l', { protocolID: [1, 'action label shop'], usageType: 'generic' });
-    for (const r of [id, sigma, label]) expect(isSharedKeyRequest(r)).toBe(false);
+    const bcal = req('c', { protocolID: [1, 'bcal record'], usageType: 'signing' });
+    for (const r of [id, sigma, label, bcal]) expect(isSharedKeyRequest(r)).toBe(false);
     expect(sheet(id).line.checked).toBe(true);
   });
 });
 
+describe('one signature: the SIGN ONCE card, one tap', () => {
+  test('alone on its sheet: SIGN ONCE, its line ticked, one tap answers it', () => {
+    const r = once();
+    const s = sheet(r);
+    expect(s.kind).toBe('signonce');
+    expect(s.line.once).toBe(true);
+    expect(s.line.risky).toBe(false);
+    expect(s.line.text).toBe(`Sign once as you for ${SITE} ("bitcoin auth"). Other sites could accept this too`);
+    expect(oneTap(s)).toEqual({ [r.requestID]: true });
+  });
+
+  test('two at once, or beside other lines: careful card, each unticked (one tap never answers two)', () => {
+    const two = sheet(once('once:a'), once('once:b'));
+    expect(two.kind).toBe('careful');
+    expect(two.model.lines.every((l) => !l.checked && l.risky)).toBe(true);
+    const mixed = sheet(once('once:c'), req('k', { type: 'basket', basket: 'tickets' }));
+    expect(mixed.kind).toBe('careful');
+    expect(mixed.model.lines.find((l) => l.requestID === 'once:c')?.checked).toBe(false);
+  });
+
+  test('a one-signature line that joined a sheet live is never pre-ticked', () => {
+    const s = sheet({ ...once('once:live'), addedLive: true });
+    expect(s.line.checked).toBe(false);
+    expect(s.kind).not.toBe('signonce');
+  });
+});
+
 describe('each line names its operation', () => {
-  const anyone = (usageType: string, calls?: string[]) =>
-    sheet(req('a', { protocolID: [2, 'docs vault'], counterparty: 'anyone', usageType, ...(calls ? { calls } : {}) }))
-      .line.text;
-  test("counterparty 'anyone'", () => {
-    expect(anyone('signing', ['createSignature'])).toBe("Prove it's you (a signature anyone can check)");
-    expect(anyone('signing', ['verifySignature'])).toBe('Check signatures with your "docs vault" keys');
-    expect(anyone('encrypting', ['encrypt'])).toBe('Encrypt with your "docs vault" keys, readable by anyone');
-    expect(anyone('encrypting', ['decrypt'])).toBe('Decrypt with your "docs vault" keys');
-    expect(anyone('encrypting')).toBe('Encrypt and decrypt with your "docs vault" keys');
-    expect(anyone('hmac', ['createHmac'])).toBe('Make and check HMAC codes with your "docs vault" keys');
-    expect(anyone('linkageRevelation')).toBe('Reveal how others can link your "docs vault" keys');
+  const ours = (usageType: string, calls?: string[]) =>
+    sheet(
+      req('a', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone', usageType, ...(calls ? { calls } : {}) }),
+    ).line.text;
+  test("our sign-in protocol with 'anyone': only a real signature is \"Prove it's you\"", () => {
+    expect(ours('signing', ['createSignature'])).toBe("Prove it's you (a signature anyone can check)");
+    expect(ours('signing', ['verifySignature'])).toBe('Check signatures with your "bwallet sign in" keys');
+    expect(ours('encrypting', ['encrypt'])).toBe('Encrypt with your "bwallet sign in" keys, readable by anyone');
+    expect(ours('encrypting', ['decrypt'])).toBe('Decrypt with your "bwallet sign in" keys');
+    expect(ours('encrypting')).toBe('Encrypt and decrypt with your "bwallet sign in" keys');
+    expect(ours('hmac', ['createHmac'])).toBe('Make and check HMAC codes with your "bwallet sign in" keys');
+    expect(ours('linkageRevelation')).toBe('Reveal how others can link your "bwallet sign in" keys');
+  });
+  test("other level-2 'anyone' keys name the operation too", () => {
+    const t = (usageType: string, calls?: string[]) =>
+      sheet(req('a', { protocolID: [2, 'docs vault'], counterparty: 'anyone', usageType, ...(calls ? { calls } : {}) }))
+        .line.text;
+    expect(t('encrypting', ['decrypt'])).toBe(`Decrypt with your "docs vault" keys for ${SITE}`);
+    expect(t('hmac')).toBe(`Make and check HMAC codes with your "docs vault" keys for ${SITE}`);
   });
   test('your own keys (self) and keys shared with one named service', () => {
     const self = sheet(
@@ -137,20 +171,20 @@ describe('each line names its operation', () => {
 
 describe("Juann E-2: a decrypt with 'anyone' is not \"Prove it's you\"", () => {
   test('decrypt: its own words, not a sign-in, not the SIGN IN card', () => {
-    const r = req('d', {
-      protocolID: [2, 'docs vault'],
-      counterparty: 'anyone',
-      usageType: 'encrypting',
-      calls: ['decrypt'],
-    });
-    const s = sheet(r);
-    expect(s.line.text).not.toContain("Prove it's you"); // was "Prove it's you (a signature anyone can check)"
-    expect(isSignInRequest(r)).toBe(false); // was true
-    expect(s.kind).not.toBe('signin'); // was 'signin'
+    for (const protocolID of [
+      [2, 'docs vault'],
+      [2, 'bwallet sign in'],
+    ] as [number, string][]) {
+      const r = req('d', { protocolID, counterparty: 'anyone', usageType: 'encrypting', calls: ['decrypt'] });
+      const s = sheet(r);
+      expect(s.line.text).not.toContain("Prove it's you"); // was "Prove it's you (a signature anyone can check)"
+      expect(isSignInRequest(r)).toBe(false); // was true
+      expect(s.kind).not.toBe('signin'); // was 'signin'
+    }
   });
-  test('the same for encrypt, HMAC and key linkage', () => {
+  test('the same for encrypt, HMAC, key linkage and public keys', () => {
     for (const usageType of ['encrypting', 'hmac', 'linkageRevelation', 'publicKey']) {
-      const r = req('x', { protocolID: [2, 'docs vault'], counterparty: 'anyone', usageType });
+      const r = req('x', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone', usageType });
       expect(sheet(r).line.text).not.toContain("Prove it's you");
       expect(isSignInRequest(r)).toBe(false);
     }
@@ -163,7 +197,7 @@ describe('regression: sign-ins that were one tap still are', () => {
     counterparty: 'self',
     usageType: 'identityKey',
   });
-  test("Sign in with bWalletX (bChatX, bit-sign): identity key + [2, 'bwallet sign in'] signature", () => {
+  test("Sign in with bWalletX (bChatX, bit-sign): identity key + 'bwallet sign in' signature", () => {
     const signIn = req('si', {
       protocolID: [2, 'bwallet sign in'],
       counterparty: 'anyone',
@@ -176,12 +210,12 @@ describe('regression: sign-ins that were one tap still are', () => {
     expect(s.model.lines.every((l) => l.checked && !l.risky)).toBe(true);
     expect(oneTap(s)).toEqual({ id: true, si: true });
   });
-  test("bAds sign-in [2, 'bads session'] (badvertisingx.com)", () => {
+  test("bAds sign-in 'bads session' (badvertisingx.com)", () => {
     const s = sheet(req('b', { protocolID: [2, 'bads session'], counterparty: 'anyone', usageType: 'signing' }));
     expect(s.kind).toBe('signin');
     expect(oneTap(s)).toEqual({ b: true });
   });
-  test("BRC-103/104 [2, 'auth message signature'] to a server's key: one CONNECT tap, as before", () => {
+  test("BRC-103/104 'auth message signature' to a server's key: one CONNECT tap, as before", () => {
     const s = sheet(
       req('m', { protocolID: [2, 'auth message signature'], counterparty: '03'.padEnd(66, 'c'), usageType: 'signing' }),
     );
@@ -189,7 +223,7 @@ describe('regression: sign-ins that were one tap still are', () => {
     expect(s.line.checked).toBe(true);
     expect(oneTap(s)).toEqual({ m: true });
   });
-  test("a site's first post ([1, 'sigma'] + bap basket) keeps its POST card", () => {
+  test("a site's first post ('sigma' + bap basket) keeps its POST card", () => {
     const s = sheet(req('s', { protocolID: [1, 'sigma'], counterparty: 'self', usageType: 'signing' }), {
       requestID: 'b',
       type: 'basket',

@@ -15,7 +15,9 @@ const kind = (items: BundleRequest[]) => approvalKindForSheet(buildSheetModel({ 
 
 describe('approvalKindForSheet', () => {
   test('signature anyone can check → SIGN IN', () => {
-    expect(kind([proto('a', { counterparty: 'anyone' })])).toBe('signin');
+    // Our own sign-in (one tap). Another level-2 'anyone' signature is never pre-ticked (sharedKeySigning.ts).
+    expect(kind([proto('a', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' })])).toBe('signin');
+    expect(kind([proto('a', { counterparty: 'anyone' })])).toBe('connect');
   });
   test('a sign-in protocol for the site → SIGN IN', () => {
     expect(kind([proto('a')])).toBe('signin');

@@ -237,7 +237,7 @@ describe('sheet model', () => {
 
   test('risky permissions are never pre-ticked', () => {
     const items = [
-      proto('anyone', 'x', { counterparty: 'anyone' }),
+      proto('anyone', 'x', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
       proto('priv', 'x', { privileged: true }),
       {
         requestID: 'cert',
@@ -442,7 +442,9 @@ describe('allowance only on money sheets (b-Aware 24 Oct 2026: sign-in stored a 
 describe('requests that arrive after the user touched a sheet (option A, 24 Oct 2026)', () => {
   test("the first sheet's Allow never grants a late request", () => {
     const { clock, ready, bundler } = setup();
-    const b = bundler.add(proto('sign', 'evil.example', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'evil.example', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     bundler.freeze(bundler.list()[0].id); // touched: later requests queue
     bundler.add(basket('late', 'evil.example'));
@@ -462,7 +464,9 @@ describe('requests that arrive after the user touched a sheet (option A, 24 Oct 
 
   test('the queued request is judged on its own merits: a routine one is not a careful card', () => {
     const { clock, ready, bundler } = setup();
-    const b = bundler.add(proto('sign', 'evil.example', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'evil.example', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     bundler.freeze(bundler.list()[0].id); // touched: later requests queue
     bundler.add(basket('late', 'evil.example'));
@@ -475,7 +479,9 @@ describe('requests that arrive after the user touched a sheet (option A, 24 Oct 
 
   test('a late spend becomes the main payment of its own sheet, not a line on the first', () => {
     const { clock, ready, bundler } = setup();
-    const b = bundler.add(proto('sign', 'evil.example', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'evil.example', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     bundler.freeze(bundler.list()[0].id); // touched: later requests queue
     bundler.add(spend('pay', 5000, 'evil.example'));
@@ -592,7 +598,9 @@ describe('the three answers of a careful sheet (owner, 24 Oct 2026)', () => {
 describe('the live sheet (owner, 24 Oct 2026)', () => {
   test('an untouched open sheet takes a new line live, marked New and unticked', () => {
     const { clock, updated, bundler } = setup();
-    const b = bundler.add(proto('sign', 'bmovies.app', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     expect(bundler.add(basket('late'))).toBe(b);
     expect(updated).toHaveLength(1);
@@ -604,7 +612,9 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('Allow alone never grants a New line; ticking it does', () => {
     const { clock, bundler } = setup();
-    const b = bundler.add(proto('sign', 'bmovies.app', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     bundler.add(basket('late'));
     const model = buildSheetModel(b);
@@ -615,7 +625,9 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('regression (paid playtest, 25 Oct 2026): Allow never denies a joined line; it gets its own sheet', () => {
     const { clock, ready, bundler } = setup();
-    const b = bundler.add(proto('sign', 'bmovies.app', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     bundler.add(basket('late'));
     const model = buildSheetModel(b);
@@ -633,7 +645,9 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('Not now still declines a joined line; an explicit untick on Allow declines it', () => {
     const { clock, bundler } = setup();
-    const b = bundler.add(proto('sign', 'bmovies.app', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     bundler.add(basket('late'));
     const model = buildSheetModel(b);
@@ -643,7 +657,9 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('an approve bound to an older set of lines (hash mismatch) grants nothing', () => {
     const { clock, bundler } = setup();
-    const b = bundler.add(proto('sign', 'bmovies.app', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     const before = buildSheetModel(b);
     const seen = sheetHash(b.items); // what was on screen when the user tapped
@@ -656,11 +672,15 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('a missing hash grants nothing; a matching hash grants the ticked lines', () => {
     const one = setup();
-    const b1 = one.bundler.add(proto('sign', 'bmovies.app', { counterparty: 'anyone' }))!;
+    const b1 = one.bundler.add(
+      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     one.clock.tick(400);
     expect(one.bundler.resolve(b1.id, { sign: true }, '')!.granted).toHaveLength(0);
     const two = setup();
-    const b2 = two.bundler.add(proto('sign', 'bmovies.app', { counterparty: 'anyone' }))!;
+    const b2 = two.bundler.add(
+      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     two.clock.tick(400);
     two.bundler.add(basket('late'));
     const res = two.bundler.resolve(b2.id, { sign: true, late: false }, sheetHash(b2.items))!;
@@ -698,7 +718,9 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('a live spend is a New line, never the main payment', () => {
     const { clock, bundler } = setup();
-    const b = bundler.add(proto('sign', 'bmovies.app', { counterparty: 'anyone' }))!;
+    const b = bundler.add(
+      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
+    )!;
     clock.tick(400);
     bundler.add(spend('pay', 5000));
     const model = buildSheetModel(b);

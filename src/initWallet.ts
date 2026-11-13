@@ -69,7 +69,7 @@ import { guardSpendRecipients } from './services/spendRecipients';
 import { guardLabelsOnSpend } from './services/labelsOnSpend';
 import { chromeConsentStore, guardSiteTokens } from './services/siteTokens';
 import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
-import { guardSharedKeySigning } from './services/sharedKeySigning';
+import { guardSharedKeySigning, revokeSharedKeyGrantsOnce } from './services/sharedKeySigning';
 import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
@@ -1188,6 +1188,17 @@ export const initWallet = async (
   await revokeReservedBasketGrants(permissionStore, ADMIN_ORIGINATOR)
     .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for wallet-internal baskets`))
     .catch((e: unknown) => console.warn('[initWallet] reserved-basket grant cleanup failed:', e));
+  // Upgrade migration, once per account (b-Aware 13 Nov 2026): grants that let a site make signatures anyone can
+  // check (level-1 keys, level-2 'anyone'), given by a pre-ticked line or a manifest before the fix, are removed;
+  // the site asks again (services/sharedKeySigning.ts revokeSharedKeyGrants).
+  await revokeSharedKeyGrantsOnce(
+    permissionStore,
+    ADMIN_ORIGINATOR,
+    { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+    accountId || 'no-account',
+  )
+    .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for keys every app shares`))
+    .catch((e: unknown) => console.warn('[initWallet] shared-key grant cleanup failed (retried next unlock):', e));
 
   // 5. Initialize sync context (derives addresses, creates services, queue, addressManager).
   // Background sync calls go through the manager-wrapped wallet (admin

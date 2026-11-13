@@ -91,7 +91,7 @@ describe('sign-in tokens other services accept: one approval per signature', () 
     expect(valid).toBe(true);
   });
 
-  test('the one-use answer leaves no working grant behind', async () => {
+  test('the one-use answer stores nothing at all', async () => {
     const { wallet, store } = setup();
     await wallet.createSignature(bitplan(NOW_S), SITE);
     const g = await store.findGrant({
@@ -102,8 +102,7 @@ describe('sign-in tokens other services accept: one approval per signature', () 
       protocolName: 'bitcoin auth',
       counterparty: '',
     } as never);
-    // Stored already expired (oneUseGrant expiry 1), never a standing grant.
-    expect(!g || (g as { expiry: number }).expiry === 1).toBe(true);
+    expect(g).toBeFalsy();
   });
 
   test('a standing grant the site already holds (approved for a self-sign) does not cover a token', async () => {
@@ -211,15 +210,25 @@ describe('isBearerSignature', () => {
     expect(isBearerSignature(sig([1, 'bitcoin auth'], NOW_S, '02'.padEnd(66, 'a')))).toBe(false);
     expect(isBearerSignature(sig([2, 'bwallet sign in'], NOW_S))).toBe(false);
     expect(isBearerSignature(sig([2, 'Auth Message Signature'], NOW_S))).toBe(false);
-    expect(isBearerSignature(sig([1, 'sigma'], NOW_S))).toBe(false);
     expect(isBearerSignature(sig([2, 'bads session'], 'abcdef0123456789'))).toBe(false);
     expect(isBearerSignature(sig([2, 'p auth'], NOW_S))).toBe(false);
     expect(isBearerSignature(sig([0, 'bitcoin auth'], NOW_S))).toBe(false);
   });
   test('isTimeKeyID', () => {
-    for (const k of ['1763040000', '1763040000123', '1763040000.5', '2026-11-13T10:00:00Z', '2026-11-13 10:00'])
+    for (const k of [
+      '1763040000',
+      '1763040000123',
+      '1763040000.5',
+      '2026-11-13T10:00:00Z',
+      '2026-11-13 10:00',
+      '20261113T100000Z',
+      '176304000',
+      '17630400001',
+      'ts-1763040000-a1b2',
+      'nonce-1763040000',
+    ])
       expect(isTimeKeyID(k)).toBe(true);
-    for (const k of ['123', 'nonce-1763040000', 'a1b2c3d4e5f6', '17630400001', undefined])
+    for (const k of ['123', 'a1b2c3d4e5f6', '0123456789abcdef0123456789abcdef', 'abc1763040000def', undefined])
       expect(isTimeKeyID(k)).toBe(false);
   });
 });
