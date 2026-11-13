@@ -55,7 +55,7 @@ export const parseStatus = (raw: unknown, version: string | null): Set<KillFeatu
   return out;
 };
 
-let cache: { at: number; paused: Set<KillFeature> } | null = null;
+let cache: { at: number; paused: Set<KillFeature>; read: boolean } | null = null;
 let inflight: Promise<Set<KillFeature>> | null = null;
 
 /** Paused features, from a fresh (<10 min) in-memory copy or the network. Never throws. */
@@ -67,15 +67,19 @@ export const getPaused = async (
   if (inflight) return inflight;
   inflight = (async () => {
     let paused = new Set<KillFeature>();
+    let read = false;
     try {
       const ctl = new AbortController();
       const t = setTimeout(() => ctl.abort(), FETCH_TIMEOUT);
       const r = await f(STATUS_URL, { cache: 'no-store', signal: ctl.signal }).finally(() => clearTimeout(t));
-      if (r.ok) paused = parseStatus(await r.json(), appVersion());
+      if (r.ok) {
+        paused = parseStatus(await r.json(), appVersion());
+        read = true;
+      }
     } catch {
       /* fail open */
     }
-    cache = { at: now, paused };
+    cache = { at: now, paused, read };
     inflight = null;
     return paused;
   })();
@@ -83,6 +87,18 @@ export const getPaused = async (
 };
 
 export const isPaused = async (feature: KillFeature): Promise<boolean> => (await getPaused()).has(feature);
+
+/**
+ * Fail CLOSED: paused, or the status file could not be read. For payments nobody is waiting on (automatic storage
+ * top-ups, services/storagePaymentGuard.ts), where refusing while offline costs nothing.
+ */
+export const isPausedOrUnknown = async (
+  feature: KillFeature,
+  f?: (url: string, init: RequestInit) => Promise<Response>,
+): Promise<boolean> => {
+  const paused = await getPaused(f);
+  return paused.has(feature) || !cache?.read;
+};
 
 /** Throws FeaturePausedError when `feature` is paused. */
 export const assertNotPaused = async (feature: KillFeature): Promise<void> => {

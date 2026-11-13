@@ -18,6 +18,7 @@ import {
 import type { OneSatContext } from '@1sat/actions';
 import { LOCKUP_PREFIX, LOCKUP_SUFFIX } from './constants';
 import { USB_KEY_ABSENT_MESSAGE } from '../services/usbPresence';
+import { STORAGE_PAY_REFUSED_NOTICE } from '../services/storagePaymentGuard';
 
 export const getCurrentUtcTimestamp = (): number => {
   const currentDate = new Date();
@@ -154,6 +155,8 @@ export const getErrorMessage = (error: string | unknown | undefined) => {
   if (error instanceof Error && error.name === 'UsbKeyAbsentError') return error.message;
   // Check for StoragePaymentError by code (works without importing the class)
   if (typeof error === 'object' && error !== null && (error as { code?: string }).code === 'storage-payment-failed') {
+    // Refused by our own check (services/storagePaymentGuard.ts): say so, not "add BSV".
+    if (/declined/i.test(String((error as { message?: unknown }).message ?? ''))) return STORAGE_PAY_REFUSED_NOTICE;
     return 'Your remote storage requires a payment that could not be completed. Please ensure you have enough BSV in your wallet.';
   }
   // Check for StoragePaymentError message pattern when the error was stringified
