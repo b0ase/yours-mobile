@@ -311,8 +311,9 @@ export async function unlockTokenLock(
       }),
     },
   ];
-  // Capped: the indexer's fee goes into a signed output with no sheet showing it (H-5, b-Aware 28 Oct 2026).
-  const overlay = cappedOverlayFee(details?.status?.fee_address, details?.status?.fee_per_output, 1);
+  // Capped, and only to the token's own fee address: the indexer's fee goes into a signed output with no sheet
+  // showing it (H-5, b-Aware 28 Oct 2026; row 123, 25 Oct).
+  const overlay = cappedOverlayFee(lock.tokenId, details?.status?.fee_address, details?.status?.fee_per_output, 1);
   if (overlay)
     outputs.push({
       lockingScript: new P2PKH().lock(overlay.address).toHex(),

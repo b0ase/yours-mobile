@@ -1,3 +1,5 @@
+import { deriveFeeAddress } from '../../tokens/indexFund';
+
 /**
  * BSV-21 send safety (15 Oct 2026 audit). sendBsv21 (@1sat/actions) adds one extra output besides the 1-sat token
  * transfers: an "Overlay processing fee" P2PKH paying `fee_per_output × token outputs` sats to the indexer's
@@ -27,17 +29,30 @@ export const maxOverlayFee = (
 export const MAX_OVERLAY_FEE_PER_OUTPUT = 10_000;
 export const OVERLAY_FEE_REFUSAL = "The token indexer's fee looks wrong, so nothing was sent.";
 
+export const OVERLAY_FEE_ADDRESS_REFUSAL =
+  "The token indexer asked to be paid at an address that isn't this token's fee address, so nothing was sent.";
+
 /**
- * The overlay fee output for `tokenOuts` token outputs, or null when the token charges nothing. Throws when the
- * indexer's per-output fee is not a whole number or is above MAX_OVERLAY_FEE_PER_OUTPUT. Use on every token spend
- * that builds its own fee output (unlock, room messages, invites, cancels). Pure.
+ * The overlay fee output for `tokenOuts` token outputs of `tokenId`, or null when the token charges nothing. Throws
+ * when the indexer's per-output fee is not a whole number or is above MAX_OVERLAY_FEE_PER_OUTPUT, or when its
+ * `fee_address` is not the address this token's id leads to (deriveFeeAddress, the indexer's own derivation): the
+ * address is read from the indexer at spend time and paid in a signed output no sheet shows (b-Aware 25 Oct 2026,
+ * fzsusanto row 123; the cap alone was 17c4eee5). Use on every token spend that builds its own fee output (unlock,
+ * room messages, invites, cancels). Pure.
  */
-export const cappedOverlayFee = (feeAddress: unknown, feePerOutput: unknown, tokenOuts: number): OverlayFee | null => {
+export const cappedOverlayFee = (
+  tokenId: string,
+  feeAddress: unknown,
+  feePerOutput: unknown,
+  tokenOuts: number,
+): OverlayFee | null => {
   if (typeof feeAddress !== 'string' || !feeAddress || typeof feePerOutput !== 'number' || !(feePerOutput > 0))
     return null;
   if (!Number.isSafeInteger(feePerOutput) || feePerOutput > MAX_OVERLAY_FEE_PER_OUTPUT)
     throw new Error(OVERLAY_FEE_REFUSAL);
-  return { address: feeAddress, sats: feePerOutput * tokenOuts };
+  const derived = deriveFeeAddress(tokenId);
+  if (!derived || feeAddress !== derived) throw new Error(OVERLAY_FEE_ADDRESS_REFUSAL);
+  return { address: derived, sats: feePerOutput * tokenOuts };
 };
 
 type Out = { lockingScript: string; satoshis: number };
