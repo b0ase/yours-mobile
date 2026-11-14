@@ -173,7 +173,7 @@ async function bigWallet(b: StorageIdb, identityKey: string, outputs: number, un
   return { unspent, txids: new Set(raws.map((r) => r.txid)) };
 }
 
-type Stats = { pages: number; items: number; jsonBytes: number; binBytes: number };
+type Stats = { pages: number; items: number; jsonBytes: number; binBytes: number; readMs: number };
 const ENTITIES = [
   'provenTxs',
   'outputBaskets',
@@ -207,7 +207,7 @@ function sizeOf(chunk: Record<string, unknown>) {
 
 /** wallet.1sat.app as this device's StorageClient sees it: the backup's store, every page counted, failures on cue. */
 function backupClient(b: StorageIdb) {
-  const stats: Stats = { pages: 0, items: 0, jsonBytes: 0, binBytes: 0 };
+  const stats: Stats = { pages: 0, items: 0, jsonBytes: 0, binBytes: 0, readMs: 0 };
   const o: { failAfterPages?: number } = {};
   const client = new Proxy(b, {
     get(t, p) {
@@ -215,7 +215,9 @@ function backupClient(b: StorageIdb) {
         return async (args: unknown) => {
           if (o.failAfterPages !== undefined && stats.pages >= o.failAfterPages)
             throw new Error('network: the backup did not answer in time (getSyncChunk)'); // the heal's 120 s deadline
+          const t0 = Date.now();
           const c = (await t.getSyncChunk(args as never)) as unknown as Record<string, unknown>;
+          stats.readMs += Date.now() - t0; // the backup's own read (its store here; wallet.1sat.app in production)
           stats.pages++;
           for (const k of ENTITIES) stats.items += (c[k] as unknown[] | undefined)?.length ?? 0;
           const s = sizeOf(c);
@@ -944,34 +946,43 @@ describe.skipIf(process.env.BWX_FULLPASS_BENCH !== '1')('the full re-pull: cost 
         try {
           t = Date.now();
           const s0 = { ...d.stats };
-          await d.pull();
-          const first = { ms: Date.now() - t, ...diff(d.stats, s0) };
+          // The open's first pass is sliced too (FULL_PASS_SLICE_MS), so past a few thousand outputs one pull no longer
+          // finishes it and the next call resumes it. Drive it as the product does: pull until the pass is done.
+          const firstSlices = await d.pullToEnd(BENCH_MAX_SLICES);
+          const first = { ms: Date.now() - t, ...diff(d.stats, s0), slices: firstSlices };
+          expect(firstSlices).toBeLessThan(BENCH_MAX_SLICES); // a pass always ends
           await d.admit();
           const s1 = { ...d.stats };
           t = Date.now();
           expect(await d.pull(Date.now() + FULL_PASS_EVERY_MS + 1)).toBe('started');
           let slices = 1;
-          while ((await d.state()).when == null) {
+          while ((await d.state()).when == null || passUnderWay(await d.state())) {
+            expect(slices).toBeLessThan(BENCH_MAX_SLICES); // bound: never loop forever
             await d.pull();
             slices++;
           }
           const again = { ms: Date.now() - t, ...diff(d.stats, s1), slices };
+          expect(await d.count()).toEqual({ outputs: n, transactions: Math.ceil(n / 4) });
           console.log(
-            `[full re-pull cost] ${n} outputs (setup ${setup} ms; the open's merge took the first pass) | an incremental pull with every row inside the 15-min overlap: ${first.items} rows, ${mb(first.binBytes)} binary, ${first.ms} ms | daily re-pull: ${again.items} rows, ${again.pages} pages, ${mb(again.binBytes)} binary / ${mb(again.jsonBytes)} JSON, ${again.ms} ms in ${again.slices} slices`,
+            `[full re-pull cost] ${n} outputs (setup ${setup} ms; the open's first pass: ${first.items} rows, ${mb(first.binBytes)} binary, ${first.ms} ms in ${first.slices} slices | daily re-pull: ${again.items} rows, ${again.pages} pages, ${mb(again.binBytes)} binary / ${mb(again.jsonBytes)} JSON, ${again.ms} ms (${again.readMs} ms of it the backup's own page reads, ${again.ms - again.readMs} ms this device's checks and merge) in ${again.slices} slices`,
           );
         } finally {
           d.off();
         }
       },
-      3 * 3_600_000,
+      30 * 60_000,
     );
 });
+
+/** A full pass is a few hundred slices at 20,000 outputs; this bound only catches one that never ends. */
+const BENCH_MAX_SLICES = 5_000;
 
 const diff = (a: Stats, b: Stats): Stats => ({
   pages: a.pages - b.pages,
   items: a.items - b.items,
   jsonBytes: a.jsonBytes - b.jsonBytes,
   binBytes: a.binBytes - b.binBytes,
+  readMs: a.readMs - b.readMs,
 });
 const mb = (n: number) => `${(n / 1_048_576).toFixed(2)} MB`;
 
