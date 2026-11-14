@@ -8,10 +8,14 @@ import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
 import { isReservedProtocol } from '../../services/reservedProtocols';
+// The catalogue's checker (site/api/contracts.js publish), so a wallet-signed listing is exactly what the site accepts.
+import site from '../../../site/lib/contracts.js';
 import {
   CONTRACT_ENVELOPE_FORMAT,
+  CONTRACT_SIGN_KEY_ID,
   CONTRACT_SIGN_PROTOCOL,
   contractAuthorKey,
+  contractSigningBytes,
   signContractEnvelope,
   type ContractEnvelope,
 } from './contractNft';
@@ -75,6 +79,29 @@ describe('author signatures on contract envelopes', () => {
   test('a re-sign by someone else is valid only for their own key', async () => {
     const theirs = await signContractEnvelope(asWallet(mallory), base);
     expect(await contractAuthorKey(theirs)).toBe(await keyOf(mallory));
+  });
+});
+
+describe('the catalogue checks the same signature (site/lib/contracts.js)', () => {
+  test('same protocol, key ID and signed bytes as the wallet', async () => {
+    expect(site.CONTRACT_SIGN_PROTOCOL).toEqual(CONTRACT_SIGN_PROTOCOL);
+    expect(site.CONTRACT_SIGN_KEY_ID).toBe(CONTRACT_SIGN_KEY_ID);
+    const env = await signContractEnvelope(asWallet(ann), base, 'ann@bwallet.space');
+    const reordered = JSON.parse(JSON.stringify({ authorSig: env.authorSig, sale: env.sale, ...env }));
+    expect(site.contractSigningBytes(reordered)).toEqual(contractSigningBytes(env));
+  });
+
+  test('a wallet-signed paid listing is listed; a tampered or unsigned one is refused', async () => {
+    const env = JSON.parse(JSON.stringify(await signContractEnvelope(asWallet(ann), base, 'ann@bwallet.space')));
+    expect(await site.contractAuthorKey(env)).toBe(await keyOf(ann));
+    expect(await site.listingRefusal(env, [])).toBeNull();
+    expect(await site.listingRefusal({ ...env, sale: { ...env.sale, priceUsd: 50 } }, [])).toEqual([
+      400,
+      'This contract isn’t signed by its author',
+    ]);
+    expect((await site.listingRefusal(base, []))?.[0]).toBe(400);
+    const clone = await signContractEnvelope(asWallet(mallory), base);
+    expect((await site.listingRefusal(clone, [env]))?.[0]).toBe(409);
   });
 });
 

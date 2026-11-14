@@ -2,11 +2,13 @@
 //   GET  /api/contracts                    → { contracts: [{ origin, envelope, sold, createdAt }] }
 //   GET  /api/contracts?origin=<origin>    → { contract: { origin, envelope, sold, createdAt } }
 //   POST { action:'publish', outpoint, message, pubkey_hex, signature }   the author's freshly minted copy
+//        A paid contract must be signed by its author, and a contract already listed by another author is refused
+//        (lib/contracts.js listingRefusal).
 //   POST { action:'claim',   outpoint, message, pubkey_hex, signature }   a buyer's copy: checked as paid, counted
 // Contracts are public (not encrypted): the catalogue only vouches that a copy is genuine and paid for.
 // Env (Vercel only): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 const K = require('../lib/strategyKeys');
-const { CONTRACT_TYPE, parseContractEnvelope } = require('../lib/contracts');
+const { CONTRACT_TYPE, listingRefusal, parseContractEnvelope } = require('../lib/contracts');
 
 const WINDOW_MS = 10 * 60 * 1000;
 const hits = new Map();
@@ -94,6 +96,15 @@ async function publish(b, res) {
     return send(res, 400, { error: 'Publish from the newly minted copy' });
   const a = await at(p.outpoint);
   if (!a) return send(res, 400, { error: 'That output isn’t a contract inscription' });
+  // Earlier listings of a contract with this name (the same contract is checked in listingRefusal), earliest first.
+  const earlier = await rows(
+    `bwallet_contracts?select=envelope&envelope->contract->>name=eq.${encodeURIComponent(a.env.contract.name)}&order=created_at.asc&limit=500`,
+  );
+  const refused = await listingRefusal(
+    a.env,
+    earlier.map((e) => e.envelope),
+  );
+  if (refused) return send(res, refused[0], { error: refused[1] });
   const r = await db('bwallet_contracts', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
