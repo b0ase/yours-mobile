@@ -45,22 +45,35 @@ const manager = (store: InMemoryPermissionStore, answer?: (m: LocalWalletPermiss
 };
 
 const args = { protocolID: PID, keyID: '1', counterparty: 'self' };
-const outcome = (p: Promise<unknown>) => {
-  p.catch(() => undefined);
-  return Promise.race([p.then(() => 'allowed'), new Promise((r) => setTimeout(() => r('asked'), 200))]);
+/** Wait (event-driven, generous timeout) until `ok()` holds. Timing-free, so a slow first run can't flip a result. */
+const until = async (ok: () => boolean, ms = 5000) => {
+  for (const end = Date.now() + ms; !ok() && Date.now() < end; ) await new Promise((r) => setTimeout(r, 5));
+};
+/** The call went through: it resolved (no sheet left open). */
+const allowed = (p: Promise<unknown>) =>
+  Promise.race([p.then(() => 'allowed'), new Promise((r) => setTimeout(() => r('still waiting'), 5000))]);
+/** The call raised sheet number `n` and is still waiting on it (never resolved on an old grant). */
+const asked = async (p: Promise<unknown>, prompts: () => number, n: number) => {
+  let settled = false;
+  p.then(
+    () => (settled = true),
+    () => (settled = true),
+  );
+  await until(() => settled || prompts() >= n);
+  await new Promise((r) => setTimeout(r, 20));
+  return !settled && prompts() === n ? 'asked' : settled ? 'allowed' : `prompts ${prompts()}`;
 };
 
 describe('a let-through encrypt answers that one request only', () => {
   test('after it, decrypt, sign and HMAC on the same protocol each ask', async () => {
     const store = new InMemoryPermissionStore();
     const first = manager(store, (m, id) => void m.grantPermission(deferredEncryptGrant(id)));
-    expect(await outcome(first.mgr.encrypt({ ...args, plaintext: [1] } as never, SITE))).toBe('allowed');
+    expect(await allowed(first.mgr.encrypt({ ...args, plaintext: [1] } as never, SITE))).toBe('allowed');
     expect(first.prompts()).toBe(1);
 
     // The same manager (as in the background), nobody answering now: a decrypt raises its own sheet.
     first.stopAnswering();
-    expect(await outcome(first.mgr.decrypt({ ...args, ciphertext: [1] } as never, SITE))).toBe('asked');
-    expect(first.prompts()).toBe(2);
+    expect(await asked(first.mgr.decrypt({ ...args, ciphertext: [1] } as never, SITE), first.prompts, 2)).toBe('asked');
 
     // Any manager over the same grant store: decrypt, sign and HMAC each ask, none rides the encrypt's grant.
     for (const call of [
@@ -69,8 +82,7 @@ describe('a let-through encrypt answers that one request only', () => {
       (m: LocalWalletPermissionsManager) => m.createHmac({ ...args, data: [1] } as never, SITE),
     ]) {
       const later = manager(store);
-      expect(await outcome(call(later.mgr))).toBe('asked');
-      expect(later.prompts()).toBe(1);
+      expect(await asked(call(later.mgr), later.prompts, 1)).toBe('asked');
     }
   });
 
@@ -79,7 +91,7 @@ describe('a let-through encrypt answers that one request only', () => {
     const first = manager(store, (m, id) => void m.grantPermission(deferredEncryptGrant(id)));
     await first.mgr.encrypt({ ...args, plaintext: [1] } as never, SITE);
     const next = manager(store);
-    expect(await outcome(next.mgr.encrypt({ ...args, plaintext: [2] } as never, SITE))).toBe('asked');
+    expect(await asked(next.mgr.encrypt({ ...args, plaintext: [2] } as never, SITE), next.prompts, 1)).toBe('asked');
   });
 
   test('the background answers a deferred encrypt with deferredEncryptGrant, never the 60 s oneShotGrant', () => {
@@ -188,7 +200,7 @@ describe("a mint's label cover is a label use only", () => {
     );
     label.catch(() => undefined);
     hmac.catch(() => undefined);
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => seen.length >= 2);
     expect(seen.map((r) => r.usageType).sort()).toEqual(['generic', 'hmac']);
     for (const r of seen) expect(labelCoveredByIntent(r as never, intent)).toBe(r.usageType === 'generic');
   });

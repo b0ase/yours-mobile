@@ -139,6 +139,9 @@ describe('origin binding', () => {
     // A key operation under the label's name is not a label use: its own sheet (rows 120/207 follow-up).
     for (const usageType of ['encrypting', 'hmac', 'signing', undefined])
       expect(passCovers(pass, { ...labelUse, usageType })).toBe(false);
+    // A one-signature request (sharedKeySigning 'once:') under the label name, even one claiming 'generic'.
+    for (const usageType of ['signing', 'hmac', 'generic'])
+      expect(passCovers(pass, { ...labelUse, usageType, requestID: 'once:bmovies.online:1,x:a.1' })).toBe(false);
     expect(passCovers(pass, { type: 'protocol', originator: 'bmovies.online', protocolID: [2, LABEL] })).toBe(false);
     expect(passCovers(pass, { type: 'basket', originator: 'bmovies.online' })).toBe(false);
     expect(passCovers(undefined, { type: 'spending', originator: 'bmovies.online', spending: { satoshis: 1 } })).toBe(
