@@ -1,6 +1,6 @@
 /**
  * Tiny real files for the location detector's tests, built byte by byte: each format with and without location
- * metadata. Test-only (imported by location.test.ts; copied verbatim into bwalletx-indexer/test).
+ * metadata. Test-only (imported by location.test.ts and chat/uploadLocation.test.ts).
  */
 
 type B = number[];
@@ -40,6 +40,105 @@ export function tiff(gps: boolean): B {
   return cat(ascii('MM'), be16(42), be32(8), ifd0, gpsIfd);
 }
 
+/** An IFD entry: tag, type, count, then an inline value or the IFD(s) it points at (indexes into the IFD list). */
+export type Ent = [number, number, number, number | number[]];
+
+/**
+ * Big-endian TIFF from a list of IFDs (index 0 is IFD0) and IFD0's next link. Pointer lists longer than one go out
+ * of line, after the IFDs.
+ */
+export function tiffIfds(ifds: Ent[][], ifd0Next = -1): B {
+  const at: number[] = [];
+  let o = 8;
+  for (const e of ifds) {
+    at.push(o);
+    o += 2 + e.length * 12 + 4;
+  }
+  const extra: B = [];
+  const value = ([, type, , v]: Ent): B => {
+    if (typeof v === 'number') return type === 3 ? cat(be16(v), [0, 0]) : be32(v);
+    if (v.length === 1) return be32(at[v[0]]);
+    const out = be32(o + extra.length);
+    extra.push(...v.flatMap((i) => be32(at[i])));
+    return out;
+  };
+  const body = ifds.map((ents, k) =>
+    cat(
+      be16(ents.length),
+      ...ents.map((e) => cat(be16(e[0]), be16(e[1]), be32(e[2]), value(e))),
+      be32(k === 0 && ifd0Next >= 0 ? at[ifd0Next] : 0),
+    ),
+  );
+  return cat(ascii('MM'), be16(42), be32(8), ...body, extra);
+}
+
+const GPS_IFD: Ent[] = [
+  [0x0000, 1, 4, 0x02030000],
+  [0x0001, 2, 2, 0x4e000000],
+];
+const EXIF_VERSION: Ent = [0x9000, 7, 4, 0x30323332];
+
+/** A GPS IFD pointer outside IFD0 (b-Aware #230): in the Exif IFD, the Interop IFD, IFD1 or one of the SubIFDs. */
+export const tiffGpsIn = (where: 'exif' | 'interop' | 'ifd1' | 'subifds', orientation = 1): B =>
+  where === 'exif'
+    ? tiffIfds([
+        [
+          [0x0112, 3, 1, orientation],
+          [0x8769, 4, 1, [1]],
+        ],
+        [EXIF_VERSION, [0x8825, 4, 1, [2]]],
+        GPS_IFD,
+      ])
+    : where === 'interop'
+      ? tiffIfds([
+          [[0x8769, 4, 1, [1]]],
+          [EXIF_VERSION, [0xa005, 4, 1, [2]]],
+          [
+            [0x0001, 2, 4, 0x52393800],
+            [0x8825, 4, 1, [3]],
+          ],
+          GPS_IFD,
+        ])
+      : where === 'ifd1'
+        ? tiffIfds(
+            [
+              [[0x0112, 3, 1, orientation]],
+              [
+                [0x0103, 3, 1, 6],
+                [0x8825, 4, 1, [2]],
+              ],
+              GPS_IFD,
+            ],
+            1,
+          )
+        : tiffIfds([
+            [[0x014a, 4, 2, [1, 2]]],
+            [[0x0100, 3, 1, 8]],
+            [
+              [0x0100, 3, 1, 8],
+              [0x8825, 4, 1, [3]],
+            ],
+            GPS_IFD,
+          ]);
+
+/** The same shapes without GPS: Exif + Interop IFDs, IFD1, two SubIFDs. */
+export const tiffNoGps = (): B =>
+  tiffIfds(
+    [
+      [
+        [0x0112, 3, 1, 6],
+        [0x014a, 4, 2, [2, 3]],
+        [0x8769, 4, 1, [1]],
+      ],
+      [EXIF_VERSION, [0xa005, 4, 1, [4]]],
+      [[0x0100, 3, 1, 8]],
+      [[0x0100, 3, 1, 8]],
+      [[0x0001, 2, 4, 0x52393800]],
+      [[0x0103, 3, 1, 6]],
+    ],
+    5,
+  );
+
 // ── JPEG ─────────────────────────────────────────────────────────────────────
 
 const seg = (marker: number, payload: B): B => cat([0xff, marker], be16(payload.length + 2), payload);
@@ -50,19 +149,70 @@ export const xmp = (body: string) =>
 const GPS_XMP = xmp('exif:GPSLatitude="51,30.4440N" exif:GPSLongitude="0,7.6680W"');
 const PLAIN_XMP = xmp('exif:DateTimeOriginal="2026-11-05T10:00:00"');
 
-const jpegBody = (): B => cat(seg(0xdb, noise(65)), seg(0xda, [1, 1, 0, 0, 63, 0]), noise(200), [0xff, 0xd9]);
+/** Tables, a frame, a scan (with stuffed 0xFF00 bytes and a restart marker), more tables, a second scan, EOI. */
+export const jpegBody = (): B =>
+  cat(
+    seg(0xdb, noise(65)),
+    seg(0xc0, [8, 0, 1, 0, 1, 1, 1, 0x11, 0]),
+    seg(0xc4, noise(20, 5)),
+    seg(0xda, [1, 1, 0, 0, 63, 0]),
+    noise(100).map((x) => (x === 0xff ? 0x7f : x)),
+    [0xff, 0x00, 0x12, 0xff, 0xd0, 0x34],
+    noise(100, 9).map((x) => (x === 0xff ? 0x7f : x)),
+    seg(0xc4, noise(20, 6)),
+    seg(0xda, [1, 1, 0, 0, 63, 0]),
+    noise(50, 11).map((x) => (x === 0xff ? 0x7f : x)),
+    [0xff, 0xd9],
+  );
 
-export const jpeg = (o: { exif?: 'gps' | 'plain' | 'corrupt'; xmp?: 'gps' | 'plain'; trailer?: B } = {}): B =>
+export const jpeg = (
+  o: {
+    exif?: 'gps' | 'plain' | 'corrupt';
+    tiff?: B;
+    xmp?: 'gps' | 'plain';
+    app1?: B[];
+    extra?: B[];
+    trailer?: B;
+  } = {},
+): B =>
   cat(
     [0xff, 0xd8],
     seg(0xe0, cat(ascii('JFIF\0'), [1, 1, 0, 0, 1, 0, 1, 0, 0])),
     o.exif === 'gps' ? seg(0xe1, cat(ascii('Exif\0\0'), tiff(true))) : [],
     o.exif === 'plain' ? seg(0xe1, cat(ascii('Exif\0\0'), tiff(false))) : [],
     o.exif === 'corrupt' ? seg(0xe1, cat(ascii('Exif\0\0'), ascii('XX'), noise(10))) : [],
+    o.tiff ? seg(0xe1, cat(ascii('Exif\0\0'), o.tiff)) : [],
     o.xmp ? seg(0xe1, cat(XMP_NS, ascii(o.xmp === 'gps' ? GPS_XMP : PLAIN_XMP))) : [],
+    ...(o.app1 ?? []).map((p) => seg(0xe1, p)),
+    ...(o.extra ?? []),
     jpegBody(),
     o.trailer ?? [],
   );
+
+/** Any marker segment (APPn, COM, …). */
+export const jpegSeg = seg;
+
+/**
+ * Extended XMP (APP1 "http://ns.adobe.com/xmp/extension/"), as Pixel / Photoshop write it: one packet split over
+ * parts, each with a GUID, the full length and its offset. The cut falls inside "GPSLatitude", so no part holds a
+ * whole tag; `reversed` stores the parts out of order.
+ */
+export const extendedXmp = (reversed = false): B[] => {
+  const text = ascii(
+    '<x:xmpmeta><rdf:Description xmlns:e="http://ns.adobe.com/exif/1.0/" e:GPSLatitude="51,30N"/></x:xmpmeta>',
+  );
+  const cut = text.indexOf(ascii('L')[0], 50);
+  const part = (off: number, end: number) =>
+    cat(
+      ascii('http://ns.adobe.com/xmp/extension/\0'),
+      ascii('0123456789ABCDEF0123456789ABCDEF'),
+      be32(text.length),
+      be32(off),
+      text.slice(off, end),
+    );
+  const parts = [part(0, cut), part(cut, text.length)];
+  return reversed ? parts.reverse() : parts;
+};
 
 // ── PNG ──────────────────────────────────────────────────────────────────────
 
@@ -83,13 +233,30 @@ export const pngXmp = (gps: boolean, compressed = false) =>
       compressed ? noise(40) : ascii(gps ? GPS_XMP : PLAIN_XMP),
     ),
   );
+/** A PDF-like file with `n` embedded JPEGs (plain EXIF unless `gps`), as a photo deck exported to PDF. */
+export const pdfWithPhotos = (n: number, o: { gps?: boolean; broken?: boolean } = {}): B =>
+  cat(
+    ascii('%PDF-1.4\n'),
+    ...Array.from({ length: n }, (_, i) =>
+      cat(
+        ascii(`${i + 4} 0 obj<</Filter/DCTDecode>>stream\n`),
+        jpeg({ exif: o.gps && i === n - 1 ? 'gps' : 'plain' }),
+        ascii('\nendstream\n'),
+      ),
+    ),
+    o.broken ? cat(ascii('Exif\0\0'), ascii('XX'), noise(10)) : [],
+    ascii('%%EOF\n'),
+  );
+
+/** A tEXt chunk with any keyword and text. */
+export const pngRawText = (keyword: string, text: string) => chunk('tEXt', ascii(`${keyword}\0${text}`));
 /** ImageMagick also writes one tEXt per EXIF tag, keyword "exif:<Tag>". */
 export const pngTagText = (tag: string, value: string) => chunk('tEXt', ascii(`exif:${tag}\0${value}`));
-/** ImageMagick's hex "Raw profile type exif" tEXt chunk. */
-export const pngRawProfile = (gps: boolean) => {
-  const body = cat(ascii('Exif\0\0'), tiff(gps));
+/** ImageMagick's hex "Raw profile type <kind>" tEXt chunk (exif by default; xmp carries the XMP packet). */
+export const pngRawProfile = (gps: boolean, kind: 'exif' | 'xmp' = 'exif') => {
+  const body = kind === 'xmp' ? ascii(gps ? GPS_XMP : PLAIN_XMP) : cat(ascii('Exif\0\0'), tiff(gps));
   const hex = body.map((x) => x.toString(16).padStart(2, '0')).join('');
-  return chunk('tEXt', ascii(`Raw profile type exif\0\nexif\n${String(body.length).padStart(8)}\n${hex}\n`));
+  return chunk('tEXt', ascii(`Raw profile type ${kind}\0\n${kind}\n${String(body.length).padStart(8)}\n${hex}\n`));
 };
 
 // ── WebP ─────────────────────────────────────────────────────────────────────
@@ -115,8 +282,9 @@ const full = (type: string, v: number, payload: B): B => box(type, cat([v, 0, 0,
  * HEIC: ftyp, meta (hdlr, iinf with an hvc1 image item and an Exif item, iloc pointing into mdat), mdat. `prefixed`
  * puts "Exif\0\0" before the TIFF header (Apple); without it only the iinf / iloc reader can find the EXIF.
  */
-export function heic(o: { gps: boolean; prefixed?: boolean; xmpGps?: boolean }): B {
-  const exifItem = o.prefixed ? cat(be32(6), ascii('Exif\0\0'), tiff(o.gps)) : cat(be32(0), tiff(o.gps));
+export function heic(o: { gps: boolean; prefixed?: boolean; xmpGps?: boolean; tiff?: B }): B {
+  const t = o.tiff ?? tiff(o.gps);
+  const exifItem = o.prefixed ? cat(be32(6), ascii('Exif\0\0'), t) : cat(be32(0), t);
   const xmpItem = o.xmpGps === undefined ? [] : ascii(o.xmpGps ? GPS_XMP : PLAIN_XMP);
   const ftyp = box('ftyp', cat(ascii('heic'), be32(0), ascii('mif1heic')));
   const build = (exifOff: number, xmpOff: number) => {
@@ -153,8 +321,23 @@ export function heic(o: { gps: boolean; prefixed?: boolean; xmpGps?: boolean }):
   return cat(ftyp, meta, box('mdat', cat(exifItem, xmpItem, noise(64))));
 }
 
-/** MP4 / MOV: ftyp, moov (mvhd + optional udta ©xyz or Apple keys ISO6709), mdat. */
-export function mp4(o: { loc?: 'xyz' | 'keys' | 'loci' | 'xmp'; noMoov?: boolean; mdat?: B } = {}): B {
+/**
+ * MP4 / MOV: ftyp, moov (mvhd + optional udta ©xyz or Apple keys ISO6709), mdat. 'ffkeys' is ffmpeg's
+ * use_metadata_tags form (a plain "location" mdta key, ISO 6709 value); 'gpmd' a GoPro-style GPS metadata track.
+ */
+export function mp4(
+  o: {
+    loc?: 'xyz' | 'keys' | 'ffkeys' | 'loci' | 'xmp' | 'gpmd';
+    noMoov?: boolean;
+    mdat?: B;
+    /** Tracks by sample entry type ('avc1', 'mp4a', 'tx3g' subtitles, 'djmd' DJI telemetry…). */
+    tracks?: string[];
+    /** A udta comment (©cmt) with this text. */
+    comment?: string;
+    /** An Apple timed-metadata track ('mebx') with these key names. */
+    mebxKeys?: string[];
+  } = {},
+): B {
   const ftyp = box('ftyp', cat(ascii('qt  '), be32(0), ascii('qt  isom')));
   const udta =
     o.loc === 'xyz'
@@ -164,18 +347,44 @@ export function mp4(o: { loc?: 'xyz' | 'keys' | 'loci' | 'xmp'; noMoov?: boolean
         : o.loc === 'xmp'
           ? box('udta', box('XMP_', ascii(GPS_XMP)))
           : [];
+  const key = o.loc === 'keys' ? 'com.apple.quicktime.location.ISO6709' : 'location';
   const keys =
-    o.loc === 'keys'
+    o.loc === 'keys' || o.loc === 'ffkeys'
       ? box(
           'meta',
           cat(
             full('hdlr', 0, cat(be32(0), ascii('mdta'), new Array(13).fill(0))),
-            full('keys', 0, cat(be32(1), box('mdta', ascii('com.apple.quicktime.location.ISO6709')))),
-            box('ilst', box('\0\0\0\x01', box('data', cat(be32(1), be32(0), ascii('+51.5074-000.1278/'))))),
+            full('keys', 0, cat(be32(2), box('mdta', ascii('title')), box('mdta', ascii(key)))),
+            box(
+              'ilst',
+              cat(
+                box('\0\0\0\x01', box('data', cat(be32(1), be32(0), ascii('Walk')))),
+                box('\0\0\0\x02', box('data', cat(be32(1), be32(0), ascii('+51.5074-000.1278/')))),
+              ),
+            ),
           ),
         )
       : [];
-  const moov = box('moov', cat(full('mvhd', 0, noise(96)), udta, keys));
+  const gpmd = o.loc === 'gpmd' ? box('trak', box('mdia', box('minf', box('stbl', box('stsd', ascii('gpmd')))))) : [];
+  const trak = (entry: string) =>
+    box('trak', box('mdia', box('minf', box('stbl', full('stsd', 0, cat(be32(1), box(entry, noise(16))))))));
+  const mebx = (keys: string[]) =>
+    box(
+      'mebx',
+      cat(
+        [0, 0, 0, 0, 0, 0, 0, 1],
+        box(
+          'keys',
+          cat(...keys.map((k, i) => box(String.fromCharCode(0, 0, 0, i + 1), box('keyd', ascii(`mdta${k}`))))),
+        ),
+      ),
+    );
+  const mebxTrak = o.mebxKeys
+    ? box('trak', box('mdia', box('minf', box('stbl', full('stsd', 0, cat(be32(1), mebx(o.mebxKeys)))))))
+    : [];
+  const tracks = [...(o.tracks ?? []).flatMap(trak), ...mebxTrak];
+  const comment = o.comment ? box('udta', box('\xA9cmt', cat(be16(o.comment.length), be16(0), ascii(o.comment)))) : [];
+  const moov = box('moov', cat(full('mvhd', 0, noise(96)), udta, keys, gpmd, tracks, comment));
   return cat(ftyp, o.noMoov ? [] : moov, box('mdat', o.mdat ?? noise(300)));
 }
 

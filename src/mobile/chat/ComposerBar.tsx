@@ -13,6 +13,7 @@ import bGlyph from '../brand/bwallet-glyph.svg';
 import { B_OUTLINE_D, B_OUTLINE_VIEWBOX } from '../brand/bOutline';
 import type { BchatClient } from './api';
 import { insertAtCursor, rememberEmoji } from './emoji';
+import { sendVoiceNote } from './uploadLocation';
 import {
   composerOptions,
   FILE_ACCEPT,
@@ -355,7 +356,7 @@ export const ComposerBar = ({
         <VoiceNoteSheet
           onClose={() => setSheet(null)}
           onSend={async (file) => {
-            await upload(file, () => undefined);
+            await sendVoiceNote(client, ticker, file);
             onUploaded();
           }}
         />

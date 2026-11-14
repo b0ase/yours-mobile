@@ -129,8 +129,8 @@ export function CommissionCard({
       const t = await terms('deliverer');
       let contentSha256: string | undefined;
       if (file) {
-        contentSha256 = await sha256Hex(file);
-        await client.uploadMedia(ticker, file); // fallback clip submission: into the room's media
+        // Fallback clip submission: into the room's media. Hash what was sent (a JPEG goes without its metadata).
+        contentSha256 = await sha256Hex(await client.uploadMedia(ticker, file));
       }
       await post({
         action: 'enter',
