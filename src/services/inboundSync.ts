@@ -72,6 +72,7 @@ import {
   syncStateFor,
   tailUnderWay,
   updateMark,
+  type FullPassMark,
   type SyncStateRow,
 } from './fullPass';
 
@@ -422,6 +423,16 @@ const syncMapOnce = (once: PageSyncMap | undefined, raw: unknown): IdMaps | unde
     once.raw = raw;
   }
   return once.maps;
+};
+
+/**
+ * The pass mark markOf(row) reads, taken from the page's one parse. Only a parsed OBJECT is handed to markOf; a text
+ * that parses to anything else (a double-encoded row would parse to a string) goes to markOf as the row, so the answer
+ * is always markOf(row)'s (pageMark.test.ts).
+ */
+export const pageMark = (row: SyncStateRow | undefined, once: PageSyncMap | undefined): FullPassMark => {
+  const parsed = typeof row?.syncMap === 'string' ? syncMapOnce(once, row.syncMap) : undefined;
+  return markOf(parsed && typeof parsed === 'object' ? { syncMap: parsed } : row);
 };
 
 /** A record as JSON (the verifier decrypts what the manager encrypted); undefined when it can't be read. */
@@ -1831,8 +1842,10 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         // scheduling only
       }
     };
-    // The same mark markOf(row) reads, from this page's one parse (markOf takes a map already parsed as it is).
-    const mark = markOf(typeof row?.syncMap === 'string' ? { syncMap: syncMapOnce(once, row.syncMap) } : row);
+    // The same mark markOf(row) reads, from this page's one parse (markOf takes a map already parsed as it is). Only a
+    // parsed OBJECT is handed over: a text that parses to anything else (a double-encoded row) goes to markOf as the
+    // row, exactly as before the memo.
+    const mark = pageMark(row, once);
     /** A tail pass (rows that reached the backup late with old times: services/pullTail.ts), not one from the start. */
     const tail = fromStart && tailUnderWay(mark);
     /** A deep, full or tail pass this device started: the device-sync pulls carry it (services/fullPass.ts). */
