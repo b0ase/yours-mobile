@@ -54,12 +54,22 @@ export const MIN_FEE_SATS = 50;
 export type TransferRule = { kind: 'unanimous' } | { kind: 'majority'; m: number };
 /** Owner default (15 Oct): MAJORITY, the smallest true majority (2-of-3, 3-of-4, 3-of-5). Unanimous stays selectable. */
 export const defaultRule = (partners: number): TransferRule => ({ kind: 'majority', m: Math.floor(partners / 2) + 1 });
-/** Plain warnings for the setup screen. KEEP IN STEP with bit-sign partnership.ts RULE_WARNING (agreement text). */
+/**
+ * Plain warnings for the setup screen and the agreement (section 3). KEEP IN STEP with bit-sign partnership.ts
+ * RULE_WARNING (agreement text). Owner, 14 Nov 2026: strict consent, a partner's shares move only with that partner's
+ * own signature (proposalMoveProblem enforces it); a majority decides other matters.
+ */
 export const RULE_WARNING = {
   majority:
-    'Majority: if most partners agree, shares can move even without one partner — and a lost phone never freezes the business.',
+    "Majority: each partner's shares move only with their own approval and enough partners to make a majority; a majority decides other matters, such as admitting a partner. If a partner loses their 12 words, their shares stay locked.",
   unanimous: 'Unanimous: every partner must sign; if one partner loses their 12 words, the shares are stuck for good.',
 } as const;
+/**
+ * The majority wording agreements were drafted and signed with before 14 Nov 2026. Never shown or drafted any more;
+ * kept only so agreements made with it still check (agreementProblem).
+ */
+export const LEGACY_RULE_WARNING_MAJORITY =
+  'Majority: if most partners agree, shares can move even without one partner — and a lost phone never freezes the business.';
 
 /** Signatures a move needs. Same rule as bit-sign src/lib/partnership.ts signaturesForTransfer. */
 export const signaturesNeeded = (rule: TransferRule, partners: number) =>
@@ -519,9 +529,11 @@ export const AWAITING_OWNER = 'This move takes shares from a partner who has not
  * - `expected` is the agreement's keyset (agreedKeyset): every partner-locked input and every output must be exactly
  *   the partner lock template under it, byte for byte, so a move can't drop a partner, add a key, lower M, hide a
  *   backdoor after the multisig or write a non-standard amount (b-Aware, 0xRen + review).
- * - Consent (conservative): every holder whose shares go down must either be `signer` (the partner about to sign,
- *   who sees their own loss on the card) or have already signed this exact transaction. A partner's wallet never
- *   co-signs moving someone else's shares without that someone's signature, even where the rule's M would allow it.
+ * - Consent (owner decision, 14 Nov 2026: strict): every holder whose shares go down must either be `signer` (the
+ *   partner about to sign, who sees their own loss on the card) or have already signed this exact transaction. A
+ *   partner's wallet never co-signs moving someone else's shares without that someone's signature, even where the
+ *   rule's M would allow it. Lost-seed recovery is planned via a new BRC allowing dilution (lock or invalidate the
+ *   lost tokens and issue new ones), never by a majority moving a partner's shares.
  *   `signer: null` (the default) requires every loser's signature, as broadcasting does.
  * - `next` is only for an admission whose new keyset the wallet has verified; without it outputs stay on `expected`.
  */

@@ -128,7 +128,10 @@ describe('default rule', () => {
     ]);
     expect(keysetFor(defaultRule(3), [pub(ann), pub(ben), pub(cat)]).m).toBe(2);
     expect(RULE_WARNING.unanimous).toContain('stuck for good');
-    expect(RULE_WARNING.majority).toContain('lost phone never freezes');
+    expect(RULE_WARNING.majority).toContain("each partner's shares move only with their own approval");
+    expect(RULE_WARNING.majority).toContain('a majority decides other matters');
+    expect(RULE_WARNING.majority).not.toContain('even without one partner');
+    expect(RULE_WARNING.majority).not.toContain('never freezes');
   });
 });
 
