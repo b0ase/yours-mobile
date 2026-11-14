@@ -108,6 +108,7 @@ describe('labelCoveredByIntent', () => {
     originator: SITE,
     protocolID: [1, 'action label bvideox records'],
     counterparty: 'self',
+    usageType: 'generic',
   };
   test("only that action's label, from that site", () => {
     expect(labelCoveredByIntent(label, intent)).toBe(true);
@@ -116,5 +117,9 @@ describe('labelCoveredByIntent', () => {
     expect(labelCoveredByIntent({ ...label, protocolID: [2, 'action label bvideox records'] }, intent)).toBe(false);
     expect(labelCoveredByIntent({ ...label, privileged: true }, intent)).toBe(false);
     expect(labelCoveredByIntent(label, undefined)).toBe(false);
+  });
+  test('a key operation under the label name is not a label: decrypt, HMAC, signing each get a sheet', () => {
+    for (const usageType of ['encrypting', 'hmac', 'signing', 'publicKey', 'linkageRevelation', undefined])
+      expect(labelCoveredByIntent({ ...label, usageType }, intent)).toBe(false);
   });
 });

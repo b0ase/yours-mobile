@@ -133,6 +133,8 @@ export type MintPermissionRequest = {
   privileged?: boolean;
   protocolID?: unknown;
   counterparty?: string;
+  /** The toolbox's operation: 'generic' for a label (ensureLabelAccess), 'encrypting', 'hmac', 'signing'... */
+  usageType?: string;
 };
 
 /**
@@ -290,9 +292,15 @@ export const mintIntentFor = (origin: string | undefined, params: CreateParams):
   };
 };
 
-/** Let a label request through while its mint's createAction runs? Only that site, only that action's labels. */
+/**
+ * Let a label request through while its mint's createAction runs? Only that site, only that action's labels, and only
+ * a label use (usageType 'generic', as ensureLabelAccess asks): a level-1 decrypt, HMAC or signature a site makes
+ * under the same 'action label …' name is a key operation, not a label, and gets its own sheet (coordinator note on
+ * rows 120/207, 14 Nov 2026).
+ */
 export const labelCoveredByIntent = (req: MintPermissionRequest, intent: MintIntent | undefined): boolean => {
   if (!intent || req.type !== 'protocol' || req.privileged || req.originator !== intent.origin) return false;
+  if (req.usageType !== 'generic') return false;
   if ((req.counterparty ?? 'self') !== 'self') return false;
   const pid = asPid(req.protocolID);
   return !!pid && pid[0] === 1 && intent.labels.some((l) => pid[1] === `action label ${l}`);

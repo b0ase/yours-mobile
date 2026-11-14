@@ -134,9 +134,11 @@ describe('origin binding', () => {
       false,
     );
     expect(passCovers(pass, { type: 'spending', originator: 'evil.com', spending: { satoshis: 1 } })).toBe(false);
-    expect(
-      passCovers(pass, { type: 'protocol', originator: 'bmovies.online', protocolID: [1, `action label ${LABEL}`] }),
-    ).toBe(true);
+    const labelUse = { type: 'protocol', originator: 'bmovies.online', protocolID: [1, `action label ${LABEL}`] };
+    expect(passCovers(pass, { ...labelUse, usageType: 'generic' })).toBe(true);
+    // A key operation under the label's name is not a label use: its own sheet (rows 120/207 follow-up).
+    for (const usageType of ['encrypting', 'hmac', 'signing', undefined])
+      expect(passCovers(pass, { ...labelUse, usageType })).toBe(false);
     expect(passCovers(pass, { type: 'protocol', originator: 'bmovies.online', protocolID: [2, LABEL] })).toBe(false);
     expect(passCovers(pass, { type: 'basket', originator: 'bmovies.online' })).toBe(false);
     expect(passCovers(undefined, { type: 'spending', originator: 'bmovies.online', spending: { satoshis: 1 } })).toBe(

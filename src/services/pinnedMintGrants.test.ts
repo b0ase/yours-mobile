@@ -12,6 +12,8 @@ import { InMemoryPermissionStore, LocalWalletPermissionsManager } from '@1sat/wa
 import {
   deferredEncryptGrant,
   isLegacyPinnedMintGrant,
+  labelCoveredByIntent,
+  mintIntentFor,
   PINNED_MINT_MIGRATION_KEY,
   revokeLegacyPinnedMintGrants,
   revokeLegacyPinnedMintGrantsOnce,
@@ -150,5 +152,44 @@ describe('old never-expiring pinned-mint grants are removed on upgrade', () => {
   test('wallet start-up runs the sweep', () => {
     const init = readFileSync(join(import.meta.dir, '..', 'initWallet.ts'), 'utf8');
     expect(init).toContain('await revokeLegacyPinnedMintGrantsOnce(');
+  });
+});
+
+describe("a mint's label cover is a label use only", () => {
+  test('the real manager asks a label as usageType generic, an HMAC under its name as hmac; only the first is covered', async () => {
+    const intent = mintIntentFor(SITE, {
+      description: 'bVideoX: 1 private video record',
+      labels: ['bvideox records'],
+      outputs: [{ satoshis: 0 }],
+      options: { spendingAuthorization: { protocolID: PID } },
+    })!;
+    const seen: Record<string, unknown>[] = [];
+    const w = {
+      createHmac: async () => ({ hmac: [1] }),
+      listOutputs: async () => ({ outputs: [], totalOutputs: 0 }),
+      listActions: async () => ({ actions: [], totalActions: 0 }),
+    };
+    const mgr = new LocalWalletPermissionsManager(w as never, ADMIN, { seekPermissionWhenApplyingActionLabels: true }, {
+      store: new InMemoryPermissionStore(),
+    } as never);
+    mgr.bindCallback(
+      'onProtocolPermissionRequested',
+      (async (r: Record<string, unknown>) => void seen.push(r)) as never,
+    );
+    const label = (mgr as unknown as { ensureLabelAccess: (a: object) => Promise<boolean> }).ensureLabelAccess({
+      originator: SITE,
+      label: 'bvideox records',
+      reason: 'mint',
+      usageType: 'apply',
+    });
+    const hmac = mgr.createHmac(
+      { protocolID: [1, 'action label bvideox records'], keyID: '1', data: [1] } as never,
+      SITE,
+    );
+    label.catch(() => undefined);
+    hmac.catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(seen.map((r) => r.usageType).sort()).toEqual(['generic', 'hmac']);
+    for (const r of seen) expect(labelCoveredByIntent(r as never, intent)).toBe(r.usageType === 'generic');
   });
 });
