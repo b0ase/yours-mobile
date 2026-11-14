@@ -130,12 +130,17 @@ export type MintPermissionRequest = {
   privileged?: boolean;
   protocolID?: unknown;
   counterparty?: string;
+  /** The manager's usage type ('encrypting' for encrypt and decrypt, 'signing', 'hmac', ...). */
+  usageType?: string;
 };
 
 /**
  * Let this protocol request through for one call, without a sheet? Only a self-encrypt by a pinned protocol's home
  * site on a protocol that has a mint action, with nothing else in flight on it, inside the rate cap.
  * `req.originator` must already be normalised.
+ * The request must be the manager's 'encrypting' kind whatever the call tracking says (review of 8155671a): a
+ * signature, HMAC or key linkage is never let through. A decrypt is 'encrypting' too; it is kept out by
+ * calls.onlyEncrypt (any decrypt in flight on the protocol means a sheet).
  */
 export const shouldDeferEncrypt = (
   req: MintPermissionRequest,
@@ -144,6 +149,7 @@ export const shouldDeferEncrypt = (
   now: number,
 ): boolean => {
   if (req.type !== 'protocol' || req.privileged || !req.originator) return false;
+  if (req.usageType !== 'encrypting') return false;
   if ((req.counterparty ?? 'self') !== 'self') return false;
   const pid = asPid(req.protocolID);
   const pin = pid ? pinnedProtocol(pid) : undefined;

@@ -32,6 +32,7 @@
  * Pure apart from the manager it wraps, so it can be unit tested with the real LocalWalletPermissionsManager.
  */
 import { PublicKey } from '@bsv/sdk';
+import { isOneUseAnswer } from './oneShotGrant';
 
 /** Request IDs of one-signature requests start with this (the manager's own keys start "proto:"). */
 export const ONE_USE_REQUEST_PREFIX = 'once:';
@@ -203,7 +204,12 @@ const COUNTERPARTY_METHODS = [
 
 type Fn = (args: unknown, originator?: string) => Promise<unknown>;
 type Manager = Partial<Record<(typeof COUNTERPARTY_METHODS)[number], Fn>> & {
-  grantPermission?: (params: { requestID: string; ephemeral?: boolean; expiry?: number }) => Promise<void>;
+  grantPermission?: (params: {
+    requestID: string;
+    ephemeral?: boolean;
+    expiry?: number;
+    oneUse?: boolean;
+  }) => Promise<void>;
   enqueueAndFireEvent?: (request: Record<string, unknown>, key: string) => Promise<boolean>;
   underlying?: { createSignature?: Fn; createHmac?: Fn };
   isAdminProtocol?: (p: [number, string]) => boolean;
@@ -250,11 +256,13 @@ export function guardSharedKeySigning<T extends object>(manager: T, deps: { admi
     };
   }
 
-  // 2. Answering a "once:" request releases that one call and stores nothing (the manager stores a grant for every
-  //    request still in its pendingSingle map; taking it out first leaves only the release).
+  // 2. Answering a "once:" request, or answering any request with oneUseGrant (oneShotGrant.ts: the Seal sheet, a
+  //    pinned-site mint's encrypt and label, a stream pass), releases that one call and stores nothing (the manager
+  //    stores a grant for every request still in its pendingSingle map; taking it out first leaves only the release,
+  //    with no store write to wait for, so no other call can join the request before it is released).
   const grant = m.grantPermission;
   m.grantPermission = async (params) => {
-    if (!isOneUseRequestID(params?.requestID)) return grant.call(manager, params);
+    if (!isOneUseRequestID(params?.requestID) && !isOneUseAnswer(params)) return grant.call(manager, params);
     m.pendingSingle!.delete(params.requestID);
     return grant.call(manager, { requestID: params.requestID, ephemeral: true, expiry: 1 });
   };
