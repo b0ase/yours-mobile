@@ -1,11 +1,13 @@
 {
   "compilerOptions": {
-    "composite": true,
     "skipLibCheck": true,
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
-    "strict": true
+    "strict": true,
+    "noEmit": true
   },
-  "include": ["vite.config*.ts", "vite.brand.ts"]
+  "include": ["vite.*.ts", "scripts/**/*.ts"]
 }

@@ -15,6 +15,8 @@ import {
   relaySocketUrl,
   newClaim,
   walletClaimFor,
+  sessionWalletClaim,
+  claimDigestSync,
   isAllowedRelay,
   verifyPairProofs,
   type HelloFrame,
@@ -50,6 +52,36 @@ export const CLI_ONLY_FROM_SETTINGS =
   'To pair the bWalletX CLI, open Agents › Pair the CLI (or Settings › Paired websites) and scan from there. Only do this if you just ran `bwalletx login` on your own computer.';
 export const REPAIR_NEEDED_CODE = 'REPAIR_NEEDED';
 export const REPAIR_NEEDED_MESSAGE = 'This pairing has ended. Scan the QR code on the site again to reconnect.';
+/** The relay refused the join: someone else already joined with this QR, or it expired. */
+export const PAIR_CODE_USED_MESSAGE = 'This code has expired or was already used.';
+export const PAIR_UNREACHABLE_MESSAGE = 'Could not reach the pairing service. Check your connection and try again.';
+/** The site sent a sealed close before Connect: on the site, the user said the codes didn't match. */
+export const SITE_SAID_NO_MESSAGE =
+  "The website said the codes didn't match, so nothing was connected. Ask the site for a new QR code.";
+export const SITE_CLOSED_MESSAGE = 'The website ended the pairing, so nothing was connected.';
+
+/**
+ * A page sees a refused join and an unreachable relay the same way (error, then close 1006), so ask the relay whether
+ * it is up. No-cors: an opaque answer is enough to know it was reached. Never throws.
+ */
+async function relayReachable(relay: string): Promise<boolean> {
+  const local = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(relay);
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), 4000) : null;
+  try {
+    await fetch(`${local ? 'http' : 'https'}://${relay}/health`, {
+      mode: 'no-cors',
+      cache: 'no-store',
+      credentials: 'omit',
+      ...(ctl ? { signal: ctl.signal } : {}),
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** What paired-CLI calls need from the app; TopNav keeps it current (wallet context + open account). */
 let agentDeps: {
@@ -58,6 +90,8 @@ let agentDeps: {
   feeRate?: () => number;
   /** How many accounts the wallet holds; decides whether pre-binding sessions are adopted (see bindToAccount). */
   accountCount?: number;
+  /** Identity addresses of every account in the wallet: another account's pairings are parked, not dropped (isDormant). */
+  accountIds?: string[];
   /** The open account's Twetch signing key store (twetch/twetchLink.ts), for twetch.* calls. */
   twetch?: TwetchStore;
 } = {
@@ -195,6 +229,11 @@ export type StoredSession = {
   account?: string;
   /** Relay role claim (protocol.ts newClaim): only this wallet can rejoin the channel. Missing on older sessions. */
   claim?: string;
+  /**
+   * 2: `claim` is the session claim (protocol.ts sessionWalletClaim) and the relay bound it, so rejoins send its digest
+   * as `nc`. Unset: `claim` is the QR claim or a random one (relays or sessions from before 12 Nov 2026).
+   */
+  wcv?: 2;
   /** The site proved its origin (protocol.ts verifyPairProof). Unset: the host is only claimed. */
   proven?: boolean;
 };
@@ -216,9 +255,10 @@ export type PendingPair = {
   cancel: () => void;
   /**
    * Called once if the card is no longer wanted before Connect or Cancel: the site closed its QR (its socket left the
-   * channel), or it signed in through another pairing meanwhile (pairLogin.ts closeConnectCardsFor).
+   * channel), or it signed in through another pairing meanwhile (pairLogin.ts closeConnectCardsFor). With a message
+   * when the user should see why: the site ended the pairing itself (its user said the codes didn't match).
    */
-  onGone: (f: () => void) => void;
+  onGone: (f: (message?: string) => void) => void;
 };
 
 /**
@@ -254,6 +294,14 @@ const isCurrent = (s: StoredSession, now = Date.now()) =>
   s.agent ? now < s.agent.expiresAt : now - s.lastUsed < IDLE_MS;
 
 /**
+ * Bumped for a channel whenever its pairing ends here (forget, lapse, closeAllPairings). A paired-computer spend can wait
+ * in the spend queue behind a slow mint; it checks the generation it started with before it signs (b-Aware report,
+ * 13 Nov 2026), so an unpair always wins, even when storage is blocked and the stored session can't be removed.
+ */
+const revokedGen = new Map<string, number>();
+const revokeChannel = (c: string) => revokedGen.set(c, (revokedGen.get(c) ?? 0) + 1);
+
+/**
  * A session that lapses (24 h idle, agent grant expired, unpinned relay) is dropped like a Disconnect: its socket
  * closes and the paired key's grants are queued for revocation (b-Aware report, 23 Oct 2026), unless another
  * current session still uses the same paired key. The queue is written before anything else so a revoke is
@@ -264,6 +312,7 @@ const dropLapsed = (dropped: StoredSession[], kept: StoredSession[]) => {
   const origins = [...new Set(dropped.map(keyOf))].filter((o) => !inUse.has(o));
   if (origins.length) writeQueue([...readQueue(), ...origins]);
   for (const s of dropped) {
+    revokeChannel(s.c);
     replies.forget(s.c);
     const l = live.get(s.c);
     if (!l) continue;
@@ -321,28 +370,66 @@ const peek = (c: string): StoredSession | undefined => {
   }
 };
 
-const load = (): StoredSession[] => {
+/**
+ * A pairing made by another account that is still in this wallet (owner, 13 Nov 2026: switching to the main account and
+ * back wiped the agent account's CLI pairing, and the CLI got no answer). It is parked: kept in storage, but no socket,
+ * no calls, not listed and not mirrored to the background, because calls run on the open account. Switching back to
+ * its account revives it. Only a pairing whose account is gone from the wallet is dropped (bindToAccount).
+ */
+const isDormant = (s: StoredSession) =>
+  !!agentDeps.currentId &&
+  !!s.account &&
+  s.account !== agentDeps.currentId &&
+  !!agentDeps.accountIds?.includes(s.account);
+
+/** Close a parked pairing's socket without telling the site anything: it is still paired, just not answering here. */
+const park = (c: string) => {
+  const l = live.get(c);
+  if (!l) return;
+  if (l.retry) clearTimeout(l.retry);
+  live.delete(c);
+  l.ws.onclose = null;
+  l.ws.onmessage = null;
+  try {
+    l.ws.close();
+  } catch {
+    /* already gone */
+  }
+};
+
+/** The open account's sessions (`kept`) and other accounts' parked ones (`dormant`); drops the rest. */
+const loadSplit = (): { kept: StoredSession[]; dormant: StoredSession[] } => {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
-    if (!Array.isArray(raw)) return [];
+    if (!Array.isArray(raw)) return { kept: [], dormant: [] };
     const now = Date.now();
     const trusted = new Set(dropUntrustedRelays(raw));
     const current = raw.filter((s) => trusted.has(s) && isCurrent(s, now));
     const kept = bindToAccount(current, agentDeps.currentId, agentDeps.accountCount);
-    const adopted = kept.some((s, i) => s !== current[i]);
-    if (kept.length !== raw.length || adopted) {
-      localStorage.setItem(KEY, JSON.stringify(kept));
-      mirrorSessions(kept);
-      const keptChannels = new Set(kept.map((s) => s.c));
+    const dormant = current.filter(isDormant);
+    const persisted = [...kept, ...dormant];
+    const adopted = kept.some((s) => !current.includes(s));
+    if (persisted.length !== raw.length || adopted) {
+      localStorage.setItem(KEY, JSON.stringify(persisted));
+      const keptChannels = new Set(persisted.map((s) => s.c));
       dropLapsed(
         raw.filter((s) => !keptChannels.has(s.c)),
-        kept,
+        persisted,
       );
     }
-    return kept;
+    // Before the open account is known `kept` is every session; mirror only once it is.
+    if (agentDeps.currentId) mirrorSessions(kept);
+    for (const s of dormant) park(s.c);
+    return { kept, dormant };
   } catch {
-    return [];
+    return { kept: [], dormant: [] };
   }
+};
+const load = (): StoredSession[] => loadSplit().kept;
+/** Every stored session, parked ones included: what save() must write back so a change never drops them. */
+const loadAll = (): StoredSession[] => {
+  const { kept, dormant } = loadSplit();
+  return [...kept, ...dormant];
 };
 const save = (all: StoredSession[]) => {
   try {
@@ -350,7 +437,7 @@ const save = (all: StoredSession[]) => {
   } catch {
     /* storage blocked: sessions last until the app closes */
   }
-  mirrorSessions(all);
+  mirrorSessions(all.filter((s) => !isDormant(s)));
   emit();
 };
 export const pairedSites = () => load();
@@ -362,14 +449,31 @@ type Live = {
   retry?: ReturnType<typeof setTimeout>;
   /** Reopened for a stored session (connect), not a fresh pairing. */
   resumed?: boolean;
+  /** This pairing's session claim (protocol.ts sessionWalletClaim); its digest goes to the site in every `ready`. */
+  session?: string;
+  /** A v1 session's connect: the relay may answer that it now holds the session claim (see connect). */
+  upgrade?: boolean;
+  /** The relay admitted this socket (its verifiedOrigin frame arrived). */
+  relayed?: boolean;
 };
 const live = new Map<string, Live>();
+/** Per channel: which of its candidate claims the next connect brings (connect explains why). Memory only. */
+const claimTry = new Map<string, number>();
+
+/**
+ * `ready` with `wcv: 2` and the session claim's digest: the site (if it is new enough) stores that the pairing is v2
+ * and re-binds the wallet role to that digest on its next connect, with the site claim it opened the channel with.
+ * That is how a v1 session upgrades (review 13 Nov 2026): the relay never lets a v1 claim bind on its own, because
+ * whoever saw the QR holds the same claim. Older sites ignore both fields.
+ */
+const readyFor = (l: Live): PairMessage =>
+  l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session) } : { t: 'ready' };
 
 const update = (c: string, patch: Partial<StoredSession>) =>
-  save(load().map((s) => (s.c === c ? { ...s, ...patch } : s)));
+  save(loadAll().map((s) => (s.c === c ? { ...s, ...patch } : s)));
 
 /** Answered / in-flight / unsent replies per channel (memory only). See replies.ts. */
-const replies = new ReplyBook();
+let replies = new ReplyBook(); // let: __resetPairingForTests swaps in an empty book
 /** Per-channel send chain: frames are sealed and sent one at a time so counters reach the site in order. */
 const sendChains = new Map<string, Promise<void>>();
 
@@ -405,12 +509,32 @@ function flush(c: string) {
   for (const msg of replies.drain(c)) void send(c, msg);
 }
 
+/**
+ * isLive for a paired-computer call: the channel wasn't revoked since the request came in, its stored session still
+ * holds the same agent grant (not lapsed, parked or on an unpinned relay), and the same account and wallet are open.
+ * A socket reconnect (wake, network) replaces only the socket, so queued work carries on.
+ */
+export const pairingLiveCheck = (c: string, grant: AgentGrant, ctx: OneSatContext) => {
+  const gen = revokedGen.get(c) ?? 0;
+  return () => {
+    if ((revokedGen.get(c) ?? 0) !== gen) return false;
+    if (agentDeps.ctx !== ctx || agentDeps.currentId !== grant.agentId) return false;
+    // Read only (peek), never load(): this runs inside createAction, and load() rewrites storage (and on a write error
+    // would answer "no sessions"). The same filters load() keeps a session by, applied to this one session.
+    const s = peek(c);
+    if (!s?.agent || s.agent.agentId !== grant.agentId || s.agent.expiresAt !== grant.expiresAt) return false;
+    if (!isCurrent(s) || isDormant(s) || !dropUntrustedRelays([s]).length) return false;
+    return bindToAccount([s], agentDeps.currentId, agentDeps.accountCount).length === 1;
+  };
+};
+
 async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
   try {
     if (!agentDeps.ctx) throw new AgentCallError('LOCKED', `${appNameFor()} is locked. Unlock it on your phone.`);
     const result = await handleAgentCall(grant, action, params, {
       ctx: agentDeps.ctx,
       currentId: agentDeps.currentId,
+      isLive: pairingLiveCheck(l.stored.c, grant, agentDeps.ctx),
       bsvUsd,
       feeRate: agentDeps.feeRate,
       saveGrant: (g) => {
@@ -490,12 +614,17 @@ function attach(l: Live) {
   ws.onmessage = inOrder(async (ev: MessageEvent) => {
     const f = JSON.parse(String(ev.data)) as RelayFrame | unknown;
     if ((f as RelayFrame).t === 'relay') {
-      const v = (f as RelayFrame).verifiedOrigin;
-      if (v && v !== stored.origin) forget(stored.c, false); // the channel changed hands: refuse
+      const rf = f as RelayFrame;
+      const v = rf.verifiedOrigin;
+      if (v && v !== stored.origin) return forget(stored.c, false); // the channel changed hands: refuse
+      if (v && !l.relayed) {
+        l.relayed = true;
+        claimTry.delete(stored.c);
+        if (l.upgrade && l.session) onUpgradeAnswer(l, l.session, rf.wcv === 2);
+      }
       // The site's tab came back (iOS kills its socket while the user is in bWallet, e.g. after a return-to-site):
       // say `ready` again so it resumes and resends, without relying on the relay's 60 s queue.
-      const rf = f as RelayFrame;
-      if (rf.peer === 'joined' && rf.role === 'site') void reply(l, { t: 'ready' });
+      if (rf.peer === 'joined' && rf.role === 'site') void reply(l, readyFor(l));
       return;
     }
     if (!isSealed(f)) return;
@@ -504,6 +633,8 @@ function attach(l: Live) {
     // The pairing lapsed while its socket stayed open: answer the call with REPAIR_NEEDED (never run it), then let
     // load() drop the session, which revokes its grants and sends the close frame.
     const own = peek(stored.c);
+    // Another account is open now: this pairing is parked (isDormant), so nothing runs on the wrong account.
+    if (own && isDormant(own)) return park(stored.c);
     if (!own || !isCurrent(own)) {
       if (msg.t === 'req')
         await send(
@@ -524,18 +655,43 @@ function attach(l: Live) {
   // got no answer while the phone was away.
   const opened = () => {
     flush(stored.c);
-    if (l.resumed) void reply(l, { t: 'ready' });
+    if (l.resumed) void reply(l, readyFor(l));
   };
   if (ws.readyState === WebSocket.OPEN) opened();
   else ws.onopen = opened;
   ws.onclose = () => {
     if (live.get(stored.c) !== l) return;
+    const at = epoch;
     live.delete(stored.c);
+    // Refused before the relay said anything: the relay may hold another of our claims now, so the next try brings
+    // the next one (connect).
+    if (!l.relayed) claimTry.set(stored.c, (claimTry.get(stored.c) ?? 0) + 1);
     // Still paired: try again (the relay holds frames for 60 s while we're away).
     if (load().some((s) => s.c === stored.c) && document.visibilityState === 'visible')
-      l.retry = setTimeout(() => connect(stored.c), 3000);
+      l.retry = setTimeout(() => at === epoch && connect(stored.c), 3000);
   };
 }
+
+/**
+ * The relay admitted a v1 session's connect. `bound` (wcv 2): the role is bound to our session claim (the site
+ * re-bound it, or the channel was re-created unbound), so from now on only that claim admits this phone: keep it.
+ * Otherwise keep whichever claim the relay just admitted.
+ */
+function onUpgradeAnswer(l: Live, session: string, bound: boolean) {
+  const c = l.stored.c;
+  l.upgrade = false;
+  if (bound) {
+    l.stored = { ...l.stored, claim: session, wcv: 2 };
+    update(c, { claim: session, wcv: 2 });
+  } else if (l.stored.claim) update(c, { claim: l.stored.claim });
+}
+
+/**
+ * Bumped only by __resetPairingForTests. A reconnect timer or key derivation started before the bump does nothing:
+ * `bun test` runs every file in one process, and a retry left by one file's copy of this module fired during the next
+ * file and acted on that file's localStorage and WebSocket stubs. Never changes in the app.
+ */
+let epoch = 0;
 
 /** Channels whose key is being derived for a reconnect (the socket isn't in `live` until that finishes). */
 const connecting = new Set<string>();
@@ -550,21 +706,35 @@ function connect(c: string) {
   const stored = load().find((s) => s.c === c);
   if (!stored) return;
   connecting.add(c);
+  const at = epoch;
   void (async () => {
     try {
       const { key } = await deriveSession(PrivateKey.fromHex(stored.phoneKey), stored.sitePub, stored.c);
+      if (at !== epoch) return; // reset meanwhile (tests only, __resetPairingForTests)
       if (!load().some((s) => s.c === c)) return; // forgotten meanwhile
       const sealer = new Sealer(key, 'wallet');
       sealer.restore({ sent: stored.sent, lastSeen: stored.lastSeen });
       if (!isAllowedRelay(stored.r, ALLOW_LOCAL_RELAY)) return; // never reconnect to an unpinned relay (audit H1)
       // Sessions stored before claims existed get one now; the relay binds it on this connect.
-      const claim = stored.claim ?? newClaim();
-      if (!stored.claim) update(c, { claim });
+      const held = stored.claim ?? newClaim();
+      if (!stored.claim) update(c, { claim: held });
+      // v2: also send the session claim's digest, so a channel the relay re-created stays bound to this phone.
+      // v1 (review 13 Nov 2026): send it too (the relay binds it on a channel re-created with the QR binding while that
+      // QR is live, or one nobody bound). The site re-binds the role to it after our `ready` (readyFor).
+      // The relay may hold a different claim of ours than the stored one: the session claim once the site re-bound it,
+      // or the QR claim on a channel a site re-created from a v1 pairing. After a refusal the next connect brings the
+      // next candidate; for a v1 session the relay's wcv 2 then makes the session claim the stored one.
+      const session =
+        stored.wcv === 2 ? held : sessionWalletClaim(PrivateKey.fromHex(stored.phoneKey), stored.sitePub, c);
+      const candidates = [...new Set([held, session, walletClaimFor(c, stored.sitePub)])];
+      const claim = candidates[(claimTry.get(c) ?? 0) % candidates.length];
       attach({
-        ws: new WebSocket(relaySocketUrl(stored.r, stored.c, 'wallet', undefined, claim)),
+        ws: new WebSocket(relaySocketUrl(stored.r, stored.c, 'wallet', undefined, claim, claimDigestSync(session))),
         sealer,
-        stored: { ...stored, claim },
+        stored: stored.wcv === 2 ? stored : { ...stored, claim },
         resumed: true,
+        session,
+        upgrade: stored.wcv !== 2,
       });
     } finally {
       connecting.delete(c);
@@ -574,6 +744,7 @@ function connect(c: string) {
 
 /** Disconnect a site: tell it, forget the key, and withdraw every grant and allowance the pairing was given. */
 export function forget(c: string, notify = true) {
+  revokeChannel(c); // first: a spend queued for this channel must not sign from here on
   forgetLogin(c);
   const stored = load().find((s) => s.c === c);
   const l = live.get(c);
@@ -585,7 +756,8 @@ export function forget(c: string, notify = true) {
     else done();
   }
   replies.forget(c);
-  save(load().filter((s) => s.c !== c));
+  claimTry.delete(c);
+  save(loadAll().filter((s) => s.c !== c));
   if (stored) void flushRevocations([keyOf(stored)]);
 }
 
@@ -605,18 +777,21 @@ export function beginPairing(scanned: string, opts: { allowCli?: boolean } = {})
   // pair the CLI themselves (Agents, Settings), never from the general scanner or a link that opened the app.
   if (link.o === CLI_ORIGIN && !opts.allowCli) return Promise.reject(new Error(CLI_ONLY_FROM_SETTINGS));
   const P = PrivateKey.fromRandom();
-  // Bound to the QR (N3-2): a site that registered this claim's digest lets only us take the wallet role.
-  return connectPairing(link, P, walletClaimFor(link.c, link.k), opts);
+  // Bound to the QR (N3-2): a site that registered this claim's digest lets only us take the wallet role. Anyone who
+  // sees the QR can compute that claim too, so it is good for this first join only: we also send the digest of our
+  // session claim (wallet claim v2), which only we and the site can compute, and the relay binds the role to it.
+  return connectPairing(link, P, walletClaimFor(link.c, link.k), sessionWalletClaim(P, link.k, link.c), opts);
 }
 
 function connectPairing(
   link: PairLink,
   P: PrivateKey,
   claim: string,
+  sessionClaim: string,
   opts: { allowCli?: boolean },
 ): Promise<PendingPair> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(relaySocketUrl(link.r, link.c, 'wallet', undefined, claim));
+    const ws = new WebSocket(relaySocketUrl(link.r, link.c, 'wallet', undefined, claim, claimDigestSync(sessionClaim)));
     let settled = false;
     const fail = (m: string) => {
       if (settled) return;
@@ -625,21 +800,31 @@ function connectPairing(
       reject(new Error(m));
     };
     const timer = setTimeout(() => fail('The site did not answer. Make sure its QR code is still showing.'), 15_000);
-    ws.onerror = () => fail('Could not reach the pairing service. Check your connection and try again.');
-    ws.onclose = (ev) =>
-      !settled && fail(ev.code === 1006 ? 'This code has expired or was already used.' : 'Pairing closed.');
+    // An error before the relay's first frame is usually a refused join (review 13 Nov 2026: the user saw "could not
+    // reach" when someone else had used the QR); say "unreachable" only when the relay really is.
+    let probing = false;
+    ws.onerror = () => {
+      if (settled || probing) return;
+      probing = true;
+      void relayReachable(link.r).then((up) => fail(up ? PAIR_CODE_USED_MESSAGE : PAIR_UNREACHABLE_MESSAGE));
+    };
+    ws.onclose = (ev) => !settled && !probing && fail(ev.code === 1006 ? PAIR_CODE_USED_MESSAGE : 'Pairing closed.');
     // After the card is up (settled) and until Connect or Cancel: the site leaving, or the channel closing, ends it.
     let open = false;
-    let goneFns: (() => void)[] = [];
+    let goneFns: ((message?: string) => void)[] = [];
     let gone = false;
+    let goneMessage: string | undefined;
     let unwatch = () => {};
+    // Made with the key once the hello is out; Connect hands it to the live session so the counters carry on.
+    let sealer: Sealer | null = null;
     const end = () => {
       open = false;
       unwatch();
     };
-    const supersede = () => {
+    const supersede = (message?: string) => {
       if (!open || gone) return;
       gone = true;
+      goneMessage = message;
       end();
       ws.onclose = null;
       try {
@@ -647,13 +832,19 @@ function connectPairing(
       } catch {
         /* already closed */
       }
-      goneFns.forEach((g) => g());
+      goneFns.forEach((g) => g(message));
       goneFns = [];
     };
     ws.onmessage = inOrder(async (ev: MessageEvent) => {
       const f = JSON.parse(String(ev.data)) as RelayFrame;
       if (settled) {
         if (f.t === 'relay' && f.peer === 'left' && f.role === 'site') supersede();
+        // The site ended it before Connect (its user said the codes didn't match): end the card and say so.
+        else if (open && sealer && isSealed(f)) {
+          const msg = await sealer.open(f);
+          if (msg?.t === 'close')
+            supersede(msg.reason === 'codes did not match' ? SITE_SAID_NO_MESSAGE : SITE_CLOSED_MESSAGE);
+        }
         return;
       }
       if (f.t !== 'relay' || !f.verifiedOrigin) return;
@@ -662,14 +853,18 @@ function connectPairing(
       // client can set any Origin header, so the session never gets the site's saved grants (see onRequest).
       if (f.verifiedOrigin !== link.o)
         return fail(`This code was shown by ${f.verifiedOrigin}, not ${link.o}. Don't connect.`);
+      // The relay says it bound the wallet role to our session claim: tell the site, which re-binds it on reconnects.
+      const v2 = f.wcv === 2;
       const hello: HelloFrame = {
         t: 'hello',
         k: P.toPublicKey().toString(),
         info: { name: appNameFor(), rdns: 'space.bwallet.mobile' },
         ...(link.cd === 8 && { cd: 8 as const }),
+        ...(v2 && { wcv: 2 as const }),
       };
       ws.send(JSON.stringify(hello));
       const { key, code } = await deriveSession(P, link.k, link.c, link.cd ?? 4);
+      sealer = new Sealer(key, 'wallet');
       // The relay's origin is only a header; the host is shown plainly only when the site proves it (B3).
       const proofs =
         (link.s || link.s2) && f.verifiedOrigin !== CLI_ORIGIN
@@ -705,7 +900,7 @@ function connectPairing(
           return claimRid(returnPlan.rid) ? returnPlan : null;
         },
         onGone: (g) => {
-          if (gone) g();
+          if (gone) g(goneMessage);
           else goneFns.push(g);
         },
         confirm: (agent?: AgentGrant) => {
@@ -726,13 +921,14 @@ function connectPairing(
             lastUsed: Date.now(),
             ...(agent && { agent }),
             ...(agentDeps.currentId && { account: agentDeps.currentId }),
-            claim,
+            // v2: the QR claim is spent at the relay; rejoin with the session claim. An older relay kept the QR claim.
+            ...(v2 ? { claim: sessionClaim, wcv: 2 as const } : { claim }),
             ...(proven && { proven: true }),
           };
-          save([...load().filter((s) => s.c !== link.c), stored]);
-          const l: Live = { ws, sealer: new Sealer(key, 'wallet'), stored };
+          save([...loadAll().filter((s) => s.c !== link.c), stored]);
+          const l: Live = { ws, sealer: sealer!, stored, relayed: true, session: sessionClaim };
           attach(l);
-          void reply(l, { t: 'ready' });
+          void reply(l, readyFor(l));
         },
         cancel: () => {
           end();
@@ -800,7 +996,14 @@ export function initPairing() {
  * reconnects on the next launch (the caller then clears localStorage).
  */
 export function closeAllPairings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
+    if (Array.isArray(raw)) for (const s of raw) revokeChannel(s.c);
+  } catch {
+    /* storage unavailable: the live channels below are still revoked */
+  }
   for (const [c, l] of live) {
+    revokeChannel(c);
     if (l.retry) clearTimeout(l.retry);
     live.delete(c);
     replies.forget(c);
@@ -813,4 +1016,36 @@ export function closeAllPairings() {
   }
   mirrorSessions([]);
   emit();
+}
+
+/**
+ * Tests only: put this module copy back to its freshly loaded state and make it inert. Live sockets are detached and
+ * closed without a retry, pending reconnect timers and key derivations started earlier do nothing (epoch), and the
+ * open account, revoker and started flag are forgotten, so nothing left behind can read or write the globals the next
+ * test file installs. Stored sessions are left alone (they live in the caller's localStorage stub).
+ */
+export function __resetPairingForTests() {
+  epoch++;
+  for (const l of live.values()) {
+    if (l.retry) clearTimeout(l.retry);
+    l.ws.onclose = null;
+    l.ws.onmessage = null;
+    try {
+      l.ws.close();
+    } catch {
+      /* already gone */
+    }
+  }
+  live.clear();
+  replies = new ReplyBook();
+  claimTry.clear();
+  connecting.clear();
+  sendChains.clear();
+  listeners.clear();
+  agentDeps = { ctx: undefined, currentId: undefined };
+  revoke = defaultRevoke;
+  rateCache = { at: 0, rate: 0 };
+  lastMirror = '';
+  hiddenAt = undefined;
+  started = false;
 }

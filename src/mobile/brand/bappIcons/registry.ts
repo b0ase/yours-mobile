@@ -34,6 +34,9 @@ export const BAPP_ICONS: Record<GlyphSlug, BappIconDef> = {
   bbooks: def('bbooks', 'bBooks', FEED_COLORS.bbooks),
   bwriter: def('bwriter', 'bWriter', FEED_COLORS.writer),
   bmail: def('bmail', 'bMail', FEED_COLORS.bmail),
+  bphone: def('bphone', 'bPhone', undefined),
+  bmedia: def('bmedia', 'Media Player', undefined),
+  block: def('block', 'Lock', undefined),
   bsocial: def('bsocial', 'bSocial', FEED_COLORS.bsocial),
   bchatx: def('bchatx', 'bChatX', FEED_COLORS.bbrowser),
   bchat: def('bchat', 'bChat', FEED_COLORS.bbrowser),
@@ -47,7 +50,6 @@ export const BAPP_ICONS: Record<GlyphSlug, BappIconDef> = {
   bedu: def('bedu', 'bEdu', FEED_COLORS.bedu),
   bmaps: def('bmaps', 'bMaps', FEED_COLORS.bmaps),
   bexchange: def('bexchange', 'bExchange', FEED_COLORS.bexchange),
-  bcredits: def('bcredits', 'bCredits', FEED_COLORS.bmarket),
   // bShares is bWalletX only (PLACEMENT_ENABLED): the store bundle never carries its name.
   bshares: def('bshares', PLACEMENT_ENABLED ? 'bShares' : '', FEED_COLORS.bdns),
 };
@@ -57,7 +59,6 @@ const ALIASES: Record<string, GlyphSlug> = {
   bgame: 'bgames',
   writer: 'bwriter',
   bidentity: 'bid',
-  credits: 'bcredits',
   shares: 'bshares',
   bitcoincode: 'bcode',
 };

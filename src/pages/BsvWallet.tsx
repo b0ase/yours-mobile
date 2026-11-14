@@ -34,6 +34,7 @@ import { MainContent } from '../components/Reusable';
 import { Show } from '../components/Show';
 import { TopNav } from '../components/TopNav';
 import { RefreshGlyph, UpToDateAnnouncer, useUpToDate } from '../components/RefreshGlyph';
+import { BalanceTruthLines } from '../components/BalanceTruthLines';
 import { useBottomMenu } from '../hooks/useBottomMenu';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { useIdentity, resolveImageUrl } from '../hooks/useIdentity';
@@ -43,7 +44,7 @@ import {
   MNEE_ICON_URL,
   MNEE_MOBILE_REFERRAL_LINK,
 } from '../utils/constants';
-import { formatNumberWithCommasAndDecimals, formatUSD } from '../utils/format';
+import { formatNumberWithCommasAndDecimals } from '../utils/format';
 import { sleep } from '../utils/sleep';
 import { AssetRow } from '../components/AssetRow';
 import { DefaultTokenCards } from '../mobile/wallet/DefaultTokenCards';
@@ -55,6 +56,8 @@ import { useServiceContext } from '../hooks/useServiceContext';
 import { getLockData, sendAllBsv, syncAddresses, type Bsv21Balance, type LockData } from '@1sat/actions';
 import { sendBsv } from '../utils/guardedSendBsv';
 import { getWalletBalance, fetchExchangeRate, cachedExchangeRate } from '../utils/wallet';
+import { cachedDisplayRate, exchangeRateAgeMs, fetchDisplayRate, startAlignedRateRefresh } from '../utils/exchangeRate';
+import { balanceUsd, formatBalanceUsd, rateLine, satsOf } from '../utils/balanceUsd';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import { YoursEventName } from '../inject';
 import { useSyncTracker } from '../hooks/useSyncTracker';
@@ -252,7 +255,11 @@ export const BsvWallet = () => {
   // The last balance this device saw, shown at once while the wallet opens and syncs (owner, 19 Oct 2026: a big
   // wallet sat on "Still syncing. Tap to retry." for a long time before its balance appeared).
   const [bsvBalance, setBsvBalance] = useState<number>(() => (loadLastBalance(identityAddress) ?? 0) / 100_000_000);
+  // Two rates (utils/exchangeRate.ts): `exchangeRate` is the PAYMENT rate (USD amounts → sats, checked against
+  // WhatsOnChain); `displayRate` is the shared per-minute price for the balance headline (the same cent on every device).
   const [exchangeRate, setExchangeRate] = useState<number>(0);
+  const [displayRate, setDisplayRate] = useState<number>(() => cachedDisplayRate());
+  const headlineRate = displayRate || exchangeRate;
   const [balanceLoading, setBalanceLoading] = useState(true);
   const [balanceFailed, setBalanceFailed] = useState(false);
   const [balanceKnown, setBalanceKnown] = useState(() => loadLastBalance(identityAddress) != null);
@@ -729,6 +736,24 @@ export const BsvWallet = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exchangeRate]);
 
+  // The same price as every other device (owner, 13 Nov 2026: extension and iPhone one cent apart). The screen used to
+  // keep whatever price it had until the next balance load, while the price tile (and the other device) moved on. Now it
+  // asks at the same moment of every minute as every device, and takes any newer price any screen fetched
+  // (utils/exchangeRate.ts startAlignedRateRefresh).
+  useEffect(
+    () =>
+      startAlignedRateRefresh(
+        (rate) => {
+          setDisplayRate(rate);
+          const pay = cachedExchangeRate();
+          if (pay > 0) setExchangeRate(pay);
+        },
+        () => fetchDisplayRate(apiContext.chain, apiContext.wocApiKey),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   useEffect(() => {
     if (updateBalance) {
       getAndSetBsvBalance();
@@ -1184,11 +1209,21 @@ export const BsvWallet = () => {
       }
     }
 
-    //? multi-send calculate all amounts
+    //? multi-send calculate all amounts. Dollar amounts use the PAYMENT rate, read now (checked against WhatsOnChain),
+    // never the headline's shared price; no price → no dollar send (it used to divide by a 0 rate).
+    const usdRows = recipients.some((r) => r.amountType === 'usd' && r.usdSendAmount);
+    const payRate = usdRows ? await fetchExchangeRate(apiContext.chain, apiContext.wocApiKey) : exchangeRate;
+    if (usdRows) {
+      if (!(payRate > 0)) {
+        addSnackbar('No BSV price right now. Try again in a minute, or send an amount in BSV.', 'error');
+        return;
+      }
+      setExchangeRate(payRate);
+    }
     const sendRecipients = recipients.map((r) => {
       let satoshis = r.satSendAmount ?? 0;
       if (r.amountType === 'usd' && r.usdSendAmount) {
-        satoshis = Math.ceil((r.usdSendAmount / exchangeRate) * BSV_DECIMAL_CONVERSION);
+        satoshis = Math.ceil((r.usdSendAmount / payRate) * BSV_DECIMAL_CONVERSION);
       }
       return isValidEmail(r.address) ? { paymail: r.address, satoshis } : { address: r.address, satoshis };
     });
@@ -1755,11 +1790,11 @@ export const BsvWallet = () => {
               </h1>
             ) : (
               <h1
-                title={isSyncing ? 'Syncing…' : 'Balance'}
+                title={isSyncing ? 'Syncing…' : rateLine(headlineRate, exchangeRateAgeMs()) || 'Balance'}
                 className="text-4xl font-bold tracking-tight select-none"
                 style={{ color: theme.color.global.contrast, letterSpacing: '-0.02em' }}
               >
-                {formatUSD(bsvBalance * exchangeRate + (services.mnee ? mneeBalance : 0))}
+                {formatBalanceUsd(satsOf(bsvBalance), headlineRate, services.mnee ? mneeBalance : 0)}
               </h1>
             )}
             <AnimatePresence>
@@ -1825,6 +1860,18 @@ export const BsvWallet = () => {
             <p role="status" className="mt-1 text-[11px] m-0" style={{ color: theme.color.global.gray }}>
               {restoreMessage}
             </p>
+          )}
+          {/* One small line each when it applies: held by an unsent payment, arriving from the other device, last sync
+              with the other devices (services/balanceTruth.ts, plan fix 5). The phone shows them under WalletCard. */}
+          {balanceKnown && (
+            <BalanceTruthLines
+              fmt={(n) =>
+                exchangeRate > 0
+                  ? formatBalanceUsd(n, exchangeRate, 0)
+                  : `${formatNumberWithCommasAndDecimals(n, 0)} sats`
+              }
+              refreshKey={bsvBalance}
+            />
           )}
         </motion.div>
 
@@ -1924,11 +1971,11 @@ export const BsvWallet = () => {
             icon={bsvCoin}
             ticker="BSV"
             decimals={8}
-            usdBalance={bsvBalance * exchangeRate}
+            usdBalance={balanceUsd(satsOf(bsvBalance), headlineRate)}
             subline={
               // bWallet: the BSV price, so a moving dollar balance can be read against it (owner, 5 Oct 2026).
               <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
-                {exchangeRate > 0 ? `1 BSV = ${formatUSD(exchangeRate)}` : 'Balance'}
+                {headlineRate > 0 ? rateLine(headlineRate, exchangeRateAgeMs()) : 'Balance'}
               </span>
             }
             showPointer={true}
@@ -2133,7 +2180,7 @@ export const BsvWallet = () => {
       ticker: 'BSV',
       icon: bsvCoin,
       balance: bsvBalance,
-      usdBalance: bsvBalance * exchangeRate,
+      usdBalance: balanceUsd(satsOf(bsvBalance), headlineRate),
     },
     ...(services.mnee
       ? [

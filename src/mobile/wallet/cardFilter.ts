@@ -14,8 +14,6 @@ export const filterForCard = (cardId: string): CardFilter => {
   switch (cardId) {
     case 'btickets':
       return { kind: 'tickets', coin: null };
-    case 'bcredits':
-      return { kind: 'credits', coin: null };
     case 'bshares':
       return { kind: 'shares', coin: null };
     case 'mnee':
@@ -30,7 +28,6 @@ export const filterForCard = (cardId: string): CardFilter => {
 const HOME: Partial<Record<WalletKind, string>> = {
   tokens: 'bsv',
   tickets: 'btickets',
-  credits: 'bcredits',
   shares: 'bshares',
 };
 

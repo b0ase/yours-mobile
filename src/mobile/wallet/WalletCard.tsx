@@ -57,8 +57,11 @@ import { usePictureReturn } from './pictureReturn';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { formatUSD } from '../../utils/format';
+import { bsvCents, rateLine, usdCents } from '../../utils/balanceUsd';
+import { exchangeRateAgeMs } from '../../utils/exchangeRate';
 import { pendingSatsNow, subscribePendingSats } from '../../utils/pendingBalance';
 import { PendingLine } from './PendingLine';
+import { BalanceTruthLines } from '../../components/BalanceTruthLines';
 import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
@@ -175,7 +178,10 @@ const WalletCardInner = ({
   const shownSats = known ? sats - pendingSats : sats;
   const count = useCountUp(shownSats, known);
   const animSats = known ? count.value : sats;
-  const animUsd = rate > 0 ? usd + ((animSats - sats) * rate) / 100_000_000 : usd;
+  // Settled, the card shows `usd` exactly as given (utils/balanceUsd.ts, the extension's figure too); counting up, the
+  // difference is added in whole cents by the same rule.
+  const animUsd =
+    rate > 0 && animSats !== sats ? (usdCents(usd) + bsvCents(animSats, rate) - bsvCents(sats, rate)) / 100 : usd;
 
   // Quiet refresh: every 5 s while something is happening (a spend, a live session, just opened), else every
   // 20 s; never while hidden (balances otherwise only loaded once: owner, 4 Oct 2026). Battery/rate: the fast
@@ -535,42 +541,17 @@ const WalletCardInner = ({
                     <AccountAvatar src={avatar} size={31} id={id} />
                   </button>
                 )}
-                {t.tag ? (
+                {fingerprint && (
                   <>
-                    {/* Copy sits LEFT of the paymail (owner rule); the front shows the FULL bWalletX paymail
-                        (owner, 13 Oct 2026) so it never reads as a universal BSV handle. */}
-                    <button
-                      type="button"
-                      onClick={copy(t.copy)}
-                      aria-label={`Copy ${t.copy}`}
-                      className="bw-wcard-icon"
+                    {/* Fingerprint only: not selectable, not copyable (the full key is on the back). */}
+                    <span
+                      className="bw-wcard-idtext bw-wcard-fingerprint"
+                      {...idLinePress}
+                      aria-label={`Identity key fingerprint ${fingerprint}. Long-press for the identity map`}
                     >
-                      <Copy size={15} color="var(--bw-wcard-muted, #98A2B3)" />
-                    </button>
-                    <span className={`bw-wcard-handle${t.front.includes('@') ? ' is-paymail' : ''}`} title={t.front}>
-                      {t.front}
+                      {fingerprint}
                     </span>
-                    {verified && (
-                      <span
-                        aria-label="Verified identity"
-                        title="Verified identity"
-                        style={{ color: 'var(--bw-wcard-ok, #2ecc71)' }}
-                      >
-                        <Check size={13} strokeWidth={3} />
-                      </span>
-                    )}
                   </>
-                ) : (
-                  <button
-                    type="button"
-                    className="bw-wcard-getname"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setHandleOpen(true);
-                    }}
-                  >
-                    Get your $name
-                  </button>
                 )}
               </div>
               <div className="bw-wcard-tr">
@@ -593,17 +574,45 @@ const WalletCardInner = ({
                 </button>
               </div>
             </div>
-            {fingerprint && (
-              <div className="bw-wcard-idline">
-                {/* Fingerprint only: not selectable, not copyable (the full key is on the back). */}
-                <span
-                  className="bw-wcard-idtext bw-wcard-fingerprint"
-                  {...idLinePress}
-                  aria-label={`Identity key fingerprint ${fingerprint}. Long-press for the identity map`}
+          </div>
+          {/* Its own row (owner, 9 Nov 2026): the full paymail fits, with even space above and below. */}
+          <div className="bw-wcard-idline">
+            {t.tag ? (
+              <>
+                {/* Copy sits LEFT of the paymail (owner rule); the front shows the FULL bWalletX paymail
+                        (owner, 13 Oct 2026) so it never reads as a universal BSV handle. */}
+                <button
+                  type="button"
+                  onClick={copy(t.copy)}
+                  aria-label={`Copy ${t.copy}`}
+                  className="bw-wcard-icon bw-wcard-copyicon"
                 >
-                  {fingerprint}
+                  <Copy size={14} color="var(--bw-wcard-muted, #98A2B3)" />
+                </button>
+                <span className={`bw-wcard-handle${t.front.includes('@') ? ' is-paymail' : ''}`} title={t.front}>
+                  {t.front}
                 </span>
-              </div>
+                {verified && (
+                  <span
+                    aria-label="Verified identity"
+                    title="Verified identity"
+                    style={{ color: 'var(--bw-wcard-ok, #2ecc71)' }}
+                  >
+                    <Check size={13} strokeWidth={3} />
+                  </span>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                className="bw-wcard-getname"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setHandleOpen(true);
+                }}
+              >
+                Get your $name
+              </button>
             )}
           </div>
           <div className="bw-wcard-centre">
@@ -622,7 +631,7 @@ const WalletCardInner = ({
                 <span
                   key={`flash-${count.flashKey}`}
                   className={`bw-wcard-usd${unit === 'bsv' ? ' is-bsv' : ''}${count.dir && count.flashKey ? ` bw-live-flash-${count.dir}` : ''}`}
-                  title={syncing ? 'Syncing…' : 'Balance'}
+                  title={syncing ? 'Syncing…' : rateLine(rate, exchangeRateAgeMs()) || 'Balance'}
                   style={(() => {
                     // Same size as the $ balance; long amounts shrink to stay on one line.
                     const len = (unit === 'usd' ? formatUSD(animUsd) : cardBsv(animSats, MAIN_CARD_UNIT)).length;
@@ -706,7 +715,7 @@ const WalletCardInner = ({
                         <Copy size={14} color="var(--bw-wcard-muted, #98A2B3)" aria-hidden="true" />
                       </button>
                       <span className="bw-wcard-addr" aria-label="Your BSV address">
-                        {receiveAddress}
+                        {`${receiveAddress.slice(0, 12)}…${receiveAddress.slice(-10)}`}
                       </span>
                     </div>
                   )}
@@ -865,6 +874,15 @@ const WalletCardInner = ({
           </button>
         </div>
       </div>
+      {/* Under the card, one small line each when it applies: held by an unsent payment, arriving from the other device,
+          last sync with the other devices (services/balanceTruth.ts, plan fix 5, 13 Nov 2026). */}
+      {known && (
+        <BalanceTruthLines
+          fmt={(n) => (unit === 'usd' && rate > 0 ? formatUSD((n * rate) / 100_000_000) : cardSats(n))}
+          hidden={balanceHidden}
+          refreshKey={sats}
+        />
+      )}
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
       {adjusting && (

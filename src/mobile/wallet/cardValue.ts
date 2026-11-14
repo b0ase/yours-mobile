@@ -5,7 +5,7 @@ import { cardBsv, loadCardUnit, saveCardUnit, type CardUnit } from './walletCard
 /**
  * What a balance card is worth (owner, 15 Oct 2026): every card shows money, in the display currency or in BSV,
  * never a raw token count. A card's value is kept in two parts so the sum is exact in either unit: `usd` for
- * dollar-pegged amounts (MNEE, PNEEs, bCredits) and `sats` for amounts priced in BSV (tokens at their last sale).
+ * dollar-pegged amounts (MNEE, PNEEs) and `sats` for amounts priced in BSV (tokens at their last sale).
  * Holdings with no price add nothing and are counted in `unpriced`, so the card says "N unpriced" instead of guessing.
  */
 export type CardValue = { usd: number; sats: number; unpriced: number };
@@ -84,10 +84,6 @@ export const formatTokenAmount = (amount: number, symbol: string, decimals = 0):
 
 /** True when a card has nothing priced: its big line is then the token amount and "No price yet" sits under it. */
 export const hasNoPrice = (v: CardValue): boolean => v.usd <= 0 && v.sats <= 0 && v.unpriced > 0;
-
-/** A bCredit is 1p: its US$ value at `usdPerGbp` (null while no GBP rate is known). */
-export const creditsUsd = (credits: number, usdPerGbp: number | null): number | null =>
-  credits > 0 ? (pos(usdPerGbp) ? (credits / 100) * usdPerGbp : null) : 0;
 
 // The shared fiat/BSV switch (the BSV card's own setting, bw-card-unit): flipping it on any card flips them all.
 const unitSubs = new Set<() => void>();

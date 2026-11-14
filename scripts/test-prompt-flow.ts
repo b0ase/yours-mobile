@@ -11,7 +11,7 @@
  * window closes, no request keys in chrome.storage.local, main popup clean,
  * dApp reconnect does not re-prompt.
  */
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import puppeteer, { type Browser, type Page, type WebWorker } from 'puppeteer';
@@ -86,11 +86,11 @@ async function createWallet(page: Page, secrets: Secrets): Promise<Secrets> {
   await page.waitForFunction(() => document.body.innerText.includes('Create password'), { timeout: 15_000 });
   const inputs = await page.$$('input');
   if (inputs.length < 4) throw new Error(`Expected ≥4 inputs on create form, found ${inputs.length}`);
-  await inputs[0].click({ clickCount: 3 });
+  await inputs[0].click({ count: 3 });
   await inputs[0].type(secrets.accountName, { delay: 15 });
-  await inputs[2].click({ clickCount: 3 });
+  await inputs[2].click({ count: 3 });
   await inputs[2].type(secrets.password, { delay: 15 });
-  await inputs[3].click({ clickCount: 3 });
+  await inputs[3].click({ count: 3 });
   await inputs[3].type(secrets.password, { delay: 15 });
 
   await page.evaluate(() => {
@@ -121,7 +121,6 @@ async function createWallet(page: Page, secrets: Secrets): Promise<Secrets> {
 
 async function storageKeys(worker: WebWorker): Promise<string[]> {
   return worker.evaluate(async () => {
-    // @ts-expect-error chrome in SW
     const local = await chrome.storage.local.get(null);
     return Object.keys(local);
   });
@@ -207,7 +206,15 @@ async function main() {
     console.log('[dapp] opening', DAPP_URL);
     const dapp = await browser.newPage();
     dapp.on('console', (msg) => console.log(`[dapp:${msg.type()}]`, msg.text()));
-    dapp.on('pageerror', (e) => console.log('[dapp:pageerror]', String(e.stack).split('\n').slice(0, 4).join(' | ')));
+    dapp.on('pageerror', (e) =>
+      console.log(
+        '[dapp:pageerror]',
+        String(e instanceof Error ? e.stack : e)
+          .split('\n')
+          .slice(0, 4)
+          .join(' | '),
+      ),
+    );
     await dapp.goto(DAPP_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await dapp.evaluate(() => localStorage.clear());
     await dapp.reload({ waitUntil: 'domcontentloaded' });
@@ -230,7 +237,9 @@ async function main() {
     });
     const promptPage = (await promptTarget.page())!;
     promptPage.on('console', (msg) => console.log(`[prompt:${msg.type()}]`, msg.text()));
-    promptPage.on('pageerror', (err) => console.log('[prompt:pageerror]', err.stack || err.message));
+    promptPage.on('pageerror', (err) =>
+      console.log('[prompt:pageerror]', err instanceof Error ? err.stack || err.message : String(err)),
+    );
     promptPage.on('close', () => console.log('[prompt] page closed'));
     console.log('[prompt] window opened:', promptTarget.url());
 

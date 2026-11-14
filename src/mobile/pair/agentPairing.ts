@@ -20,8 +20,16 @@ import {
   UploadStore,
   type MintLimits,
 } from './mintScope';
-import { getAgentAccount, getAgentLog, isPairableAgent } from '../agents/agentAccounts';
-import { runAgentAction } from '../agents/agentTrade';
+import {
+  allAgentsStopped,
+  appendAgentLog,
+  checkAgentSpend,
+  getAgentAccount,
+  getAgentLog,
+  isPairableAgent,
+} from '../agents/agentAccounts';
+import { isPaused, PAUSED_MESSAGE } from '../config/killSwitch';
+import { runAgentAction, type AgentActionHooks } from '../agents/agentTrade';
 import { serialSpend } from '../agents/spendQueue';
 import { getLoadedStrategy, getPaperBook, loadStrategy, parseStrategy } from '../agents/strategy';
 
@@ -102,6 +110,52 @@ export type AgentDeps = {
   saveGrant?: (g: AgentGrant) => void;
   /** Swappable for tests. */
   mintMedia?: typeof mintMedia;
+  /** The `spending` kill switch (config/killSwitch.ts); swappable for tests. */
+  spendingPaused?: () => Promise<boolean>;
+  /**
+   * Is this pairing still live (not unpaired, lapsed or parked, same account and wallet open)? sessions.ts sets it per
+   * request. A spend waits in the queue behind other spends, so it is asked again inside the queued job and right
+   * before signing (b-Aware report, 13 Nov 2026). Missing = live (direct callers and tests with no session).
+   */
+  isLive?: () => boolean;
+  /** Swappable for tests: the trade run's own outside calls (agentTrade.ts AgentTradeIo). */
+  tradeIo?: AgentActionHooks['io'];
+};
+
+const NOT_PAIRED = 'This computer is no longer paired with bWalletX. Run `bwalletx login` again.';
+
+/** Refuse when the pairing was removed (or the account switched) since the request came in. Fails closed. */
+const assertLive = (deps: AgentDeps) => {
+  let ok: boolean;
+  try {
+    ok = deps.isLive ? deps.isLive() : true;
+  } catch {
+    ok = false;
+  }
+  if (!ok) throw new AgentCallError('UNPAIRED', NOT_PAIRED);
+};
+
+/**
+ * Refuse a paired-CLI spend (buy, send, mint) while "Stop all agents", the account's own Stop or the `spending`
+ * pause is on. Checked before anything is assembled or signed, for agent and mint-only pairings alike.
+ */
+const assertMaySpend = async (grant: AgentGrant, deps: AgentDeps) => {
+  if (allAgentsStopped()) throw new AgentCallError('STOPPED', 'All agents are stopped in bWalletX.');
+  if (getAgentAccount(grant.agentId)?.stopped)
+    throw new AgentCallError('STOPPED', `${grant.name} is stopped in bWalletX.`);
+  const paused = deps.spendingPaused ?? (() => isPaused('spending'));
+  if (await paused().catch(() => true)) throw new AgentCallError('PAUSED', PAUSED_MESSAGE);
+};
+
+/**
+ * First thing inside a queued spend job, and its last look: the pairing is still live, the grant still allows the call
+ * (expiry, agent status), and Stop all / Stop / pause are off. Throws AgentCallError.
+ */
+const assertSpendJob = async (grant: AgentGrant, action: string, deps: AgentDeps) => {
+  assertLive(deps);
+  checkGrant(grant, action, deps.currentId);
+  await assertMaySpend(grant, deps);
+  assertLive(deps);
 };
 
 const uploads = new UploadStore();
@@ -176,11 +230,30 @@ export async function handleAgentCall(
         action === 'buy'
           ? { kind: 'buy' as const, token: String(p.tokenId ?? ''), usd }
           : { kind: 'send' as const, token: 'BSV', usd, to: String(p.to ?? '') };
+      await assertMaySpend(grant, deps);
       // Serialised like mint: checkAgentAction reads the log and the spend is logged only after it is
       // signed, so two parallel requests could both pass the daily cap (18 Oct 2026 review).
       const rate = await deps.bsvUsd();
-      const r = await serial(() => runAgentAction(deps.ctx, id, block, rate));
-      if (!r.ok) throw new AgentCallError('REFUSED', r.text);
+      // The last look's own error (UNPAIRED, STOPPED, PAUSED…), so the computer is told why, not just REFUSED.
+      let lastLookError: AgentCallError | undefined;
+      const r = await serial(async () => {
+        // The job may have waited behind a slow mint: unpaired, expired or Stopped meanwhile → nothing runs.
+        await assertSpendJob(grant, action, deps);
+        return runAgentAction(deps.ctx, id, block, rate, {
+          // Again after the listing / destination checks, right before signing (agentTrade.ts lastLook).
+          beforeSign: async () => {
+            try {
+              await assertSpendJob(grant, action, deps);
+              return null;
+            } catch (e) {
+              if (e instanceof AgentCallError) lastLookError ??= e;
+              throw e;
+            }
+          },
+          io: { ...(deps.spendingPaused && { spendingPaused: deps.spendingPaused }), ...deps.tradeIo },
+        });
+      });
+      if (!r.ok) throw lastLookError ?? new AgentCallError('REFUSED', r.text);
       return { text: r.text, txid: r.txid ?? null };
     }
     case 'mint_quote': {
@@ -198,7 +271,10 @@ export async function handleAgentCall(
     case 'mint_upload':
       return wrapLimit(() => uploads.put(p as Parameters<UploadStore['put']>[0]));
     case 'mint':
-      return serial(() => runMint(grant, p, deps));
+      return serial(async () => {
+        await assertSpendJob(grant, action, deps);
+        return runMint(grant, p, deps);
+      });
   }
   throw new AgentCallError('UNKNOWN', `Unknown action "${action}"`);
 }
@@ -217,10 +293,22 @@ const wrapLimit = <T>(fn: () => T): T => {
   }
 };
 
+/**
+ * On an agent account a mint is an agent spend too: the account's daily cap and hourly limit apply, refusals are
+ * logged, and the spend is logged after broadcast so it counts against them. Mint-only pairings on an ordinary
+ * account keep only the pairing's own limits (it has no agent cap).
+ */
+const assertAgentCap = (grant: AgentGrant, usd: number) => {
+  if (!getAgentAccount(grant.agentId)) return;
+  const r = checkAgentSpend(grant.agentId, usd);
+  if (r.ok) return;
+  appendAgentLog(grant.agentId, { at: Date.now(), action: 'refused', detail: `Refused mint: ${r.reason}`, usd: 0 });
+  throw new AgentCallError('REFUSED', r.reason);
+};
+
 /** `mint`: checks, budget BEFORE signing, the Mint screen's own routine, then the actual spend is recorded. */
 async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
-  const acct = getAgentAccount(grant.agentId);
-  if (acct?.stopped) throw new AgentCallError('STOPPED', `${grant.name} is stopped in bWalletX.`);
+  await assertMaySpend(grant, deps);
   const contentType = String(p.contentType ?? '');
   if (!isMintableType(contentType))
     throw new AgentCallError(
@@ -241,6 +329,7 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
   const satsPerKb = deps.feeRate?.() ?? 100;
   const est = estimateCost(declared > 0 ? declared : 1, satsPerKb, rate, { newCollection: collection.kind === 'new' });
   wrapLimit(() => checkMintBudget(g0, est.usd));
+  assertAgentCap(grant, est.usd ?? 0);
 
   let base64Content: string;
   if (p.uploadId !== undefined) base64Content = await wrapLimitAsync(() => uploads.take(p.uploadId));
@@ -262,6 +351,10 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
     if (!outputs.some((o) => o.outpoint.replace('.', '_') === collection.id))
       throw new AgentCallError('INVALID', "That collection isn't in this wallet.");
   }
+  // Last look right before signing: Stop all / Stop / pause may have been turned on, or the computer unpaired,
+  // while the file came in.
+  await assertSpendJob(grant, 'mint', deps);
+  assertAgentCap(grant, cost.usd ?? 0);
 
   const r = await (deps.mintMedia ?? mintMedia)(deps.ctx, {
     base64Content,
@@ -285,6 +378,14 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
   };
   grant.mint = next.mint;
   deps.saveGrant?.(next);
+  if (getAgentAccount(grant.agentId))
+    appendAgentLog(grant.agentId, {
+      at: Date.now(),
+      action: 'mint',
+      detail: `Minted ${form.title.trim()} from a paired computer`,
+      usd,
+      txid: r.txid,
+    });
   notifyMinted();
   return {
     txid: r.txid,

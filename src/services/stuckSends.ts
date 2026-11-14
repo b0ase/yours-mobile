@@ -11,6 +11,13 @@
  * already has, or whose status can't be read cleanly, is never touched (knownOnChain fails closed). A permanent
  * rejection is already failed by the toolbox itself (OneSatServices REJECTED -> invalidTx), inputs released.
  *
+ * A copy of another device's payment (change write-ahead, services/changeWriteAhead.ts: transaction 'sending', proof
+ * request 'nosend'): this device never sends it and the toolbox counts no attempts on a 'nosend' request (its proof
+ * task, CheckNoSends, never does), so the attempts rule could never pass and a payment whose broadcast never landed
+ * (its device lost before its next push) stayed 'sending' on a restored copy for ever: inputs locked, change counted
+ * (re-review of 18c93dd9). Such a copy is judged by age alone, NOSEND_COPY_GIVE_UP_MS (7 days); the network check is
+ * the same, so one the network has, or may have, is never released.
+ *
  * The repeat guard (repeatGuard.ts) is unchanged: its window (1 h) ends long before GIVE_UP_MS, so a cancel here
  * can't let a site build an identical second payment while the first is still going out.
  */
@@ -19,6 +26,15 @@
 export const GIVE_UP_MS = 24 * 60 * 60 * 1000;
 /** Never give up on a send the wallet has tried fewer times than this (a wallet that was closed for a day). */
 export const MIN_ATTEMPTS = 6;
+/**
+ * How old another device's payment, held here as a 'nosend' copy, must be before this device gives up on it (when
+ * the network has no copy). Much longer than GIVE_UP_MS on purpose (final check of 5f0a845b): the copy's cancel fails
+ * the payment and frees its inputs here, but the device that made it keeps its own request and may still be sending
+ * it (its SendWaiting does not look at the transaction's status), so a release while that device is alive could tell
+ * the user "nothing was paid" shortly before it lands. Whenever the sending device is in use its own rule (GIVE_UP_MS
+ * and MIN_ATTEMPTS) settles the payment first; this is only for a copy whose sending device is gone (wiped, lost).
+ */
+export const NOSEND_COPY_GIVE_UP_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type QueuedSend = {
   transactionId: number;
@@ -26,6 +42,8 @@ export type QueuedSend = {
   createdAt: number;
   /** The proven-tx request's broadcast attempts (0 when unknown). */
   attempts: number;
+  /** The proven-tx request's status ('nosend': a copy of another device's payment, never sent from here). */
+  reqStatus?: string;
   description?: string;
   satoshis?: number;
 };
@@ -33,9 +51,12 @@ export type QueuedSend = {
 export type StuckVerdict = 'wait' | 'give-up';
 
 /** Pure: should the wallet give up on this queued send now? (Chain state is checked separately, after.) */
-export function stuckVerdict(s: Pick<QueuedSend, 'createdAt' | 'attempts'>, now: number): StuckVerdict {
+export function stuckVerdict(s: Pick<QueuedSend, 'createdAt' | 'attempts' | 'reqStatus'>, now: number): StuckVerdict {
   if (!Number.isFinite(s.createdAt)) return 'wait';
-  return now - s.createdAt >= GIVE_UP_MS && s.attempts >= MIN_ATTEMPTS ? 'give-up' : 'wait';
+  const age = now - s.createdAt;
+  // A copy never sent from here has no attempts to count: its age alone, a week (the network check still follows).
+  if (s.reqStatus === 'nosend') return age >= NOSEND_COPY_GIVE_UP_MS ? 'give-up' : 'wait';
+  return age >= GIVE_UP_MS && s.attempts >= MIN_ATTEMPTS ? 'give-up' : 'wait';
 }
 
 export type ReleaseDeps = {
@@ -88,7 +109,11 @@ export async function releaseStuckSends(deps: ReleaseDeps): Promise<ReleaseRepor
       try {
         await deps.cancel(s);
         report.released.push(s);
-        log(`[stuckSends] gave up on ${s.txid} after ${s.attempts} attempts; inputs released`);
+        log(
+          s.reqStatus === 'nosend'
+            ? `[stuckSends] gave up on ${s.txid}, another device's payment the network never had; inputs released`
+            : `[stuckSends] gave up on ${s.txid} after ${s.attempts} attempts; inputs released`,
+        );
       } catch (e) {
         console.warn('[stuckSends] cancel failed for', s.txid, e);
       }

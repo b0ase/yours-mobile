@@ -373,6 +373,13 @@ export interface UnseenHealDeps {
   broadcast(beef: number[], txid: string): Promise<BroadcastOutcome>;
   submitOverlay(beef: number[], tokenId: string): Promise<void>;
   relinquish(outpoint: string): Promise<void>;
+  /**
+   * Does the chain know this transaction? Asked before relinquishing on a refused rebroadcast (fix 7, 13 Nov 2026): a
+   * transaction already mined is refused as "missing inputs" too (it spent them itself), so a chainBeef lookup that
+   * merely failed would otherwise remove valid token coins for good. Only 'unknown' lets them go; 'known' submits the
+   * stored copy to the overlay instead. The wiring answers 'unknown' only when every chain source says so.
+   */
+  txOnChain?(txid: string): Promise<'known' | 'unknown' | 'unclear'>;
   log?(msg: string): void;
 }
 
@@ -458,6 +465,26 @@ export async function healUnseenTokenOutputs(
         }
         if (!sent.inputsSpent) {
           report.errors.push(`${txid.slice(0, 8)} broadcast: ${sent.error}`);
+          continue;
+        }
+        // Never on a refusal alone: the chain must say it has never seen the transaction (fix 7).
+        const seen = deps.txOnChain ? await deps.txOnChain(txid).catch(() => 'unclear' as const) : 'unclear';
+        if (seen === 'known') {
+          // On chain after all (its chain lookup had failed): pass the stored copy to the overlay, as for a mined one.
+          try {
+            await deps.submitOverlay(stored, tokenId);
+            report.submitted.push(txid);
+            touched.push(...outsOfTx);
+            log(`submitted ${txid} (${tokenId}) to the overlay from the stored copy`);
+          } catch (e) {
+            report.errors.push(`${txid.slice(0, 8)} overlay: ${msg(e)}`);
+          }
+          continue;
+        }
+        if (seen !== 'unknown') {
+          report.errors.push(
+            `${txid.slice(0, 8)} broadcast refused (${sent.error}); kept, the chain couldn't say whether it has it`,
+          );
           continue;
         }
         for (const o of outsOfTx) {

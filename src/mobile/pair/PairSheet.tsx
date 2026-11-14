@@ -56,13 +56,18 @@ export default function PairSheet({
       .then((p) => setStage({ k: 'confirm', p }))
       .catch((e: unknown) => setStage({ k: 'error', m: e instanceof Error ? e.message : String(e) }));
   };
-  // The site closed this QR, or signed in through another pairing meanwhile: the card is stale, so close it.
+  // The site closed this QR, or signed in through another pairing meanwhile: the card is stale, so close it. When the
+  // site ended it itself (its user said the codes didn't match), show why instead.
   const pending = stage.k === 'confirm' ? stage.p : null;
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
     let live = true;
-    pending?.onGone(() => live && closeRef.current());
+    pending?.onGone((m) => {
+      if (!live) return;
+      if (m) setStage({ k: 'error', m });
+      else closeRef.current();
+    });
     return () => {
       live = false;
     };
@@ -180,7 +185,7 @@ export default function PairSheet({
               </>
             )}
             <p className="mt-6 text-sm" style={{ color: MUTED }}>
-              Check the website shows the same code:
+              Does the website show this code?
             </p>
             <p
               className={`mt-2 whitespace-nowrap font-mono font-bold ${stage.p.code.length > 4 ? 'text-3xl tracking-[0.15em]' : 'text-4xl tracking-[0.3em]'}`}
@@ -199,7 +204,7 @@ export default function PairSheet({
                 className="flex-1 rounded-xl py-3 font-semibold text-white"
                 style={{ background: PANEL }}
               >
-                Cancel
+                No
               </button>
               <button
                 onClick={() => {
@@ -213,7 +218,7 @@ export default function PairSheet({
                 className="flex-1 rounded-xl py-3 font-bold"
                 style={{ background: GOLD, color: '#000' }}
               >
-                Connect
+                Yes, connect
               </button>
             </div>
           </div>

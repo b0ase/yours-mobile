@@ -119,8 +119,10 @@ const tokenSafe = (r: HotRoom) =>
   !safety().check({ ids: [r.ref.id], collectionId: null, texts: [r.title, r.subtitle], map: r.map }).blocked;
 
 /** The 1Sat token board (trending, then the overlay's active tokens), safe tokens only; null while loading. */
-const useBoard = (registry: Registry | null, wanted: boolean): HotRoom[] | null => {
+const useBoard = (registry: Registry | null, wanted: boolean): { board: HotRoom[] | null; settled: boolean } => {
   const [rooms, setRooms] = useState<HotRoom[] | null>(null);
+  // The ranking has finished (or failed): the card board waits for it so cards don't reshuffle as it fills in.
+  const [settled, setSettled] = useState(false);
   const [directory, setDirectory] = useState<DirectoryToken[] | null>(null);
   const [started, setStarted] = useState(false);
   if (wanted && !started) setStarted(true);
@@ -132,9 +134,10 @@ const useBoard = (registry: Registry | null, wanted: boolean): HotRoom[] | null 
       .catch(() => setDirectory([]));
     hotBoard((p) => setRooms(p))
       .then(setRooms)
-      .catch(() => setRooms([]));
+      .catch(() => setRooms([]))
+      .finally(() => setSettled(true));
   }, [started]);
-  return useMemo(
+  const board = useMemo(
     () =>
       rooms === null && directory === null
         ? null
@@ -143,6 +146,7 @@ const useBoard = (registry: Registry | null, wanted: boolean): HotRoom[] | null 
           ),
     [rooms, directory, registry],
   );
+  return { board, settled };
 };
 
 /** Markets: every active BSV-21 token with price, 24h change and volume; categories, platforms, tags, search, favourites. */
@@ -151,12 +155,15 @@ const Markets = ({
   favs,
   onFav,
   board,
+  settled,
   registry,
 }: {
   rate: number;
   favs: string[];
   onFav: (id: string) => void;
   board: HotRoom[] | null;
+  /** The board's ranking has finished (useBoard). */
+  settled: boolean;
   registry: Registry | null;
 }) => {
   const navigate = useNavigate();
@@ -231,7 +238,7 @@ const Markets = ({
     [all, albums],
   );
   const nHidden = useMemo(() => hiddenCount(all, (r) => r.ref.id, prefs), [all, prefs]);
-  // The list view loads its own row stats; the card board loads its facts (TokenBoard), so none here.
+  // The list view loads its own row stats; the card board loads its own prices (TokenBoard), so none here.
   const visible = useMemo(() => (cardsView ? [] : list.slice(0, shown)), [cardsView, list, shown]);
   // Tickers more than one token uses: those rows show their short token id so copies can be told apart.
   const shared = useMemo(() => {
@@ -381,7 +388,12 @@ const Markets = ({
                     : 'No tokens match.'}
             </p>
           ) : cardsView ? (
-            <TokenBoard list={list} rate={rate} />
+            <TokenBoard
+              list={list}
+              rate={rate}
+              settled={settled}
+              orderKey={JSON.stringify([q, onlyFavs, onlyMine, filter, folder, showHidden, favs])}
+            />
           ) : (
             <div className="rounded-2xl bg-[var(--bw-surface)] border border-[#2b2f36] overflow-hidden">
               <div className="w-full text-sm" role="list" aria-label="Tokens">
@@ -586,7 +598,10 @@ const ExchangePage = () => {
   const onFav = useCallback((id: string) => setFavs((f) => toggleFav(f, id)), []);
   useTabHome('market', () => navigate(EXCHANGE_ROUTE));
   const registry = useRegistry();
-  const board = useBoard(registry, view.tab === 'markets' || view.tab === 'platforms' || view.tab === 'platform');
+  const { board, settled: boardSettled } = useBoard(
+    registry,
+    view.tab === 'markets' || view.tab === 'platforms' || view.tab === 'platform',
+  );
 
   // "Buy in Market" from a token room in Chat: tokens open their trade screen, collections the Collectibles tab.
   useEffect(() => {
@@ -622,7 +637,7 @@ const ExchangePage = () => {
 
   return (
     <div
-      className="flex w-full flex-col items-center overflow-y-auto pb-36"
+      className="bw-exchange flex w-full flex-col items-center overflow-y-auto pb-36"
       style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <div className="w-full max-w-[1100px] px-4 pt-4 flex flex-col gap-4">
@@ -650,7 +665,9 @@ const ExchangePage = () => {
           ))}
         </nav>
 
-        {view.tab === 'markets' && <Markets rate={rate} favs={favs} onFav={onFav} board={board} registry={registry} />}
+        {view.tab === 'markets' && (
+          <Markets rate={rate} favs={favs} onFav={onFav} board={board} settled={boardSettled} registry={registry} />
+        )}
         {(view.tab === 'platforms' || view.tab === 'platform') &&
           (!registry || !board ? (
             <Loading text="Loading platforms…" />

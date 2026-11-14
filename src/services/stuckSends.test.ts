@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { captureConsole, msgOf } from '../testing/captureConsole';
 import {
   GIVE_UP_MS,
   MIN_ATTEMPTS,
+  NOSEND_COPY_GIVE_UP_MS,
   releaseStuckSends,
   releasedMessage,
   stuckVerdict,
@@ -27,6 +29,20 @@ describe('stuckVerdict', () => {
   });
   test('gives up when old and retried enough', () => {
     expect(stuckVerdict({ createdAt: NOW - GIVE_UP_MS, attempts: MIN_ATTEMPTS }, NOW)).toBe('give-up');
+  });
+  test("another device's payment kept here as 'nosend' (never sent from here, no attempts counted): a week, by age alone", () => {
+    expect(NOSEND_COPY_GIVE_UP_MS).toBe(7 * 24 * 3_600_000);
+    expect(stuckVerdict({ createdAt: NOW - NOSEND_COPY_GIVE_UP_MS, attempts: 0, reqStatus: 'nosend' }, NOW)).toBe(
+      'give-up',
+    );
+    expect(stuckVerdict({ createdAt: NOW - NOSEND_COPY_GIVE_UP_MS + 1, attempts: 0, reqStatus: 'nosend' }, NOW)).toBe(
+      'wait',
+    );
+    // Not at the sending device's own 24 h, however many attempts are recorded: that device may still be sending it.
+    expect(stuckVerdict({ createdAt: NOW - GIVE_UP_MS * 2, attempts: 99, reqStatus: 'nosend' }, NOW)).toBe('wait');
+    expect(stuckVerdict({ createdAt: NaN, attempts: 0, reqStatus: 'nosend' }, NOW)).toBe('wait');
+    // Any other request still needs its attempts.
+    expect(stuckVerdict({ createdAt: NOW - GIVE_UP_MS * 3, attempts: 0, reqStatus: 'sending' }, NOW)).toBe('wait');
   });
 });
 
@@ -55,6 +71,19 @@ describe('releaseStuckSends', () => {
     expect(r.kept).toEqual([T('a')]);
   });
 
+  test("a 'nosend' copy the network has, or may have, is never cancelled; one it has no copy of is", async () => {
+    const copy = q({ attempts: 0, reqStatus: 'nosend', createdAt: NOW - NOSEND_COPY_GIVE_UP_MS });
+    expect((await run([copy], async () => true)).cancelled).toEqual([]);
+    expect(
+      (
+        await run([copy], async () => {
+          throw new Error('offline');
+        })
+      ).cancelled,
+    ).toEqual([]);
+    expect((await run([copy], async () => false)).cancelled).toEqual([T('a')]);
+  });
+
   test('fails closed when the chain check throws', async () => {
     const { cancelled } = await run([q()], async () => {
       throw new Error('offline');
@@ -73,27 +102,43 @@ describe('releaseStuckSends', () => {
   });
 
   test('a listing error is reported, not thrown', async () => {
-    const r = await releaseStuckSends({
-      listQueued: async () => {
-        throw new Error('db closed');
-      },
-      knownOnChain: async () => false,
-      cancel: async () => undefined,
-    });
+    const { result: r, logs } = await captureConsole(() =>
+      releaseStuckSends({
+        listQueued: async () => {
+          throw new Error('db closed');
+        },
+        knownOnChain: async () => false,
+        cancel: async () => undefined,
+      }),
+    );
     expect(r.error).toBe('db closed');
+    expect(r.released).toEqual([]);
+    // Logged once, as the error it is.
+    expect(logs.warn).toEqual([]);
+    expect(logs.error).toHaveLength(1);
+    expect(logs.error[0][0]).toBe('[stuckSends] failed:');
+    expect(msgOf(logs.error[0][1])).toBe('db closed');
   });
 
   test('one failing cancel does not stop the rest', async () => {
-    const r = await releaseStuckSends({
-      listQueued: async () => [q({ txid: T('b') }), q({ txid: T('c') })],
-      knownOnChain: async () => false,
-      cancel: async (s) => {
-        if (s.txid === T('b')) throw new Error('locked');
-      },
-      now: () => NOW,
-      log: () => undefined,
-    });
+    const { result: r, logs } = await captureConsole(() =>
+      releaseStuckSends({
+        listQueued: async () => [q({ txid: T('b') }), q({ txid: T('c') })],
+        knownOnChain: async () => false,
+        cancel: async (s) => {
+          if (s.txid === T('b')) throw new Error('locked');
+        },
+        now: () => NOW,
+        log: () => undefined,
+      }),
+    );
     expect(r.released.map((s) => s.txid)).toEqual([T('c')]);
+    expect(r.error).toBeUndefined();
+    // The failed cancel is a warning for that one send only; it stays queued.
+    expect(logs.error).toEqual([]);
+    expect(logs.warn).toHaveLength(1);
+    expect(logs.warn[0].slice(0, 2)).toEqual(['[stuckSends] cancel failed for', T('b')]);
+    expect(msgOf(logs.warn[0][2])).toBe('locked');
   });
 });
 

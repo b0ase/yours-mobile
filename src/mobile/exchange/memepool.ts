@@ -87,8 +87,8 @@ export const memepoolTradeUrl = (id: string): string =>
 
 export type MemepoolSort = 'trending' | 'new' | 'mcap' | 'graduating' | 'graduated';
 export const MEMEPOOL_SORTS: readonly [MemepoolSort, string][] = [
-  ['trending', 'Trending'],
   ['new', 'Newest'],
+  ['trending', 'Most active'],
   ['mcap', 'Biggest'],
   ['graduating', 'Nearly full'],
   ['graduated', 'Graduated'],

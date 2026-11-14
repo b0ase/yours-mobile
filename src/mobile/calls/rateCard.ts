@@ -126,6 +126,34 @@ export const parseAsset = (raw: unknown): RateAsset | null => {
   return null;
 };
 
+/**
+ * The callee writes a token's decimals (and symbol) into their own card, but the decimals scale every
+ * payment: the caller sends units × 10^dec of the token. So the caller's wallet never takes them from
+ * the card. `details` is the wallet's own indexer lookup of the token (getTokenDetails: decimals as a
+ * string, "8"; absent = 0, the BSV-21 default), or null when the lookup failed. The card is quoted
+ * only when it agrees, carrying the looked-up decimals and symbol; anything else is refused.
+ */
+export type CheckedCard = { ok: true; card: RateCard } | { ok: false; error: string };
+
+export const checkCardToken = (card: RateCard, details: unknown): CheckedCard => {
+  const asset = card.asset;
+  if (asset.kind !== 'bsv21') return { ok: true, card };
+  const d = details && typeof details === 'object' ? (details as Record<string, unknown>) : null;
+  const token = d?.token && typeof d.token === 'object' ? (d.token as Record<string, unknown>) : null;
+  // The answer must name this token: at least one id, and every id it gives must match.
+  const ids = [token?.id, d?.tokenId].filter((x) => x != null);
+  const same = (x: unknown) => typeof x === 'string' && x.replace('.', '_').toLowerCase() === asset.id;
+  if (!token || !ids.length || !ids.every(same))
+    return { ok: false, error: `Couldn't look up ${asset.sym} to check the price. Try again later.` };
+  const raw = token.dec == null ? '0' : String(token.dec);
+  const dec = /^\d{1,2}$/.test(raw) ? Number(raw) : NaN;
+  if (!(dec <= 18)) return { ok: false, error: `Couldn't read ${asset.sym}'s details. This call can't be paid.` };
+  if (dec !== asset.dec)
+    return { ok: false, error: `The price doesn't match ${asset.sym}'s details. This call can't be paid.` };
+  const sym = typeof token.sym === 'string' && token.sym.trim() ? token.sym.trim().slice(0, 16) : asset.sym;
+  return { ok: true, card: { ...card, asset: { ...asset, dec, sym } } };
+};
+
 /** Where a caller pays this card: the callee's paymail for BSV, the card's address for MNEE / tokens. */
 export type PayTo = { paymail: string } | { address: string };
 

@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 /**
- * Error boundary for one mobile insert on the Wallet page (Mint, kind switch, Tickets, Credits,
+ * Error boundary for one mobile insert on the Wallet page (Mint, kind switch, Tickets,
  * handle card, Finish setting up...). A widget that throws while rendering shows one quiet line
  * instead of unmounting the whole Wallet tab; the error goes to the console.
  */

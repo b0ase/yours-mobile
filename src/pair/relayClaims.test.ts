@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { claimDigest, newChannel, relaySocketUrl, walletClaimFor } from './protocol';
+import { PrivateKey } from '@bsv/sdk';
+import {
+  claimDigest,
+  claimDigestSync,
+  newChannel,
+  relaySocketUrl,
+  sessionWalletClaim,
+  walletClaimFor,
+} from './protocol';
 
 // b-Aware 26 Oct 2026 (N3-2): the wallet's first claim comes from the QR, and the site registers its digest.
 describe('QR-bound wallet claim', () => {
@@ -37,5 +45,41 @@ describe('QR-bound wallet claim', () => {
     expect(
       new URL(relaySocketUrl('relay.bwallet.space', c, 'wallet', undefined, 'x'.repeat(22), wc)).searchParams.get('wc'),
     ).toBeNull();
+  });
+});
+
+// Wallet claim v2 (12 Nov 2026). The vector is shared with bwalletx-connect and bwalletx-cli: keep them in step.
+describe('session wallet claim (v2)', () => {
+  const P = PrivateKey.fromHex('11'.repeat(32));
+  const S = PrivateKey.fromHex('22'.repeat(32));
+  const c = 'AAAAAAAAAAAAAAAAAAAAAA';
+  const VECTOR = 'rTgy5TUbOz2xUwLyqYebrIyLaQifFhULNSSHHklw0gQ';
+
+  test('both ends compute the same claim, and it matches the shared vector', () => {
+    expect(sessionWalletClaim(P, S.toPublicKey().toString(), c)).toBe(VECTOR);
+    expect(sessionWalletClaim(S, P.toPublicKey().toString(), c)).toBe(VECTOR);
+    expect(VECTOR).toMatch(/^[A-Za-z0-9_-]{22,64}$/); // the relay's claim format
+  });
+
+  test('the QR alone is not enough: another pairing key gives another claim, and it is not the QR claim', () => {
+    const k = S.toPublicKey().toString();
+    const other = PrivateKey.fromRandom();
+    expect(sessionWalletClaim(other, k, c)).not.toBe(VECTOR);
+    expect(walletClaimFor(c, k)).not.toBe(VECTOR);
+    expect(sessionWalletClaim(P, k, newChannel())).not.toBe(VECTOR);
+  });
+
+  test('claimDigestSync equals claimDigest', async () => {
+    expect(claimDigestSync(VECTOR)).toBe(await claimDigest(VECTOR));
+    expect(claimDigestSync(VECTOR)).toBe('70d13b85c6bf389eafdc3d9b1c155826fda8517003bf2f4a8600b4dc0d06e759');
+  });
+
+  test('a wallet socket carries the session digest as nc, never as wc', () => {
+    const d = claimDigestSync(VECTOR);
+    const u = new URL(relaySocketUrl('relay.bwallet.space', c, 'wallet', undefined, 'x'.repeat(22), d));
+    expect(u.searchParams.get('nc')).toBe(d);
+    expect(u.searchParams.get('wc')).toBeNull();
+    const site = new URL(relaySocketUrl('relay.bwallet.space', c, 'site', 1, 'x'.repeat(22), d));
+    expect(site.searchParams.get('nc')).toBeNull();
   });
 });

@@ -1,59 +1,40 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Flame, Info, ShieldCheck, Sparkles, TrendingUp, Users, X } from 'lucide-react';
-import type { HotRoom } from '../market/indexer';
+import { X } from 'lucide-react';
+import { roomMarket, type HotRoom, type Listing } from '../market/indexer';
+import { RISK_LINE } from '../feed/reels/bexCards';
 import { TokenIcon } from './TokenIcon';
+import { tradeRoute } from './exchangeData';
+import { buyRoute } from './rowActions';
 import {
-  bsvLabel,
-  chainTip,
-  changeLabel,
-  dayStats,
-  tokenTrades,
-  tradeRoute,
-  unitPriceLabel,
-  type DayStats,
-} from './exchangeData';
-import {
-  SCORE_RULES,
-  ageLabel,
-  capLabel,
-  boardOrder,
-  marketCap,
-  showChange,
-  type CapView,
-  badges,
-  boardFacts,
-  derive,
-  fairScore,
-  shortAmount,
-  type Badge,
-  type BoardFacts,
-  type FairScore,
-} from './boardFacts';
+  bestBuyable,
+  buyPriceLabel,
+  compactCount,
+  listingTokens,
+  sameListings,
+  saleState,
+  shownOrder,
+  stableOrder,
+  type SaleState,
+} from './buyPrice';
+import { SCORE_RULES, type FairScore } from './boardFacts';
+import { marketTradingEnabled } from '../storeBuild';
 
 /**
- * Exchange › Tokens as cards: icon, ticker, verified badges, deployer + age, supply facts, market cap, the
- * fair-launch score, holders, and Trending / New coins. Facts load a few cards at a time (cached), as the
- * list view does. See boardFacts.ts for what each badge proves.
+ * Exchange › Tokens as cards (owner, 13 Nov 2026: "so TMI... Users just want to see what they can buy, and a
+ * button to buy it"): each card is the token's icon, its $NAME, the price to buy now and one Buy button.
+ * Everything else (fair-launch score, verified badges, deployer, age, market cap, supply, burned, 24h change)
+ * lives on the token's page under Details (TokenDetails.tsx). Tokens with a listing you can buy come first.
+ *
+ * De minimis (owner, 15 Oct 2026): no "Trending / Hot / Pumping" labels, no flames or rockets, no featured
+ * coins, and the risk line on the board. Prices load a few cards at a time from the cached market data
+ * (indexer.roomMarket), as the list view does.
  */
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 const GREEN = '#A1FF8B';
-const RED = '#FF6B6B';
 const LINE = '#2b2f36';
 const PAGE = 24;
-
-type Card = {
-  facts: BoardFacts | null;
-  stats: DayStats;
-  score: FairScore | null;
-  badges: Badge[];
-  /** Market cap only for a live market (boardFacts.marketCap). */
-  cap: CapView;
-  burnedLabel: string | null;
-};
-
-const short = (a: string) => `${a.slice(0, 5)}…${a.slice(-4)}`;
 
 const scoreColour = (n: number) => (n >= 70 ? GREEN : n >= 40 ? '#F5C518' : '#FF9F6B');
 
@@ -141,186 +122,119 @@ export const ScoreSheet = ({
   </div>
 );
 
+const TRADING = marketTradingEnabled();
+
+/**
+ * Last known listings per token, kept for the app session: a card coming back on screen (back from a token page,
+ * another tab) shows its last price straight away and refreshes quietly, never "Checking price…" again.
+ */
+const knownListings = new Map<string, Listing[]>();
+
+/** How long the board waits for the ranking to finish before placing cards anyway (it never reshuffles after). */
+const SETTLE_MS = 5000;
+
+/** Every card is this tall in every state, so nothing below moves as prices load. */
+const CARD_H = 'h-[72px]';
+/** The button slot: Buy, View and the loading block all take exactly this footprint. */
+const SLOT = 'shrink-0 w-[76px] h-[44px] rounded-xl text-sm font-extrabold';
+
+const CardShell = ({ children, label }: { children: ReactNode; label?: string }) => (
+  <article
+    role="listitem"
+    aria-label={label}
+    className={`relative ${CARD_H} rounded-2xl px-3.5 flex items-center gap-3 min-w-0`}
+    style={{ background: 'var(--bw-surface)', border: `1px solid ${LINE}` }}
+  >
+    {children}
+  </article>
+);
+
+const Bar = ({ w }: { w: string }) => (
+  <span className="block h-[12px] rounded" style={{ width: w, background: 'rgba(255,255,255,0.06)' }} />
+);
+
+/** A card-shaped placeholder (no animation) while the board waits for the ranking. */
+const SkeletonCard = () => (
+  <CardShell>
+    <span className="shrink-0 w-[44px] h-[44px] rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }} />
+    <span className="flex flex-col gap-2 flex-1 min-w-0">
+      <Bar w="45%" />
+      <Bar w="30%" />
+    </span>
+    <span className={SLOT} style={{ background: 'rgba(255,255,255,0.04)' }} aria-hidden />
+  </CardShell>
+);
+
+/** One token: icon, $NAME, the price to buy now, and Buy. Tapping anywhere else opens the token's page. */
 const TokenCard = ({
   r,
-  card,
-  tip,
+  listings,
   rate,
-  onScore,
   onOpen,
+  onBuy,
 }: {
-  onOpen: (r: HotRoom) => void;
   r: HotRoom;
-  card: Card | undefined;
-  tip: number;
+  /** The token's live listings; undefined while they load. */
+  listings: Listing[] | undefined;
   rate: number;
-  onScore: () => void;
+  onOpen: (r: HotRoom) => void;
+  onBuy: (r: HotRoom) => void;
 }) => {
-  const f = card?.facts ?? null;
-  const ch = card?.stats.change ?? null;
-  const open = () => onOpen(r);
   const name = r.title.replace(/^\$/, '');
+  const best = listings ? bestBuyable(listings) : null;
+  const tokens = best ? listingTokens(best) : null;
+  const price = best ? buyPriceLabel(best.priceSats, rate) : null;
+  const canBuy = !!best && TRADING;
   return (
-    <article
-      role="listitem"
-      className="relative rounded-2xl p-3.5 flex flex-col gap-2.5 min-w-0 transition-colors"
-      style={{
-        background: 'linear-gradient(180deg, rgba(245,197,24,0.05), rgba(0,0,0,0) 40%), var(--bw-surface)',
-        border: `1px solid ${LINE}`,
-      }}
-    >
+    <CardShell label={`$${name}${price ? `, ${price} to buy` : listings ? ', not for sale' : ''}`}>
       <button
         type="button"
-        onClick={open}
-        aria-label={`Open ${r.title}`}
+        onClick={() => onOpen(r)}
+        aria-label={`Open $${name}`}
         className="absolute inset-0 rounded-2xl bg-transparent border-0 cursor-pointer hover:bg-white/[0.02]"
       />
-      <div className="flex items-start gap-3 min-w-0 pointer-events-none">
-        <TokenIcon icon={r.icon} sym={r.title} size={48} />
-        <div className="flex flex-col min-w-0 flex-1">
-          <span className="flex items-baseline gap-2 min-w-0">
-            <span className="text-base font-extrabold text-white truncate">${name}</span>
-            {ch !== null && card && showChange(ch, card.stats.trades) && (
-              <span className="text-xs font-bold shrink-0" style={{ color: ch >= 0 ? GREEN : RED }}>
-                {changeLabel(ch)}
-              </span>
-            )}
-          </span>
-          <span className="text-[11px] truncate" style={{ color: MUTED }}>
-            {f
-              ? `${f.deployer ? `by ${short(f.deployer)}` : 'BSV-21'}${f.height && tip ? ` · ${ageLabel(tip - f.height)} ago` : ''}`
-              : card
-                ? 'BSV-21 token'
-                : 'Checking the chain…'}
-          </span>
-        </div>
-        {card?.score && (
-          <button
-            type="button"
-            onClick={onScore}
-            aria-label={`Fair-launch score ${card.score.total} of 100. How it's scored`}
-            className="pointer-events-auto relative z-10 -m-1 p-0 min-w-[44px] min-h-[44px] grid place-items-center bg-transparent border-0 cursor-pointer"
-          >
-            <ScoreRing n={card.score.total} />
-          </button>
-        )}
-      </div>
-
-      {card && card.badges.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5 m-0 p-0 list-none pointer-events-none" aria-label="Verified facts">
-          {card.badges.map((b) => (
-            <li
-              key={b.id}
-              title={b.detail}
-              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
-              style={{ background: 'rgba(245,197,24,0.08)', border: '1px solid rgba(245,197,24,0.28)', color: GOLD }}
-            >
-              {b.id === 'burned' ? <Flame size={11} /> : <ShieldCheck size={11} />}
-              {b.label}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="grid grid-cols-2 gap-2 pointer-events-none">
-        <div className="flex flex-col">
-          <span className="text-[10px] uppercase tracking-wide" style={{ color: MUTED }}>
-            {card?.cap.kind === 'thin' ? 'Thin market' : 'Market cap'}
-          </span>
-          <span className="text-sm font-bold text-white">
-            {!card
-              ? '…'
-              : card.cap.kind === 'cap'
-                ? capLabel(card.cap.sats, rate)
-                : card.cap.kind === 'thin'
-                  ? `${unitPriceLabel(card.cap.lastSatsPerToken)} / token`
-                  : '—'}
-          </span>
-          {card?.cap.kind === 'cap' && rate > 0 && (
-            <span className="text-[10px]" style={{ color: MUTED }}>
-              {capLabel(card.cap.sats, 0)}
-            </span>
+      <span className="pointer-events-none shrink-0 w-[44px] h-[44px]">
+        <TokenIcon icon={r.icon} sym={r.title} size={44} />
+      </span>
+      <span className="flex flex-col min-w-0 flex-1 pointer-events-none">
+        <span className="text-base leading-6 font-extrabold text-white truncate">${name}</span>
+        <span className="text-xs leading-[18px] h-[18px] truncate" style={{ color: MUTED }} data-testid="buy-price">
+          {!listings ? (
+            'Checking price…'
+          ) : price ? (
+            <>
+              <span className="font-bold text-white">{price}</span>
+              {tokens !== null && ` for ${compactCount(tokens)}`}
+            </>
+          ) : (
+            'Not for sale'
           )}
-          {card?.cap.kind === 'thin' && (
-            <span className="text-[10px]" style={{ color: MUTED }}>
-              {card.cap.ageBlocks === null ? 'last trade' : `last trade ${ageLabel(card.cap.ageBlocks)} ago`}
-            </span>
-          )}
-          {card?.cap.kind === 'none' && (
-            <span className="text-[10px]" style={{ color: MUTED }}>
-              never traded
-            </span>
-          )}
-        </div>
-        <div className="flex flex-col items-end text-right">
-          <span className="text-[10px] uppercase tracking-wide" style={{ color: MUTED }}>
-            Supply
-          </span>
-          <span className="text-sm font-bold text-white">{f ? shortAmount(f.supply, f.dec) : '…'}</span>
-          {card?.burnedLabel && (
-            <span className="text-[10px]" style={{ color: MUTED }}>
-              {card.burnedLabel}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div
-        className="flex items-center justify-between gap-2 pt-2 text-[11px] pointer-events-none"
-        style={{ borderTop: `1px solid ${LINE}`, color: MUTED }}
-      >
-        <span className="flex items-center gap-1">
-          <Users size={12} /> {f?.holders != null ? f.holders.toLocaleString('en-US') : '—'} holders
         </span>
-        <span>
-          {card?.stats.trades ? `${card.stats.trades} trades · ${bsvLabel(card.stats.volume)} 24h` : 'No trades 24h'}
-        </span>
-      </div>
-    </article>
-  );
-};
-
-const SideList = ({
-  title,
-  icon,
-  rows,
-  empty,
-  onOpen,
-}: {
-  onOpen: (r: HotRoom) => void;
-  title: string;
-  icon: JSX.Element;
-  rows: { r: HotRoom; right: JSX.Element }[];
-  empty: string;
-}) => {
-  return (
-    <section
-      className="rounded-2xl p-3 flex flex-col gap-1 min-w-0"
-      style={{ background: 'var(--bw-surface)', border: `1px solid ${LINE}` }}
-      aria-label={title}
-    >
-      <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-white m-0 px-1 pb-1">
-        {icon}
-        {title}
-      </h3>
-      {!rows.length && (
-        <p className="text-xs m-0 px-1 py-2" style={{ color: MUTED }}>
-          {empty}
-        </p>
-      )}
-      {rows.map(({ r, right }) => (
+      </span>
+      {canBuy ? (
         <button
-          key={r.ref.id}
+          type="button"
+          onClick={() => onBuy(r)}
+          aria-label={`Buy $${name}${price ? ` from ${price}` : ''}`}
+          className={`${SLOT} relative z-10 border-0 cursor-pointer`}
+          style={{ background: GOLD, color: '#000' }}
+        >
+          Buy
+        </button>
+      ) : listings ? (
+        <button
           type="button"
           onClick={() => onOpen(r)}
-          className="flex items-center gap-2 min-h-[44px] px-1 rounded-xl bg-transparent border-0 cursor-pointer hover:bg-white/[0.03] text-left"
+          aria-label={`View $${name}`}
+          className={`${SLOT} relative z-10 bg-transparent cursor-pointer`}
+          style={{ border: `1px solid ${LINE}`, color: MUTED }}
         >
-          <TokenIcon icon={r.icon} sym={r.title} size={28} />
-          <span className="flex-1 min-w-0 truncate text-sm font-bold text-white">{r.title}</span>
-          {right}
+          View
         </button>
-      ))}
-    </section>
+      ) : (
+        <span className={SLOT} style={{ background: 'rgba(255,255,255,0.04)' }} aria-hidden />
+      )}
+    </CardShell>
   );
 };
 
@@ -328,174 +242,106 @@ export const TokenBoard = ({
   list,
   rate,
   onOpen: onOpenIn,
+  onBuy: onBuyIn,
+  settled = true,
+  orderKey = '',
 }: {
   list: HotRoom[];
   rate: number;
   /** Open a token; default: the Exchange trade screen. */
   onOpen?: (r: HotRoom) => void;
+  /** Buy a token; default: the trade screen at its Buy panel (rowActions.buyRoute), the existing buy flow. */
+  onBuy?: (r: HotRoom) => void;
+  /** The list's ranking has finished. Until then (at most SETTLE_MS) the board shows placeholders. */
+  settled?: boolean;
+  /** Changes when the user changes a filter or search: cards are placed afresh. Data updates never move cards. */
+  orderKey?: string;
 }) => {
   const navigate = useNavigate();
   const onOpen = onOpenIn ?? ((r: HotRoom) => navigate(tradeRoute(r.ref.id)));
-  const [cards, setCards] = useState<Record<string, Card>>({});
+  const onBuy = onBuyIn ?? ((r: HotRoom) => navigate(buyRoute(r.ref.id)));
+  const [markets, setMarkets] = useState<Record<string, Listing[]>>(() => Object.fromEntries(knownListings));
   const [shown, setShown] = useState(PAGE);
-  const [tip, setTip] = useState(0);
-  const [sheet, setSheet] = useState<{ title: string; score: FairScore } | null | false>(false);
-  const page = list.slice(0, shown);
-  const visibleKey = page.map((r) => r.ref.id).join(',');
-  const visible = page;
-  // Shown order: 24h volume, then holders (loaded cards first; never by market cap).
-  const ordered = useMemo(
-    () =>
-      [...page].sort((a, b) => {
-        const x = cards[a.ref.id];
-        const y = cards[b.ref.id];
-        if (!x || !y) return x ? -1 : y ? 1 : 0;
-        return boardOrder(
-          { volume: x.stats.volume, holders: x.facts?.holders ?? null },
-          { volume: y.stats.volume, holders: y.facts?.holders ?? null },
-        );
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visibleKey, cards],
-  );
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setWaited(true), SETTLE_MS);
+    return () => clearTimeout(t);
+  }, []);
+  const ready = settled || waited;
 
+  // Card order: placed once (for sale first by what is known then), then never moved (buyPrice.stableOrder).
+  const byId = new Map(list.map((r) => [r.ref.id, r]));
+  const ids = list.map((r) => r.ref.id);
+  const placed = useRef<{ seen: string[] | null; key: string }>({ seen: null, key: orderKey });
+  if (ready && list.length) {
+    const reset = placed.current.seen === null || placed.current.key !== orderKey;
+    const known = (id: string): SaleState => {
+      const l = markets[id];
+      if (l) return saleState(l);
+      return (byId.get(id)?.newListings ?? 0) > 0 ? 'for-sale' : 'checking';
+    };
+    placed.current = { seen: stableOrder(placed.current.seen, ids, reset, known), key: orderKey };
+  }
+  const order = placed.current.seen ? shownOrder(placed.current.seen, ids) : [];
+  const page = order.slice(0, shown).map((id) => byId.get(id)!);
+  const visibleKey = page.map((r) => r.ref.id).join(',');
+
+  // Listings for the cards on screen, four at a time, once per card per visit. A card with a known price keeps
+  // showing it while this refreshes; a card only re-renders when its listings actually changed.
+  const fetched = useRef(new Set<string>());
   useEffect(() => {
     let live = true;
-    const todo = visible.filter((r) => !cards[r.ref.id]);
-    void (async () => {
-      const t = await chainTip();
-      if (live) setTip(t);
-      const queue = [...todo];
-      const worker = async () => {
-        for (let r = queue.shift(); r && live; r = queue.shift()) {
-          const id = r.ref.id;
-          const [facts, trades] = await Promise.all([boardFacts(id).catch(() => null), tokenTrades(id)]);
-          if (!live) return;
-          const stats = dayStats(trades, t);
-          const d = facts ? derive(facts) : null;
-          const cap: CapView = facts && d ? marketCap(trades, t, d.circulating, facts.dec) : { kind: 'none' };
-          setCards((c) => ({
-            ...c,
-            [id]: {
-              facts,
-              stats,
-              score: facts ? fairScore(facts, d!) : null,
-              badges: facts ? badges(facts, d!) : [],
-              cap,
-              burnedLabel: facts && d && d.burned > 0n ? `${shortAmount(d.burned, facts.dec)} burned` : null,
-            },
-          }));
+    const done = fetched.current;
+    const queue = page.filter((r) => !done.has(r.ref.id));
+    queue.forEach((r) => done.add(r.ref.id));
+    const worker = async () => {
+      for (let r = queue.shift(); r && live; r = queue.shift()) {
+        const id = r.ref.id;
+        const m = await roomMarket(r.ref).catch(() => null);
+        if (!m) {
+          // A failed read keeps the last known price; with none, the card says "Not for sale" rather than spin.
+          if (!knownListings.has(id)) setMarkets((x) => (x[id] ? x : { ...x, [id]: [] }));
+          continue;
         }
-      };
-      await Promise.all([worker(), worker(), worker(), worker()]);
-    })();
+        // roomMarket answers an empty market when its read fails: don't let that wipe a price we already showed
+        // (the token page reads the market afresh before any buy).
+        if (!m.listings.length && knownListings.get(id)?.length) continue;
+        knownListings.set(id, m.listings);
+        // Even after a re-run started: this card is marked fetched, so its answer must still land.
+        setMarkets((x) => (sameListings(x[id], m.listings) ? x : { ...x, [id]: m.listings }));
+      }
+    };
+    void Promise.all([worker(), worker(), worker(), worker()]);
     return () => {
       live = false;
+      // Not finished: let the next run pick these up.
+      for (const r of queue) done.delete(r.ref.id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleKey]);
 
-  const trending = useMemo(
-    () =>
-      list
-        .filter((r) => cards[r.ref.id]?.stats.change != null && cards[r.ref.id].stats.trades >= 2)
-        .sort((a, b) => (cards[b.ref.id].stats.change ?? 0) - (cards[a.ref.id].stats.change ?? 0))
-        .slice(0, 6),
-    [list, cards],
-  );
-  const fresh = useMemo(
-    () =>
-      list
-        .filter((r) => (cards[r.ref.id]?.facts?.height ?? 0) > 0)
-        .sort((a, b) => cards[b.ref.id].facts!.height - cards[a.ref.id].facts!.height)
-        .slice(0, 6),
-    [list, cards],
-  );
-
-  const side = (n: number) => (
-    <>
-      {trending.length > 0 && (
-        <SideList
-          onOpen={onOpen}
-          title="Trending"
-          icon={<TrendingUp size={15} color={GOLD} />}
-          empty=""
-          rows={trending.slice(0, n).map((r) => {
-            const c = cards[r.ref.id].stats.change;
-            return {
-              r,
-              right: (
-                <span className="text-xs font-bold" style={{ color: (c ?? 0) >= 0 ? GREEN : RED }}>
-                  {changeLabel(c)}
-                </span>
-              ),
-            };
-          })}
-        />
-      )}
-      <SideList
-        onOpen={onOpen}
-        title="New coins"
-        icon={<Sparkles size={15} color={GOLD} />}
-        empty="Checking deploy dates…"
-        rows={fresh.slice(0, n).map((r) => ({
-          r,
-          right: (
-            <span className="text-xs" style={{ color: MUTED }}>
-              {tip ? `${ageLabel(tip - cards[r.ref.id].facts!.height)} ago` : ''}
-            </span>
-          ),
-        }))}
-      />
-    </>
-  );
-
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px] w-full">
-      <div className="grid gap-3 sm:grid-cols-2 lg:hidden">{side(3)}</div>
-      <div className="flex flex-col gap-3 min-w-0">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs" style={{ color: MUTED }}>
-            Badges show only what the wallet checked on chain.
-          </span>
-          <button
-            type="button"
-            onClick={() => setSheet(null)}
-            className="flex items-center gap-1.5 min-h-[44px] px-3 rounded-xl text-xs font-bold bg-transparent cursor-pointer shrink-0"
-            style={{ border: `1px solid ${LINE}`, color: GOLD }}
-          >
-            <Info size={14} /> How it's scored
-          </button>
-        </div>
-        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" role="list" aria-label="Tokens">
-          {ordered.map((r) => {
-            const card = cards[r.ref.id];
-            return (
-              <TokenCard
-                key={r.ref.id}
-                r={r}
-                card={card}
-                tip={tip}
-                rate={rate}
-                onOpen={onOpen}
-                onScore={() => card?.score && setSheet({ title: r.title, score: card.score })}
-              />
-            );
-          })}
-        </div>
-        {list.length > shown && (
-          <button
-            type="button"
-            onClick={() => setShown((n) => n + PAGE)}
-            className="w-full min-h-[44px] rounded-xl text-sm font-bold bg-transparent cursor-pointer"
-            style={{ border: `1px solid ${LINE}`, color: GOLD }}
-          >
-            Show more ({list.length - shown})
-          </button>
-        )}
+    <div className="flex flex-col gap-3 w-full min-w-0">
+      <p className="text-xs m-0" style={{ color: MUTED }} data-testid="risk-line">
+        {RISK_LINE}
+      </p>
+      <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" role="list" aria-label="Tokens">
+        {!ready || !page.length
+          ? Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} />)
+          : page.map((r) => (
+              <TokenCard key={r.ref.id} r={r} listings={markets[r.ref.id]} rate={rate} onOpen={onOpen} onBuy={onBuy} />
+            ))}
       </div>
-      <aside className="hidden lg:flex flex-col gap-3">{side(6)}</aside>
-      {sheet !== false && <ScoreSheet token={sheet} onClose={() => setSheet(false)} />}
+      {ready && order.length > shown && (
+        <button
+          type="button"
+          onClick={() => setShown((n) => n + PAGE)}
+          className="w-full min-h-[44px] rounded-xl text-sm font-bold bg-transparent cursor-pointer"
+          style={{ border: `1px solid ${LINE}`, color: GOLD }}
+        >
+          Show more ({order.length - shown})
+        </button>
+      )}
     </div>
   );
 };

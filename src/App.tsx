@@ -31,6 +31,7 @@ import { SnackbarProvider } from './contexts/providers/SnackbarProvider';
 import { SentHost } from './components/sent/SentScreen';
 import { SweepMigration } from './pages/SweepMigration';
 import { PANEL_PROMPT_EVENT, PanelPrompt } from './mobile/PanelPrompt';
+import { UpdateNoticeMount } from './mobile/update/UpdateNoticeMount';
 import { wearConnectedSiteTheme, wearingSiteLook } from './mobile/theme/accent';
 import { accentById } from './mobile/theme/accents';
 import { IS_EXTENSION } from './mobile/extension';
@@ -256,6 +257,8 @@ export const App = () => {
                 <StorageRepairOverlay />
                 <SentHost />
                 {IS_EXTENSION && <PanelPrompt />}
+                {/* "A newer bWalletX is available" (mobile/update/updateNotice.ts); never in a store build. */}
+                <UpdateNoticeMount />
                 {showGuest && guestNames && guest && (
                   <Suspense fallback={<PageLoader message="Loading..." theme={theme} />}>
                     <GuestNames route={guest} onWallet={() => setGuest(null)} />

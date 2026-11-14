@@ -215,6 +215,22 @@ export const amountLabel = (raw: string, gate: Pick<TokenGate, 'key' | 'symbol' 
   return `${formatRaw(raw, gate.dec)} $${gate.symbol}`;
 };
 
+/** Digits grouped for reading: "1000000" → "1,000,000" (decimals untouched). */
+const grouped = (n: string): string => {
+  const [whole = '', frac] = n.split('.');
+  const g = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return frac === undefined ? g : `${g}.${frac}`;
+};
+
+/**
+ * The token room header's line under the title: "1 holder · you hold 1,000,000". The title is already the ticker,
+ * so the line doesn't say it again. A collection keeps its word: "3 holders · you hold 2 items".
+ */
+export const roomHoldLine = (members: number, raw: string, gate: Pick<TokenGate, 'key' | 'symbol' | 'dec'>): string => {
+  const held = gate.key.startsWith('coll:') ? amountLabel(raw, gate) : grouped(formatRaw(raw, gate.dec));
+  return `${grouped(String(members))} holder${members === 1 ? '' : 's'} · you hold ${held}`;
+};
+
 /** The locked-room line: "Hold 1 $FILM to join". */
 export const holdLine = (gate: TokenGate): string =>
   gate.key.startsWith('coll:')

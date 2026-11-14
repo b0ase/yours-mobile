@@ -13,6 +13,7 @@ import {
   ALLOWANCE_CHOICES_USD,
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
+  isOneUseRequest,
   sheetCanTrust,
   sheetAnswer,
   sheetHash,
@@ -214,17 +215,21 @@ export const BundleSheet = (props: {
             ? model.payment
               ? `Allow & pay ${payLabel}`
               : 'Allow posting'
-            : kind === 'private'
-              ? 'Allow'
-              : kind === 'signin'
-                ? 'Connect and sign in'
-                : kind === 'pay'
-                  ? model.mode === 'connectAndPay'
-                    ? `Connect & pay ${payLabel}`
-                    : `Pay ${payLabel}`
-                  : many
-                    ? 'Allow all'
-                    : 'Connect';
+            : kind === 'signonce'
+              ? request.items[0]?.usageType === 'hmac'
+                ? 'Allow once'
+                : 'Sign once'
+              : kind === 'private'
+                ? 'Allow'
+                : kind === 'signin'
+                  ? 'Connect and sign in'
+                  : kind === 'pay'
+                    ? model.mode === 'connectAndPay'
+                      ? `Connect & pay ${payLabel}`
+                      : `Pay ${payLabel}`
+                    : many
+                      ? 'Allow all'
+                      : 'Connect';
   // A requested line left unticked is named on the button (owner, 26 Oct 2026: Connect silently left "bchat
   // documents" ungranted). Display only: the decisions are the ticks as drawn.
   const leftOut = withoutSuffix(model.lines, (i) => isChecked(model.lines[i].requestID, model.lines[i].checked));
@@ -485,10 +490,14 @@ export const BundleSheet = (props: {
       (l) => request.items.find((r) => r.requestID === l.requestID)?.type === 'certificate',
     );
     const red = (t: string) => <span style={{ color: '#FF6B6B' }}>{t}</span>;
+    // One-signature requests sharing a sheet (b-Aware, Limenelo, 13 Nov 2026): signatures other sites may take as you.
+    const shared = request.items.some((r) => isOneUseRequest(r));
     title = privileged ? (
       <>Wants {red('full control')} of your keys</>
     ) : privateCert ? (
       <>Wants your {red('private details')}</>
+    ) : shared ? (
+      <>Wants a signature {red('other sites accept')}</>
     ) : (
       <>Wants {red('more than usual')}</>
     );
@@ -501,6 +510,21 @@ export const BundleSheet = (props: {
           >
             <Cross />
             Could move your money
+          </div>
+        )}
+        {shared && (
+          <div className="flex flex-col" style={{ gap: 8 }} data-testid="shared-key-warning">
+            <div
+              className="flex items-center gap-2.5"
+              style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
+            >
+              <Cross />
+              Other sites could accept these as you
+            </div>
+            <div className="flex items-center gap-2" style={{ fontSize: 14, color: CARD.soft }}>
+              <Check size={18} />
+              Each one is just this once
+            </div>
           </div>
         )}
         {riskyLines.map((l) => lineRow(l, true))}
@@ -622,6 +646,40 @@ export const BundleSheet = (props: {
           )}
         </div>
       </>
+    );
+  } else if (kind === 'signonce') {
+    // One signature other sites may accept as you (services/sharedKeySigning.ts). The careful card's plain red style
+    // without its scroll gate: still one tap ("Sign once"), with Not now and Block this site beside it. Nothing here
+    // says no money moves: a token like BitPlan's can deposit, start a checkout or spend credits (review of 1020b69c).
+    const onceProto = String(request.items[0]?.protocolID?.[1] ?? '');
+    // A level-1 HMAC for a named service (services/sharedKeySigning.ts isOneUseHmac): a code, not a signature.
+    const onceCode = request.items[0]?.usageType === 'hmac';
+    const soft = (t: string) => <span style={{ color: CARD.redSoft }}>{t}</span>;
+    hero = null;
+    siteSub = 'One signature, check it';
+    title = onceCode ? <>One code as you for {soft(name)}</> : <>Sign once as you for {soft(name)}</>;
+    body = (
+      <div className="flex flex-col" style={{ gap: 8, marginTop: 4 }} data-testid="sign-once">
+        {signingAs && <span style={{ fontSize: 15 }}>as {signingAs}</span>}
+        <div className="flex flex-wrap" style={{ gap: 8 }}>
+          {onceProto && (
+            <Chip tone="red">
+              <span data-testid="sign-once-protocol">&ldquo;{onceProto}&rdquo;</span>
+            </Chip>
+          )}
+          <Chip tone="red">
+            <Check />
+            Just this once
+          </Chip>
+        </div>
+        <div
+          className="flex items-center gap-2.5"
+          style={{ padding: '12px 14px', borderRadius: 14, background: CARD.redChip, fontSize: 14 }}
+        >
+          <Cross />
+          Other sites could accept it as you. Only sign if you trust {name}.
+        </div>
+      </div>
     );
   } else if (kind === 'private') {
     hero = <SignInHero />;
@@ -751,7 +809,7 @@ export const BundleSheet = (props: {
       onPointerDownCapture={freeze}
     >
       <ApprovalCard
-        tone={careful ? 'red' : 'gold'}
+        tone={careful || kind === 'signonce' ? 'red' : 'gold'}
         site={request.originator}
         siteSub={siteSub}
         onClose={() => void send('notNow')}
@@ -761,7 +819,7 @@ export const BundleSheet = (props: {
         title={title}
         primary={careful ? deny : allow}
         secondary={careful ? allow : deny}
-        tertiary={careful ? block : undefined}
+        tertiary={careful || kind === 'signonce' ? block : undefined}
         error={usbError || (mustRead ? 'Scroll to read every line before allowing' : '')}
       >
         {body}

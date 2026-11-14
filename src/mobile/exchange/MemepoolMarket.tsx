@@ -40,7 +40,7 @@ const CoinIcon = ({ c }: { c: MemepoolCoin }) => {
 const money = (sats: number, rate: number) => fiatLabel(sats, rate) || bsvLabel(sats);
 
 export const MemepoolMarket = ({ rate }: { rate: number }) => {
-  const [sort, setSort] = useState<MemepoolSort>('trending');
+  const [sort, setSort] = useState<MemepoolSort>('new');
   const [coins, setCoins] = useState<MemepoolCoin[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [q, setQ] = useState('');

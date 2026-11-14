@@ -3,6 +3,7 @@ import { resolve } from 'path';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import mobileConfig from './vite.config.mobile';
 import { writeAlbumPages } from './src/web/albumPages';
+import { offerStringsInBundle } from './scripts/lib/removedOfferStrings';
 import { installStaleBuildCheck } from './src/web/staleBuild';
 import { BANNER_VIDEO, bannerHtml, installWebBanner } from './src/web/betaBanner';
 
@@ -270,6 +271,18 @@ const albumPages = (): Plugin => ({
   },
 });
 
+/**
+ * No removed share-offer string ships (sharesView.test.ts checks the source). Runs on every web build, against the
+ * bundle just written: a test that looked for build-web/ only ran where an (often older) build happened to exist.
+ */
+export const noShareOffersInBundle = (): Plugin => ({
+  name: 'bwallet-no-share-offers',
+  closeBundle() {
+    const hits = offerStringsInBundle(resolve(__dirname, 'build-web'));
+    if (hits.length) throw new Error(`removed share-offer strings in the web bundle:\n${hits.join('\n')}`);
+  },
+});
+
 // Loaded after mobile.css so its rules win (see src/web/web.css).
 const webCss = (): Plugin => ({
   name: 'bwallet-web-css',
@@ -286,7 +299,7 @@ const webCss = (): Plugin => ({
 export default mergeConfig(
   mobileConfig,
   defineConfig({
-    plugins: [webShell(), webCss(), albumPages(), editionEntries()],
+    plugins: [webShell(), webCss(), albumPages(), editionEntries(), noShareOffersInBundle()],
     // public/ is the extension's (Yours manifest and sprout icons); the web wallet emits its own.
     publicDir: false,
     // Both web hosts serve index.html for deep paths (/lock/subscriptions, /m/market, /bapp/bchatx): relative ./assets/

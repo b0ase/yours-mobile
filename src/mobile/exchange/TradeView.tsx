@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { buyBsv21 } from '@1sat/actions';
 import { ArrowLeft, Star } from 'lucide-react';
@@ -20,7 +20,7 @@ import { IndexerFundPanel } from '../tokens/IndexerFundPanel';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { MyTokenListings } from '../sell/MyTokenListings';
 import { SellSheet, type SellTarget } from '../sell/SellSheet';
-import { SELL_ENABLED } from '../sell/sell';
+import { SELL_ENABLED, fromRaw } from '../sell/sell';
 import { marketTradingEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
 import { purchaseError } from './purchase';
@@ -33,8 +33,7 @@ import { useLocation } from 'react-router-dom';
 import { TokenIcon } from './TokenIcon';
 import { TokenIdentity } from '../tokens/TokenIdPanel';
 import { PriceChart } from './PriceChart';
-import { TokenFacts } from './TokenFacts';
-import { TokenAudit } from './TokenAudit';
+import { TokenDetails } from './TokenDetails';
 import { STALE_LISTING_MESSAGE, dropSpent, listingSpendState, nextAsk } from '../market/tokenPage';
 import { chartSeries } from './chartSeries';
 import { TokenLabelsRow } from './Categories';
@@ -162,6 +161,15 @@ export const TradeView = ({
     const t = setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ block: 'start' }), 80);
     return () => clearTimeout(t);
   }, [id, hash]);
+  // A Sell link (sellRoute) opens the sell sheet straight away once the balance is known (owner, 13 Nov 2026:
+  // "the 'sell' card should come up straight away"); the order book stays on this page behind it. Once per visit.
+  const sellOpened = useRef<string | null>(null);
+  useEffect(() => {
+    if (hash !== `#${SELL_ANCHOR}` || sellOpened.current === id) return;
+    if (!SELL_ENABLED || !TRADING || meta === undefined || held === null || held <= 0n) return;
+    sellOpened.current = id;
+    setSelling({ tokenId: id, symbol: meta?.sym ?? id.slice(0, 8), dec: meta?.dec ?? 0, heldRaw: held });
+  }, [hash, id, meta, held]);
 
   const dec = meta?.dec ?? 0;
   const sym = meta?.sym ?? id.slice(0, 8);
@@ -291,8 +299,7 @@ export const TradeView = ({
           Launched on the bWalletX Launchpad. {LAUNCH_DISCLAIMER}
         </p>
       )}
-      <TokenFacts tokenId={id} sym={sym} dec={dec} rate={rate} priceSats={price} held={held} />
-      <TokenAudit tokenId={id} sym={sym} rate={rate} trades={trades} />
+      <TokenDetails tokenId={id} sym={sym} rate={rate} trades={trades} facts={{ dec, priceSats: price, held }} />
       <IndexerFundPanel tokenId={id} ticker={sym} />
       {launched && <CreatorVesting tokenId={id} />}
 
@@ -328,8 +335,8 @@ export const TradeView = ({
             <PriceChart series={chartSeries(trades, { lowestAsk: market?.floorSats })} priceLabel={unitPriceLabel} />
           </div>
 
-          {/* Order book: sell orders (live listings), cheapest first */}
-          <div className={`${CARD} p-3`}>
+          {/* Order book: sell orders (live listings), cheapest first. Min height: "Loading…" → rows doesn't jump. */}
+          <div className={`${CARD} p-3 min-h-[120px]`}>
             <div className="text-sm font-bold text-white mb-2">
               {isNoCurve(id) ? 'Listings from players' : 'Order book'}
             </div>
@@ -408,7 +415,7 @@ export const TradeView = ({
 
         {/* Buy / sell panel */}
         <div className="flex flex-col gap-4">
-          <div id={BUY_ANCHOR} className={`${CARD} p-4 flex flex-col gap-3 scroll-mt-4`}>
+          <div id={BUY_ANCHOR} className={`${CARD} p-4 flex flex-col gap-3 scroll-mt-4 min-h-[148px]`}>
             <div className="text-sm font-bold text-white">Buy ${sym}</div>
             {!TRADING ? (
               <p className="text-xs" style={{ color: MUTED }}>
@@ -444,7 +451,12 @@ export const TradeView = ({
           <div id={SELL_ANCHOR} className={`${CARD} p-4 flex flex-col gap-3 scroll-mt-4`}>
             <div className="text-sm font-bold text-white">Sell ${sym}</div>
             <div className="text-xs" style={{ color: MUTED }}>
-              You hold <span className="text-white">{held === null ? '…' : `${formatAmount(held, dec)} $${sym}`}</span>
+              You hold{' '}
+              <span className="text-white">
+                {held === null
+                  ? '…'
+                  : `${held > 0n && held < 10n ** BigInt(dec) ? fromRaw(held, dec) : formatAmount(held, dec)} $${sym}`}
+              </span>
             </div>
             {SELL_ENABLED && TRADING && held !== null && held > 0n ? (
               <button

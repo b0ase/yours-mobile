@@ -55,6 +55,7 @@ import {
 } from './nativeSeal';
 import { openPendingForLink, type RoomReq } from './nativeSealSource';
 import { docHashFor } from './signLink';
+import { sealRef } from './sealCheck';
 import { SignaturePad } from '../signature/SignaturePad';
 import type { SigStroke } from '../signature/signature';
 import { checkStrictSvg, signatureSvg } from '../pair/bitsign';
@@ -409,7 +410,8 @@ export const NativeSealPage = () => {
     storageBusy,
   });
 
-  const ref = String((doc?.manifest?.documentRef as string | undefined) || doc?.documentId || '');
+  // The reference the seal's output will carry, read from the document on screen as nativeSeal reads it (sealCheck.ts).
+  const ref = useMemo(() => (doc ? sealRef(doc.html, doc.documentId) : ''), [doc]);
   /** The wallet's own fee rate (sat/kB), the one its createAction pays: the button, sheet and prompt use it. */
   const satsPerKb = () => chromeStorageService.getCustomFeeRate();
   const estFee = useMemo(
@@ -473,6 +475,8 @@ export const NativeSealPage = () => {
     try {
       const out = await nativeSignAndSeal({
         documentId: doc.documentId,
+        // The bytes on screen: the record the wallet signs must name exactly these (sealCheck.ts).
+        documentHtml: doc.html,
         fieldIds: mine.map((f) => f.id),
         svg,
         api,
@@ -489,14 +493,11 @@ export const NativeSealPage = () => {
         onSlow: (s) => setPhase((p) => (p.k === 'working' && p.step === s ? { ...p, slow: true } : p)),
         // EVERY seal: the payment sheet, then Face ID / passcode, or the wallet password (sealApproval.ts). Nothing
         // here reads a spending limit, allowance or one-click setting, so nothing can skip it.
-        approve: async (prepared) => {
-          // The wallet's own fee model, with prepare's reference. bit-sign's estFeeSats (1 sat/byte, ~10× the real
-          // fee) is logged only.
-          fee = estimateSealFee(
-            mine.map((f) => f.id),
-            prepared.ref || ref,
-            satsPerKb(),
-          );
+        satsPerKb: satsPerKb(),
+        approve: async (prepared, feeSats) => {
+          // The wallet's own fee model over the document on screen (nativeSeal.ts; never prepare's `ref`), and the
+          // most the seal will pay. bit-sign's estFeeSats (1 sat/byte, ~10× the real fee) is logged only.
+          fee = feeSats;
           console.info('[nativeSeal] fee estimate', { wallet: fee, bitsign: prepared.estFeeSats });
           setNamedFee(fee);
           const p = prepared as typeof prepared & { origHash?: string };

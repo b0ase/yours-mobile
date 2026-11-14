@@ -3,16 +3,15 @@ import { setWalletKind, type WalletKind } from '../wallet/walletKind';
 import { STORE_BUILD, STORE_HIDDEN_WALLET_KINDS } from '../storeBuild';
 
 /**
- * Desktop Wallet section tabs (owner, 12 Oct 2026): Tokens | NFTs | Names | Tickets | Credits. Tokens is
- * a view of /wallet (walletKind.ts); NFTs, Names, Tickets and Credits are their own pages at /wallet/nfts, /wallet/my-names, /wallet/tickets and
- * /wallet/credits (url/publicUrl.ts). Kinds a store edition hides stay hidden.
+ * Desktop Wallet section tabs (owner, 12 Oct 2026): Tokens | NFTs | Names | Tickets. Tokens is a view of /wallet
+ * (walletKind.ts); NFTs, Names and Tickets are their own pages at /wallet/nfts, /wallet/my-names and /wallet/tickets
+ * (url/publicUrl.ts). Kinds a store edition hides stay hidden. (Credits, the b-only prepaid credits, retired 12 Nov 2026.)
  */
 const TABS: { id: WalletKind; label: string; to: string }[] = [
   { id: 'tokens', label: 'Tokens', to: '/bsv-wallet' },
   { id: 'nfts', label: 'NFTs', to: '/m/nfts' },
   { id: 'names', label: 'Names', to: '/m/my-names' },
   { id: 'tickets', label: 'Tickets', to: '/m/tickets' },
-  { id: 'credits', label: 'Credits', to: '/m/credits' },
 ];
 
 const walletTabs = () => TABS.filter((t) => !(STORE_BUILD && STORE_HIDDEN_WALLET_KINDS.includes(t.id)));

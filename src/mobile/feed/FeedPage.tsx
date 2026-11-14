@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useAvatarPlayback } from '../names/useAvatarPlayback';
 import { setFeedLatest } from '../tabs/tabBadges';
 import {
@@ -65,7 +66,7 @@ import { openDappBrowser } from '../dappBrowser';
 import { REMOTE_ACTIONS, actionLabel, postActions, type PostAction } from './sources';
 import { fileToBase64, formatBytes, txFeeSats } from '../mint/mint';
 import { PostMedia } from './FeedMedia';
-import { FEED_APP, SOURCE_REGISTRY, migrateSourceId, textOn } from './sources';
+import { FEED_APP, SOURCE_REGISTRY } from './sources';
 import { kindOf, MAX_POST_IMAGES, planAv } from './media';
 import { onSafetyChange, refreshSafety, reportItem, safety } from '../market/safety';
 import { ReportSheet } from '../ugc/UgcSheets';
@@ -201,6 +202,7 @@ import {
   feedColor,
   feedDef,
   hasCustomView,
+  sourceOfFeed,
   loadPins,
   migrateFeedId,
   savePins,
@@ -243,24 +245,6 @@ const HOME_FILTERS: { id: Tab; label: string }[] = [
   { id: 'following', label: 'Following' },
   { id: 'foryou', label: 'For you' },
 ];
-const SOURCE_KEY = 'bwallet.feed.source';
-const loadSource = (): Source | 'all' => {
-  try {
-    const v = migrateSourceId(localStorage.getItem(SOURCE_KEY));
-    // No saved choice → Twetch, the one source still live (owner, 6 Oct 2026: the bmap indexer behind
-    // bChat and Treechat stopped in April). A choice the person made is kept.
-    return SOURCES.some((s) => s.id === v) ? (v as Source | 'all') : v === 'all' ? 'all' : 'twetch';
-  } catch {
-    return 'twetch';
-  }
-};
-const saveSource = (v: Source | 'all') => {
-  try {
-    localStorage.setItem(SOURCE_KEY, v);
-  } catch {
-    // storage unavailable
-  }
-};
 
 /**
  * Source badge: the app's bundled logo (sources.ts registry) inline on the author row, between the
@@ -309,8 +293,6 @@ const Via = ({ post }: { post: FeedPost }) => {
   );
 };
 
-/** Selected source chip colour: the source's brand colour ("All" is gold). */
-const chipColor = (id: Source | 'all') => (id === 'all' ? GOLD : (SOURCE_REGISTRY[id].color ?? GOLD));
 const chipOff = { background: PANEL, color: MUTED, border: `1px solid ${LINE}` };
 
 type FeedSort = 'latest' | 'popular' | 'locked';
@@ -1659,7 +1641,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const identity = useIdentity(apiContext, chromeStorageService);
   const online = useOnline();
   const [start] = useState(() => initialFeed(loadPrefs().defaultFeed, loadFollows().length > 0));
-  const [tab, setTab] = useState<Tab>(start.tab);
+  const [homeTab, setTab] = useState<Tab>(start.tab);
   const [follows, setFollows] = useState<Follow[]>(loadFollows);
   const [mutes, setMutes] = useState<string[]>(loadMutes);
   const [liked, setLiked] = useState<string[]>(loadLiked);
@@ -1669,7 +1651,6 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     foryou: readListCache<FeedPost>('feed:foryou'),
   }));
   const [error, setError] = useState('');
-  const [source, setSource] = useState<Source | 'all'>(loadSource);
   const [safetyTick, setSafetyTick] = useState(0);
   const [composing, setComposing] = useState<{
     replyTo: FeedPost | null;
@@ -1685,8 +1666,21 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
   const [pins, setPins] = useState<FeedId[]>(loadPins);
   const [allFeeds, setAllFeeds] = useState(false);
   const news = feed === 'bnews';
+  const navigate = useNavigate();
+  // One app picked in the row: just its posts, newest first, none of Home's filters.
+  const appSource = sourceOfFeed(feed);
+  const source: Source | 'all' = appSource ?? 'all';
+  const tab: Tab = appSource ? 'foryou' : homeTab;
   const pickFeed = (picked: FeedId) => {
-    const id = migrateFeedId(picked);
+    const next = migrateFeedId(picked);
+    // The bApps tile opens the app browser (owner, 9 Nov 2026).
+    if (next === 'bapps') {
+      setAllFeeds(false);
+      navigate('/m/apps');
+      return;
+    }
+    // Tapping the open app again goes back to every app.
+    const id = next === feed ? 'home' : next;
     setFeed(id);
     setAllFeeds(false);
     saveNewsMode(id === 'bnews');
@@ -1728,13 +1722,15 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     return () => setIdentitySetupHandler(null);
   }, []);
   const [locking, setLocking] = useState<FeedPost | null>(null);
-  const [sort, setSort] = useState<FeedSort>(start.sort);
+  const [homeSort, setSort] = useState<FeedSort>(start.sort);
+  const sort: FeedSort = appSource ? 'latest' : homeSort;
   const [blocks, setBlocks] = useState<HiddenAccount[]>(loadBlocks);
   const [bookmarks, setBookmarks] = useState<FeedPost[]>(loadBookmarks);
   const [showBookmarks, setShowBookmarks] = useState(false);
   // Row-1 filters (owner, 25 Oct 2026): Favourites (sources + people the user picked) and
-  // Leaderboard (the 'Most locked' ranking as one tap). 'feed' = the normal source chips.
-  const [view, setView] = useState<'feed' | 'favourites' | 'leaderboard'>('feed');
+  // Leaderboard (the 'Most locked' ranking as one tap). 'feed' = everything.
+  const [homeView, setView] = useState<'feed' | 'favourites' | 'leaderboard'>('feed');
+  const view = appSource ? 'feed' : homeView;
   const [favs, setFavs] = useState<Favourite[]>(loadFavourites);
   const [pickingFavs, setPickingFavs] = useState(false);
   const toggleFav = (f: Favourite) => {
@@ -2008,7 +2004,7 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
 
   return (
     <div
-      className="isolate flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
+      className="bw-feed isolate flex w-full flex-col items-center overflow-x-hidden overflow-y-auto pb-36"
       style={{ height: '100%', background: 'var(--bw-bg)' }}
     >
       <PullToRefresh onRefresh={() => load(tab)} />
@@ -2070,13 +2066,9 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
             {/* Row 1: All, sort, Favourites, Leaderboard in four equal cells. */}
             <div className="grid grid-cols-4 gap-2">
               <button
-                onClick={() => {
-                  setView('feed');
-                  setSource('all');
-                  saveSource('all');
-                }}
-                className={`bw-feed-chip min-w-0 truncate rounded-full px-1.5 py-1 text-[12px] font-semibold${view === 'feed' && source === 'all' ? ' is-on' : ''}`}
-                style={view === 'feed' && source === 'all' ? { background: GOLD, color: '#1a1300' } : chipOff}
+                onClick={() => setView('feed')}
+                className={`bw-feed-chip min-w-0 truncate rounded-full px-1.5 py-1 text-[12px] font-semibold${view === 'feed' ? ' is-on' : ''}`}
+                style={view === 'feed' ? { background: GOLD, color: '#1a1300' } : chipOff}
               >
                 All
               </button>
@@ -2117,28 +2109,6 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
                 <span className="truncate">Leaderboard</span>
                 <Lock size={12} className="shrink-0" />
               </button>
-            </div>
-            {/* Two rows of four source chips. */}
-            <div className="grid grid-cols-4 gap-2" role="tablist" aria-label="Source">
-              {SOURCES.filter((s) => s.id !== 'all').map((s) => {
-                const on = view === 'feed' && source === s.id;
-                return (
-                  <button
-                    key={s.id}
-                    role="tab"
-                    aria-selected={on}
-                    onClick={() => {
-                      setView('feed');
-                      setSource(s.id);
-                      saveSource(s.id);
-                    }}
-                    className={`bw-feed-chip min-w-0 truncate rounded-full px-1.5 py-1 text-[12px] font-semibold${on ? ' is-on' : ''}`}
-                    style={on ? { background: chipColor(s.id), color: textOn(chipColor(s.id)) } : chipOff}
-                  >
-                    {s.label}
-                  </button>
-                );
-              })}
             </div>
           </div>
         )}

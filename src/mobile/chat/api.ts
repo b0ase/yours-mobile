@@ -1104,22 +1104,6 @@ export class BchatClient {
     await this.call('POST', `${BchatClient.path(ticker)}/bounty/${no}/payout`, { txid });
   }
 
-  // ── bCredits (bit-sign lib/credits.ts; src/mobile/credits) ──
-
-  /** Balance + public config (treasury, price, cap, terms, this account's deposit reference). */
-  async credits(): Promise<unknown> {
-    return this.call('GET', '/api/bitsign/credits');
-  }
-
-  async creditLedger(limit = 50): Promise<unknown> {
-    return this.call('GET', `/api/bitsign/credits/ledger?limit=${limit}`);
-  }
-
-  /** After the wallet sent BSV + the reference output to the treasury: bit-sign verifies the tx and credits once. */
-  async depositCredits(txid: string): Promise<unknown> {
-    return this.call('POST', '/api/bitsign/credits/deposit', { txid });
-  }
-
   // ── Verified identity (src/mobile/kyc) ──
 
   /** Ask bit-sign for a BRC-52 KYC certificate for this identity key (needs approved Veriff). */
@@ -1301,6 +1285,15 @@ export class BchatClient {
     const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/rooms/direct', {
       handle: handle.trim().replace(/^\$/, ''),
     });
+    return r.ticker;
+  }
+
+  /**
+   * Your own private 1:1 with b, found or created (bit-sign POST /api/bitsign/b/direct). Everything typed there goes
+   * to b without `$b`. Called when the pinned b row is opened, never on list load. Returns its ticker.
+   */
+  async openBDirect(): Promise<string> {
+    const r = await this.call<{ ticker: string }>('POST', '/api/bitsign/b/direct', {});
     return r.ticker;
   }
 

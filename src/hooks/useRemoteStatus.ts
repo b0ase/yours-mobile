@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AuthFetch } from '@bsv/sdk';
+import { statusAuthFetch } from '../services/storagePaymentGuard';
 import type { WalletInterface } from '@bsv/sdk';
 
 export interface RemotePricing {
@@ -51,7 +51,7 @@ export const useRemoteStatus = (
     }
 
     setLoading(true);
-    const authFetch = new AuthFetch(wallet);
+    const authFetch = statusAuthFetch(wallet);
 
     const results = await Promise.all(
       remotes.map(async (url): Promise<[string, RemoteStatusResult]> => {

@@ -4,7 +4,7 @@ import { X, Server, ChevronDown, ChevronUp, Loader2, WifiOff } from 'lucide-reac
 import { Button } from './Button';
 import { Input } from './Input';
 import { Theme } from '../theme.types';
-import { AuthFetch } from '@bsv/sdk';
+import { statusAuthFetch } from '../services/storagePaymentGuard';
 import type { WalletInterface } from '@bsv/sdk';
 import type { RemoteStatus, RemoteStatusResult } from '../hooks/useRemoteStatus';
 import { KNOWN_PROVIDERS } from './storageProviders';
@@ -65,7 +65,7 @@ export const ProviderPicker = ({
   useEffect(() => {
     const fetchAll = async () => {
       setFetching(true);
-      const authFetch = new AuthFetch(wallet);
+      const authFetch = statusAuthFetch(wallet);
       const results = await Promise.all(
         KNOWN_PROVIDERS.map(async (p): Promise<[string, RemoteStatusResult]> => {
           try {
@@ -88,7 +88,7 @@ export const ProviderPicker = ({
    *  happens internally. Any response (even 405) proves the server is alive
    *  and authenticated — only a thrown error means unreachable. */
   const checkLiveness = async (baseUrl: string): Promise<boolean> => {
-    const authFetch = new AuthFetch(wallet);
+    const authFetch = statusAuthFetch(wallet);
     try {
       await authFetch.fetch(baseUrl.replace(/\/$/, ''), { method: 'POST' });
       return true;

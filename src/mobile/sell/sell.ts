@@ -108,15 +108,40 @@ export function perTokenSats(input: string, rate: number): number {
 export const usd = (sats: number, exchangeRate: number) =>
   exchangeRate > 0 ? `≈ $${((sats / 1e8) * exchangeRate).toFixed(sats * exchangeRate >= 1e8 ? 2 : 4)}` : '';
 
-export type SellError = 'quantity' | 'over-balance' | 'price' | null;
+export type SellError = 'quantity' | 'over-balance' | 'price' | 'total' | null;
 
-/** Validate the sheet. A listing must ask at least 1 sat (OrdLock rejects 0). */
-export function validateSell(qtyRaw: bigint | null, held: bigint, priceSats: number): SellError {
+/**
+ * Validate the sheet. Any amount down to 1 base unit can be sold (BSV-21 amounts are raw units; `dec` only
+ * places the decimal point), as long as the listing asks at least 1 sat in total (OrdLock rejects 0).
+ * `perToken` (sats per whole token, as typed): with a price entered but a total under 1 sat the error is
+ * 'total' (raise the price or sell more), not 'price'.
+ */
+export function validateSell(qtyRaw: bigint | null, held: bigint, priceSats: number, perToken = 0): SellError {
   if (qtyRaw === null || qtyRaw <= 0n) return 'quantity';
   if (qtyRaw > held) return 'over-balance';
-  if (!(priceSats >= 1)) return 'price';
+  if (!(priceSats >= 1)) return perToken > 0 ? 'total' : 'price';
   return null;
 }
+
+/**
+ * A token's decimals as a safe integer (0–18). Callers pass `dec` from several sources (wallet outputs,
+ * the overlay API, which answers it as a string: "8"); a string or NaN here broke the amount maths
+ * (fromRaw padded to 81 places, totalPriceSats returned 0).
+ */
+export const normDec = (dec: unknown): number => {
+  const n = Math.floor(Number(dec));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 18) : 0;
+};
+
+/** What the quantity field accepts while typing: digits, and up to `dec` decimals (none for a whole-unit token). */
+export const qtyInputOk = (input: string, dec: number): boolean => {
+  const d = normDec(dec);
+  return d > 0 ? new RegExp(`^\\d*(\\.\\d{0,${d}})?$`).test(input) : /^\d*$/.test(input);
+};
+
+/** The quantity field's hint: your whole balance when it is under one token ("0.5"), else "1". */
+export const qtyPlaceholder = (heldRaw: bigint, dec: number): string =>
+  heldRaw > 0n && heldRaw < 10n ** BigInt(normDec(dec)) ? fromRaw(heldRaw, normDec(dec)) : '1';
 
 // ── fees shown on the confirm sheet ──
 
@@ -239,4 +264,25 @@ const listeners = new Set<() => void>();
 export const onListingsChanged = (fn: () => void) => {
   listeners.add(fn);
   return () => void listeners.delete(fn);
+};
+
+// ── opening the sheet (useSellSheet.tsx) ──
+
+const normTokenId = (id: string) => id.toLowerCase().replace('.', '_');
+
+/** What SellSheet needs to sell `tokenId`, from this wallet's balances (matched on the token ID, never the
+ *  ticker); null when the wallet holds none. */
+export const sellTargetFor = (
+  balances: readonly { id: string; sym?: string; dec?: number; all: { confirmed: bigint } }[],
+  tokenId: string,
+  fallbackSymbol = '',
+): { tokenId: string; symbol: string; dec: number; heldRaw: bigint } | null => {
+  const b = balances.find((x) => normTokenId(x.id || '') === normTokenId(tokenId));
+  if (!b || b.all.confirmed <= 0n) return null;
+  return {
+    tokenId: normTokenId(tokenId),
+    symbol: (b.sym || fallbackSymbol || tokenId.slice(0, 6)).replace(/^\$/, ''),
+    dec: normDec(b.dec),
+    heldRaw: b.all.confirmed,
+  };
 };

@@ -21,6 +21,7 @@ import { ProviderPicker } from '../components/ProviderPicker';
 import { KNOWN_PROVIDERS } from '../components/storageProviders';
 import { SpeedBump } from '../components/SpeedBump';
 import { FindMissingCoins } from '../components/FindMissingCoins';
+import { TopUpRefusedNotice } from '../components/TopUpRefusedNotice';
 import { useTheme } from '../hooks/useTheme';
 import { useSnackbar } from '../hooks/useSnackbar';
 import { useServiceContext } from '../hooks/useServiceContext';
@@ -624,6 +625,9 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
           Remote Backup
         </h2>
       </div>
+
+      {/* A full store whose top-up was refused (services/storagePaymentGuard.ts). */}
+      <TopUpRefusedNotice />
 
       {/* Empty remotes: local-only, no backup configured. */}
       {localIsActive && remotes.length === 0 && (

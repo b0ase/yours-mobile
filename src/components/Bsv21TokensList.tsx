@@ -21,7 +21,9 @@ import { TokenSwipe } from '../mobile/wallet/TokenSwipe';
 import { useNavigate } from 'react-router-dom';
 import { SELL_ENABLED } from '../mobile/sell/sell';
 import { marketTradingEnabled } from '../mobile/storeBuild';
-import { sellRoute } from '../mobile/exchange/rowActions';
+import { buyRoute } from '../mobile/exchange/rowActions';
+import { useSellSheet } from '../mobile/sell/useSellSheet';
+import { TokenRowPanel, rowPanelActions } from '../mobile/wallet/TokenRowPanel';
 import { UndoToastHost } from '../mobile/swipe/undo';
 import { arrange, useTokenRows } from '../mobile/wallet/tokenRows';
 import { useAlbums } from '../mobile/albums/useAlbums';
@@ -29,7 +31,7 @@ import { AddToAlbumSheet, AlbumBar } from '../mobile/albums/AlbumSheets';
 import { ALL_VIEW, filterView, liveView, tokenKey, viewCounts, type AlbumView } from '../mobile/albums/albums';
 import { useListCoin } from '../mobile/wallet/useListCoin';
 import { rowMatchesCoin } from '../mobile/wallet/cardFilter';
-import { hasFocusHost, setFocusedToken } from '../mobile/wallet/cardFocus';
+import { clearFocusedToken, getFocusedToken, hasFocusHost, setFocusedToken } from '../mobile/wallet/cardFocus';
 
 
 type PriceData = {
@@ -91,6 +93,8 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
   const [tokens, setTokens] = useState<Bsv21Balance[]>([]);
   const [exchangeRate, setExchangeRate] = useState<number>(0);
   const ownId = useOwnPersonalTokenId();
+  // Sell opens the sell sheet right here (owner, 13 Nov 2026), not the trade screen's order book.
+  const { openSell, sellSheet } = useSellSheet();
 
   useEffect(() => {
     const loadExchangeRate = async () => {
@@ -177,8 +181,19 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
     (exchangeRate / BSV_DECIMAL_CONVERSION) *
     Number(showAmount(t.all.confirmed, t.dec));
 
-  // Tap a row: with the balance cards on screen it becomes the front card (owner, 15 Oct 2026; × or a swipe puts
-  // the normal card back, the list stays where it is). Otherwise the old tap (the token's send screen).
+  // Tap a row: it expands in place with its actions (owner, 13 Nov 2026), a second tap closes it. With the
+  // balance cards on screen it also becomes the front card (owner, 15 Oct 2026; × or a swipe puts the normal card
+  // back). Only one row is open at a time.
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const toggleRow = (t: Bsv21Balance) => {
+    if (expanded === t.id) {
+      setExpanded(null);
+      if (getFocusedToken()?.id === t.id) clearFocusedToken();
+      return;
+    }
+    setExpanded(t.id);
+    if (hasFocusHost()) openRow(t);
+  };
   const openRow = (t: Bsv21Balance) => {
     if (!hasFocusHost()) return onTokenClick(t);
     const name = getTokenName(t);
@@ -203,26 +218,69 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
     const listed = confirmedTokens.filter((t) => !rowsState.archived.includes(t.id));
     const inFolder = folderView.kind === 'album' ? filterView(listed, folderKey, albums, folderView) : listed;
     const groups = arrange(inFolder, (t) => t.id, rowsState.pinned, rowsState.archived);
-    const row = (t: Bsv21Balance) => (
-      <TokenSwipe
-        id={t.id}
-        label={getTokenName(t)}
-        pinned={rowsState.pinned.includes(t.id)}
-        onSend={() => onTokenClick(t)}
-        onReceive={() => props.onReceive?.()}
-        onChat={() => props.onChat?.(t)}
-        onLock={() => props.onLock?.(t)}
-        onSell={SELL_ENABLED && marketTradingEnabled() ? () => navigate(sellRoute(t.id)) : undefined}
-        onFolder={() => setFiling(t)}
-      >
-        <div
-          style={{ display: 'flex', justifyContent: 'center', width: '100%' }}
-          onClick={() => openRow(t)}
-        >
-          <TokenAssetRow t={t} usdBalance={usdOf(t)} still />
-        </div>
-      </TokenSwipe>
-    );
+    const trading = marketTradingEnabled();
+    const row = (t: Bsv21Balance) => {
+      const onSell =
+        SELL_ENABLED && trading
+          ? () =>
+              void openSell(t.id, getTokenName(t), {
+                tokenId: t.id,
+                symbol: getTokenName(t),
+                dec: t.dec,
+                heldRaw: t.all.confirmed,
+              })
+          : undefined;
+      const open = expanded === t.id;
+      const panelId = `token-panel-${t.id}`;
+      return (
+        <>
+          <TokenSwipe
+            id={t.id}
+            label={getTokenName(t)}
+            pinned={rowsState.pinned.includes(t.id)}
+            onSend={() => onTokenClick(t)}
+            onReceive={() => props.onReceive?.()}
+            onChat={() => props.onChat?.(t)}
+            onLock={() => props.onLock?.(t)}
+            onSell={onSell}
+            onFolder={() => setFiling(t)}
+          >
+            <div
+              role="button"
+              tabIndex={0}
+              aria-expanded={open}
+              aria-controls={panelId}
+              aria-label={`${getTokenName(t)}: ${open ? 'hide' : 'show'} actions`}
+              style={{ display: 'flex', justifyContent: 'center', width: '100%' }}
+              onClick={() => toggleRow(t)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleRow(t);
+                }
+              }}
+            >
+              <TokenAssetRow t={t} usdBalance={usdOf(t)} still />
+            </div>
+          </TokenSwipe>
+          {open && (
+            <TokenRowPanel
+              id={panelId}
+              tokenId={t.id}
+              balance={`${showAmount(t.all.confirmed, t.dec)} ${t.sym || getTokenName(t)}`}
+              actions={rowPanelActions({
+                onBuy: trading ? () => navigate(buyRoute(t.id)) : undefined,
+                onSell,
+                onSend: () => onTokenClick(t),
+                onReceive: props.onReceive,
+                onChat: props.onChat ? () => props.onChat?.(t) : undefined,
+                onLock: props.onLock ? () => props.onLock?.(t) : undefined,
+              })}
+            />
+          )}
+        </>
+      );
+    };
     const label = (text: string) => (
       <div className="w-full px-5 pt-3 pb-1">
         <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: theme.color.global.gray }}>
@@ -284,6 +342,7 @@ export const Bsv21TokensList = (props: Bsv21TokensListProps) => {
             />
           </div>
         ))}
+        {sellSheet}
         {/* Archived rows live in Wallet › Hidden tokens (HiddenTokens.tsx). */}
         {filing && (
           <AddToAlbumSheet

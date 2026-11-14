@@ -31,14 +31,15 @@
  * Pure (no chrome APIs, clock injected) so it can be unit tested.
  */
 import { Hash, Utils } from '@bsv/sdk';
+import { SEAL_FIELDS_MAX, SEAL_MAX_SATS, SEAL_REF_MAX_CHARS, SEAL_TEXT_MAX_CHARS, shortText } from './sealLimits';
 
 /** The seal protocol bit-sign signs under (bit-sign src/lib/nds-seal-record.ts BITSIGN_SEAL_PROTOCOL). */
 export const SEAL_PROTOCOL: readonly [2, string] = [2, 'bitsign seal'];
 export const SEAL_RECORD_VERSION = 'bitsign-seal-2';
 /** The pay step must follow the signature within this long, or it asks again. */
 export const SEAL_PASS_MS = 60_000;
-/** The most a seal may spend without its own sheet (a seal pays only the network fee, a few hundred sats at most). */
-export const SEAL_MAX_SATS = 1_000;
+/** The most a seal may spend without its own sheet (sealLimits.ts, shared with the native seal). */
+export { SEAL_MAX_SATS };
 /** Synthetic sheet line id prefix: never sent to the permissions manager. */
 export const SEAL_REQUEST_PREFIX = 'seal-';
 /** Feature flag sites read from `bitsign.capabilities`. */
@@ -49,8 +50,6 @@ export const isSealRequestId = (id: string | undefined): boolean => !!id && id.s
 const HEX64 = /^[0-9a-f]{64}$/;
 const IDENTITY_KEY = /^0[23][0-9a-f]{64}$/;
 const NONCE = /^[A-Za-z0-9_-]{16,128}$/;
-// eslint-disable-next-line no-control-regex
-const CTRL = /[\u0000-\u001f\u007f‪-‮⁦-⁩]/;
 
 export type SealRecordField = { id: string; party: string; role: string };
 
@@ -101,8 +100,6 @@ export const isSealProtocol = isProtocol;
 /** A seal-protocol signature asked for while an approved seal's own is being made (SealPasses.signing). */
 export const SEAL_BUSY_REFUSAL = 'A seal is being signed for this site. Try again once it is done.';
 
-const shortText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max && !CTRL.test(v);
-
 const bytesOf = (data: unknown): number[] | null => {
   if (!Array.isArray(data) || data.length === 0 || data.length > 8192) return null;
   for (const b of data) if (!Number.isInteger(b) || b < 0 || b > 255) return null;
@@ -138,12 +135,20 @@ export const readSealSign = (args: unknown, identityKey: string): SealSign | nul
   for (const k of ['doc', 'manifest', 'svg'] as const) if (typeof r[k] !== 'string' || !HEX64.test(r[k])) return null;
   if (typeof r.key !== 'string' || !IDENTITY_KEY.test(r.key)) return null;
   if (!identityKey || r.key !== identityKey.toLowerCase()) return null;
-  if (!shortText(r.ref, 200) || !r.ref || !shortText(r.handle, 100) || !r.handle || !shortText(r.ts, 40)) return null;
-  if (!Array.isArray(r.fields) || r.fields.length === 0 || r.fields.length > 50) return null;
+  if (!shortText(r.ref, SEAL_REF_MAX_CHARS) || !r.ref || !shortText(r.handle, SEAL_TEXT_MAX_CHARS) || !r.handle)
+    return null;
+  if (!shortText(r.ts, 40)) return null;
+  if (!Array.isArray(r.fields) || r.fields.length === 0 || r.fields.length > SEAL_FIELDS_MAX) return null;
   const fields: SealRecordField[] = [];
   for (const f of r.fields as unknown[]) {
     const o = f as Record<string, unknown> | null;
-    if (!o || typeof o !== 'object' || !shortText(o.id, 100) || !shortText(o.party, 100) || !shortText(o.role, 100))
+    if (
+      !o ||
+      typeof o !== 'object' ||
+      !shortText(o.id, SEAL_TEXT_MAX_CHARS) ||
+      !shortText(o.party, SEAL_TEXT_MAX_CHARS) ||
+      !shortText(o.role, SEAL_TEXT_MAX_CHARS)
+    )
       return null;
     fields.push({ id: o.id, party: o.party, role: o.role });
   }

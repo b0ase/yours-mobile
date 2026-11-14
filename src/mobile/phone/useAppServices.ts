@@ -39,6 +39,7 @@ export const useAppServices = () => {
       currentId: current,
       feeRate: () => chromeStorageService.getCustomFeeRate(),
       accountCount: chromeStorageService.getAllAccounts().length,
+      accountIds: chromeStorageService.getAllAccounts().map((a) => a.addresses.identityAddress),
       twetch: TWETCH_POST_ENABLED ? twetchStoreFor(chromeStorageService) : undefined,
     });
   }, [apiContext, current, chromeStorageService]);

@@ -23,7 +23,6 @@ export const SAFE_SCREENS = [
   'chat',
   'feed',
   'settings',
-  'credits',
   'ask-b',
   'tickets',
   'names',
@@ -91,6 +90,6 @@ export const INLINE_ACTIONS_PROMPT = [
   '\n\nBUTTONS: when a reply points to a screen the person can open next, add up to 3 buttons on their own line,',
   'written exactly as [[Label|/m/screen]] (a short label, 1–4 words). Only these screens:',
   '/m/home, /m/chat (or /m/chat?room=TICKER for a room), /m/feed, /m/settings, /m/tickets, /m/names, /m/nfts,',
-  '/m/market, /m/apps, /m/credits, /m/you. A button only opens the screen; it never sends, pays or signs, so never',
+  '/m/market, /m/apps, /m/you. A button only opens the screen; it never sends, pays or signs, so never',
   'promise that it will. Never put a full https:// address in a button. Add them only when there is a clear next step.',
 ].join(' ');

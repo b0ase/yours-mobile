@@ -24,11 +24,11 @@ describe('wallet layout', () => {
     const cfg = read('vite.config.mobile.ts');
     for (const tag of [
       '<MintButton',
+      '<WalletLockButton />',
       '<HandleOnboarding />',
       '<WalletKindSwitch />',
       '<MediaSection />',
       '<TicketsSection />',
-      '<CreditsRow />',
       '<WalletCard ',
     ]) {
       const inserts = cfg.split(tag).slice(1);

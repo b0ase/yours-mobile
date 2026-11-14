@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { P2PKH } from '@bsv/sdk';
+import { captureConsole, msgOf } from '../../testing/captureConsole';
 import {
   CARDS_API,
   CardError,
@@ -359,7 +360,13 @@ describe('cards fixes 23 Oct: broadcast now, rescue a stuck payment, show the re
     const bad = { createAction: async () => ({ sendWithResults: [{ txid: T, status: 'failed' }] }) };
     expect(await sendStuckPayment(bad as never, T)).toBe('failed');
     const throws = { createAction: async () => Promise.reject(new Error('ERR_UNKNOWN_TXID')) };
-    expect(await sendStuckPayment(throws as never, T)).toBe('unknown');
+    const { result, logs } = await captureConsole(() => sendStuckPayment(throws as never, T));
+    expect(result).toBe('unknown');
+    // The throw is caught and warned once; it never reaches the caller.
+    expect(logs.error).toEqual([]);
+    expect(logs.warn).toHaveLength(1);
+    expect(logs.warn[0][0]).toBe('[cards] re-sending the payment failed');
+    expect(msgOf(logs.warn[0][1])).toBe('ERR_UNKNOWN_TXID');
   });
   const pending = [402, { error: 'Payment not found yet' }] as [number, unknown];
   const card = [200, { cardId: 'c', imageUrl: '/v1/cards/c/image', sha256: '', mime: 'image/png' }] as [

@@ -3,12 +3,19 @@ import { ALL_FEEDS_ICON, feedIcon } from './feedIcons';
 import { FEEDS } from './feeds';
 
 describe('feed icons', () => {
-  test('$b* feeds use the bApp icon set', () => {
-    expect(feedIcon('bnews')).toEqual({ kind: 'bapp', slug: 'bnews', label: 'bNews' });
-    expect(feedIcon('writer')).toEqual({ kind: 'bapp', slug: 'writer', label: 'bWriter' });
+  test('real logos where we have them, the bApp icon set otherwise', () => {
+    for (const [id, file] of [
+      ['bnews', /bnewsx\.png/],
+      ['bmovies', /bmoviesx\.png/],
+      ['writer', /bwriter\.png/],
+      ['bgame', /bgames\.png/],
+      ['src-twetch', /twetch\.png/],
+      ['src-coingeek', /coingeek\.png/],
+    ] as const) {
+      const icon = feedIcon(id);
+      expect(icon.kind === 'app' && icon.src).toMatch(file);
+    }
     expect(feedIcon('bradio')).toEqual({ kind: 'bapp', slug: 'bradio', label: 'bRadio' });
-    // No glyph yet: still a bApp icon (the set's initial fallback).
-    expect(feedIcon('bmaps')).toEqual({ kind: 'bapp', slug: 'bmaps', label: 'bMaps' });
   });
 
   test('Home and All feeds get glyphs; ventures keep their art or initial', () => {

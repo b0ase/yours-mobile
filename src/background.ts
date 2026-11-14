@@ -1,6 +1,8 @@
 /* global chrome */
 import './utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (utils/abortTimeout.ts): before anything else
 import { siteAfterNavigation } from './mobile/theme/tabSiteNav';
+import { IS_EXTENSION } from './mobile/extension';
+import { CLOSE_FOR_RELOAD_ACTION, CLOSE_FOR_RELOAD_CAP_MS, settleWithin } from './mobile/account/closeForReload';
 import { SheetFirstGate } from './services/sheetFirst';
 import { chromeConsentStore } from './services/siteTokens';
 import {
@@ -20,6 +22,8 @@ import { siteThemeFor } from './mobile/theme/connectTheme';
 import {
   isBasketRead,
   ManifestOnce,
+  ONCE_DENIALS_KEY,
+  OnceDenials,
   SessionBasketDenials,
   SESSION_DENIALS_KEY,
   wantsManifestSheet,
@@ -104,6 +108,7 @@ import {
   markMicropayments,
   closeEnvelopeInAccounts,
 } from './services/envelopes';
+import { rejectStillPending, runEveryStep } from './services/everyStep';
 import {
   ADDRESS_RESYNC_ALARM,
   ADDRESS_RESYNC_PERIOD_MINUTES,
@@ -184,6 +189,8 @@ import {
   type AutoResyncReader,
   type WocAnswer,
 } from './services/autoCoinResync';
+import { SELF_CHECK_EVENT, createSelfCheckRunner, type SelfCheckRead } from './services/selfCheck';
+import { cleanCommit, manifestVersion } from './utils/versionLabel';
 import { withCoinResyncLock } from './services/coinResyncLock';
 import { payTimer } from './services/payTiming';
 import { ownPayments } from './services/ownPayments';
@@ -254,7 +261,7 @@ import {
 import { normalizeOriginator } from '@1sat/wallet';
 import { withDefaultExpiry } from './services/grantExpiry';
 import { markPayeeMismatch, parsePayees, payeesAllowed } from './services/allowanceGuard';
-import { ADMIN_ORIGINATOR, initWallet, openAccountStorageForBackup, type AccountContext } from './initWallet';
+import { ADMIN_ORIGINATOR, initWallet, lastCloseSteps, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
 import { ROOM_PLAYING_ACTION, ROOM_QUERY_ACTION, ROOM_TAB_ACTION, parseRoomPlaying, roomTabOrigin } from './mobile/chat/gameRoomLive';
 import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
@@ -270,6 +277,7 @@ import {
   type MintSheet,
 } from './services/pinnedMint';
 import { oneShotGrant, oneUseGrant } from './services/oneShotGrant';
+import { isOneUseRequestID } from './services/sharedKeySigning';
 import {
   SEAL_BUSY_REFUSAL,
   SEAL_PROTOCOL,
@@ -478,6 +486,7 @@ async function autoResyncDeps(
   ctx: AccountContext,
   identityKey: string,
   cleared: Record<string, string>,
+  onRead?: (read: SelfCheckRead) => void,
 ): Promise<AutoResyncDeps | null> {
   const txo = (
     ctx.syncContext.services as unknown as {
@@ -498,6 +507,7 @@ async function autoResyncDeps(
     [...PENDING_STATUSES],
   );
   if (!read) return null;
+  onRead?.(read);
   const { userId } = read;
   const setSpendable = (outpoint: string, spendable: boolean, spender?: string) =>
     ctx.storage.runAsStorageProvider(async (sp) => {
@@ -607,17 +617,28 @@ const notifyBalanceUpdate = () => {
  */
 let lockGeneration = 0;
 
-const dropWalletContext = (reason: string) => {
+/** Drops the live context at once and returns its close, for the one caller that waits on it (close for reload). */
+const dropWalletContextAndClose = (reason: string): Promise<void> => {
   lockGeneration++;
   void closeUsbBackupReader();
   const ctx = accountContext;
   accountContext = null;
   // Running site actions stop holding their sites (services/spendRecipients.ts); none of them is ever shown again.
   releaseSpendRuns();
-  if (!ctx) return;
+  if (!ctx) return Promise.resolve();
   console.log(`[background] dropWalletContext (${reason}): gone immediately`);
-  void ctx.close().catch((err) => console.error(`[background] close after ${reason}:`, err));
+  return ctx.close().catch((err) => console.error(`[background] close after ${reason}:`, err));
 };
+const dropWalletContext = (reason: string) => {
+  void dropWalletContextAndClose(reason);
+};
+
+/**
+ * Set when the page is about to reload into another account (WALLET_CLOSE_FOR_RELOAD, in-page backgrounds only):
+ * nothing may open the wallet again before the reload ends this background (owner's iPhone, 13 Nov 2026: a switch
+ * during the first account's boot left a permanent black screen).
+ */
+let closedForReload = false;
 
 // Initialize wallet on startup (will be null if locked)
 /**
@@ -684,6 +705,10 @@ const pendingImports = new Map<string, Promise<void>>();
 
 const runInitializeWallet = async (): Promise<WalletInterface | null> => {
   console.log('[background] initializeWallet: starting, current accountContext:', !!accountContext);
+  if (closedForReload) {
+    console.log('[background] initializeWallet: closed for an account-switch reload; not opening');
+    return null;
+  }
   // Stage timings (owner, 6 Oct 2026: a restore took ~50 s); read them in the service worker console.
   const t0 = Date.now();
   const stage = (name: string) => console.log(`[background] initializeWallet: ${name} at ${((Date.now() - t0) / 1000).toFixed(1)}s`);
@@ -893,8 +918,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     void localReady.finally(() => {
       if (storageSwitch === localReady) storageSwitch = null;
     });
-    // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check the default basket
-    // at most every 30 minutes per account (persisted), fail closed (services/autoCoinResync.ts). Off the unlock path:
+    // Coins spent elsewhere (another device, same seed) stay "spendable" here until checked: check the default and
+    // deposit baskets: at least a light run at every unlock (the self-check, services/selfCheck.ts), a full one at
+    // most every 30 minutes per account (persisted), fail closed (services/autoCoinResync.ts). Off the unlock path:
     // after this device's store is active, and a while after unlock so the first balance read and the address sync
     // are not queued behind its scan of every coin (owner's big wallet, 19 Oct 2026).
     {
@@ -902,7 +928,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
       void localReady
         .then(() => new Promise((r) => setTimeout(r, AUTO_RESYNC_DELAY_MS)))
         // Locked or switched account since: skip (the timer and the next foreground try again).
-        .then(() => (lockGeneration !== gen || accountContext !== ctx ? undefined : maybeAutoCoinResync()));
+        .then(() =>
+          lockGeneration !== gen || accountContext !== ctx ? undefined : maybeAutoCoinResync(false, true),
+        );
     }
     void (async () => {
       await localReady;
@@ -920,11 +948,14 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
         .catch((err: unknown) => console.warn('[background] postage reconcile failed:', err));
       // Unbroadcast (nosend) payments past their deadline: released only once the chain shows they never went out
       // (BRC-177, services/unsentExpiry.ts). Rate-limited inside.
-      await ctx
-        .expireUnsent()
-        .then((x) =>
-          x.released.length || x.settled.length || x.lateSeen.length ? console.log('[background] nosend expiry:', x) : undefined,
-        )
+      // Never while storage is switching (the detach and abort must land on this device's store).
+      await (storageSwitching() ? Promise.resolve(null) : ctx.expireUnsent(false, { storageBusy: storageSwitching }))
+        .then((x) => {
+          if (!x) return;
+          if (!x.released.length && !x.settled.length && !x.lateSeen.length) return;
+          console.log('[background] nosend expiry:', x);
+          notifyBalanceUpdate();
+        })
         .catch((err: unknown) => console.warn('[background] nosend expiry failed:', err));
       // Give up on queued sends that never reached the network, and give the money back (services/stuckSends.ts).
       // Anything still queued keeps the send-retry alarm on (services/sendRetry.ts).
@@ -971,6 +1002,8 @@ const noteMoveFailed = (id: string, reason?: string) => {
  * 22 Oct 2026 by making backups during sign-up), so the backup waits for it and a switch never starts during one.
  */
 let storageSwitch: Promise<void> | null = null;
+/** A switch of this account's storage is under way (read fresh: unsentExpiry's detach and abort wait for it). */
+const storageSwitching = (): boolean => storageSwitch !== null;
 
 /** After a failed switch: if the active store no longer answers, rebuild the wallet once (it stays on the backup). */
 const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>, id: string) => {
@@ -1331,8 +1364,29 @@ const pendingPermissionRequests = new Map<
 // merged into one bundle and shown as one sheet. Each request stays in pendingPermissionRequests and is
 // still answered through the manager's grantPermission / denyPermission.
 type BundledRequest = PermissionRequest & { requestID: string };
+/**
+ * A sheet is about to show (the bundler's onReady: new, carried or promoted from the site's queue). One with
+ * one-signature lines takes a slot of the per-minute cap (services/sessionDenials.ts ONCE_SHEETS_PER_MINUTE); past
+ * the cap its one-signature lines are refused without a sheet (the standard "Permission denied."). Counted here, after
+ * the blocked and trusted checks and only for what is really shown, so a blocked site or a long queue can't use the
+ * cap up for everyone (review of 276ee663). True when the sheet still has lines to show.
+ */
+const onceSheetAllowed = (bundle: { id: string; items: { requestID: string }[] }): boolean => {
+  const once = bundle.items.filter((i) => isOneUseRequestID(i.requestID));
+  if (once.length === 0 || onceDenials.allowSheet()) return true;
+  for (const r of once) {
+    const pending = pendingPermissionRequests.get(r.requestID);
+    pendingPermissionRequests.delete(r.requestID);
+    permissionBundler.removeRequest(r.requestID);
+    accountContext?.wallet.denyPermission(r.requestID).catch(() => undefined);
+    pending?.reject(userDeniedError());
+  }
+  return (permissionBundler.get(bundle.id)?.items.length ?? 0) > 0;
+};
 const permissionBundler = new PermissionBundler<BundledRequest & BundleRequest>({
-  onReady: (bundle) => showPromptUi('bundle', bundle.id),
+  onReady: (bundle) => {
+    if (onceSheetAllowed(bundle)) showPromptUi('bundle', bundle.id);
+  },
   // Requests that waited behind the site's last sheet get their own sheet now, with their companions.
   onPromote: (bundle) => askCompanionsFor(bundle),
   // Live sheet: a line joined the open sheet; it reloads, marks it "New" and holds its button for a moment.
@@ -1393,6 +1447,23 @@ const basketDenials = new SessionBasketDenials({
   },
 });
 const manifestOnce = new ManifestOnce();
+// A "Not now" to a one-signature request stands for that site for 10 minutes (services/sessionDenials.ts OnceDenials):
+// a site can't wear the user down with SIGN ONCE sheets one after another.
+const onceDenials = new OnceDenials({
+  load: async () => {
+    const got = await chrome.storage.session.get(ONCE_DENIALS_KEY);
+    const v = (got as Record<string, unknown>)[ONCE_DENIALS_KEY];
+    return Array.isArray(v) ? (v as [string, number][]) : [];
+  },
+  save: async (entries) => {
+    await chrome.storage.session.set({ [ONCE_DENIALS_KEY]: entries });
+  },
+});
+/** A one-signature request the user refused (services/sharedKeySigning.ts): remember it for the site. */
+const noteOnceDenial = (r: { requestID?: string; originator?: string }) => {
+  if (r.originator && r.originator !== ADMIN_ORIGINATOR && isOneUseRequestID(r.requestID))
+    void onceDenials.note(normalizeOriginator(r.originator));
+};
 /** A basket read the user refused: remember it for the session. */
 const noteBasketDenial = (r: { type?: string; basket?: unknown; usageType?: unknown; originator?: string }) => {
   if (r.originator && r.originator !== ADMIN_ORIGINATOR && isBasketRead(r))
@@ -1939,44 +2010,96 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (pageHidden() === false) maybeResyncAddresses();
 });
 
-/**
+/*
  * Coins spent elsewhere (another device, same seed) stay "spendable" here until checked (services/autoCoinResync.ts).
  * A full check at most every 30 min, a light batched-index check at most every 5 min, per account (persisted). Runs
  * after unlock, on a timer, and when the app or popup comes to the front (COIN_CHECK_DUE), so the balance drops by
  * itself without REFRESH WALLET (owner, 29 Oct 2026: phone $3.47 vs extension $1.95, same account). Never throws.
  */
-let autoCoinResyncBusy = false;
-/** foreground: the app/popup came to the front; with no run due, the biggest coins are still checked (≤ once a minute). */
-const maybeAutoCoinResync = async (foreground = false): Promise<void> => {
-  const ctx = accountContext;
-  if (!ctx || autoCoinResyncBusy) return;
-  const key = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
-  if (!key) return;
-  autoCoinResyncBusy = true;
+/** The self-check's build stamp (services/selfCheck.ts fingerprint): the version, and the commit where known. */
+const selfCheckBuildId = () => {
+  const commit = typeof __BUILD_COMMIT__ === 'string' ? cleanCommit(__BUILD_COMMIT__) : '';
+  return commit ? `${manifestVersion()} · ${commit}` : manifestVersion();
+};
+const unlockedIdentityKey = (): string => {
   try {
-    const r = await runAutoResyncIfDue(
-      key,
-      { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
-      (cleared) => (accountContext === ctx ? autoResyncDeps(ctx, key, cleared) : Promise.resolve(null)),
-      Date.now(),
-      { foreground },
-    );
-    if (r && (r.released || r.restored)) {
-      console.warn('[background] auto coin resync:', r);
-      notifyBalanceUpdate();
-    }
-  } catch (err) {
-    console.error('[background] auto coin resync failed:', err);
-  } finally {
-    autoCoinResyncBusy = false;
+    return chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
+  } catch {
+    return '';
   }
 };
+const selfCheckKv = {
+  get: (k: string) => chrome.storage.local.get(k),
+  set: (items: Record<string, unknown>) => chrome.storage.local.set(items),
+};
+/**
+ * The coin check and its self-check result (services/selfCheck.ts createSelfCheckRunner): one run at a time, a call
+ * while busy queues one follow-up, the result is stored per account and announced to open pages only while that
+ * account is still the unlocked one.
+ * foreground: the app/popup came to the front; with no run due, the biggest coins are still checked (≤ once a minute).
+ * unlock: a light run when the last one is older than AUTO_RESYNC_UNLOCK_FLOOR_MS, else the stored result again.
+ */
+const runSelfCheck = createSelfCheckRunner<AccountContext>({
+  kv: selfCheckKv,
+  current: () => {
+    const ctx = accountContext;
+    const key = unlockedIdentityKey();
+    return ctx && key ? { key, ctx } : null;
+  },
+  isCurrent: (key, ctx) => accountContext === ctx && unlockedIdentityKey() === key,
+  run: (key, ctx, o, onRead) =>
+    runAutoResyncIfDue(
+      key,
+      selfCheckKv,
+      (cleared) => (accountContext === ctx ? autoResyncDeps(ctx, key, cleared, onRead) : Promise.resolve(null)),
+      Date.now(),
+      o,
+    ),
+  buildId: selfCheckBuildId,
+  announce: (result) => {
+    if (result.differsBySats || result.unsentHolds.count || result.stuckSyncs)
+      console.warn('[background] self-check:', {
+        differsBySats: result.differsBySats,
+        mismatches: result.mismatchCount,
+        unsentHolds: result.unsentHolds,
+        stuckSyncs: result.stuckSyncs,
+      });
+    chrome.runtime.sendMessage({ action: SELF_CHECK_EVENT, data: result }).catch(() => undefined);
+  },
+  onChanged: (r) => {
+    console.warn('[background] auto coin resync:', { released: r.released, restored: r.restored });
+    notifyBalanceUpdate();
+  },
+  accounts: () =>
+    Object.values(chromeStorageService.storage?.accounts ?? {})
+      .map((a) => a?.pubKeys?.identityPubKey)
+      .filter((k): k is string => !!k),
+  onError: (err) => console.error('[background] auto coin resync failed:', err),
+});
+const maybeAutoCoinResync = (foreground = false, unlock = false): Promise<void> => runSelfCheck({ foreground, unlock });
 chrome.alarms.create(AUTO_COIN_RESYNC_ALARM, { periodInMinutes: AUTO_RESYNC_LIGHT_GAP_MS / 60_000 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeAutoCoinResync();
   // Coins from the backup waiting on the chain: their next try, even if the worker slept through its timer (16d D2).
   if (alarm.name === AUTO_COIN_RESYNC_ALARM) void accountContext?.admitBackupRows().catch(() => undefined);
+  // Unsent payments (services/unsentExpiry.ts) are looked at again while the wallet stays open, not only at unlock: a
+  // check the network or the Store couldn't answer (timeout, 429) is retried here instead of holding the coins until
+  // the next unlock (13 Nov 2026). At most every 10 minutes (rate-limited inside); never while storage is switching.
+  if (alarm.name === AUTO_COIN_RESYNC_ALARM && pageHidden() !== true) void maybeExpireUnsent();
 });
+const maybeExpireUnsent = async (): Promise<void> => {
+  const ctx = accountContext;
+  if (!ctx || storageSwitching()) return;
+  try {
+    const x = await ctx.expireUnsent(false, { storageBusy: storageSwitching });
+    if (x.released.length || x.settled.length || x.lateSeen.length) {
+      console.log('[background] nosend expiry:', x);
+      notifyBalanceUpdate();
+    }
+  } catch (err) {
+    console.warn('[background] nosend expiry failed:', err);
+  }
+};
 (globalThis as { document?: Document }).document?.addEventListener('visibilitychange', () => {
   if (pageHidden() === false) void maybeAutoCoinResync(true);
   if (pageHidden() === false) void accountContext?.admitBackupRows().catch(() => undefined);
@@ -2171,7 +2294,12 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
   const deniedThisSession =
     request.originator && request.originator !== ADMIN_ORIGINATOR && isBasketRead(request)
       ? basketDenials.has(normalizeOriginator(request.originator), request.basket)
-      : Promise.resolve(false);
+      : // A one-signature request from a site whose last one the user refused minutes ago: no new sheet
+        // (services/sessionDenials.ts OnceDenials). The per-minute cap is counted only when a sheet really shows
+        // (onceSheetAllowed, the bundler's onReady), never for a blocked site or a queued request.
+        request.originator && request.originator !== ADMIN_ORIGINATOR && isOneUseRequestID(request.requestID)
+        ? onceDenials.active(normalizeOriginator(request.originator))
+        : Promise.resolve(false);
   return Promise.all([siteBlocked(request.originator), siteTrustedFor(request), deniedThisSession]).then(
     ([blocked, trusted, denied]) =>
       new Promise<void>((resolve, reject) => {
@@ -2221,6 +2349,13 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
             const labels = takeLabelsForSheet(permSite, request as BundleRequest);
             if (labels.length > 0) (request as BundleRequest).labels = labels;
           }
+          // Which calls raised a protocol request (decrypt, encrypt, sign...), so its line names the operation it is
+          // for (permissionBundle.ts keyOperation; Juann E-2, 13 Nov 2026). Display only.
+          if (request.type === 'protocol' && permSite && Array.isArray(request.protocolID))
+            (request as BundleRequest).calls = protocolCalls.methods(permSite, [
+              Number(request.protocolID[0]),
+              String(request.protocolID[1]),
+            ]);
           // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
         } catch (error) {
@@ -3199,6 +3334,8 @@ if (!(
       // Wallet lock/unlock
       'WALLET_LOCKED',
       'WALLET_UNLOCKED',
+      // The page reloads into another account next (mobile/account/closeForReload.ts). Wallet pages only.
+      CLOSE_FOR_RELOAD_ACTION,
       // Master backup/restore
       'MASTER_BACKUP',
       'MASTER_RESTORE',
@@ -3215,6 +3352,8 @@ if (!(
       'STORE_ACTION_STATUS',
       'STORAGE_MOVE_STATUS',
       'STORAGE_MOVE_TO_DEVICE',
+      // The balance card's truth lines (services/balanceTruth.ts): read only.
+      'BALANCE_TRUTH',
       'STORAGE_REPAIR_WALLET',
       'STORAGE_REPAIR_SYNC',
       'STORAGE_RECOVER_MINED',
@@ -3489,6 +3628,28 @@ if (!(
           sendResponse({ type: 'WALLET_LOCKED', success: true });
           return true;
         }
+        case CLOSE_FOR_RELOAD_ACTION: {
+          // In-page backgrounds only (phone, web, Desktop): the reload that follows ends this background, so close the
+          // wallet's stores now instead of tearing them down mid-write. The extension's service worker outlives the
+          // page and SWITCH_ACCOUNT reopens it, so it never closes for good there.
+          if (IS_EXTENSION) {
+            sendResponse({ type: CLOSE_FOR_RELOAD_ACTION, success: false, error: 'Not used in the extension' });
+            return true;
+          }
+          closedForReload = true;
+          failPendingStreamGrants();
+          const opening = reinitPromise ?? initInFlight;
+          const closing = dropWalletContextAndClose(CLOSE_FOR_RELOAD_ACTION);
+          // An init still running (a switch during boot) closes its own wallet when it sees the bumped generation.
+          void settleWithin(
+            () => Promise.all([closing, opening?.catch(() => null)]),
+            CLOSE_FOR_RELOAD_CAP_MS - 250,
+          ).then((how) => {
+            console.log(`[background] ${CLOSE_FOR_RELOAD_ACTION}: ${how}`, lastCloseSteps);
+            sendResponse({ type: CLOSE_FOR_RELOAD_ACTION, success: true, data: { how, steps: [...lastCloseSteps] } });
+          });
+          return true;
+        }
         case 'WALLET_UNLOCKED':
           // If wallet context already exists and has pending requests, skip reinitialization
           // to preserve active CWI operations (e.g., createAction waiting for permission)
@@ -3625,6 +3786,24 @@ if (!(
             return true;
           }
           sendResponse({ type: 'STORAGE_MOVE_STATUS', success: true, data: moveStatus() });
+          return true;
+        case 'BALANCE_TRUTH':
+          // Unsent payments holding coins, coins arriving from the other device, the last device-sync pull. Reads
+          // only. Waits for the wallet to open, as GET_BALANCE does (the card shows nothing until it knows).
+          (async () => {
+            try {
+              await ensureWallet(true);
+              const ctx = accountContext;
+              if (!ctx) throw new Error('Wallet not initialized');
+              sendResponse({ type: 'BALANCE_TRUTH', success: true, data: await ctx.balanceTruth() });
+            } catch (error) {
+              sendResponse({
+                type: 'BALANCE_TRUTH',
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
           return true;
         case 'STORAGE_MOVE_TO_DEVICE':
           // "Retry moving this account to this device": now, whatever the backoff says (review F4).
@@ -3770,6 +3949,8 @@ if (!(
           return true;
         }
         case 'PERMISSIONS_LIST_ALL':
+          // The user opened Permissions in the wallet: a refused SIGN ONCE may ask again (sessionDenials.ts).
+          if (isFromExtension) void onceDenials.clear();
           processPermissionsListAll(sendResponse);
           return true;
         case 'PERMISSIONS_QUERY_SPENT':
@@ -4841,30 +5022,47 @@ if (!(
       const wpm = (await ensureWallet(true)) as LocalWalletPermissionsManager;
       // Open sheets for this originator are denied first, so approving one afterwards writes nothing.
       denyPendingPromptsFor(message.originator);
-      const revoked = await wpm.revokeAllForOriginator(message.originator);
-      // Forget site removes its basket grants and site-trust record too, whatever form the originator was
-      // stored under, and drops the manager's short-lived memory of recent grants.
-      await revokeBasketGrantsFor(message.originator);
       // Envelopes and streaming grants are spend rights too: Forget site / Revoke all / unpair ends them (Coin
       // return) and revokes the site's streaming grants (b-Aware rows 53, 62, 24 Oct 2026).
       const site = normalizeOriginator(message.originator);
-      // Session memory too: its basket-read No's and its manifest sheet (services/sessionDenials.ts).
-      await basketDenials.forget(site);
-      manifestOnce.forget(site);
-      // "Let this site see my $SYM balance" answers (services/siteTokens.ts) go too: it must ask again.
-      await chromeConsentStore().forget(site);
-      await accountContext?.envelopes.close(site);
-      await updateStreamState((st) => ({ state: revokeGrantsForOriginator(st, site, Date.now()), result: undefined }));
-      // Grants are per account; a device-wide pairing is withdrawn from the other accounts' stores too.
-      if (message.allAccounts) {
-        const ids = chromeStorageService
-          .getAllAccounts()
-          .map((a) => a.addresses?.identityAddress)
-          .filter((x): x is string => !!x);
-        await revokeOriginatorInAccounts(ids, site);
-        await closeEnvelopeInAccounts(ids, site);
-      }
-      sendResponse({ type: 'PERMISSIONS_REVOKE_ALL', success: true, data: { revokedCount: revoked.length } });
+      const ids = message.allAccounts
+        ? chromeStorageService
+            .getAllAccounts()
+            .map((a) => a.addresses?.identityAddress)
+            .filter((x): x is string => !!x)
+        : [];
+      let revokedCount = 0;
+      // Every step runs whatever the others do, and the failures are reported at the end (review F2, 13 Nov 2026):
+      // one step that throws (an envelope close on a web wallet without Web Locks) never leaves grants in place.
+      const failed = await runEveryStep([
+        ['site grants', async () => void (revokedCount = (await wpm.revokeAllForOriginator(message.originator)).length)],
+        // Forget site removes its basket grants and site-trust record too, whatever form the originator was
+        // stored under, and drops the manager's short-lived memory of recent grants.
+        ['basket grants', () => revokeBasketGrantsFor(message.originator)],
+        // Session memory too: its basket-read No's and its manifest sheet (services/sessionDenials.ts).
+        ['basket answers', () => basketDenials.forget(site)],
+        ['one-signature answers', () => onceDenials.forget(site)],
+        ['manifest sheet', () => manifestOnce.forget(site)],
+        // "Let this site see my $SYM balance" answers (services/siteTokens.ts) go too: it must ask again.
+        ['token consent', () => chromeConsentStore().forget(site)],
+        [
+          'streaming grants',
+          () => updateStreamState((st) => ({ state: revokeGrantsForOriginator(st, site, Date.now()), result: undefined })),
+        ],
+        // Grants are per account; a device-wide pairing is withdrawn from the other accounts' stores too.
+        ...(message.allAccounts ? ([['other accounts', () => revokeOriginatorInAccounts(ids, site)]] as const) : []),
+        // Envelopes last: no grant waits on them.
+        ['envelope', () => accountContext?.envelopes.close(site)],
+        ...(message.allAccounts ? ([['other accounts\' envelopes', () => closeEnvelopeInAccounts(ids, site)]] as const) : []),
+      ]);
+      if (failed.length)
+        sendResponse({
+          type: 'PERMISSIONS_REVOKE_ALL',
+          success: false,
+          error: `Everything else was revoked, but these steps failed: ${failed.join('; ')}`,
+          data: { revokedCount },
+        });
+      else sendResponse({ type: 'PERMISSIONS_REVOKE_ALL', success: true, data: { revokedCount } });
     } catch (error) {
       console.error('[PERMISSIONS_REVOKE_ALL] Error:', error);
       sendResponse({
@@ -4914,11 +5112,13 @@ if (!(
     if (response.granted) {
       // Grant the permission through the manager
       // No expiry given: the grant lasts GRANT_DEFAULT_DAYS (services/grantExpiry.ts, audit 24 Oct B1), never for ever.
+      // A one-signature request (services/sharedKeySigning.ts) answers that signature only, whatever expiry came back.
       accountContext?.wallet
-        .grantPermission({
-          requestID: response.requestID,
-          expiry: withDefaultExpiry(response.expiry),
-        })
+        .grantPermission(
+          isOneUseRequestID(response.requestID)
+            ? oneUseGrant(response.requestID)
+            : { requestID: response.requestID, expiry: withDefaultExpiry(response.expiry) },
+        )
         .then(() => {
           pending.resolve();
         })
@@ -4927,6 +5127,7 @@ if (!(
         });
     } else {
       noteBasketDenial(pending.request);
+      noteOnceDenial(pending.request);
       // Deny the permission
       accountContext?.wallet
         .denyPermission(response.requestID)
@@ -5615,6 +5816,9 @@ if (!(
       } as Parameters<typeof store.putGrant>[0]);
     };
 
+    // Set when the requests start being settled. A failure before that refused everything (below); a failure after it
+    // must never tell the user "ask the site to try again": a payment in this bundle may already have gone (N2).
+    let settling = false;
     const work = (async () => {
       await blockSite().catch((error) => console.error('[background] block site failed:', error));
       const usd = Number(response.allowanceUsd ?? 0);
@@ -5655,7 +5859,12 @@ if (!(
         // host-only permission key, so "shop.com:8443" would otherwise fill "shop.com"'s envelope; b-Aware row 58).
         const spendReq = result.granted.find((r) => (r as BundleRequest).type === 'spending') as BundleRequest;
         const site = normalizeOriginator(spendReq.displayOriginator ?? bundle.originator);
-        if (sats > 0) await accountContext.envelopes.fill(site, sats);
+        // A fill that fails (review F3, 13 Nov 2026) leaves the approved payment on its normal path: it is granted
+        // once, below, and only the earmark is missing, so the site's next payment asks again.
+        if (sats > 0)
+          await accountContext.envelopes
+            .fill(site, sats)
+            .catch((error) => console.error('[background] envelope fill failed; the approved payment goes on:', error));
       }
       // "Don't ask again": routine requests from this site are granted without a sheet from now on.
       if (
@@ -5674,6 +5883,7 @@ if (!(
           baskets: trustedBasketsFrom(result.granted as (BundledRequest & BundleRequest)[]),
         } as Parameters<typeof accountContext.permissionStore.putGrant>[0]);
       }
+      settling = true;
       await Promise.all([
         ...result.granted.map(async (r) => {
           const pending = pendingPermissionRequests.get(r.requestID);
@@ -5682,7 +5892,11 @@ if (!(
           if (isReconnectRequestId(r.requestID) || isSealRequestId(r.requestID)) return pending.resolve();
           try {
             if (!wallet) throw new Error('Wallet is locked');
-            await wallet.grantPermission({ requestID: r.requestID, expiry });
+            // A sign-in-token signature (services/sharedKeySigning.ts): this one signature only, stored already
+            // expired, so the next token asks again (oneUseGrant, as the Seal sheet does; b-Aware 13 Nov 2026).
+            await wallet.grantPermission(
+              isOneUseRequestID(r.requestID) ? oneUseGrant(r.requestID) : { requestID: r.requestID, expiry },
+            );
             pending.resolve();
           } catch (error) {
             pending.reject(error instanceof Error ? error : new Error(String(error)));
@@ -5694,10 +5908,18 @@ if (!(
           if (!pending) return;
           if (isReconnectRequestId(r.requestID)) return pending.reject(new Error('Permission denied by user'));
           if (isSealRequestId(r.requestID)) return pending.reject(userDeniedError());
-          // A blocked sheet is handled by the block itself; a plain No to a basket read stands for the session.
-          if (!response.block) noteBasketDenial(r as BundleRequest);
+          // A blocked sheet is handled by the block itself; a plain No to a basket read stands for the session, and
+          // to a one-signature request for 10 minutes.
+          if (!response.block) {
+            noteBasketDenial(r as BundleRequest);
+            noteOnceDenial(r as BundleRequest);
+          }
           try {
             await wallet?.denyPermission(r.requestID);
+          } catch (error) {
+            // The manager no longer holds it ("Request ID not found."): nothing left to deny. Never fail the whole
+            // answer for it once grants in this bundle have gone through (review N2).
+            console.warn('[background] denyPermission failed:', r.requestID, error);
           } finally {
             pending.reject(userDeniedError());
           }
@@ -5705,8 +5927,28 @@ if (!(
       ]);
     })();
 
+    let workFailed = false;
+    const BUNDLE_UNFINISHED =
+      'Something went wrong finishing this approval. Any request it could not finish was refused; ask the site to try again.';
     work
-      .catch((error) => console.error('[background] bundle response failed:', error))
+      .catch((error) => {
+        console.error('[background] bundle response failed:', error);
+        if (settling) return; // grants may have gone through: the sheet is not told to retry (N2)
+        workFailed = true;
+        // Every waiting request gets an outcome (review F3, N1): any this answer did not settle is refused, both the
+        // background's caller and the permissions manager's own request (as failUnshownPrompt does), so the site's call
+        // rejects instead of hanging, and a later identical request can't piggyback on a hung one. Nothing is granted.
+        const err = new Error(BUNDLE_UNFINISHED);
+        rejectStillPending(
+          [...result.granted, ...result.denied].map((r) => r.requestID),
+          pendingPermissionRequests,
+          err,
+          (id) => {
+            if (!isReconnectRequestId(id) && !isSealRequestId(id))
+              rejectManagerRequest(wallet, id, err).catch(() => undefined);
+          },
+        );
+      })
       .finally(() => {
         sendResponse(
           result.stale
@@ -5715,7 +5957,13 @@ if (!(
                 success: false,
                 error: 'This request changed while you were answering, so nothing was allowed. Ask the site to try again.',
               }
-            : { type: 'BUNDLE_PERMISSION_RESPONSE', success: true },
+            : workFailed
+              ? {
+                  type: 'BUNDLE_PERMISSION_RESPONSE',
+                  success: false,
+                  error: BUNDLE_UNFINISHED,
+                }
+              : { type: 'BUNDLE_PERMISSION_RESPONSE', success: true },
         );
         // A stale answer keeps the window open (holdPopupOpenUntil, set above) so the sheet can show why; it closes itself.
         if (!result.stale) closeDappPopupIfNoUi();

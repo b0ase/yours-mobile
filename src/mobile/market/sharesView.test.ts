@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { offerStringsInBundle, REMOVED_OFFER_STRINGS } from '../../../scripts/lib/removedOfferStrings';
 import type { BsharesMe, PlacementOffer } from '../placement/placement';
 import { sharesView } from './sharesView';
 
@@ -30,18 +32,6 @@ describe('Market › Shares is members only', () => {
   });
 });
 
-// Strings from the removed static listings and bApps alphabet-share offers. None may ship.
-export const REMOVED_OFFER_STRINGS = [
-  'bcorp-ordinary',
-  'Register interest',
-  'Interest registered',
-  'alphabet-share',
-  '1,000,000,000 (placeholder)',
-  'Share offers are for verified investors',
-  'To be confirmed from the Register of Members',
-  "the issuer's responsibility; The Bitcoin Corporation does not endorse",
-];
-
 const files = (dir: string): string[] =>
   readdirSync(dir).flatMap((f) => {
     const p = join(dir, f);
@@ -56,15 +46,25 @@ describe('no share offers in the bundle', () => {
       .filter((f) => REMOVED_OFFER_STRINGS.some((s) => readFileSync(f, 'utf8').includes(s)));
     expect(hits).toEqual([]);
   });
-  // Runs against the built web bundle when one exists (pnpm build:web → build-web/).
-  const built = join(import.meta.dir, '..', '..', '..', 'build-web');
-  test.skipIf(!existsSync(built))('built web bundle carries none of the removed offer strings', () => {
-    const hits = files(built)
-      .filter((f) => /\.(js|html)$/.test(f))
-      .flatMap((f) => {
-        const t = readFileSync(f, 'utf8');
-        return REMOVED_OFFER_STRINGS.filter((s) => t.includes(s)).map((s) => `${f}: ${s}`);
-      });
-    expect(hits).toEqual([]);
+  // The built bundle is checked by the web build itself (vite.config.web.ts noShareOffersInBundle), on every build. It
+  // used to be a test here that skipped when build-web/ was missing, so the suite's pass/skip count depended on the
+  // worktree, and where a build-web/ existed it checked whatever older build was there.
+  test('the web build runs the bundle check', () => {
+    const cfg = readFileSync(join(import.meta.dir, '..', '..', '..', 'vite.config.web.ts'), 'utf8');
+    expect(cfg).toMatch(/plugins: \[[^\]]*noShareOffersInBundle\(\)[^\]]*\]/);
+  });
+  test('the bundle check finds a removed string in a built file, and passes a clean one', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'offer-bundle-'));
+    try {
+      mkdirSync(join(dir, 'assets'));
+      writeFileSync(join(dir, 'index.html'), '<html>bWalletX</html>');
+      writeFileSync(join(dir, 'assets', 'clean.js'), 'export const a = 1;');
+      expect(offerStringsInBundle(dir)).toEqual([]);
+      writeFileSync(join(dir, 'assets', 'main.js'), `const t = "${REMOVED_OFFER_STRINGS[1]}";`);
+      writeFileSync(join(dir, 'assets', 'note.txt'), REMOVED_OFFER_STRINGS[0]); // not a shipped .js/.html
+      expect(offerStringsInBundle(dir)).toEqual([`${join(dir, 'assets', 'main.js')}: ${REMOVED_OFFER_STRINGS[1]}`]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

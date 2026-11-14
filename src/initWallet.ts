@@ -39,17 +39,27 @@ import { cacheBlockHeaders, prefetchHeadersOnInternalize } from './services/head
 import {
   backupBeforeSend,
   createDeviceSync,
+  FOREGROUND_STALE_MS,
+  PULL_STALE_MS,
+  PULL_TIMER_MS,
   notifyOnWalletChanges,
   pullThenAdmitSoon,
   type BackupBeforeSend,
   type DeviceSyncResult,
 } from './services/deviceSync';
+import {
+  createChangeWriteAhead,
+  onBroadcast,
+  watchStorage,
+  type ChangeWriteAhead,
+  type UnbackedRecord,
+  type WriteAheadStorage,
+} from './services/changeWriteAhead';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
 import { ensureBackupConnected, keepDeviceStoreActive, switchActiveAs } from './services/deviceActive';
 import { loadMayBeOut, recheckRefusals } from './services/refusalRecheck';
 import { installCoinPreflightForWallet } from './services/coinPreflight';
-import { expiryLookups } from './services/unsentGuard';
 import {
   createWebWallet,
   createIndexedDbTaskStateStore,
@@ -67,6 +77,7 @@ import { guardSpendRecipients } from './services/spendRecipients';
 import { guardLabelsOnSpend } from './services/labelsOnSpend';
 import { chromeConsentStore, guardSiteTokens } from './services/siteTokens';
 import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
+import { guardSharedKeySigning, revokeSharedKeyGrantsOnce } from './services/sharedKeySigning';
 import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
@@ -77,31 +88,57 @@ import {
   installInboundSyncGuard,
   registerInboundVerifier,
   admitPending,
+  requeueHeldTokenCoins,
   walletOwnership,
   walletRecords,
   type AdmitOptions,
   type AdmitReport,
   type AdmitStore,
   type InboundVerifier,
+  pendingAdmissions,
 } from './services/inboundSync';
 import { syncErrorDetail, tagStorageClientErrors } from './services/syncErrorDetail';
 import {
+  backupFullNotice,
+  refuseBackupStorageAutoPay,
+  refuseStorageAuthFetchPayments,
+  refuseStorageClientPayments,
+  storagePaymentHook,
+} from './services/storagePaymentGuard';
+import { KNOWN_PROVIDERS } from './components/storageProviders';
+import {
   FULL_PASS_NEXT_SLICE_MS,
+  passLooksStuck,
   paymentYields,
   requestFullPass,
   requestTailPass,
+  syncStateFor,
   withDeadlines,
   withFullPassMode,
+  type FullPassPlan,
 } from './services/fullPass';
+import { afterPull, recordedPullOkAt } from './services/pullIntegrity';
+import { createPullRecord, createSyncHealth, registerSyncHealth, type SyncHealth } from './services/syncHealth';
 import { ownPayments } from './services/ownPayments';
 import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
 import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
-import { ENVELOPES_ENABLED } from './mobile/storeBuild';
+import { ENVELOPES_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
-import { normalizeOriginator, parsePrivateKey } from '@1sat/wallet';
+import {
+  clearLearnedOwnBackends,
+  migrateServerKeys,
+  OWN_SERVER_PENDING_MS,
+  saveOwnServerKey,
+  savedOwnServerKeys,
+  setOwnServerSource,
+  storageServers,
+  watchStoreConnections,
+} from './services/ownBackendKeys';
+import { normalizeOriginator, parsePrivateKey, type StoragePaymentHook } from '@1sat/wallet';
 import { guardSpending } from './mobile/config/killSwitch';
+import { trackSpendsInFlight } from './services/spendsInFlight';
 import {
   syncMessages,
   sweepDeposit,
@@ -143,6 +180,8 @@ import {
   normOutpoint,
   restoreMoved,
   setArriving,
+  arrivingCoins,
+  arrivingOutputs,
 } from './services/receiveGuard';
 import {
   accountedVia,
@@ -178,10 +217,31 @@ import {
 } from './services/seedChange';
 import { makeSeedChangeDeps, seedChangeKV } from './services/seedChangeWiring';
 import { reconcilePostage, wocIsMined, type PostageReconcileReport } from './services/postageReconcile';
-import { runUnsentExpiry, storageKV, wocHeight, type ExpiryReport, type NoSendAction } from './services/unsentExpiry';
+import { runUnsentExpiry, storageKV, type ExpiryReport } from './services/unsentExpiry';
+import { makeExpiryDeps } from './services/unsentExpiryWiring';
 import { chainActive } from './services/dappChain';
 import { healthStatus, SYNC_HEALTH_KEY } from './services/storageHealth';
+import {
+  arrivingFromAdmissions,
+  DEVICE_SYNC_KEY,
+  heldPayments,
+  nextDeviceSyncHealth,
+  STUCK_SHOW_MS,
+  type BalanceTruth,
+  type DeviceSyncHealth,
+  type TruthStore,
+} from './services/balanceTruth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
+import { settleWithin } from './utils/settleWithin';
+
+/** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
+const WATCH_STORES_CLOSE_CAP_MS = 2000;
+/**
+ * The last wallet close's steps with their times (ms from the start of the close). An account-switch reload sends them
+ * to the page's boot trace (background.ts CLOSE_FOR_RELOAD), so a close that hangs shows which step it hung on
+ * (owner's iPhone, 13 Nov 2026: a switch whose close hit the cap reloaded into a black screen).
+ */
+export const lastCloseSteps: string[] = [];
 
 // Admin originator for the extension (bypasses all permission checks). The bare
 // extension ID, as ChromeCWI sends it: toolbox permission checks reject a URL
@@ -276,6 +336,11 @@ export interface AccountContext {
    */
   balanceSplit: () => Promise<BalanceSplit>;
   /**
+   * The balance card's truth lines (services/balanceTruth.ts): payments holding coins unsent, coins arriving from the
+   * other device, the last device-sync pull. Reads only.
+   */
+  balanceTruth: () => Promise<BalanceTruth>;
+  /**
    * Instant receive (services/receiveWatch.ts): the UI in front (APP_FOREGROUND) watches the receive addresses every
    * ~3 s; APP_BACKGROUND stops it.
    */
@@ -299,6 +364,8 @@ export interface AccountContext {
     paused: boolean;
     /** A heal or a device sync is running: it holds the storage locks, so a coin check would only queue behind it. */
     storageBusy: boolean;
+    /** How the pulls from the backup are doing (services/syncHealth.ts): last caught-up pull, stuck, coins missing. */
+    health?: SyncHealth;
   };
   /** Restore actions storage marked failed whose transaction is mined (services/recoverFailed.ts). */
   recoverFailed: () => Promise<RecoverReport>;
@@ -319,7 +386,8 @@ export interface AccountContext {
    * BRC-177 deadlines for nosend actions: release one only after the chain shows it was never broadcast and its
    * inputs are unspent; watch releases in case it turns up later (services/unsentExpiry.ts).
    */
-  expireUnsent: (force?: boolean) => Promise<ExpiryReport>;
+  /** `storageBusy`: the background's storage switch is under way (no detach or abort meanwhile). */
+  expireUnsent: (force?: boolean, o?: { storageBusy?: () => boolean }) => Promise<ExpiryReport>;
   /** Sweep txids from this wallet's own records, for Find mined payments (recoverByTxidWiring.ts). */
   sweepCandidates: () => Promise<string[]>;
   /** Re-internalize paymail receipts the server recorded that this device lacks (restore from seed, 14 Oct 2026). */
@@ -408,6 +476,35 @@ export interface InitWalletOptions {
 
 // A backup call that fails names itself and its page in the sync log (services/syncErrorDetail.ts, 6 Nov 2026).
 tagStorageClientErrors(StorageClient);
+// Each remote store's server key is saved when the wallet's own client connects to it (services/ownBackendKeys.ts).
+// The account the wallet is open on (set at the start of initWallet, before its stores connect).
+let ownStoresAccount: string | undefined;
+watchStoreConnections(StorageClient, () => ownStoresAccount);
+// No site signs in as the user to the wallet's own servers (services/ownBackendKeys.ts: seeded first-party keys, plus
+// the stores in use, registered below; refused in services/crossSiteSignGuard.ts). Keys saved by the learning in
+// earlier 5.2.56 candidates are dropped, so no certifier's key stays refused.
+clearLearnedOwnBackends();
+
+/**
+ * Storage top-ups (HTTP 507) are never paid without a check (services/storagePaymentGuard.ts, b-Aware 12 Nov 2026).
+ * A backup store's 507 never starts a payment; the active store's goes through storagePaymentHook, passed on every
+ * wallet created here (the factory treats a missing hook as yes).
+ */
+let storageNotice: ((text: string) => void) | undefined;
+refuseBackupStorageAutoPay(StorageClient, (url) => backupFullNotice(storageNotice)(url));
+// …and no storage server is paid through HTTP 402: a StorageClient's AuthFetch can't create actions.
+refuseStorageClientPayments(StorageClient);
+type WalletConfigWithStorageHook = WebWalletConfig & { onStoragePaymentRequired: StoragePaymentHook };
+/** Every storage URL this wallet may talk to: a BRC-105 (402) payment to any of them is refused. */
+const storageUrls =
+  (storage: unknown, config: { activeRemote?: string; backups?: string[] }) => (): (string | undefined)[] => [
+    config.activeRemote,
+    ...(config.backups ?? []),
+    ...KNOWN_PROVIDERS.flatMap((p) => [p.url, p.accountUrl]),
+    ...((storage as { _stores?: { storage?: { endpointUrl?: string } }[] })._stores ?? []).map(
+      (m) => m.storage?.endpointUrl,
+    ),
+  ];
 
 /**
  * Rows a backup store sends become spendable on this device only when the chain or this account's own keys say so
@@ -459,7 +556,7 @@ export const openAccountStorageForBackup = async (
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
-  const { storage, destroy, monitor } = await createWebWallet({
+  const backupConfig: WalletConfigWithStorageHook = {
     privateKey: keys.identityWif,
     chain: 'main',
     feeModel: { model: 'sat/kb', value: chromeStorageService.getCustomFeeRate() },
@@ -470,7 +567,13 @@ export const openAccountStorageForBackup = async (
     // No boot runOnce: its BackupSync (which now also runs for a remote active store; toolbox patch) would contend
     // with the backup's getSyncChunk. stopTasks below only ends a task loop; it cannot recall a runOnce in flight.
     skipInitialMonitor: true,
-  });
+    onStoragePaymentRequired: storagePaymentHook(),
+  };
+  const { storage, destroy, monitor, wallet: backupWallet } = await createWebWallet(backupConfig);
+  if (!refuseStorageAuthFetchPayments(backupWallet, storageUrls(storage, { activeRemote, backups })))
+    console.error('[initWallet] storage 402 payments are not refused');
+  // Another account's stores, opened for a backup: their keys count, but never "pending" (this storage may be closed).
+  setOwnServerSource('backup-storage', () => storageServers(storage).map((x) => ({ ...x, pending: false })));
 
   // Stop monitor work so BackupSync/runOnce does not contend with getSyncChunk.
   try {
@@ -516,11 +619,13 @@ export const initWallet = async (
   // current account's persisted storageConfig. storageIdentityKey is
   // per-install and lazily materialized.
   const { account } = chromeStorageService.getCurrentAccountObject();
+  ownStoresAccount = account?.addresses?.identityAddress;
   const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
-  const walletConfig: WebWalletConfig = {
+  if (options?.notice) storageNotice = options.notice;
+  const walletConfig: WalletConfigWithStorageHook = {
     privateKey: keys.identityWif,
     chain,
     feeModel: { model: 'sat/kb', value: chromeStorageService.getCustomFeeRate() },
@@ -528,6 +633,7 @@ export const initWallet = async (
     backups,
     storageIdentityKey,
     taskStateStore: createIndexedDbTaskStateStore(),
+    onStoragePaymentRequired: storagePaymentHook({ notice: options?.notice }),
   };
 
   const t0 = Date.now();
@@ -550,6 +656,26 @@ export const initWallet = async (
     console.warn('[initWallet] backup storage failed to connect; opening without it:', err);
     return createWebWallet({ ...walletConfig, backups: [] });
   });
+  // The factory's own storage calls (/account/status, /account/payment) never pay a 402 (storagePaymentGuard.ts).
+  if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups })))
+    console.error('[initWallet] storage 402 payments are not refused');
+  // The stores this wallet signs in to (its online storage and backups): no site may sign in to them as the user. Each
+  // store's key is saved under its own chrome.storage key when the store connects (watchStoreConnections, above), so
+  // later sessions aren't pending; never inside `accounts`, whose read-merge-write could revert a storage switch.
+  const ownerAddress = account?.addresses?.identityAddress;
+  await migrateServerKeys(ownerAddress, account?.storageConfig?.serverKeys, () =>
+    chromeStorageService.updateNested('accounts', {
+      [ownerAddress!]: { storageConfig: { serverKeys: undefined } } as unknown as Account,
+    }),
+  );
+  const ownStoresSince = Date.now();
+  setOwnServerSource('storage', () =>
+    storageServers(storage, {
+      saved: savedOwnServerKeys(ownerAddress),
+      onLearn: (origin, key) => saveOwnServerKey(ownerAddress, origin, key),
+      pendingUntil: ownStoresSince + OWN_SERVER_PENDING_MS,
+    }),
+  );
   // This device's store stays the enabled active store for its payments, receipts and backup pushes, whatever another
   // device wrote into the backup (P0, 5 Nov 2026: the owner's 1p test was refused with WERR_NOT_ACTIVE after the backup
   // connected late; services/deviceActive.ts). First on the manager, so the later wrappers (the coin check) run over it.
@@ -564,9 +690,9 @@ export const initWallet = async (
    * A full re-pull from a backup when one is due (services/fullPass.ts): a daily one, a store's first, or one a failure
    * asked for. Never in the way of the sync itself: a failure here is logged and the sync goes on.
    */
-  const fullPassIfDue = async (readerSik: string | undefined, failed = false) => {
+  const fullPassIfDue = async (readerSik: string | undefined, failed = false): Promise<FullPassPlan | undefined> => {
     const own = ownStore();
-    if (!own || !readerSik) return;
+    if (!own || !readerSik) return undefined;
     try {
       const { identityKey } = await storage.getAuth();
       const r = await requestFullPass({
@@ -586,8 +712,12 @@ export const initWallet = async (
         console.warn('[deviceSync] pulling the last 48 hours of the backup again (the daily deep pull)');
       if (r === 'abandoned')
         console.warn('[deviceSync] a pull from the start had stopped moving: given up, the ordinary pulls run again');
+      if (r === 'stuck')
+        console.warn('[deviceSync] a pull has not moved for 30 minutes of uptime; it keeps being retried (syncHealth)');
+      return r;
     } catch (e) {
       console.warn('[deviceSync] a full pass could not be asked for:', e);
+      return undefined;
     }
   };
   /** The last heal's merge failed: the next heal asks for a full pass (b). */
@@ -657,6 +787,19 @@ export const initWallet = async (
   const deviceStore = (): AdmitStore | undefined =>
     managed._stores?.map((m) => m.storage).find((s): s is StorageIdb => s instanceof StorageIdb) as never;
   stopBackupCheck.useSecondSource(oneSatChainLookups(toolboxServices));
+  // A held BSV-21 coin the chain calls unspent: the token overlay's word, read through tokenOverlayVerdict (fix 7). Only
+  // its 'spent' holds the coin back; an error or an unfunded overlay never does. Set before the first admission run
+  // is scheduled (onQueued below), from the factory's 1Sat services.
+  stopBackupCheck.verifier.tokenState = async (tokenId, outpoint) => {
+    const bsv21 = (
+      toolboxServices as unknown as {
+        bsv21?: { getOutputStatus?: (id: string, ops: string[]) => Promise<{ outpoint: string; state: string }[]> };
+      }
+    ).bsv21;
+    if (typeof bsv21?.getOutputStatus !== 'function') return undefined;
+    const [s] = await bsv21.getOutputStatus(tokenId, [outpoint]);
+    return s?.state;
+  };
   let admitClosed = false;
   let admitTimer: ReturnType<typeof setTimeout> | undefined;
   let admitAt = Infinity;
@@ -677,10 +820,33 @@ export const initWallet = async (
   /** Set by every device-sync pull: what that pull lists is retried every few seconds for a while (inboundSync.ts). */
   let admitPrompt: AdmitOptions['prompt'];
   const PROMPT_ADMIT_MS = 2 * 60_000;
+  /**
+   * Token coins this device holds as not spendable with no spender go back on the admission list at most every 6 hours
+   * (fix 7, 13 Nov 2026: the extension's 2a5d3e03:0 stayed not spendable while the phone's copy was spendable). The
+   * chain then decides them like any backup coin. The time is kept across service-worker restarts; no store: every run.
+   */
+  const HELD_TOKENS_EVERY_MS = 6 * 3_600_000;
+  const requeueHeldTokensIfDue = async (device: AdmitStore, identityKey: string) => {
+    const key = `bwxHeldTokenRecheckAt:${identityKey}`;
+    try {
+      const last = Number((await chrome.storage?.local?.get(key))?.[key] ?? 0);
+      if (Date.now() - last < HELD_TOKENS_EVERY_MS) return;
+      await chrome.storage?.local?.set({ [key]: Date.now() });
+    } catch {
+      // no store to remember the time in: check anyway (local reads; listed entries keep their back-off)
+    }
+    try {
+      const n = await requeueHeldTokenCoins(device, identityKey);
+      if (n) console.warn(`[inbound-sync] ${n} token coin(s) held not spendable here: asking the chain again`);
+    } catch (e) {
+      console.warn('[inbound-sync] held token coins not listed:', e);
+    }
+  };
   const admitBackupRows = async (): Promise<AdmitReport | undefined> => {
     const device = deviceStore();
     if (!device || admitClosed) return undefined;
     const { identityKey } = await storage.getAuth();
+    await requeueHeldTokensIfDue(device, identityKey);
     const r = await admitPending(device, identityKey, stopBackupCheck.verifier, { prompt: admitPrompt }).catch(
       (e: unknown) => {
         console.warn('[inbound-sync] admission list not worked through:', e);
@@ -698,16 +864,73 @@ export const initWallet = async (
   // request, no second request to a backup still answering a timed-out one, and own payments first only before a cycle
   // or between backups (owner's seal and its review, 7 Nov 2026).
   const pushInFlight = new WeakMap<object, InFlight>();
+  const pushInFlightFor = (backup: object) => {
+    let f = pushInFlight.get(backup);
+    if (!f) pushInFlight.set(backup, (f = createInFlight()));
+    return f;
+  };
   const backupPush = makeBackupPush({
     storage: storage as unknown as Parameters<typeof makeBackupPush>[0]['storage'],
     backups: () => managed._backups ?? [],
     waiting: ownPayments.waiting,
-    inFlightFor: (backup) => {
-      let f = pushInFlight.get(backup);
-      if (!f) pushInFlight.set(backup, (f = createInFlight()));
-      return f;
-    },
+    inFlightFor: pushInFlightFor,
   });
+  /** A payment's rows reach the backup before it is broadcast (services/changeWriteAhead.ts); set up below. */
+  // eslint-disable-next-line prefer-const -- assigned once further down; the push closure below can run before that, so a later const would throw (TDZ)
+  let writeAhead: ChangeWriteAhead | undefined;
+  // How the pulls are doing, for a one-line status (services/syncHealth.ts): the last pull that caught up, stuck.
+  const pullHealth = createSyncHealth();
+  const unregisterPullHealth = registerSyncHealth(pullHealth);
+  /** The backup's storage identity key, once it is connected. */
+  const backupSikNow = (): string | undefined => {
+    try {
+      return (
+        managed._backups?.[0]?.storage as { getSettings?: () => { storageIdentityKey?: string } } | undefined
+      )?.getSettings?.()?.storageIdentityKey;
+    } catch {
+      return undefined; // not connected yet
+    }
+  };
+  /** The last caught-up pull as recorded in this device store: lastPullOkAt isn't 0 until the first pull ends. */
+  const hydratePullHealth = async (readerSik = backupSikNow()) => {
+    const own = ownStore();
+    if (!own || !readerSik) return;
+    try {
+      const { identityKey } = await storage.getAuth();
+      pullHealth.hydrate(await recordedPullOkAt(own as never, identityKey, readerSik));
+    } catch {
+      // a status line only
+    }
+  };
+  void hydratePullHealth();
+  // The same, per account, where the balance card's sync line reads it (DEVICE_SYNC_KEY: deviceSyncPull:<address>).
+  const pullRecord = createPullRecord(
+    {
+      get: (k) => chrome.storage.local.get(k) as Promise<Record<string, unknown>>,
+      set: (items) => chrome.storage.local.set(items),
+    },
+    keys.identityAddress,
+  );
+  /** The backup's output rows for one of its transactions (the coin check after a pull, services/pullIntegrity.ts). */
+  const backupOutputsOf = async (backupTxId: number) => {
+    const m = managed._backups?.[0] as
+      | {
+          storage: {
+            findOutputsAuth(
+              auth: { identityKey: string; userId?: number },
+              args: { partial: { transactionId: number }; noScript: boolean },
+            ): Promise<{ vout: number; updated_at?: unknown }[]>;
+          };
+          user?: { userId: number };
+        }
+      | undefined;
+    if (!m) throw new Error('backup storage is not connected');
+    const { identityKey } = await storage.getAuth();
+    return m.storage.findOutputsAuth(
+      { identityKey, userId: m.user?.userId },
+      { partial: { transactionId: backupTxId }, noScript: true },
+    );
+  };
   const deviceSync = createDeviceSync({
     applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
     // A backup naming another store is healed first; a set-aside one only reconnects on its probe and back-off, never
@@ -716,50 +939,130 @@ export const initWallet = async (
     // What the pull left for the chain to settle runs soon after, outside every storage lock; not awaited here (F-A).
     pull: pullThenAdmitSoon(
       async () => {
-        const reader = managed._backups?.[0]?.storage;
-        if (!reader) throw new Error('backup storage is not connected');
-        const { identityKey } = await storage.getAuth();
-        // What this pull lists is asked about every few seconds for a while, not after the 1-minute doubling: a sweep
-        // the other device made must not hide its dollar here for minutes (review 20, M5; services/inboundSync.ts).
-        admitPrompt = { from: Date.now(), until: Date.now() + PROMPT_ADMIT_MS };
-        // Once a day (and on a store's first open, or when a failure asked) the pull starts from the beginning; such
-        // a pass runs in slices so payments never wait on it (services/fullPass.ts).
-        const backupSik = (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
-          ?.storageIdentityKey;
-        await fullPassIfDue(backupSik);
-        // Rows another copy pushed late, with times older than the cursor (extension, 6 Nov 2026: 8734977f never
-        // arrived): every TAIL_CHECK_EVERY_MS, found by the backup's insert order with one-row probes, and pulled from
-        // the first one (services/pullTail.ts). Its own deadlines; never while a pass is under way.
-        const own = ownStore();
-        if (own && backupSik) {
-          const plan = await requestTailPass({
-            manager: storage,
-            store: own as never,
-            identityKey,
-            readerSik: backupSik,
-            reader: withDeadlines(reader as object) as never,
-          }).catch(() => 'unknown');
-          if (plan === 'tail')
-            console.warn(
-              '[deviceSync] the backup has rows this device never had (pushed late): pulling from the first',
-            );
+        pullHealth.attempt();
+        void pullRecord({ attemptAt: Date.now() });
+        try {
+          const reader = managed._backups?.[0]?.storage;
+          if (!reader) throw new Error('backup storage is not connected');
+          const { identityKey } = await storage.getAuth();
+          // What this pull lists is asked about every few seconds for a while, not after the 1-minute doubling: a sweep
+          // the other device made must not hide its dollar here for minutes (review 20, M5; services/inboundSync.ts).
+          admitPrompt = { from: Date.now(), until: Date.now() + PROMPT_ADMIT_MS };
+          // Once a day (and on a store's first open, or when a failure asked) the pull starts from the beginning; such
+          // a pass runs in slices so payments never wait on it (services/fullPass.ts).
+          const backupSik = (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
+            ?.storageIdentityKey;
+          if (pullHealth.get().lastPullOkAt === 0) await hydratePullHealth(backupSik);
+          pullHealth.plan(await fullPassIfDue(backupSik));
+          // Rows another copy pushed late, with times older than the cursor (extension, 6 Nov 2026: 8734977f never
+          // arrived): every TAIL_CHECK_EVERY_MS, found by the backup's insert order with one-row probes, and pulled from
+          // the first one (services/pullTail.ts). Its own deadlines; never while a pass is under way.
+          const own = ownStore();
+          if (own && backupSik) {
+            const plan = await requestTailPass({
+              manager: storage,
+              store: own as never,
+              identityKey,
+              readerSik: backupSik,
+              reader: withDeadlines(reader as object) as never,
+            }).catch(() => 'unknown');
+            if (plan === 'tail')
+              console.warn(
+                '[deviceSync] the backup has rows this device never had (pushed late): pulling from the first',
+              );
+          }
+          // Each backup request has a deadline, so a stalled backup frees the storage locks in seconds (review 23, M2).
+          const bounded = withDeadlines(reader as object) as Parameters<typeof storage.syncFromReader>[1];
+          // Own payments go first (fullPass afterPage): a pull that ended for one carries on in this run after it.
+          const yieldsBefore = paymentYields();
+          await withFullPassMode(ownSik(), 'slice', () => storage.syncFromReader(identityKey, bounded));
+          // A pull can't half-arrive (services/pullIntegrity.ts): once it has caught up, payments it brought are checked
+          // for their coins against the backup, and coins still missing are pulled again (a heal pass, in slices).
+          if (own && backupSik) {
+            const report = await afterPull({
+              manager: storage,
+              store: own as never,
+              identityKey,
+              readerSik: backupSik,
+              backupOutputs: backupOutputsOf,
+              stop: () => ownPayments.waiting() || deviceSync.pushWaiting(),
+            }).catch((e: unknown) => {
+              console.warn('[sync-integrity] the coin check after the pull did not run:', e);
+              return undefined;
+            });
+            pullHealth.succeeded(report);
+            void recordPullOk();
+            if (report?.plan === 'healing') {
+              console.warn(
+                `[deviceSync] ${report.missingTx} payment(s) arrived without some of their coins: pulling them again`,
+              );
+              stopBackupCheck.verifier.onMore?.();
+            } else if (report?.plan === 'full-due')
+              console.warn(
+                '[deviceSync] coins still missing after re-pulls: the backup is pulled again from the start',
+              );
+          } else {
+            pullHealth.succeeded();
+            void recordPullOk();
+          }
+          return paymentYields() > yieldsBefore ? ('yielded' as const) : undefined;
+        } catch (e) {
+          pullHealth.failed(e);
+          void recordPullFailed(e);
+          throw e;
         }
-        // Each backup request has a deadline, so a stalled backup frees the storage locks in seconds (review 23, M2).
-        const bounded = withDeadlines(reader as object) as Parameters<typeof storage.syncFromReader>[1];
-        // Own payments go first (fullPass afterPage): a pull that ended for one carries on in this run after it.
-        const yieldsBefore = paymentYields();
-        await withFullPassMode(ownSik(), 'slice', () => storage.syncFromReader(identityKey, bounded));
-        return paymentYields() > yieldsBefore ? ('yielded' as const) : undefined;
       },
       () => admitIn(0),
     ),
     push: async () => {
-      return backupPush();
+      // A push that went through carries every payment marked "change not backed up yet" before it started.
+      const cap = writeAhead?.checkpoint();
+      const r = await backupPush();
+      if (r !== 'yielded' && cap !== undefined) writeAhead?.pushed(cap);
+      return r;
     },
     yieldTo: ownPayments,
     busy: chainActive,
     log: (...a) => console.warn(...a),
+    // The balance card's sync line is written by the pull itself (recordPullOk / recordPullFailed): one writer.
   });
+  /**
+   * The pull's outcome for the balance card (services/balanceTruth.ts), through the one writer of deviceSyncPull. A pull
+   * that went through while its pass from the start has not moved for STUCK_SHOW_MS (fullPass.ts stuckMs), or while
+   * syncHealth says stuck, keeps the last good time and reads as stuck (8 Nov 2026 freeze).
+   */
+  async function recordPullOk() {
+    let stuck = false;
+    try {
+      const own = ownStore();
+      const backupSik = backupSikNow();
+      if (own && backupSik) {
+        const { identityKey } = await storage.getAuth();
+        // Read after the pull: a pull that moved the pass's offsets is progress, whatever the mark said before it.
+        stuck = passLooksStuck(await syncStateFor(own as never, identityKey, backupSik), STUCK_SHOW_MS);
+      }
+    } catch {
+      // can't tell: the pull went through, so it counts
+    }
+    stuck = stuck || pullHealth.get().stuck;
+    await pullRecord((p) => nextDeviceSyncHealth(p as DeviceSyncHealth, { ok: true, stuck }, Date.now()));
+  }
+  function recordPullFailed(e: unknown) {
+    const now = Date.now();
+    const error = e instanceof Error ? e.message : String(e);
+    return pullRecord((p) => ({
+      ...nextDeviceSyncHealth(p as DeviceSyncHealth, { ok: false, error }, now),
+      failAt: now,
+      ...(pullHealth.get().stuck ? { stuck: true } : {}),
+    }));
+  }
+  // Pulls also when the last good one is an hour old, while the wallet stays open (review of fix 5: a phone app, web
+  // tab or extension worker could go hours without the other devices' changes). Paced; a site mid-action defers it.
+  const stalePullTimer = setInterval(() => {
+    // Never before the held-back syncs may start (startSyncsAfter), never on a closed wallet.
+    if (!admitClosed && syncsOpen) void deviceSync.pullIfStale(PULL_STALE_MS)?.catch(() => undefined);
+  }, PULL_TIMER_MS);
+  (stalePullTimer as { unref?: () => void }).unref?.();
   // A full pass paused (a slice used up, or a heal left it): the next slice a moment later, sends in between.
   let moreTimer: ReturnType<typeof setTimeout> | undefined;
   stopBackupCheck.verifier.onMore = () => {
@@ -771,11 +1074,31 @@ export const initWallet = async (
   };
   if (!notifyOnWalletChanges(baseWallet, deviceSync.changed))
     console.warn('[initWallet] wallet changes do not update the backup');
+  // A payment's change reaches the backup BEFORE it is broadcast (balance integrity plan, fix 4): the push runs inside
+  // the broadcast step with an 8 s limit. Backup down or slow: the payment still goes, flagged "change not backed up
+  // yet" (balance card, syncHealth) and pushed again urgently until it lands. Hooked to the broadcaster below.
+  const unbackedKey = `changeUnbacked:${keys.identityAddress}`;
+  writeAhead = createChangeWriteAhead({
+    applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
+    backups: () => managed._backups ?? [],
+    storage: storage as unknown as WriteAheadStorage,
+    inFlightFor: pushInFlightFor,
+    pushNow: () => deviceSync.pushNow(),
+    onChange: (n) => pullHealth.changeNotBackedUp(n),
+    kv: {
+      load: async () => ((await chrome.storage.local.get(unbackedKey))?.[unbackedKey] as UnbackedRecord) ?? null,
+      save: (r) => (r ? chrome.storage.local.set({ [unbackedKey]: r }) : chrome.storage.local.remove(unbackedKey)),
+    },
+  });
+  void writeAhead.hydrate();
+  if (!watchStorage(storage, writeAhead)) console.warn('[initWallet] payments are not backed up before broadcast');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
+  // Web wallet: a tab handing the wallet to another tab lets these finish first (services/spendsInFlight.ts).
+  trackSpendsInFlight(baseWallet);
   // HARD RULE (P0, 3 Nov 2026): no payment builds change on the remote store; this device's store first, else refused
   // (services/localFirst.ts: wallet.1sat.app builds its own random change; seed-derived change exists only here).
   if (
@@ -801,6 +1124,9 @@ export const initWallet = async (
   // Resumed Store payments marked "may be out" survive a service-worker restart (06c M1).
   void loadMayBeOut();
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
+  // Last postBeef wrapper (outermost): the backup push before a payment's broadcast is not timed as the broadcast.
+  if (!onBroadcast(toolboxServices, writeAhead))
+    console.warn('[initWallet] payments are not backed up before broadcast');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
   // The wallet's own sends check the coins storage picked against the chain before signing; coins another device
@@ -874,32 +1200,38 @@ export const initWallet = async (
             // A message naming another site (a login challenge fetched from good.com) is never signed for evil.com
             // (services/crossSiteSignGuard.ts, payment-safety audit 24 Oct 2026 B1).
             guardCrossSiteSigning(
-              preserveOriginalErrors(
-                withLocalSpendLedger(
-                  // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
-                  // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
-                  // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
-                  // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
-                  ALLOWANCES_ENABLED
-                    ? guardAllowance(sitePermissions, {
-                        store: permissionStore,
-                        adminOriginator: ADMIN_ORIGINATOR,
-                        normalize: normalizeOriginator,
-                      })
-                    : ENVELOPES_ENABLED
-                      ? guardEnvelopes(sitePermissions, {
-                          envelopes,
+              // A sign-in token other services accept (counterparty 'anyone' under a sign-in protocol, or a time as
+              // keyID) asks every time and the answer covers that one signature (services/sharedKeySigning.ts,
+              // b-Aware 13 Nov 2026). Inside the refusal guards, so a refused call never raises a sheet.
+              guardSharedKeySigning(
+                preserveOriginalErrors(
+                  withLocalSpendLedger(
+                    // Envelopes by default: a site's payment goes through without a sheet only when it fits that site's
+                    // envelope; stored allowances grant nothing (services/envelopes.ts, owner 24 Oct 2026). With
+                    // ALLOWANCES_ENABLED, the old monthly allowance with its per-payment cap and payee allowlist
+                    // (services/allowanceGuard.ts, payment-safety audit 24 Oct 2026 B2).
+                    ALLOWANCES_ENABLED
+                      ? guardAllowance(sitePermissions, {
+                          store: permissionStore,
                           adminOriginator: ADMIN_ORIGINATOR,
                           normalize: normalizeOriginator,
                         })
-                      : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
-                        // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
-                        guardEverySpendAsks(sitePermissions, {
-                          adminOriginator: ADMIN_ORIGINATOR,
-                          normalize: normalizeOriginator,
-                        }),
-                  spendLedger,
+                      : ENVELOPES_ENABLED
+                        ? guardEnvelopes(sitePermissions, {
+                            envelopes,
+                            adminOriginator: ADMIN_ORIGINATOR,
+                            normalize: normalizeOriginator,
+                          })
+                        : // Store builds have no envelopes (storeBuild.ts ENVELOPES_ENABLED): every payment shows its sheet,
+                          // whatever old monthly grant is stored (services/everySpendAsks.ts, owner 25 Oct 2026).
+                          guardEverySpendAsks(sitePermissions, {
+                            adminOriginator: ADMIN_ORIGINATOR,
+                            normalize: normalizeOriginator,
+                          }),
+                    spendLedger,
+                  ),
                 ),
+                { adminOriginator: ADMIN_ORIGINATOR },
               ),
               ADMIN_ORIGINATOR,
             ),
@@ -934,6 +1266,17 @@ export const initWallet = async (
   await revokeReservedBasketGrants(permissionStore, ADMIN_ORIGINATOR)
     .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for wallet-internal baskets`))
     .catch((e: unknown) => console.warn('[initWallet] reserved-basket grant cleanup failed:', e));
+  // Upgrade migration, once per account (b-Aware 13 Nov 2026): grants that let a site make signatures anyone can
+  // check (level-1 keys, level-2 'anyone'), given by a pre-ticked line or a manifest before the fix, are removed;
+  // the site asks again (services/sharedKeySigning.ts revokeSharedKeyGrants).
+  await revokeSharedKeyGrantsOnce(
+    permissionStore,
+    ADMIN_ORIGINATOR,
+    { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+    accountId || 'no-account',
+  )
+    .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for keys every app shares`))
+    .catch((e: unknown) => console.warn('[initWallet] shared-key grant cleanup failed (retried next unlock):', e));
 
   // 5. Initialize sync context (derives addresses, creates services, queue, addressManager).
   // Background sync calls go through the manager-wrapped wallet (admin
@@ -1492,8 +1835,10 @@ export const initWallet = async (
     }
     // Whatever is still missing counts as arriving, so the balance never shows $0 for it. Each balance read checks these
     // outpoints against storage again (services/receiveGuard.ts arrivingNow).
-    setArriving(final.outputs, since);
-    if (final.satoshis) sendSyncStatus({ status: 'arriving', satoshis: final.satoshis });
+    // Money only: a 1-sat ordinal / marker still missing is never shown as BSV arriving (receiveGuard.ts isCoinSats).
+    const stillArriving = arrivingCoins(final.outputs);
+    setArriving(stillArriving.outputs, since);
+    if (stillArriving.satoshis) sendSyncStatus({ status: 'arriving', satoshis: stillArriving.satoshis });
   };
   // One receive-guard run at a time: overlapping runs each internalized and swept the same outputs.
   const receiveGuardFlight = singleFlight(receiveGuardOnce);
@@ -1768,6 +2113,7 @@ export const initWallet = async (
             txid: t.txid,
             createdAt: new Date(t.created_at).getTime(),
             attempts: req?.attempts ?? 0,
+            reqStatus: req?.status,
             description: t.description,
             satoshis: t.satoshis,
           });
@@ -1865,22 +2211,37 @@ export const initWallet = async (
     });
 
   const close = async () => {
+    const c0 = Date.now();
+    lastCloseSteps.length = 0;
+    const step = (name: string) => void lastCloseSteps.push(`${Date.now() - c0}ms ${name}`);
+    step('start');
     walletClosed = true;
     admitClosed = true;
+    clearInterval(stalePullTimer);
+    writeAhead?.stop();
+    unregisterPullHealth();
     receiveWatch.stop();
-    void watchKit
-      ?.then(async (k) => {
-        await k.store.close();
-        await k.classified.close();
-      })
-      .catch(() => undefined);
+    // The receive watch's processed-tx stores close with the wallet, capped so a stuck one never holds the close
+    // (an account-switch reload waits on this; mobile/account/closeForReload.ts).
+    const watchStoresClosed = settleWithin(
+      () =>
+        watchKit?.then(async (k) => {
+          await k.store.close();
+          await k.classified.close();
+        }),
+      WATCH_STORES_CLOSE_CAP_MS,
+    );
     keepActive?.stop();
     if (admitTimer) clearTimeout(admitTimer);
     admitTimer = undefined;
     if (moreTimer) clearTimeout(moreTimer);
     moreTimer = undefined;
+    step('destroy: monitor tasks + wallet');
     await destroyWallet();
+    step('destroy done');
     stopBackupCheck();
+    await watchStoresClosed;
+    step('watch stores closed');
   };
 
   return {
@@ -1904,7 +2265,47 @@ export const initWallet = async (
     sweepDeposits: () => sweepDeposit.execute(actionCtx, {}),
     creditArriving: () => runReceiveGuard(),
     balanceSplit: () => balanceSplit(baseWallet, { accountedFor, spenderCarries: carriesVia(deviceReads) }),
-    receiveWatch: { foreground: (on) => receiveWatch.foreground(on) },
+    balanceTruth: async () => {
+      const now = Date.now();
+      const r = await deviceReads().catch(() => undefined);
+      const store = r?.store as unknown as TruthStore | undefined;
+      // What the headline already counts as arriving (receive guard): never counted again in either line.
+      const arriving = arrivingOutputs();
+      const arrivingOutpoints = arriving.map((o) => o.outpoint);
+      // Each part on its own: one that can't be read shows nothing, never hides the others.
+      const held = store && r ? await heldPayments(store, r.userId, now, arrivingOutpoints).catch(() => []) : [];
+      let arrivingSats = 0;
+      const device = deviceStore();
+      if (store && r && device) {
+        try {
+          const { identityKey } = await storage.getAuth();
+          const entries = await pendingAdmissions(device, identityKey);
+          arrivingSats = await arrivingFromAdmissions(store, r.userId, entries, {
+            outpoints: arrivingOutpoints,
+            spenders: arriving.map((o) => o.spender),
+          });
+        } catch {
+          arrivingSats = 0;
+        }
+      }
+      const key = DEVICE_SYNC_KEY(keys.identityAddress);
+      const got: Record<string, unknown> = await chrome.storage.local.get(key).catch(() => ({}));
+      const sync = (got[key] ?? null) as DeviceSyncHealth | null;
+      return {
+        held,
+        arrivingSats,
+        syncApplies: storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
+        sync,
+        changeUnbacked: writeAhead?.count() ?? 0,
+      };
+    },
+    receiveWatch: {
+      foreground: (on) => {
+        receiveWatch.foreground(on);
+        // A wallet page in front (APP_FOREGROUND, every 30 s while visible): a pull when the last good one is 5 min old.
+        if (on && syncsOpen && !admitClosed) void deviceSync.pullIfStale(FOREGROUND_STALE_MS)?.catch(() => undefined);
+      },
+    },
     syncDevices: () => deviceSync.syncNow(),
     admitBackupRows,
     backupState: () => {
@@ -1917,6 +2318,8 @@ export const initWallet = async (
         // A backup set aside after a failed merge, reconnecting on its back-off (review 19, F4).
         paused: keepActive?.paused().paused ?? false,
         storageBusy: (keepActive?.healing() ?? false) || st.running,
+        // The pulls: the last one that caught up, stuck, payments still waiting for coins (services/syncHealth.ts).
+        health: pullHealth.get(),
       };
     },
     backupBeforeSend: () =>
@@ -1956,42 +2359,25 @@ export const initWallet = async (
         },
         { force },
       ),
-    expireUnsent: (force?: boolean) =>
+    expireUnsent: (force?: boolean, expiryOpts: { storageBusy?: () => boolean } = {}) =>
       runUnsentExpiry(
-        {
-          listNoSend: async () => {
-            const out: NoSendAction[] = [];
-            for (let offset = 0; offset < 5000; offset += 500) {
-              const page = await baseWallet.listNoSendActions({
-                labels: [],
-                includeLabels: true,
-                includeInputs: true,
-                limit: 500,
-                offset,
-              });
-              for (const a of page.actions)
-                out.push({
-                  txid: a.txid,
-                  labels: a.labels,
-                  inputs: (a.inputs ?? []).map((i) => ({ sourceOutpoint: i.sourceOutpoint })),
-                });
-              if (page.actions.length < 500) break;
-            }
-            return out;
-          },
-          abort: (txid) => baseWallet.abortAction({ reference: txid }),
-          sendWith: (txid) =>
-            baseWallet.createAction({
-              description: 'Payment the network has',
-              options: { sendWith: [txid], acceptDelayedBroadcast: false },
-            }),
-          recoverLate: (txid) => recoverTxidImpl(txid),
-          // A copy in 1Sat's BEEF store still leads to the wallet's own (chain-checked) send of that tx, never a release.
-          lookups: expiryLookups(),
-          // BRC-177 blockheight deadlines (b-Aware 26 Oct 2026, N1). Undefined on any failure: the action stays held.
-          height: wocHeight(),
+        // One wiring for the app and the two-device simulation (services/unsentExpiryWiring.ts).
+        makeExpiryDeps({
+          wallet: baseWallet,
+          storage,
+          services: toolboxServices,
+          identityKey: baseWallet.keyDeriver.identityKey,
           kv: storageKV(baseWallet.keyDeriver.identityKey),
-        },
+          recordCleared: (outpoint, spender) =>
+            recordAutoCleared(
+              { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+              account?.pubKeys?.identityPubKey ?? '',
+              { [outpoint]: spender },
+            ),
+          recoverLate: (txid) => recoverTxidImpl(txid),
+          storageBusy: expiryOpts.storageBusy,
+          storePaid: THEME_STORE_PAID_ENABLED,
+        }),
         { force },
       ),
     sweepCandidates: () => {

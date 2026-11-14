@@ -16,6 +16,13 @@
 
 import { BLOCK_SITE_BASKET, basketDisplayName, isReservedBasket } from './reservedBaskets';
 import type { SealSheet } from './sealPass';
+import {
+  isAnyoneCounterparty,
+  isOneTapSignIn,
+  isOneUseRequestID,
+  isSignInShapedName,
+  SIGN_IN_NAME,
+} from './sharedKeySigning';
 
 export { BLOCK_SITE_BASKET };
 
@@ -28,6 +35,18 @@ export interface BundleRequest {
   privileged?: boolean;
   protocolID?: [number, string] | (string | number)[];
   counterparty?: string;
+  /**
+   * What the key use is for, as the toolbox names it ('signing', 'encrypting', 'hmac', 'publicKey', 'identityKey',
+   * 'linkageRevelation', 'generic'). A grant does not depend on it: it covers every use of that protocol.
+   */
+  usageType?: string;
+  /**
+   * The wallet methods this site has running on this protocol when the request arrived (pinnedMint.ts ProtocolCalls),
+   * e.g. ['decrypt']: they tell a decrypt from an encrypt, which share one usageType. Display only.
+   */
+  calls?: string[];
+  /** Set by services/sharedKeySigning.ts on a one-signature request. Informational: its "once:" requestID decides. */
+  oneUse?: boolean;
   basket?: string;
   certificate?: { verifier: string; certType: string; fields: string[] };
   spending?: { satoshis: number; lineItems?: { type: string; description: string; satoshis: number }[] };
@@ -368,6 +387,8 @@ export interface SheetLine {
   signIn?: boolean;
   /** Joined while the sheet was open: shown as "New: …" with its own tick, never covered by Allow alone. */
   isNew?: boolean;
+  /** The only line on its sheet and a one-signature request: the SIGN ONCE card, one tap (buildSheetModel). */
+  once?: boolean;
   /** For a key used only for your own data (counterparty self): what it keeps private, e.g. "Ask b chats". */
   privateLabel?: string;
   /** Part of a first post (identity basket or post signature): what the POST card's face describes. */
@@ -407,6 +428,9 @@ export const isRiskyRequest = (r: BundleRequest): boolean => {
   // your key and moves nothing; anything "encrypted for anyone" is readable from your public key
   // anyway. Flagging it red and unticked made sign-in fail with "permission denied".
   if (r.type === 'certificate' && (r.certificate?.fields ?? []).some((f) => PRIVATE_CERT_FIELDS.test(f))) return true;
+  // A one-signature request sharing a sheet with other lines: never pre-ticked, on the careful card. Alone on its
+  // sheet it gets the calm SIGN ONCE card instead (buildSheetModel).
+  if (isOneUseRequest(r)) return true;
   return false;
 };
 
@@ -423,16 +447,97 @@ export const isIdentityKeyRequest = (r: BundleRequest): boolean =>
   (r.counterparty === undefined || r.counterparty === 'self');
 
 /** Protocol names that are a sign-in (the site checks who you are), not general key use. */
-const SIGN_IN_PROTOCOL = /\b(auth|authentication|sign[- ]?in|login|log[- ]?in)\b/i;
+const SIGN_IN_PROTOCOL = SIGN_IN_NAME;
 
-/** True for a line that really is a sign-in: nothing kept, nothing shared, only "this is you". */
+/** What a protocol request asks the keys to do. 'other' when the request does not say (no usageType). */
+export type KeyOperation =
+  | 'sign'
+  | 'verify'
+  | 'encrypt'
+  | 'decrypt'
+  | 'encryptDecrypt'
+  | 'hmac'
+  | 'linkage'
+  | 'publicKey'
+  | 'generic'
+  | 'other';
+
+/**
+ * The operation a protocol request is for, from the toolbox's usageType and, when the wallet saw it, the call that
+ * raised it (encrypt and decrypt share 'encrypting'; createSignature and verifySignature share 'signing'). Unknown
+ * calls count as the stronger operation (sign, or encrypt and decrypt).
+ */
+export const keyOperation = (r: Pick<BundleRequest, 'usageType' | 'calls'>): KeyOperation => {
+  const calls = r.calls ?? [];
+  const only = (...m: string[]) => calls.length > 0 && calls.every((c) => m.includes(c));
+  switch (r.usageType) {
+    case 'signing':
+      return only('verifySignature') ? 'verify' : 'sign';
+    case 'encrypting':
+      return only('encrypt') ? 'encrypt' : only('decrypt') ? 'decrypt' : 'encryptDecrypt';
+    case 'hmac':
+      return 'hmac';
+    case 'linkageRevelation':
+      return 'linkage';
+    case 'publicKey':
+      return 'publicKey';
+    case 'generic':
+      return 'generic';
+    default:
+      return 'other';
+  }
+};
+
+/** The request's counterparty is 'anyone', in any spelling (the word or the written-out 'anyone' key). */
+const forAnyone = (r: BundleRequest) => isAnyoneCounterparty(r.counterparty);
+
+/**
+ * Keys every app shares (b-Aware, Limenelo, 13 Nov 2026): never pre-ticked. Signatures with them can be checked by
+ * anybody with your public key, so other services may accept them as you (BitPlan: level-1 'bitcoin auth', keyID = a
+ * timestamp, counterparty 'anyone'). A grant covers every use of its protocol (the store keeps no usageType), so the
+ * request's own use doesn't matter:
+ *  - level 2 with counterparty 'anyone', except our own one-tap sign-ins (sharedKeySigning.ts ONE_TAP_SIGN_INS);
+ *  - every one-signature request (sharedKeySigning.ts).
+ * Not level 1 (consent polish, 13 Nov 2026): a level-1 grant still covers every counterparty, but every level-1
+ * signature not made as 'self' asks on its own at signing time (sharedKeySigning.ts), whatever is stored. So a
+ * level-1 line is pre-ticked again like any other key use, and level-1 apps don't get "Permission denied".
+ * Not: the public identity key, the first-post signature (its own POST card), 'generic' names (action labels,
+ * certificate acquisition: no key is used). Level 0 never reaches a sheet, and level-0 signing is refused for sites.
+ */
+export const isSharedKeyRequest = (r: BundleRequest): boolean => {
+  if (r.type !== 'protocol') return false;
+  if (isOneUseRequest(r)) return true;
+  if (isIdentityKeyRequest(r) || isPostSignature(r) || r.usageType === 'generic' || r.usageType === 'identityKey')
+    return false;
+  // A level-1 sign-in-shaped name (review of fc614295): never pre-ticked, the same rule as the upgrade's revocation.
+  if (protoLevel(r) === 1) return isSignInShapedName(protoName(r));
+  return protoLevel(r) === 2 && forAnyone(r) && !isOneTapSignIn(r.protocolID);
+};
+
+/** A request that answers one signature only (its sheet's Allow never stores a working grant). */
+export const isOneUseRequest = (r: Pick<BundleRequest, 'requestID'>): boolean => isOneUseRequestID(r.requestID);
+
+/** The request may sign (or does not say what it is for). */
+const maySign = (r: BundleRequest) => {
+  const op = keyOperation(r);
+  return op === 'sign' || op === 'other';
+};
+
+/**
+ * True for a line that really is a sign-in: nothing kept, nothing shared, only "this is you". A signature with
+ * counterparty 'anyone' (Sign in with bWalletX), the public identity key, or a sign-in protocol's own signature. Not
+ * an encrypt, decrypt, HMAC or key reveal with 'anyone' (Juann E-2, 13 Nov 2026), and never keys every app shares.
+ */
 export const isSignInRequest = (r: BundleRequest): boolean =>
   r.type === 'protocol' &&
   !r.privileged &&
-  (r.counterparty === 'anyone' ||
-    isIdentityKeyRequest(r) ||
-    (SIGN_IN_PROTOCOL.test(protoName(r)) &&
-      (r.counterparty === undefined || r.counterparty === 'self' || r.counterparty === 'anyone')));
+  !isSharedKeyRequest(r) &&
+  (isIdentityKeyRequest(r) ||
+    // Never a level-1 key: its signatures are not a sign-in to this site (they ask on their own, sharedKeySigning.ts).
+    (protoLevel(r) !== 1 &&
+      maySign(r) &&
+      (forAnyone(r) ||
+        (SIGN_IN_PROTOCOL.test(protoName(r)) && (r.counterparty === undefined || r.counterparty === 'self')))));
 
 /** Self-only keys we can name in plain words (protocol name → what the keys are used for). */
 const PRIVATE_LABELS: [RegExp, string][] = [
@@ -476,18 +581,72 @@ export const postPackCompanions = (
   return missing;
 };
 
+/** "Decrypt with your "docs" keys": the operation in plain words, for lines that name it. */
+const OPERATION_WORDS: Record<Exclude<KeyOperation, 'sign' | 'generic' | 'other'>, string> = {
+  verify: 'Check signatures with',
+  encrypt: 'Encrypt with',
+  decrypt: 'Decrypt with',
+  encryptDecrypt: 'Encrypt and decrypt with',
+  hmac: 'Make and check HMAC codes with',
+  linkage: 'Reveal how others can link',
+  publicKey: 'See a public key from',
+};
+
+/** "<site>" as the line says it: the host the request came from. */
+const hostOf = (r: BundleRequest) => r.originator;
+
+/**
+ * Keys every app shares (isSharedKeyRequest), in calm, plain words with the site named. A one-signature line says
+ * the risk in words: other sites could accept it as you (b-Aware, Limenelo, 13 Nov 2026). A standing line doesn't
+ * need to: its grant never covers a signature anyone can check under level 1 or a token-shaped one under level 2
+ * (each of those asks on its own, sharedKeySigning.ts).
+ */
+const sharedLineText = (r: BundleRequest): string => {
+  const name = protoName(r);
+  const site = hostOf(r);
+  if (isOneUseRequest(r))
+    return keyOperation(r) === 'hmac'
+      ? `Make one code as you for ${site} ("${name}"). The service it is for could accept it as you`
+      : `Sign once as you for ${site} ("${name}"). Other sites could accept this too`;
+  const op = keyOperation(r);
+  if (op === 'sign' || op === 'other')
+    return forAnyone(r)
+      ? `Sign as you for ${site} ("${name}"), a signature anyone can check`
+      : `Sign with your "${name}" keys for ${site}`;
+  const words = op === 'generic' ? 'Use' : OPERATION_WORDS[op];
+  return `${words} your "${name}" keys for ${site}`;
+};
+
 const lineText = (r: BundleRequest): string => {
   switch (r.type) {
     case 'protocol': {
       if (isIdentityKeyRequest(r)) return 'See your public identity (the key that names you)';
-      if (r.counterparty === 'anyone') return "Prove it's you (a signature anyone can check)";
+      if (isSharedKeyRequest(r)) return sharedLineText(r);
+      const op = keyOperation(r);
+      const name = protoName(r);
+      const named = op !== 'sign' && op !== 'generic' && op !== 'other' ? OPERATION_WORDS[op] : '';
+      // A level-1 key (keys every app shares): plain words, the site named. Its signatures to anyone but 'self' ask
+      // one at a time (sharedKeySigning.ts), so "sign with" here means as yourself.
+      if (protoLevel(r) === 1 && !isPostSignature(r) && op !== 'generic')
+        return named
+          ? `${named} your "${name}" keys for ${hostOf(r)}`
+          : `Sign with your "${name}" keys for ${hostOf(r)}`;
+      if (forAnyone(r)) {
+        // "Prove it's you" is only for a real signature (Juann E-2: a decrypt with 'anyone' said it too).
+        if (op === 'sign' || op === 'other') return "Prove it's you (a signature anyone can check)";
+        if (op === 'encrypt') return `Encrypt with your "${name}" keys, readable by anyone`;
+        if (named) return `${named} your "${name}" keys`;
+      }
       if (isPostSignature(r)) return 'Sign your posts and likes as you';
       const kept = privateLabelFor(r);
       if (kept) return `Use keys from your wallet for your ${kept}`;
-      if (protoLevel(r) === 2 && r.counterparty && r.counterparty !== 'self')
-        return `Sign and encrypt with your "${protoName(r)}" keys, shared with one named person or service`;
+      if (protoLevel(r) === 2 && r.counterparty && r.counterparty !== 'self' && !forAnyone(r))
+        return named
+          ? `${named} your "${name}" keys, shared with one named person or service`
+          : `Sign and encrypt with your "${name}" keys, shared with one named person or service`;
+      if (named) return `${named} your "${name}" keys`;
       // Not "sign in": this lets the app sign anything with keys derived from your wallet (audit C1).
-      return `Sign and encrypt anything with your "${protoName(r)}" keys`;
+      return `Sign and encrypt anything with your "${name}" keys`;
     }
     case 'basket':
       if (isPostBasket(r)) return 'Use your public profile (name and picture) on its posts';
@@ -588,10 +747,15 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
       }
       continue;
     }
-    const risky = isRiskyRequest(r);
+    // A one-signature request alone on its sheet: the SIGN ONCE card. Its main button ("Sign once") answers that one
+    // signature and stores nothing, so it is the line's tick (one tap, owner rule; review of ae664e79). With other
+    // lines it is risky: unticked, on the careful card.
+    const once = isOneUseRequest(r) && !r.addedLive && bundle.items.length === 1;
+    const risky = once ? false : isRiskyRequest(r);
     // Protocol (key use) lines are not pre-ticked: the user ticks them knowingly (audit C1). The one exception is
     // "Prove it's you" (counterparty 'anyone'), which Sign in with bWalletX needs; reserved wallet protocols never
-    // reach a sheet at all (services/reservedProtocols.ts).
+    // reach a sheet at all (services/reservedProtocols.ts). Keys every app shares are never pre-ticked
+    // (isSharedKeyRequest, b-Aware 13 Nov 2026).
     // The public identity key is the other exception: Sign in with bWalletX asks for it first, and an unticked line
     // made Allow answer "denied" for it ("Permission denied." on every site since 5.2.35, 20 Oct 2026).
     // Owner, 26 Oct 2026: every line is now drawn with its tick on every sheet (BundleSheet, no "Show details"), so a
@@ -599,9 +763,10 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
     // in plain view. bchatx.com's Connect left "bchat documents" unticked behind Hide details, so Connect granted
     // nothing it asked for and the site's encrypt failed "Permission denied". Risky and live-joined lines (and any
     // spend) stay unticked: payments still ask first.
-    const checked = !risky && !r.addedLive;
+    const checked = once || (!risky && !r.addedLive && !isSharedKeyRequest(r));
     lines.push({
       requestID: r.requestID,
+      ...(once ? { once: true } : {}),
       text: r.addedLive ? `New: ${lineText(r)}` : lineText(r),
       ...(r.addedLive ? { isNew: true } : {}),
       detail: lineDetail(r),
@@ -647,7 +812,7 @@ export interface SheetView {
 }
 
 /** Card kind, as approvalKindForSheet names it (kept as a string here to avoid an import cycle). */
-type FaceKind = 'signin' | 'connect' | 'pay' | 'mint' | 'careful' | 'post' | 'private';
+type FaceKind = 'signin' | 'connect' | 'pay' | 'mint' | 'careful' | 'post' | 'private' | 'signonce';
 
 /** The lines a card's face describes without drawing them (see SheetView.summarised). Fails closed. */
 export const faceSummary = (model: Pick<SheetModel, 'lines'>, kind?: FaceKind): Set<string> => {

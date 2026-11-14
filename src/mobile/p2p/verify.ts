@@ -11,6 +11,7 @@
  *   amount and price; one output pays the seller exactly that price; one output gives the tokens to our key; the
  *   only extras are the marketplace fee and overlay fee, each at most what the sheet showed.
  * - Cancel: one input, our listing; the tokens go back to our key; the only extra is the overlay fee.
+ * - Ordinal purchase: like Purchase, for an NFT listing (no token amount, no overlay fee).
  *
  * BSV funding inputs and BSV change are added by the wallet itself (they never appear in these args).
  * Pure: unit-tested in verify.test.ts with crafted bad args.
@@ -194,6 +195,80 @@ export function verifyPurchaseArgs(args: CheckArgs, e: PurchaseExpect): void {
   if (e.marketFee?.required && market !== 1) fail('the index-fund fee is missing');
   if (receive !== 1) fail('the tokens are not coming to you');
   if (overlay > e.maxOverlayFee) fail(`indexing fee ${overlay} sats is more than the ${e.maxOverlayFee} shown`);
+}
+
+// ── ordinal purchase (NFTs: Market collections, Movies clips, Podcasts) ──
+
+export type OrdinalPurchaseExpect = {
+  /** "txid.vout" or "txid_vout" of the listing the buyer picked. */
+  outpoint: string;
+  /** The price the sheet showed, in sats (paid to the seller). */
+  priceSats: number;
+  /** Our receive script (P2PKH to the key buyOrdinal derives from the outpoint). */
+  receiveScript: string;
+  /** Wallet baskets the bought ordinal may land in (buyOrdinal picks by content type). */
+  baskets: readonly string[];
+  /** Fee output shown on the sheet (the marketplace / ticket resale fee), at most `sats`. */
+  marketFee: { address: string; sats: number } | null;
+};
+
+/**
+ * Buying a listed ordinal: one input, the listing the buyer picked; its script (in inputBEEF) is an OrdLock v2 that
+ * is not a token listing and asks exactly the price shown; one output pays the seller that price; one output gives
+ * the ordinal to our key; the only extra is the marketplace fee, at most what the sheet showed.
+ */
+export function verifyOrdinalPurchaseArgs(args: CheckArgs, e: OrdinalPurchaseExpect): void {
+  const op = dotted(e.outpoint);
+  const inputs = args.inputs ?? [];
+  if (inputs.length !== 1 || dotted(inputs[0].outpoint) !== op)
+    fail('the purchase spends something other than the listing');
+  if (!positive(e.priceSats)) fail('no price');
+
+  if (!args.inputBEEF) fail('listing transaction missing');
+  const [txid, vout] = op.split('.');
+  let script: LockingScript | undefined;
+  try {
+    script = Beef.fromBinary(Array.from(args.inputBEEF as number[])).findTxid(txid)?.tx?.outputs[Number(vout)]
+      ?.lockingScript;
+  } catch {
+    script = undefined;
+  }
+  if (!script) fail('listing output not found');
+  let v2 = false;
+  try {
+    v2 = !!OrdLockV2.decode(script as LockingScript);
+  } catch {
+    v2 = false;
+  }
+  if (!v2) fail('not an OrdLock v2 listing');
+  if (decodeListing(script as LockingScript)) fail('this is a token listing, not an ordinal');
+  const payout = ordLockPayout(script as LockingScript);
+  if (!payout) fail('listing payout unreadable');
+  if (payout!.sats !== e.priceSats) fail(`the listing asks ${payout!.sats} sats, not the ${e.priceSats} shown`);
+
+  let receive = 0;
+  let paid = 0;
+  let market = 0;
+  for (const o of args.outputs ?? []) {
+    if (o.lockingScript === e.receiveScript && receive === 0) {
+      if (o.satoshis !== 1 || !e.baskets.includes(o.basket ?? '')) fail('the ordinal is not coming to your wallet');
+      receive += 1;
+      continue;
+    }
+    if (o.lockingScript === payout!.script && paid === 0) {
+      if (o.satoshis !== e.priceSats) fail(`seller payout is ${o.satoshis} sats, not ${e.priceSats}`);
+      paid += 1;
+      continue;
+    }
+    if (e.marketFee && o.lockingScript === p2pkhHex(e.marketFee.address) && market === 0) {
+      if (o.satoshis > e.marketFee.sats) fail('marketplace fee is more than shown');
+      market += 1;
+      continue;
+    }
+    fail('an output pays someone unexpected');
+  }
+  if (paid !== 1) fail('the seller is not paid');
+  if (receive !== 1) fail('the ordinal is not coming to you');
 }
 
 /** The OrdLock's committed payout (sats + script hex), or null. */

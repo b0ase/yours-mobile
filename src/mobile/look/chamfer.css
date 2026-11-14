@@ -1,0 +1,522 @@
+/* Chamfer (owner, 8 Nov 2026: "more angular buttons… a different feel"; "I like Chamfer"): cut corners and one button
+   system, in every theme. True black, hairlines and the one filled gold action are the Gold base only
+   (:not([data-bw-pack])): full packs keep their own colours. The dock's b stays round (owner): nothing here touches it.
+
+   Paint cost (owner's first priority is speed). Two techniques, by where the shape sits:
+   - On the plain page: a static gradient that paints the page colour over two corners. No clip, no extra layer, and the
+     focus outline survives.
+   - On art or an unknown ground (the room header's two buttons, the composer, the active tab):
+     clip-path, only on a handful of static elements. Never on list rows, the card face or anything animated: repeated
+     rows (.bw-card) are plain small-radius boxes.
+   The wallet's credit card keeps its own rounded corners and pill buttons (owner, 9 Nov 2026): no Chamfer rule here
+   touches the card, its face or anything on it (mobile.css .bw-wcard*, balanceCards.css .bw-bc). */
+
+:root {
+  /* One button system: a row's buttons share a height and padding. */
+  --bw-btn-h: 30px;
+  --bw-btn-px: 11px;
+  --bw-btn-fs: 12px;
+  --bw-act-h: 46px;
+  --bw-tile-h: 54px;
+  --bw-row-py: 6px;
+  --bw-corner: 2px;
+  /* The cut: leg of the clipped shape, and the matching distance along the corner gradient (leg / √2). */
+  --ch-leg: 7px;
+  --ch-c: 5px;
+  --ch-bg: var(--bw-bg);
+  --ch-edge: var(--bw-line);
+  --ch-bw: 0px;
+  --bw-cut: polygon(
+    var(--ch-leg) 0,
+    100% 0,
+    100% calc(100% - var(--ch-leg)),
+    calc(100% - var(--ch-leg)) 100%,
+    0 100%,
+    0 var(--ch-leg)
+  );
+  --bw-tile-off: var(--bw-muted);
+  --bw-tint-plate: color-mix(in srgb, var(--bw-accent-hi) 14%, transparent);
+}
+/* 68px: the b (52px) with its ring, and no empty dots row. */
+html[data-phone-layout]:root:not([data-rail]) {
+  --dock-h: 4.25rem;
+}
+
+/* ── Gold: one black, hairlines, nothing cold ── */
+html:not([data-bw-pack]) {
+  --bw-bg: #000;
+  --bw-pack-bg: #000;
+  --bw-surface: #101010;
+  --bw-card: #101010;
+  --bw-card2: #191918;
+  --bw-line: #242321;
+  --bw-muted: #9c9a92;
+  --bw-tile-off: #8f8c84;
+  --bw-black: #000;
+  --bw-field: #141413;
+  --bw-chip: #191918;
+  --bw-hair: rgb(255 255 255 / 0.09);
+  --ch-edge: rgb(255 255 255 / 0.16);
+  --bw-gold-hair: rgb(var(--bw-accent-hi-rgb) / 0.5);
+}
+html:not([data-bw-pack]) body,
+html:not([data-bw-pack]) #root {
+  background-color: var(--bw-black);
+}
+
+/* ── The corner paint ── */
+:is(
+  .bw-toprow > *,
+  .bw-swaprow button,
+  .bw-backup-banner,
+  .bw-home-panel,
+  .bw-handle-card,
+  .bw-sendrow > .bw-pill,
+  .bw-apps-bar,
+  .bw-home-edit
+) {
+  position: relative;
+  border-radius: 0 !important;
+}
+:is(.bw-toprow > *, .bw-swaprow button, .bw-home-panel, .bw-handle-card) {
+  --ch-bw: 1px;
+}
+:is(
+  .bw-toprow > *,
+  .bw-swaprow button,
+  .bw-backup-banner,
+  .bw-home-panel,
+  .bw-handle-card,
+  .bw-sendrow > .bw-pill,
+  .bw-apps-bar,
+  .bw-home-edit
+)::after {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--ch-bw));
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+        135deg,
+        var(--ch-bg) calc(var(--ch-c) - 0.5px),
+        var(--ch-edge) calc(var(--ch-c) - 0.5px) calc(var(--ch-c) + 0.5px),
+        transparent calc(var(--ch-c) + 0.5px)
+      )
+      left top / 16px 16px no-repeat,
+    linear-gradient(
+        315deg,
+        var(--ch-bg) calc(var(--ch-c) - 0.5px),
+        var(--ch-edge) calc(var(--ch-c) - 0.5px) calc(var(--ch-c) + 0.5px),
+        transparent calc(var(--ch-c) + 0.5px)
+      )
+      right bottom / 16px 16px no-repeat;
+}
+:is(.bw-home-panel, .bw-handle-card) {
+  --ch-c: 8px;
+}
+/* The clipped few. */
+:is(.bw-golive, .bw-room-invites, .bw-composer-input, .bw-composer-plus, .bw-composer-send) {
+  border-radius: 0 !important;
+  clip-path: var(--bw-cut);
+}
+/* Repeated rows and their swipe clip: small corners, nothing clipped. */
+:is(.bw-card, .bw-token-swipe .bw-swipe:has(.bw-card)) {
+  border-radius: var(--bw-corner) !important;
+}
+
+/* Focus: clip-path removes an outline, so the clipped few ring on the inside. */
+:is(.bw-golive, .bw-room-invites, .bw-composer-plus, .bw-composer-send):focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--bw-text) !important;
+}
+:is(
+  .bw-toprow > *,
+  .bw-swaprow button,
+  .bw-backup-banner,
+  .bw-handle-card,
+  .bw-sendrow > .bw-pill,
+  .bw-apps-bar,
+  .bw-home-edit
+):focus-visible,
+.bw-tile:focus-visible {
+  outline: 2px solid var(--bw-accent-hi) !important;
+  outline-offset: 1px;
+}
+
+/* ── Buttons ── */
+:is(.bw-golive, .bw-room-invites, .bw-home-edit) {
+  height: var(--bw-btn-h) !important;
+  min-height: var(--bw-btn-h);
+  padding: 0 var(--bw-btn-px) !important;
+  font-size: var(--bw-btn-fs) !important;
+  line-height: 1 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-width: 0 !important;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.bw-golive:active,
+.bw-room-invites:active {
+  opacity: 0.7;
+}
+@media (max-width: 359px) {
+  .bw-golive-text {
+    display: none;
+  }
+}
+/* On an unknown ground: a tinted plate, so no outline has to follow the cut. */
+.bw-room-invites {
+  background: var(--bw-tint-plate) !important;
+}
+.bw-home-edit {
+  background: transparent !important;
+  color: var(--bw-muted) !important;
+  box-shadow: inset 0 0 0 1px var(--bw-line);
+}
+.bw-toprow > * {
+  height: var(--bw-tile-h) !important;
+}
+/* Two rows: Send · Receive, Mint · Lock (order-* in the markup). A button this build or an error leaves out never leaves
+   a hole: its partner takes the whole row. */
+.bw-sendrow {
+  width: 92%;
+  gap: 8px;
+}
+.bw-sendrow .bw-pill {
+  height: var(--bw-act-h);
+  padding-block: 0;
+  font-size: 14px !important;
+}
+.bw-sendrow:not(:has(.bw-act-mint)) > .bw-act-lock,
+.bw-sendrow:not(:has(.bw-act-lock)) > .bw-act-mint {
+  grid-column: 1 / -1;
+}
+.bw-sendrow > p {
+  grid-column: 1 / -1;
+  order: 5;
+}
+
+/* ── Dock: no rings, and no plate (owner, 9 Nov 2026): the current tab is lit gold. The b is left exactly as it was. ── */
+.bw-dock-dots:empty {
+  display: none;
+}
+/* Owner, 9 Nov 2026: the b and the tab names sit lower in the bar. The b's 56px with ring must stay inside the 68px dock
+   (it clips at the dock's edge). The names move by real layout, because the right-hand tiles sit in an overflow scroller:
+   padding balances the bigger gap so the icons stay where they were. */
+nav[data-phone-dock][data-bw-bottom-nav] .bw-dock-b {
+  top: 4px;
+}
+nav[data-phone-dock][data-bw-bottom-nav] .bw-tile {
+  gap: 9px;
+  padding-top: 6px;
+}
+.bw-tile {
+  gap: 3px;
+  padding-block: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.bw-tile-ico:not(.is-app) {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  width: 44px;
+  height: 28px;
+}
+.bw-apps-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 40px;
+  margin: 8px 12px 0;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  color: var(--bw-on-accent);
+  background: var(--bw-accent-hi);
+  border: 0;
+  cursor: pointer;
+}
+.bw-apps-bar:active {
+  opacity: 0.7;
+}
+.bw-tile-ico.is-app,
+.bw-tile-ico.is-app img {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--bw-corner) !important;
+}
+.bw-tile-ico > svg {
+  width: 23px;
+  height: 23px;
+  stroke: var(--bw-tile-off);
+  stroke-width: 1.75;
+}
+.bw-tile[data-active] .bw-tile-ico:not(.is-app) > svg {
+  stroke: var(--bw-accent-hi);
+  stroke-width: 2;
+}
+.bw-tile-lbl {
+  color: var(--bw-tile-off) !important;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 9px;
+  font-weight: 500 !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.bw-tile[data-active] .bw-tile-lbl {
+  color: var(--bw-accent-hi) !important;
+  font-weight: 700 !important;
+}
+.bw-tile:active .bw-tile-ico {
+  opacity: 0.65;
+}
+.bw-topnav > button {
+  border-color: transparent !important;
+  background: transparent !important;
+}
+.bw-topnav > .bw-topnav-apps[aria-pressed='true'] {
+  border-color: var(--bw-accent) !important;
+  background: color-mix(in srgb, var(--bw-accent) 20%, transparent) !important;
+}
+html:not([data-bw-pack]) nav[data-phone-dock][data-bw-bottom-nav] {
+  background: var(--bw-black) !important;
+  border-top: 1px solid var(--bw-gold-hair) !important;
+}
+/* The bar carries on under the home indicator, so no strip shows below it. */
+html:not([data-bw-pack]) nav[data-phone-dock][data-bw-bottom-nav]::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-bottom, 0px);
+  background: inherit;
+}
+html:not([data-bw-pack]) nav[data-phone-rail] {
+  background: var(--bw-black) !important;
+  border-right: 1px solid var(--bw-hair) !important;
+}
+
+/* ── Room header: two compact rows, with Go live beside the room's buttons ── */
+.bw-room-head {
+  column-gap: 8px;
+  row-gap: 0;
+  padding-top: 4px !important;
+  padding-bottom: 0 !important;
+}
+.bw-room-head > button[aria-label='Back'] {
+  padding: 6px;
+}
+.bw-room-head .bw-room-tools {
+  padding-block: var(--bw-row-py);
+  min-height: calc(var(--bw-btn-h) + 2 * var(--bw-row-py));
+  gap: 2px;
+}
+.bw-room-head .bw-room-tools button:not(.bw-golive, .bw-room-invites) {
+  width: var(--bw-btn-h);
+  height: var(--bw-btn-h);
+  padding: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.bw-room-head .bw-room-tools svg {
+  width: 18px;
+  height: 18px;
+}
+.bw-composer {
+  padding-top: 6px;
+  padding-bottom: 6px !important;
+}
+
+/* ── Gold: the room and the wallet on black ── */
+html:not([data-bw-pack]) .bw-room-view,
+html:not([data-bw-pack]) .bw-room-list:not([data-room-look]) {
+  background: var(--bw-black) !important;
+}
+html:not([data-bw-pack]) .bw-room-head:not([data-room-look]) {
+  background: var(--bw-black) !important;
+  border-bottom: 1px solid var(--bw-hair) !important;
+}
+html:not([data-bw-pack]) .bw-room-day {
+  background: transparent !important;
+  color: var(--bw-muted) !important;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0 !important;
+}
+html:not([data-bw-pack]) .bw-room-event {
+  background: transparent !important;
+  color: var(--bw-muted) !important;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 0 8px !important;
+  max-width: 88%;
+}
+html:not([data-bw-pack]) .bw-composer {
+  background: var(--bw-black) !important;
+  border-top: 1px solid var(--bw-hair) !important;
+}
+html:not([data-bw-pack]) :is(.bw-composer-plus, .bw-composer-b) {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html:not([data-bw-pack]) .bw-composer-input {
+  background: var(--bw-field) !important;
+  border-color: transparent !important;
+}
+html:not([data-bw-pack]) .bw-composer-send:disabled {
+  background: var(--bw-chip) !important;
+  opacity: 1;
+}
+html:not([data-bw-pack]) .bw-composer-send:disabled svg {
+  stroke: var(--bw-muted);
+}
+html:not([data-bw-pack]) .bw-composer-send:not(:disabled) svg {
+  stroke: #000;
+}
+html:not([data-bw-pack]) :is(.bw-toprow > *, .bw-swaprow button, .bw-handle-card, .bw-home-panel) {
+  background: var(--bw-black) !important;
+  border-color: var(--ch-edge) !important;
+  box-shadow: none !important;
+}
+html:not([data-bw-pack]) .bw-card {
+  background: var(--bw-black) !important;
+  box-shadow: inset 0 0 0 1px var(--bw-hair) !important;
+  border-color: transparent !important;
+}
+/* Buy BSV steps back: the one filled gold button on the screen is Send. */
+html:not([data-bw-pack]) .bw-toprow > button:nth-child(2) {
+  --ch-edge: var(--bw-gold-hair);
+  border-color: var(--bw-gold-hair) !important;
+  background: var(--bw-black) !important;
+  color: var(--bw-accent-hi) !important;
+}
+/* Owner, 9 Nov 2026: Receive, Mint and Lock were blending into the page. */
+html:not([data-bw-pack]) .bw-sendrow .bw-pill {
+  --ch-edge: rgb(var(--bw-accent-hi-rgb) / 0.7);
+  background: var(--bw-black) !important;
+  color: var(--bw-text) !important;
+  box-shadow: inset 0 0 0 1px var(--ch-edge);
+}
+html:not([data-bw-pack]) .bw-sendrow > .bw-act-send {
+  --ch-edge: transparent;
+  background: var(--bw-accent-hi) !important;
+  color: #000 !important;
+  box-shadow: none;
+}
+html:not([data-bw-pack]) .bw-backup-banner {
+  --ch-edge: rgb(229 72 77 / 0.55);
+  background: var(--bw-black) !important;
+  color: var(--bw-text) !important;
+  box-shadow:
+    inset 2px 0 0 #e5484d,
+    inset 0 0 0 1px rgb(229 72 77 / 0.35);
+  width: 92%;
+}
+html:not([data-bw-pack]) .bw-backup-banner svg {
+  color: #e5484d;
+}
+
+/* Packs draw outlines on these, and a clip would break the outline at the cut: small square corners instead. */
+:root[data-bw-pack] :is(.bw-composer-input, .bw-composer-plus, .bw-composer-send),
+:root[data-bw-tone='mono'] .bw-golive {
+  clip-path: none;
+  border-radius: var(--bw-corner) !important;
+}
+/* Pack buttons set their own radius with a stronger selector. */
+html:root .bw-sendrow > .bw-pill.bw-pill.bw-pill {
+  border-radius: 0 !important;
+}
+
+/* ── The rounded leftovers (owner, 10 Nov 2026; Feed 13 Nov): Exchange, Feed, chat list, chat room, sheets, Ask b ──
+   Screens write Tailwind radii (rounded-xl…) in the markup, so these rules match the utility by class token inside a
+   screen's root (.bw-exchange, .bw-feed, .bw-chatlist, .bw-room-view, .bw-askchat) or a sheet. Same two techniques as above:
+   - Panels, inputs, bubbles and anything that may carry a border or repeat: the small --bw-corner box, no clip.
+   - Filled buttons (no `border` class) and sheets: the clipped cut, static elements only.
+   Left round on purpose: the wallet credit card and its pills, the b button (.askb-bar's talk b, the dock b), avatars,
+   count badges and any rounded-full without a text-button shape (icon hit areas, dots, tags). */
+:is(.bw-exchange, .bw-feed, .bw-chatlist, .bw-room-view, .bw-askchat, [class~='rounded-t-3xl'])
+  :is(
+    [class~='rounded'],
+    [class~='rounded-md'],
+    [class~='rounded-lg'],
+    [class~='rounded-xl'],
+    [class~='rounded-2xl'],
+    [class~='rounded-3xl']
+  ) {
+  border-radius: var(--bw-corner) !important;
+}
+/* Filled buttons: cut corners. A bordered button would lose its outline at the cut, so it keeps the small corner above. */
+:is(.bw-exchange, .bw-feed, .bw-chatlist, .bw-room-view, .bw-askchat, [class~='rounded-t-3xl'])
+  button:is([class~='rounded-xl'], [class~='rounded-2xl'], [class~='rounded-full'][class*='px-3']):not(
+    [class~='border'],
+    [class~='p-2'],
+    [style*='border']
+  ),
+.askb-send,
+.askb-tools button,
+.yours-sheet-secondary,
+.bw-idwarn-cancel {
+  border-radius: 0 !important;
+  clip-path: var(--bw-cut);
+}
+.askb-send:focus-visible,
+.askb-tools button:focus-visible,
+.yours-sheet-secondary:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--bw-text) !important;
+}
+/* Pills on Exchange, Feed and the chat list (owner, 13 Nov 2026: "chamfer buttons in Exchange, Feed and Chat"): text
+   pills, chips and segmented controls lose their round ends. Fixed-size round things stay round: avatars, icon buttons
+   (fixed width or height, or p-2), the compose button and count dots. Bordered pills get the small corner; filled ones the cut. */
+:is(.bw-exchange, .bw-feed, .bw-chatlist)
+  :is(
+    button,
+    a,
+    [role='tab'],
+    [role='button'],
+    div[class~='p-0.5'],
+    div[class~='p-[3px]'],
+    .bw-feed-chip,
+    .bw-feed-sort
+  ):is([class~='rounded-full'], .bw-feed-chip, .bw-feed-sort):not(
+    [class*=' h-'],
+    [class^='h-'],
+    [class~='p-2'],
+    [class~='p-[2px]'],
+    img
+  ) {
+  border-radius: var(--bw-corner) !important;
+}
+:is(.bw-exchange, .bw-feed, .bw-chatlist) :is(.bw-pill, .bw-feed-chip.is-on),
+:is(.bw-exchange, .bw-feed, .bw-chatlist)
+  button[class~='rounded-full'][class~='flex-1']:not([class~='border'], [style*='border']) {
+  border-radius: 0 !important;
+  clip-path: var(--bw-cut);
+}
+/* Ask b: the bar and its reply bubbles. The bar has a border, so a small corner; its b button stays circular. */
+.askb-bar,
+.askb-bubble {
+  border-radius: var(--bw-corner) !important;
+}
+/* Sheets: the top two corners are cut (leg 12px); the bottom meets the screen edge. Static, so a clip is cheap. */
+:is(.yours-sheet, .fr-sheet, .bw-cdes-confirm > div, [class~='rounded-t-3xl']) {
+  --bw-cut-top: polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%, 0 12px);
+  border-radius: 0 !important;
+  clip-path: var(--bw-cut-top);
+}
+/* A sheet that floats (wide layout) is cut at all four corners. */
+html.ww-on .yours-sheet {
+  clip-path: var(--bw-cut);
+}
+/* Dialogs and notices: small corner, bordered. */
+:is(.bw-idwarn-card, .yours-toast) {
+  border-radius: var(--bw-corner) !important;
+}

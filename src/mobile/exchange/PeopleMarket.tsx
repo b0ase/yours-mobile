@@ -17,6 +17,7 @@ import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { clearMarketCache, roomMarket, type Listing } from '../market/indexer';
 import { marketFeeOptions, marketFeeSats } from '../market/fee';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
+import { checkedPurchaseContext } from '../p2p/checkedPurchase';
 import { showOnWallet } from '../tokens/indexFund';
 import { marketTradingEnabled, tokenRoomsEnabled } from '../storeBuild';
 import { useBackClose } from '../backStack';
@@ -30,6 +31,7 @@ import { addHistory, bsvLabel, fiatLabel, unitPriceLabel } from './exchangeData'
 import { usePeopleTokens } from './usePeopleTokens';
 import { joinLabel, peopleSections, tokenFor, type PersonToken } from './people';
 import {
+  curveHeadlineCents,
   fetchQuote,
   joinSheetTitle,
   pickCurveListing,
@@ -74,7 +76,8 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
   const openRoom = useOpenRoom();
   const [state, setState] = useState<'idle' | 'loading' | 'none' | 'sheet' | 'buying'>('idle');
   const [best, setBest] = useState<Listing | null>(null);
-  const [curve, setCurve] = useState<{ cents: number; supporter: number | null } | null>(null);
+  /** cents: the headline price (null = no BSV rate: the sheet shows the listing's sats only). */
+  const [curve, setCurve] = useState<{ cents: number | null; supporter: number | null } | null>(null);
   useBackClose(state === 'sheet', () => setState('idle'));
   if (!TRADING || !tokenRoomsEnabled()) return null;
 
@@ -99,7 +102,11 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
         const m = await roomMarket(ref, 50).catch(() => null);
         const l = pickCurveListing(q.listings, m?.listings ?? []);
         if (l) {
-          setCurve({ cents: q.price_usd_cents * q.pack, supporter: q.supporter });
+          // The headline is the picked listing's own price (what gets signed), not just the server's quote.
+          setCurve({
+            cents: curveHeadlineCents(q.price_usd_cents * q.pack, l.priceSats, rate),
+            supporter: q.supporter,
+          });
           setBest(l);
           setState('sheet');
           return;
@@ -117,7 +124,14 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
     try {
       const outpoint = walletOutpoint(l.outpoint);
       await assertOrdLockV2(outpoint);
-      const res = await buyBsv21.execute(purchaseContext(apiContext, outpoint), {
+      // Checked before signing: the wallet pays exactly the price on the sheet, or nothing.
+      const checked = await checkedPurchaseContext(apiContext, {
+        tokenId: token.tokenId,
+        outpoint,
+        amount: BigInt(l.amount ?? '0'),
+        priceSats: l.priceSats,
+      });
+      const res = await buyBsv21.execute(purchaseContext(checked, outpoint), {
         tokenId: token.tokenId,
         outpoint,
         amount: l.amount ?? '0',
@@ -192,7 +206,9 @@ export const BuyAndChat = ({ token, rate }: { token: PersonToken; rate: number }
               <img src={avatarSrc(token)} alt="" className="w-12 h-12 rounded-full object-cover" />
               <div>
                 <div className="text-base font-bold text-white">
-                  {curve ? joinSheetTitle(token.handle, curve.cents, curve.supporter) : `Join $${token.handle}'s room`}
+                  {curve?.cents != null
+                    ? joinSheetTitle(token.handle, curve.cents, curve.supporter)
+                    : `Join $${token.handle}'s room`}
                 </div>
                 <div className="text-xs" style={{ color: MUTED }}>
                   {curve ? `${best.label} from $${token.handle}. ` : `Buy ${best.label}. `}Holding their token opens

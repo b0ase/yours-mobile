@@ -3,6 +3,7 @@ import '../utils/abortSignalPolyfill'; // AbortSignal.timeout / any on iOS 15 (u
 import { Buffer } from 'buffer';
 import process from 'process';
 import { createChromeShim } from './chromeShim';
+import { onSpendsInFlight } from '../services/spendsInFlight';
 
 /**
  * Runs the extension's background.ts in a dedicated worker. Like a service
@@ -37,17 +38,20 @@ for (const level of relayLevels) {
   };
 }
 
+// Payments running (services/spendsInFlight.ts): the web page lets them finish before handing the wallet to another tab.
+onSpendsInFlight((n) => self.postMessage({ t: 'spends', n }));
+
 // Hub traffic can arrive before init on WebKit; hold it until the shim exists.
 const early: string[] = [];
 let receive: ((json: string) => void) | undefined;
 
 self.addEventListener('message', (event: MessageEvent) => {
-  const data = event.data as string | { t?: string; rootUrl?: string; version?: string };
+  const data = event.data as string | { t?: string; rootUrl?: string; version?: string; sharedEnvelopeLock?: boolean };
   if (typeof data === 'string') return receive ? receive(data) : void early.push(data);
-  if (data?.t === 'init' && !receive) void init(data.rootUrl!, data.version!);
+  if (data?.t === 'init' && !receive) void init(data.rootUrl!, data.version!, data.sharedEnvelopeLock === true);
 });
 
-const init = async (rootUrl: string, version: string) => {
+const init = async (rootUrl: string, version: string, sharedEnvelopeLock: boolean) => {
   const shim = createChromeShim({
     post: (json) => self.postMessage(json),
     parse: JSON.parse,
@@ -64,6 +68,8 @@ const init = async (rootUrl: string, version: string) => {
   early.splice(0).forEach(receive);
 
   try {
+    // Web wallet: other tabs run their own worker over the same storage; envelopes then need navigator.locks.
+    if (sharedEnvelopeLock) (await import('../services/envelopes')).requireSharedEnvelopeLock();
     await import('./syncStateRaceFix');
     await import('../background');
     self.postMessage({ t: 'ready' });

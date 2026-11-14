@@ -176,7 +176,13 @@ export function disconnectPhone() {
  * Show a QR and wait for a phone. Calls `onState` as things happen; returns a stop function
  * (call it when the chooser closes). A fresh QR is made when one expires.
  */
-export function startPairing(onState: (s: PairState) => void): () => void {
+export function startPairing(
+  onState: (s: PairState) => void,
+  // Test hooks (not in TokenBlaster's copy): another relay, and the site claim + `wc` a current site sends, which the
+  // relay requires on a new channel after its compatibility window.
+  opts: { relay?: string; siteClaims?: (c: string, sitePub: string) => Promise<{ claim: string; wc: string }> } = {},
+): () => void {
+  const relay = opts.relay ?? RELAY;
   let stopped = false;
   let ws: WebSocket | null = null;
   let refresh: ReturnType<typeof setTimeout> | undefined;
@@ -187,10 +193,12 @@ export function startPairing(onState: (s: PairState) => void): () => void {
     const S = PrivateKey.fromRandom();
     const c = newChannel();
     const e = Math.floor(Date.now() / 1000) + QR_LIFETIME_S;
-    const link = pairUrl({ v: PAIR_VERSION, r: RELAY, c, k: S.toPublicKey().toString(), o: location.origin, e });
+    const link = pairUrl({ v: PAIR_VERSION, r: relay, c, k: S.toPublicKey().toString(), o: location.origin, e });
     const qr = await QRCode.toDataURL(link, { margin: 1, width: 320 });
     if (stopped) return;
-    const sock = new WebSocket(relaySocketUrl(RELAY, c, 'site', e));
+    const claims = opts.siteClaims ? await opts.siteClaims(c, S.toPublicKey().toString()) : null;
+    const url = relaySocketUrl(relay, c, 'site', e);
+    const sock = new WebSocket(claims ? `${url}&claim=${claims.claim}&wc=${claims.wc}` : url);
     ws = sock;
     let sealer: Sealer | null = null;
     let phone = 'bWallet';
@@ -215,7 +223,7 @@ export function startPairing(onState: (s: PairState) => void): () => void {
       if (!sealer || !isSealed(f)) return;
       const msg = await sealer.open(f);
       if (msg?.t === 'ready') {
-        const saved: Saved = { c, r: RELAY, s: S.toHex(), k: phoneKey, phone, ...sealer.counters };
+        const saved: Saved = { c, r: relay, s: S.toHex(), k: phoneKey, phone, ...sealer.counters };
         try {
           sessionStorage.setItem(STORE, JSON.stringify(saved));
         } catch {

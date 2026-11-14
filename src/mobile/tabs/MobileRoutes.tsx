@@ -73,15 +73,14 @@ const HomeScreen = lazy(() => import('../phone/HomeScreen'));
 const PeopleScreen = lazy(() => import('../phone/PeopleScreen'));
 const BrowserPage = lazy(() => import('../BrowserPage'));
 const BappLinkPage = lazy(() => import('../bappFrame/BappLinkPage'));
-// The phone top bar's Lock BSV button (locks/, docs/TIME-LOCK-PLAN.md).
+// Lock BSV: the wallet's Lock button and the bApps tile (locks/, docs/TIME-LOCK-PLAN.md).
 const LockScreen = lazy(() => import('../locks/LockScreen'));
-// Desktop sidebar › Tickets / Credits (wide/WalletKindPages.tsx).
+// Desktop sidebar › Tickets (wide/WalletKindPages.tsx).
 const TicketsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.TicketsPage })));
 const MyNamesPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.MyNamesPage })));
 // Wallet › Friends is the address book notebook (wallet/AddressBook.tsx, owner 15 Oct 2026); /m/friends/<slug> keeps
 // a friend's own page.
 const AddressBookPage = lazy(() => import('../wallet/AddressBook').then((m) => ({ default: m.AddressBookPage })));
-const CreditsPage = lazy(() => import('../wide/WalletKindPages').then((m) => ({ default: m.CreditsPage })));
 // Wallet › NFTs library (Desktop /wallet/nfts[/<outpoint>], docs/NFT-LIBRARY.md).
 const NftLibraryPage = lazy(() => import('../nfts/NftLibraryPage'));
 // Desktop sidebar › Friends (/wallet/friends, docs/FRIENDS.md).
@@ -95,7 +94,7 @@ const BTrustPage = BTRUST_ENABLED ? lazy(() => import('../btrust/BTrustPage')) :
 const BsharesPage = PLACEMENT_ENABLED ? lazy(() => import('../placement/BsharesPage')) : null;
 // The Name Store (/m/names, public /names): search, buy, claim and give names (names/store/).
 const NameStorePage = lazy(() => import('../names/store/NameStorePage'));
-// bStore (/m/store, themeStore/, docs/BSTORE.md): Themes + Names everywhere; bWalletX also paid themes, Subscriptions, Credits, Stickers, Services, Community (THEME_STORE_PAID_ENABLED).
+// bStore (/m/store, themeStore/, docs/BSTORE.md): Themes + Names everywhere; bWalletX also paid themes, Subscriptions, Stickers, Services, Community (THEME_STORE_PAID_ENABLED).
 const ThemeStorePage = lazy(() => import('../themeStore/ThemeStorePage'));
 // /names/store: the shop's stock (listed by tier, other sellers, held unlisted), names/store/StockPage.tsx.
 const StockPage = MARKET_ENABLED ? lazy(() => import('../names/store/StockPage')) : null;
@@ -177,7 +176,8 @@ const MobileRoutes = () => (
         <Route path="nfts" element={<NftLibraryPage />} />
         <Route path="nfts/:outpoint" element={<NftLibraryPage />} />
         <Route path="tickets" element={<TicketsPage />} />
-        <Route path="credits" element={<CreditsPage />} />
+        {/* Credits (b-only prepaid credits) retired 12 Nov 2026: old links land on the wallet. */}
+        <Route path="credits" element={<Navigate to="/bsv-wallet" replace />} />
         <Route path="my-names" element={<MyNamesPage />} />
         <Route path="friends" element={<AddressBookPage />} />
         <Route path="friends/:slug" element={<FriendsPage />} />

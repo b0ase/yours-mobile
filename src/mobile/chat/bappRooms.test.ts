@@ -1,6 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { BAPPS, BAPP_DEFAULT_CURVE, bappForTicker, isBappRoom } from './bappRooms';
-import { checkTicket, ticketLabel, ticketReference, ticketRequests, type TicketCard } from './bappTicket';
+import {
+  checkTicket,
+  recheckTicket,
+  ticketLabel,
+  ticketReference,
+  ticketRequests,
+  type TicketCard,
+} from './bappTicket';
+
+/** USD per BSV in these tests: 2,000 sats = 1¢. */
+const RATE = 500;
 
 const hex = (s: string) => Buffer.from(s, 'utf8').toString('hex');
 const card = (over: Partial<NonNullable<TicketCard['ticket']>> = {}, ticker = 'BMAIL', me = 'alice'): TicketCard => {
@@ -47,20 +57,53 @@ describe('registry', () => {
 
 describe('checkTicket', () => {
   test('a good penny ticket passes', () => {
-    const c = checkTicket(card(), 'BMAIL', 'alice');
+    const c = checkTicket(card(), 'BMAIL', 'alice', RATE);
     expect(c.ok).toBe(true);
     if (c.ok) expect(ticketRequests(c.pay)).toHaveLength(2);
   });
   test('refuses another room, another person, wrong amounts, big prices, bad addresses', () => {
-    expect(checkTicket(card(), 'BCAL', 'alice').ok).toBe(false);
-    expect(checkTicket(card(), 'BMAIL', 'mallory').ok).toBe(false);
-    expect(checkTicket(card({ sats: 3000 }), 'BMAIL', 'alice').ok).toBe(false);
-    expect(checkTicket(card({ usd: 5 }), 'BMAIL', 'alice').ok).toBe(false);
+    expect(checkTicket(card(), 'BCAL', 'alice', RATE).ok).toBe(false);
+    expect(checkTicket(card(), 'BMAIL', 'mallory', RATE).ok).toBe(false);
+    expect(checkTicket(card({ sats: 3000 }), 'BMAIL', 'alice', RATE).ok).toBe(false);
+    expect(checkTicket(card({ usd: 5 }), 'BMAIL', 'alice', RATE).ok).toBe(false);
     const bad = card();
     bad.ticket!.pay!.address = 'not-an-address';
-    expect(checkTicket(bad, 'BMAIL', 'alice').ok).toBe(false);
-    expect(checkTicket({ ...card(), ticket: null }, 'BMAIL', 'alice').ok).toBe(false);
-    expect(checkTicket(card({ ready: false }), 'BMAIL', 'alice').ok).toBe(false);
+    expect(checkTicket(bad, 'BMAIL', 'alice', RATE).ok).toBe(false);
+    expect(checkTicket({ ...card(), ticket: null }, 'BMAIL', 'alice', RATE).ok).toBe(false);
+    expect(checkTicket(card({ ready: false }), 'BMAIL', 'alice', RATE).ok).toBe(false);
+  });
+  test('refuses sats far above the USD price at the wallet’s rate, and pays nothing without a rate', () => {
+    const big = card({ sats: 10_000_000 });
+    big.ticket!.pay!.sats = 10_000_000;
+    const c = checkTicket(big, 'BMAIL', 'alice', RATE);
+    expect(c.ok).toBe(false);
+    if (!c.ok) expect(c.why).toContain('more than the ticket price');
+    // Within tolerance (bit-sign's rate differs a little from ours) still passes; well above does not.
+    const near = card({ sats: 2100 });
+    near.ticket!.pay!.sats = 2100;
+    expect(checkTicket(near, 'BMAIL', 'alice', RATE).ok).toBe(true);
+    const far = card({ sats: 2300 });
+    far.ticket!.pay!.sats = 2300;
+    expect(checkTicket(far, 'BMAIL', 'alice', RATE).ok).toBe(false);
+    expect(checkTicket(card(), 'BMAIL', 'alice', 0).ok).toBe(false);
+  });
+});
+
+describe('recheckTicket (at Allow)', () => {
+  const shown = { sats: 2000, address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', payee: '$b0asex' };
+  test('pays when the re-read ticket is the one on the sheet', () => {
+    const c = recheckTicket(card(), 'BMAIL', 'alice', RATE, shown);
+    expect(c.ok).toBe(true);
+    if (c.ok) expect(ticketRequests(c.pay)[0]).toEqual({ address: shown.address, satoshis: 2000 });
+  });
+  test('refuses a ticket that changed after the sheet opened (amount, address or payee)', () => {
+    const more = card({ sats: 2100 });
+    more.ticket!.pay!.sats = 2100;
+    expect(recheckTicket(more, 'BMAIL', 'alice', RATE, shown).ok).toBe(false);
+    const moved = card();
+    moved.ticket!.pay!.address = '1KFHE7w8BhaENAswwryaoccDb6qcT6DbYY';
+    expect(recheckTicket(moved, 'BMAIL', 'alice', RATE, shown).ok).toBe(false);
+    expect(recheckTicket(card({ payee: '$mallory' }), 'BMAIL', 'alice', RATE, shown).ok).toBe(false);
   });
 });
 

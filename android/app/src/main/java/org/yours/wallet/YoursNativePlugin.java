@@ -184,8 +184,11 @@ public class YoursNativePlugin extends Plugin {
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, storageKey());
+            SharedPreferences p = prefs(STORAGE_PREFS);
+            String before = p.getString(key, null);
             // commit(): the keystore must be on disk before JS is told it was saved.
-            if (!prefs(STORAGE_PREFS).edit().putString(key, seal(cipher, value)).commit()) {
+            if (!p.edit().putString(key, seal(cipher, value)).commit()) {
+                restore(p, key, before);
                 call.reject("Secure write failed");
                 return;
             }
@@ -202,8 +205,27 @@ public class YoursNativePlugin extends Plugin {
             call.reject("Must provide key");
             return;
         }
-        prefs(STORAGE_PREFS).edit().remove(key).commit();
+        SharedPreferences p = prefs(STORAGE_PREFS);
+        String before = p.getString(key, null);
+        if (before != null && !p.edit().remove(key).commit()) {
+            restore(p, key, before);
+            call.reject("Secure remove failed");
+            return;
+        }
         call.resolve();
+    }
+
+    /**
+     * commit() returned false: SharedPreferences has already changed its in-memory copy (later reads return the new
+     * value) and the next commit of ANY key would write it to disk, while JS was told the write failed and keeps the
+     * old value. Put the old value back in memory so reads, later writes and JS agree with what is stored. If this
+     * commit fails too, memory still holds the old value and the file was never changed.
+     */
+    private static void restore(SharedPreferences p, String key, String before) {
+        SharedPreferences.Editor e = p.edit();
+        if (before == null) e.remove(key);
+        else e.putString(key, before);
+        e.commit();
     }
 
     @PluginMethod

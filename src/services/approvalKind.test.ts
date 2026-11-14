@@ -7,14 +7,17 @@ const proto = (id: string, extra: Partial<BundleRequest> = {}): BundleRequest =>
   requestID: id,
   type: 'protocol',
   originator: o,
-  protocolID: [1, 'bchatx auth'],
+  // Level 2: level-1 keys are shared by every app and get the careful card (permissionBundle.ts isSharedKeyRequest).
+  protocolID: [2, 'bchatx auth'],
   ...extra,
 });
 const kind = (items: BundleRequest[]) => approvalKindForSheet(buildSheetModel({ originator: o, items }));
 
 describe('approvalKindForSheet', () => {
   test('signature anyone can check → SIGN IN', () => {
-    expect(kind([proto('a', { counterparty: 'anyone' })])).toBe('signin');
+    // Our own sign-in (one tap). Another level-2 'anyone' signature is never pre-ticked (sharedKeySigning.ts).
+    expect(kind([proto('a', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' })])).toBe('signin');
+    expect(kind([proto('a', { counterparty: 'anyone' })])).toBe('connect');
   });
   test('a sign-in protocol for the site → SIGN IN', () => {
     expect(kind([proto('a')])).toBe('signin');

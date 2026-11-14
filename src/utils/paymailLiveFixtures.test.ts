@@ -3,6 +3,7 @@ import { afterEach, expect, mock, test } from 'bun:test';
 import pki from '../mobile/names/testdata/paymail-bwalletx-x/pki.json';
 import p2p from '../mobile/names/testdata/paymail-bwalletx-x/p2p.json';
 import caps from '../mobile/names/testdata/paymail-bwalletx-x/bsvalias.json';
+import { captureConsole, msgOf } from '../testing/captureConsole';
 
 // As the mobile build defines it (vite.config.mobile.ts), so bwalletx.com counts as our domain.
 const realConfig = await import('../mobile/names/config');
@@ -48,10 +49,18 @@ test('bwalletX.X@bwalletX.com (any case) resolves with a signed binding and pass
       throw new Error('reached-signing');
     },
   };
-  const res = await sendBsv.execute({ wallet } as never, {
-    requests: [{ paymail: 'bwalletx.x@bwalletx.com', satoshis: 1000 }],
-  });
+  // Upstream sendBsv (@1sat/actions payments) catches what createAction throws, logs it once with
+  // console.error('[sendBsv]', error) and returns { error }. Assert that one log; anything else fails.
+  const { result: res, logs } = await captureConsole(() =>
+    sendBsv.execute({ wallet } as never, {
+      requests: [{ paymail: 'bwalletx.x@bwalletx.com', satoshis: 1000 }],
+    }),
+  );
   expect(res.error).toBe('reached-signing'); // every #97 check passed; only the (fake) wallet stopped it
+  expect(logs.warn).toEqual([]);
+  expect(logs.error).toHaveLength(1);
+  expect(logs.error[0][0]).toBe('[sendBsv]');
+  expect(msgOf(logs.error[0][1])).toBe('reached-signing');
 });
 
 test('an alias our host does not know is "no such user" at lookup, not a 404 at send', async () => {

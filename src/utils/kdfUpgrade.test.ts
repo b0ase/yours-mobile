@@ -12,6 +12,11 @@ import {
   pbkdf2Hex,
   saltIterations,
 } from './crypto';
+import { consoleGate } from '../testing/captureConsole';
+
+// upgradeKdf defers (returns false, changes nothing) on any error and warns once with the error's name only (never
+// its message: no key material in logs). The tests that make it fail declare that line; anything else fails.
+const gate = consoleGate(['error', 'warn']);
 
 const PW = 'correct horse battery staple';
 const LEGACY_SALT = '00112233445566778899aabbccddeeff';
@@ -66,6 +71,16 @@ type Store = Record<string, any>;
 let local: Store;
 let session: Store;
 let failSet = false;
+/**
+ * The app killed in the middle of one multi-key write (phones: Capacitor writes each key as its own secure item):
+ * only these keys of the next write that carries both `accounts` and `salt` land, then nothing else is written.
+ */
+let killMidWrite: 'salt-only' | 'accounts-only' | undefined;
+/**
+ * The app killed during the unlock's repair write, the worst way round: if one write carries both `salt` and
+ * `kdfPending` (two secure items on phones), only the note's clearing lands, then nothing else is written.
+ */
+let killRepair = false;
 
 const pick = (s: Store, keys: string | string[] | null) => {
   if (keys === null) return structuredClone(s);
@@ -90,7 +105,21 @@ afterAll(() => {
         cb(pick(local, keys));
       },
       set: (obj: Store, cb?: () => void) => {
-        if (!failSet) Object.assign(local, structuredClone(obj));
+        if (!failSet && killRepair && 'salt' in obj && 'kdfPending' in obj && !('accounts' in obj)) {
+          Object.assign(local, structuredClone({ kdfPending: obj.kdfPending }));
+          killRepair = false;
+          failSet = true;
+        } else if (!failSet && killRepair && 'salt' in obj && !('accounts' in obj)) {
+          // Salt written in its own write: the kill comes right after it, before the note is cleared.
+          Object.assign(local, structuredClone(obj));
+          killRepair = false;
+          failSet = true;
+        } else if (!failSet && killMidWrite && 'accounts' in obj && 'salt' in obj) {
+          const part = killMidWrite === 'salt-only' ? { salt: obj.salt } : { accounts: obj.accounts };
+          Object.assign(local, structuredClone(part));
+          killMidWrite = undefined;
+          failSet = true; // the process is gone: nothing after this lands
+        } else if (!failSet) Object.assign(local, structuredClone(obj));
         (globalThis as any).chrome.runtime.lastError = failSet ? new Error('disk full') : undefined;
         cb?.();
       },
@@ -120,6 +149,8 @@ beforeEach(async () => {
   await inFlight?.catch(() => undefined);
   inFlight = undefined;
   failSet = false;
+  killMidWrite = undefined;
+  killRepair = false;
   session = {};
   const oldKey = await deriveKey(PW, LEGACY_SALT);
   local = {
@@ -166,6 +197,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
   });
 
   kdfTest('a blob that will not open: nothing is written, the old wallet still opens', async () => {
+    gate.expectLines('warn [ChromeStorageService] password key upgrade deferred: OperationError'); // AES-GCM refused it
     local.accounts['1B'].encryptedKeys = 'v2:' + '00'.repeat(40);
     const svc = await service();
     const snap = structuredClone(local);
@@ -175,6 +207,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
   });
 
   kdfTest('a failed write keeps the old key in the session (old data still opens)', async () => {
+    gate.expectLines('warn [ChromeStorageService] password key upgrade deferred: Error'); // the 'disk full' write
     const svc = await service();
     failSet = true;
     const snap = structuredClone(local);
@@ -233,9 +266,140 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
     },
   );
 
+  kdfTest(
+    'an earlier unfinished note: the upgrade note carries its salts forward (kdfNote), never erases them',
+    async () => {
+      gate.expectLines('warn [ChromeStorageService] password key upgrade deferred: Error'); // the kill after the note
+      local.kdfPending = { prevSalt: 'earlier-prev', salt: 'earlier-salt', older: ['earlier-older'] };
+      const svc = await service();
+      killMidWrite = 'accounts-only'; // the note lands, the swap is cut off: the note is what recovery reads
+      expect(await svc.upgradeKdf(PW)).toBe(false);
+      expect(local.kdfPending.prevSalt).toBe(LEGACY_SALT);
+      expect(saltIterations(local.kdfPending.salt)).toBe(KDF_ITERATIONS);
+      expect(local.kdfPending.older).toEqual(['earlier-salt', 'earlier-prev', 'earlier-older']);
+    },
+  );
+
   test('the unlock screen runs it, only with the USB key off', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../components/UnlockWallet.tsx', import.meta.url), 'utf8');
     expect(src).toContain('if (!usbEnabled) await chromeStorageService.upgradeKdf(password)');
+  });
+});
+
+describe('changePassword: a swap cut off halfway is repaired at the next unlock (kdfPending, as upgradeKdf)', () => {
+  const NEW_PW = 'a brand new password';
+
+  /** A fresh app start after the kill: storage as it was left, nothing in the session. */
+  const restart = async () => {
+    failSet = false;
+    session = {};
+    const svc = new ChromeStorageService();
+    (svc as any).getAndSetStorage = async () => undefined;
+    (svc as any).storage = local;
+    return svc;
+  };
+
+  const unlocked = async (svc: any) => {
+    const key = await svc.getPassKey();
+    return decrypt(local.accounts['1A'].encryptedKeys, key);
+  };
+
+  kdfTest('a completed change: new password opens, old does not, the note is cleared', async () => {
+    local.selectedAccount = '1A';
+    const svc = await service();
+    (svc as any).storage = local;
+    await svc.changePassword(NEW_PW, { currentPassword: PW });
+    expect(local.kdfPending).toBeNull();
+    const again = await restart();
+    expect(await again.verifyPassword(PW)).toBe(false);
+    expect(await again.verifyPassword(NEW_PW)).toBe(true);
+    expect(await unlocked(again)).toBe(plainA);
+  });
+
+  kdfTest('killed with the NEW salt beside the OLD keys: the old password opens and the salt goes back', async () => {
+    local.selectedAccount = '1A';
+    const svc = await service();
+    (svc as any).storage = local;
+    killMidWrite = 'salt-only';
+    await expect(svc.changePassword(NEW_PW, { currentPassword: PW })).rejects.toThrow();
+    expect(local.salt).not.toBe(LEGACY_SALT); // the half-write really happened
+    expect(local.kdfPending).toEqual({ prevSalt: LEGACY_SALT, salt: local.salt });
+    const again = await restart();
+    expect(await again.verifyPassword(PW)).toBe(true);
+    expect(local.salt).toBe(LEGACY_SALT);
+    expect(local.kdfPending).toBeNull();
+    expect(await unlocked(again)).toBe(plainA);
+    expect(await decrypt(local.accounts['1B'].encryptedKeys, await deriveKey(PW, LEGACY_SALT))).toBe(plainB);
+  });
+
+  kdfTest('killed with the NEW keys beside the OLD salt: the new password opens and the new salt is kept', async () => {
+    local.selectedAccount = '1A';
+    const svc = await service();
+    (svc as any).storage = local;
+    killMidWrite = 'accounts-only';
+    await expect(svc.changePassword(NEW_PW, { currentPassword: PW })).rejects.toThrow();
+    expect(local.salt).toBe(LEGACY_SALT);
+    const newSalt = local.kdfPending.salt as string;
+    const again = await restart();
+    expect(await again.verifyPassword(PW)).toBe(false);
+    expect(await again.verifyPassword(NEW_PW)).toBe(true);
+    expect(local.salt).toBe(newSalt);
+    expect(local.kdfPending).toBeNull();
+    expect(await unlocked(again)).toBe(plainA);
+    expect(await decrypt(local.accounts['1B'].encryptedKeys, await deriveKey(NEW_PW, newSalt))).toBe(plainB);
+  });
+
+  kdfTest('the note cannot be written: nothing is changed and the old password still opens', async () => {
+    local.selectedAccount = '1A';
+    const svc = await service();
+    (svc as any).storage = local;
+    const snap = structuredClone(local);
+    failSet = true;
+    await expect(svc.changePassword(NEW_PW, { currentPassword: PW })).rejects.toThrow();
+    expect(local).toEqual(snap);
+    const again = await restart();
+    expect(await again.verifyPassword(PW)).toBe(true);
+  });
+});
+
+describe('the unlock repair itself cut off (reviewer probe): the note is cleared last, in its own write', () => {
+  const NEW_PW = 'a brand new password';
+  const restart = async () => {
+    failSet = false;
+    session = {};
+    const svc = new ChromeStorageService();
+    (svc as any).getAndSetStorage = async () => undefined;
+    (svc as any).storage = local;
+    return svc;
+  };
+
+  for (const half of ['salt-only', 'accounts-only'] as const)
+    kdfTest(`${half} half-write, then the repairing unlock killed mid-write: the next unlock still opens`, async () => {
+      local.selectedAccount = '1A';
+      const svc = await service();
+      (svc as any).storage = local;
+      killMidWrite = half;
+      await expect(svc.changePassword(NEW_PW, { currentPassword: PW })).rejects.toThrow();
+      const password = half === 'salt-only' ? PW : NEW_PW; // the password the stored keys are under
+      const r1 = await restart();
+      killRepair = true;
+      await r1.verifyPassword(password).catch(() => undefined); // the app dies inside the repair
+      expect(local.kdfPending).toBeTruthy(); // the note survived the kill
+      const r2 = await restart();
+      expect(await r2.verifyPassword(password)).toBe(true);
+      expect(await decrypt(local.accounts['1A'].encryptedKeys, await r2.getPassKey())).toBe(plainA);
+      // Forward (new keys, new salt landed): the note is done with and cleared. Back to the old salt: the note is
+      // kept (harmless: only a failed unlock reads it).
+      if (half === 'accounts-only') expect(local.kdfPending).toBeNull();
+      expect(await (await restart()).verifyPassword(password)).toBe(true);
+    });
+
+  test('every write that clears kdfPending clears nothing else', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../services/ChromeStorage.service.ts', import.meta.url), 'utf8');
+    const clears = src.match(/this\.set\(\{[^}]*kdfPending: null[^}]*\}/g) ?? [];
+    expect(clears.length).toBeGreaterThanOrEqual(3);
+    for (const c of clears) expect(c.replace(/\s+/g, ' ')).toBe('this.set({ kdfPending: null }');
   });
 });

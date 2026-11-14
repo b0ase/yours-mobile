@@ -17,7 +17,20 @@ export const getPageEl = () => pageEl;
 /** False until the phone layout's cold start has landed on Home (PhoneShell): the Wallet route a fresh unlock
  *  opens on is not kept mounted behind Home (it would load in the background and slow the start). */
 let landedFlag = false;
-export const hasLanded = () => landedFlag;
+/**
+ * Set by an account switch just before its reload (account/accountSwitch.ts): the reloaded page has already landed,
+ * so it opens on the Wallet, never on Ask b again. Owner, 13 Nov 2026: switches kept reloading onto Ask b (its WebGL
+ * hero and audio live during the reload) and some ended on a black screen. sessionStorage: survives the reload only.
+ */
+export const SWITCH_LANDED_KEY = 'bwallet.switchLanded';
+const switchLanded = () => {
+  try {
+    return sessionStorage.getItem(SWITCH_LANDED_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+export const hasLanded = () => landedFlag || switchLanded();
 export const setLanded = () => {
   landedFlag = true;
 };

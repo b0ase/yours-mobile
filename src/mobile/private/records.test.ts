@@ -416,7 +416,9 @@ describe('wallet.mintPrivate request (§10)', () => {
     expect(r2.complete).toBe(true);
     expect(r2.records.length).toBe(300);
     expect(new Set(r2.records.map((r) => r.x_id)).size).toBe(300);
-  });
+    // 300 real encrypted mints: ~2 s alone, ~7 s on a loaded machine (full suite beside other runs, 13 Nov 2026);
+    // bun's 5 s default timed it out there.
+  }, 30_000);
   test('cap and shape checks', async () => {
     const c = ctxWith();
     await expect(

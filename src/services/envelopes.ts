@@ -13,7 +13,8 @@
  * Rules, all enforced here and unit tested (envelopes.test.ts):
  * - One envelope per site, keyed by the browser-derived originator (never anything the page says).
  * - A spend is approved only when the whole amount fits in the balance; the balance can never go negative.
- * - Every change goes through one queue, so two payments racing for the last cents cannot both win.
+ * - Every change goes through one lock per storage key (shared by every store instance and, on the web, every tab),
+ *   so two payments racing for the last cents cannot both win.
  * - Another site's payment never reads or touches this envelope.
  */
 
@@ -149,29 +150,171 @@ export const returnCoins = (state: EnvelopeState, originator: string): { state: 
 export type EnvelopeBackend = {
   load(): Promise<unknown>;
   save(state: EnvelopeState): Promise<void>;
+  /**
+   * The storage key this backend reads and writes (`bwxEnvelopes:<account>`). Every store over the same key shares
+   * one lock, whichever instance it is. Without a key, stores share a lock only when they share this backend object.
+   */
+  readonly key?: string;
+};
+
+/** A Web Locks API, as navigator.locks offers it (shared by every tab, worker and popup of one origin). */
+type Locks = { request: <T>(name: string, options: object, cb: () => Promise<T>) => Promise<T> };
+const localLocks = new Map<string, Promise<unknown>>();
+let sharedLockRequired = false;
+export const ENVELOPE_LOCK_UNAVAILABLE =
+  'Envelopes need a browser with Web Locks here, so this payment was not taken from the envelope.';
+export const ENVELOPE_TIMED_OUT = 'The envelope did not answer in time, so this payment was not taken from it.';
+/** How long an envelope operation may take, lock wait included, before its caller is told "unavailable". */
+export const ENVELOPE_TIMEOUT_MS = 15_000;
+
+/**
+ * The envelope could not be used safely right now (no shared lock, or it did not answer in time). Nothing was taken
+ * from it: a payment falls back to its normal approval sheet (guardEnvelopes), never to an unlocked spend.
+ */
+export class EnvelopeUnavailableError extends Error {
+  readonly envelopeUnavailable = true;
+}
+export const isEnvelopeUnavailable = (e: unknown): boolean =>
+  e instanceof EnvelopeUnavailableError ||
+  (e as { envelopeUnavailable?: unknown } | null)?.envelopeUnavailable === true;
+/**
+ * The web wallet calls this in each tab's background worker: other tabs run their own worker over the same storage,
+ * so only navigator.locks serialises them. Without it every envelope operation is refused (fail closed).
+ */
+export const requireSharedEnvelopeLock = (on = true) => {
+  sharedLockRequired = on;
 };
 
 /**
- * The envelope store. Every read-modify-write runs in one queue, and the stored state is re-read inside the queue,
- * so concurrent payments are applied one after another: two payments cannot both spend the same last balance.
- * Only the background owns a store; pages ask the background (ENVELOPES_* messages) and never write it.
+ * One lock per envelope storage key, across store instances (13 Nov 2026). Every wallet init (unlock, restore,
+ * recovery) builds a new EnvelopeStore over the same `bwxEnvelopes:<account>` key, and a payment already running keeps
+ * the old wallet and its old store. With one queue per instance, two stores could both load the same balance before
+ * either saved and both approve the last sats. navigator.locks where there is one, so the web wallet's other tabs
+ * (each with its own background worker) queue too; else a module-level queue, shared by every instance in this
+ * process. Same pattern as storePay.ts withPayLock. Not re-entrant: never take it twice in one call chain. A lock
+ * that cannot be taken rejects, so the spend is refused (fail closed), never run unlocked.
+ */
+export function withEnvelopeLock<T>(
+  name: string,
+  fn: () => Promise<T>,
+  signal?: AbortSignal,
+  /**
+   * Coin return only: run on this tab's queue when there is no shared lock (see EnvelopeStore.close). Never for a
+   * fill or a spend.
+   */
+  removalOnly = false,
+): Promise<T> {
+  const locks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
+  // `signal`: a caller that gave up while still waiting leaves the queue without running.
+  if (locks && typeof locks.request === 'function')
+    return locks.request(`bwx-envelopes:${name}`, signal ? { signal } : {}, fn);
+  // Web wallet without Web Locks (Safari before 15.4): a module queue covers this tab only, so refuse.
+  if (sharedLockRequired && !removalOnly)
+    return Promise.reject(new EnvelopeUnavailableError(ENVELOPE_LOCK_UNAVAILABLE));
+  const before = localLocks.get(name) ?? Promise.resolve();
+  const start = () => (signal?.aborted ? Promise.reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT)) : fn());
+  const run = before.then(start, start);
+  const tail = run.catch(() => undefined);
+  localLocks.set(name, tail);
+  void tail.then(() => {
+    if (localLocks.get(name) === tail) localLocks.delete(name);
+  });
+  return run;
+}
+
+/**
+ * Keys whose write outlived its caller's deadline and has not settled (review N3). Their lock is still held (so no op
+ * can read around the write), and ops on them in this process are refused at once instead of each waiting out the
+ * deadline. Other web tabs still wait out theirs: releasing the lock before the write settles could let that late
+ * write land over a newer one, so there is no safe earlier bound for them.
+ */
+const stuckWrites = new Set<string>();
+
+/** Lock names for backends without a key: one per backend object. */
+const anonLockNames = new WeakMap<EnvelopeBackend, string>();
+let anonSeq = 0;
+const lockNameFor = (backend: EnvelopeBackend): string => {
+  if (backend.key) return backend.key;
+  let name = anonLockNames.get(backend);
+  if (!name) anonLockNames.set(backend, (name = `anon:${++anonSeq}`));
+  return name;
+};
+
+/**
+ * The envelope store. Every read-modify-write runs under the storage key's lock (withEnvelopeLock), shared by every
+ * store over that key, and the stored state is re-read inside the lock, so concurrent payments are applied one after
+ * another: two payments cannot both spend the same last balance, even from two stores (an old wallet's and the
+ * re-initialised one's) or, in the web wallet, two tabs. Only the background owns a store; pages ask the background
+ * (ENVELOPES_* messages) and never write it.
  */
 export class EnvelopeStore {
-  private queue: Promise<unknown> = Promise.resolve();
+  private readonly lockName: string;
+  private readonly timeoutMs: number;
   constructor(
     private readonly backend: EnvelopeBackend,
     private readonly now: () => number = Date.now,
-  ) {}
+    opts: { timeoutMs?: number } = {},
+  ) {
+    this.lockName = lockNameFor(backend);
+    this.timeoutMs = opts.timeoutMs ?? ENVELOPE_TIMEOUT_MS;
+  }
 
-  private run<T>(fn: (s: EnvelopeState) => { state?: EnvelopeState; result: T }): Promise<T> {
-    const job = this.queue.then(async () => {
-      const state = parseEnvelopeState(await this.backend.load());
-      const out = fn(state);
-      if (out.state && out.state !== state) await this.backend.save(out.state);
-      return out.result;
+  /**
+   * One read-check-write under the key's lock, with a deadline (review of fix/envelope-queue, F1: a storage call that
+   * never answered held the lock, and every envelope op in every tab hung). The caller is told EnvelopeUnavailableError
+   * at the deadline, whether it was still waiting for the lock (it then leaves the queue) or running. Inside the lock:
+   * - a read that does not answer in time gives the lock up: nothing was written, so the next op reads fresh state;
+   * - once the deadline has passed nothing is written (the caller was already told no);
+   * - a write already sent keeps the lock until it settles, so no other op can read around it (no unlocked spend).
+   */
+  private run<T>(fn: (s: EnvelopeState) => { state?: EnvelopeState; result: T }, removalOnly = false): Promise<T> {
+    if (stuckWrites.has(this.lockName)) return Promise.reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT));
+    const ac = typeof AbortController === 'function' ? new AbortController() : undefined;
+    let late = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => {
+        late = true;
+        ac?.abort();
+        reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT));
+      }, this.timeoutMs);
     });
-    this.queue = job.catch(() => undefined);
-    return job;
+    const job = withEnvelopeLock(
+      this.lockName,
+      async () => {
+        let readTimer: ReturnType<typeof setTimeout> | undefined;
+        const raw = await Promise.race([
+          this.backend.load(),
+          new Promise<never>((_, reject) => {
+            readTimer = setTimeout(() => reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT)), this.timeoutMs);
+          }),
+        ]).finally(() => clearTimeout(readTimer));
+        const state = parseEnvelopeState(raw);
+        const out = fn(state);
+        if (out.state && out.state !== state) {
+          if (late) throw new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT);
+          const saving = this.backend.save(out.state);
+          // Past the deadline with this write still out: refuse this key's ops here at once until it settles.
+          const mark = setTimeout(() => stuckWrites.add(this.lockName), Math.max(0, this.timeoutMs));
+          try {
+            await saving;
+          } finally {
+            clearTimeout(mark);
+            stuckWrites.delete(this.lockName);
+          }
+        }
+        return out.result;
+      },
+      ac?.signal,
+      removalOnly,
+    ).catch((e: unknown) => {
+      // A lock request the deadline aborted rejects with AbortError: that is the timeout, said as such.
+      throw late && !isEnvelopeUnavailable(e) && (e as { name?: string } | null)?.name === 'AbortError'
+        ? new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT)
+        : e;
+    });
+    job.catch(() => undefined); // the deadline may have answered the caller already
+    return Promise.race([job, timedOut]).finally(() => clearTimeout(deadline));
   }
 
   get(originator: string): Promise<Envelope | undefined> {
@@ -198,12 +341,19 @@ export class EnvelopeStore {
     });
   }
 
-  /** Coin return. Resolves to what was released (0 when there was no envelope). */
+  /**
+   * Coin return. Resolves to what was released (0 when there was no envelope).
+   *
+   * Without a shared lock (web wallet on a browser with no Web Locks) it still runs, on this tab's queue (review of
+   * fix/envelope-queue: Forget site and the pairing revoke queue must not fail for ever there). That is safe because
+   * on such a browser no fill or spend runs at all (they are refused), so nothing of this build writes envelopes
+   * concurrently; and a close only removes an earmark, so at worst it is lost and retried, never more spending.
+   */
   close(originator: string): Promise<number> {
     return this.run((s) => {
       const r = returnCoins(s, originator);
       return { state: r.returned || s.envelopes[originator] ? r.state : undefined, result: r.returned };
-    });
+    }, true);
   }
 }
 
@@ -211,7 +361,17 @@ export class EnvelopeStore {
 export const chromeEnvelopeBackend = (accountId: string): EnvelopeBackend => {
   const key = ENVELOPES_KEY_PREFIX + (accountId || 'no-account');
   return {
-    load: () => new Promise((resolve) => chrome.storage.local.get(key, (v) => resolve((v ?? {})[key]))),
+    key,
+    // A failed read rejects (the spend is refused) instead of reading as "no envelopes": a fill or close must never
+    // save over envelopes it could not see.
+    load: () =>
+      new Promise((resolve, reject) =>
+        chrome.storage.local.get(key, (v) => {
+          const err = chrome.runtime?.lastError;
+          if (err) reject(new Error(err.message));
+          else resolve((v ?? {})[key]);
+        }),
+      ),
     save: (state) =>
       new Promise<void>((resolve, reject) =>
         chrome.storage.local.set({ [key]: state }, () => {
@@ -225,7 +385,8 @@ export const chromeEnvelopeBackend = (accountId: string): EnvelopeBackend => {
 
 /**
  * Coin return for one site in other accounts' envelopes (a device-wide unpair / Revoke all). The live account uses
- * its own store (its queue); this is for the accounts that are not open.
+ * its own store; this is for the accounts that are not open. Each store takes its key's shared lock, so a close here
+ * still queues behind a live store's payment on the same key.
  */
 export const closeEnvelopeInAccounts = async (
   accountIds: string[],
@@ -233,8 +394,15 @@ export const closeEnvelopeInAccounts = async (
   backendFor: (accountId: string) => EnvelopeBackend = chromeEnvelopeBackend,
 ): Promise<number> => {
   let released = 0;
+  const failed: string[] = [];
+  // One account that can't be closed never stops the others (review F2); the failure is reported at the end.
   for (const id of new Set(accountIds.filter(Boolean)))
-    released += await new EnvelopeStore(backendFor(id)).close(originator);
+    try {
+      released += await new EnvelopeStore(backendFor(id)).close(originator);
+    } catch (e) {
+      failed.push(e instanceof Error ? e.message : String(e));
+    }
+  if (failed.length) throw new Error(`Envelope not closed in ${failed.length} account(s): ${failed.join('; ')}`);
   return released;
 };
 
@@ -295,7 +463,15 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
     if (!args?.originator || args.originator === deps.adminOriginator || !(args.satoshis > 0))
       return (original as (a: SpendArgs) => Promise<boolean>).call(manager, args);
     const originator = deps.normalize(args.originator);
-    if (await deps.envelopes.trySpend(originator, args.satoshis)) return true;
+    // An envelope that can't be used safely (no shared lock, no answer in time) is treated as "doesn't fit": the
+    // normal sheet for this payment, never an unlocked spend (review F4).
+    let fits = false;
+    try {
+      fits = await deps.envelopes.trySpend(originator, args.satoshis);
+    } catch (e) {
+      if (!isEnvelopeUnavailable(e)) throw e;
+    }
+    if (fits) return true;
     if (args.seekPermission === false)
       throw new Error(`Spending authorization needs your approval for ${args.satoshis} (seekPermission=false).`);
     return (flow as (r: unknown) => Promise<boolean>).call(manager, {

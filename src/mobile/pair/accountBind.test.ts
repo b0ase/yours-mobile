@@ -3,7 +3,7 @@
  * revived for whichever wallet was restored next. Sessions are now bound to the account that paired them, and the
  * wipe closes and forgets them. Same local setup as lapseRevoke.test.ts: fake WebSocket, throwaway keys, .invalid host.
  */
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
 import { PAIR_VERSION, pairUrl } from '../../pair/protocol';
 import { normalizeOriginator } from '@1sat/wallet';
@@ -52,6 +52,9 @@ stubGlobals({
 // A private copy of sessions.ts for this file: bun shares one module registry across test files, and its
 // started flag, live sockets and document listener would otherwise carry over from whichever pair test ran first.
 const sessions = (await import('./sessions?accountBind' as string)) as typeof import('./sessions');
+// Leave this copy inert when the file ends: its reconnect timers would otherwise fire during the next file and act on
+// that file's localStorage and WebSocket stubs (bun runs every test file in one process).
+afterAll(() => sessions.__resetPairingForTests());
 const { pairedOrigin } = await import('../../services/originKey');
 
 const settle = () => new Promise<void>((r) => setTimeout(r, 25));
@@ -79,8 +82,8 @@ const KEY = 'bwallet.pair.sessions';
 const stored = () => JSON.parse(mem.get(KEY) ?? '[]') as Array<Record<string, unknown>>;
 const A = '1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const B = '1AccountBBBBBBBBBBBBBBBBBBBBBBBBBB';
-const as = (currentId: string | undefined, accountCount: number) =>
-  sessions.setAgentPairDeps({ ctx: undefined, currentId, accountCount });
+const as = (currentId: string | undefined, accountCount: number, accountIds?: string[]) =>
+  sessions.setAgentPairDeps({ ctx: undefined, currentId, accountCount, accountIds });
 const revoked: string[] = [];
 sessions.setPairRevoker(async (o) => {
   revoked.push(normalizeOriginator(o));
@@ -112,7 +115,7 @@ describe('Pairings are bound to the account that made them (b-Aware report)', ()
     expect(stored().map((s) => s.account)).toEqual([A]);
   });
 
-  test("account B never revives account A's pairing; it is dropped and revoked", async () => {
+  test("a wallet without account A never revives A's pairing; it is dropped and revoked", async () => {
     reset();
     as(A, 2);
     await pair('BBBBBBBBBBBBBBBBBBBBBB');
@@ -121,11 +124,52 @@ describe('Pairings are bound to the account that made them (b-Aware report)', ()
     sessions.initPairing();
     expect(opened()).toBe(0); // nothing is revived before the open account is known
 
-    as(B, 2);
+    as(B, 2, [B, '1SomeoneElseCCCCCCCCCCCCCCCCCCCCC']);
     await settle();
     expect(opened()).toBe(0);
     expect(stored()).toEqual([]);
     expect(revoked).toContain(normalizeOriginator(PAIRED_KEY));
+  });
+
+  // Owner, 13 Nov 2026: switching from the agent account to the main one and back wiped the agent's CLI pairing.
+  test("switching to another account of the same wallet parks A's pairing; switching back revives it", async () => {
+    reset();
+    as(A, 2, [A, B]);
+    await pair('PPPPPPPPPPPPPPPPPPPPPP');
+    expect(opened()).toBe(1);
+    const sock = FakeWS.all.at(-1)!;
+    const sent: string[] = [];
+    sock.send = (d: string) => void sent.push(d);
+    const revokedBefore = [...revoked]; // a new pairing clears its own fresh key once (sessions.ts beginPairing)
+
+    as(B, 2, [A, B]);
+    await settle();
+    expect(sock.readyState).toBe(3); // its socket is closed: nothing runs on B
+    expect(sent).toEqual([]); // and the site isn't told to unpair
+    expect(opened()).toBe(0);
+    expect(sessions.pairedSites()).toEqual([]); // not listed under B
+    expect(stored().map((s) => [s.c, s.account])).toEqual([['PPPPPPPPPPPPPPPPPPPPPP', A]]); // still stored
+    expect(revoked).toEqual(revokedBefore); // its grants stay
+
+    as(A, 2, [A, B]);
+    await untilOpened(1);
+    const live = FakeWS.all.filter((s) => s.readyState === 1).map((s) => s.url.split('/v1/c/')[1]?.slice(0, 22));
+    expect(live).toEqual(['PPPPPPPPPPPPPPPPPPPPPP']);
+    expect(sessions.pairedSites().map((s) => s.c)).toEqual(['PPPPPPPPPPPPPPPPPPPPPP']);
+  });
+
+  test("a parked pairing survives the open account's own changes (a new pairing on B)", async () => {
+    reset();
+    as(A, 2, [A, B]);
+    await pair('QQQQQQQQQQQQQQQQQQQQQQ');
+    as(B, 2, [A, B]);
+    await settle();
+    await pair('RRRRRRRRRRRRRRRRRRRRRR');
+    expect(stored().map((s) => [s.c, s.account])).toEqual([
+      ['QQQQQQQQQQQQQQQQQQQQQQ', A],
+      ['RRRRRRRRRRRRRRRRRRRRRR', B],
+    ]);
+    expect(sessions.pairedSites().map((s) => s.c)).toEqual(['RRRRRRRRRRRRRRRRRRRRRR']);
   });
 
   test("the pairing account's own sessions are revived", async () => {

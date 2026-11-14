@@ -211,7 +211,7 @@ export const ComposerBar = ({
           aria-haspopup="dialog"
           aria-expanded={sheet === 'options'}
           title="More"
-          className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
+          className="bw-composer-plus h-10 w-10 rounded-full flex items-center justify-center shrink-0"
           style={{ background: PANEL, border: `1px solid ${LINE}` }}
         >
           <Plus
@@ -226,7 +226,7 @@ export const ComposerBar = ({
           onClick={onAskB}
           aria-label={askBLabel}
           title="Ask b"
-          className="h-10 w-10 rounded-full flex items-center justify-center shrink-0"
+          className="bw-composer-b h-10 w-10 rounded-full flex items-center justify-center shrink-0"
           style={{
             background: '#1a1608',
             color: GOLD,
@@ -309,7 +309,7 @@ export const ComposerBar = ({
           type="submit"
           disabled={!draft.trim()}
           aria-label="Send"
-          className="h-10 w-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
+          className="bw-composer-send h-10 w-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40"
           style={{ background: GOLD }}
         >
           <ArrowUp size={20} color="#1a1300" strokeWidth={2.6} />

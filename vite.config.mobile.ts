@@ -135,25 +135,20 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
   'src/pages/BsvWallet.tsx': [
     [
       "import { getPlatform } from '../platform';",
-      "import { getPlatform } from '../platform';\nimport { MintButton } from '../mobile/mint/MintButton';\nimport { SectionBoundary } from '../mobile/wallet/SectionBoundary';",
+      "import { getPlatform } from '../platform';\nimport { MintButton } from '../mobile/mint/MintButton';\nimport { WalletLockButton } from '../mobile/wallet/WalletLockButton';\nimport { SectionBoundary } from '../mobile/wallet/SectionBoundary';",
     ],
     [
       '            Send\n          </motion.button>\n        </motion.div>',
-      '            Send\n          </motion.button>\n<SectionBoundary name="Mint"><MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>',
+      '            Send\n          </motion.button>\n<SectionBoundary name="Mint"><MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n<SectionBoundary name="Lock"><WalletLockButton /></SectionBoundary>\n        </motion.div>',
     ],
-    // Button order: Send · Receive · Mint (flex order; upstream renders Receive first).
+    // Button order, 2×2: Send · Receive, then Mint · Lock (grid order; upstream renders Receive first).
     [
       "onClick={() => setPageState('receive')}\n            className=\"flex flex-1",
       "onClick={() => setPageState('receive')}\n            className=\"order-2 flex flex-1",
     ],
     [
       "onClick={() => setPageState('asset-picker')}\n            className=\"flex flex-1",
-      "onClick={() => setPageState('asset-picker')}\n            className=\"order-1 flex flex-1",
-    ],
-    // Credits row under the action buttons: balance, Top up, history (src/mobile/credits).
-    [
-      "import { MintButton } from '../mobile/mint/MintButton';",
-      "import { MintButton } from '../mobile/mint/MintButton';\nimport { CreditsRow } from '../mobile/credits/CreditsRow';",
+      "onClick={() => setPageState('asset-picker')}\n            className=\"bw-act-send order-1 flex flex-1",
     ],
     // Send to a name now lives in the Send card itself (src/mobile/wallet/send/SendCard → NameInput).
     [
@@ -183,8 +178,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ['      <OrdinalsAddress />\n    </motion.div>\n  );', '    </motion.div>\n  );'],
     // "Choose your handle" after create / restore, else a dismissible "Get your $name" card (src/mobile/names).
     [
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';",
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';\nimport { SweepPrompt } from '../mobile/sweep/SweepPrompt';",
+      "import { MintButton } from '../mobile/mint/MintButton';",
+      "import { MintButton } from '../mobile/mint/MintButton';\nimport { HandleOnboarding } from '../mobile/names/HandleOnboarding';\nimport { SweepPrompt } from '../mobile/sweep/SweepPrompt';",
     ],
     // Wide web layout: the token table and totals beside the wallet read this page's balances (wide/walletFeed.ts).
     [
@@ -192,10 +187,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       '  useWideWalletFeed({ bsvBalance, mneeBalance, exchangeRate, bsv21s });\n  if (showWelcome) {',
     ],
     [
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';",
-      "import { CreditsRow } from '../mobile/credits/CreditsRow';\nimport { useWideWalletFeed } from '../mobile/wide/walletFeed';",
+      "import { MintButton } from '../mobile/mint/MintButton';",
+      "import { MintButton } from '../mobile/mint/MintButton';\nimport { useWideWalletFeed } from '../mobile/wide/walletFeed';",
     ],
-    // Under Receive / Send / Mint, outside the Tokens / NFTs / Credits gates so it shows on every view.
+    // Under Receive / Send / Mint, outside the Tokens / NFTs gates so it shows on every view.
     [
       '</SectionBoundary>\n        </motion.div>',
       '</SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Handle"><HandleOnboarding /></SectionBoundary>\n<SectionBoundary name="Sweep"><SweepPrompt /></SectionBoundary>\n<SectionBoundary name="Airdrops"><AirdropsRow /></SectionBoundary>',
@@ -439,18 +434,24 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     // Balance as a membership card (src/mobile/wallet/WalletCard); the old balance block below it is hidden.
     [
       '        {/* ── USD balance ── */}',
-      '<SectionBoundary name="Card"><WalletCard usd={bsvBalance * exchangeRate + (services.mnee ? mneeBalance : 0)} sats={Math.round(bsvBalance * 100_000_000)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={showSyncRetry({ failed: balanceFailed, known: balanceKnown })} stale={staleHint} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} onRefresh={(manual) => void refreshUtxos({ notifyIfUnchanged: manual, quiet: !manual })} upToDate={upToDate} refreshing={isRefreshing} rate={exchangeRate} /></SectionBoundary>\n        {/* ── USD balance ── */}',
+      '<SectionBoundary name="Card"><WalletCard usd={balanceUsd(satsOf(bsvBalance), headlineRate, services.mnee ? mneeBalance : 0)} sats={satsOf(bsvBalance)} view={balanceView({ loading: balanceLoading, failed: balanceFailed, known: balanceKnown })} syncing={isSyncing} failed={showSyncRetry({ failed: balanceFailed, known: balanceKnown })} stale={staleHint} onRetry={() => void getAndSetBsvBalance()} receiveAddress={receiveAddress} onRefresh={(manual) => void refreshUtxos({ notifyIfUnchanged: manual, quiet: !manual })} upToDate={upToDate} refreshing={isRefreshing} rate={headlineRate} /></SectionBoundary>\n        {/* ── USD balance ── */}',
     ],
     [
       'className="text-4xl font-bold tracking-tight select-none"',
       'className="text-4xl font-bold tracking-tight select-none bw-balance-amount"',
+    ],
+    // The truth lines show under WalletCard on the phone and web (src/components/BalanceTruthLines): not a second copy
+    // polling inside the hidden balance block.
+    [
+      '{balanceKnown && (\n            <BalanceTruthLines',
+      '{false && balanceKnown && (\n            <BalanceTruthLines',
     ],
     // Receive / Send: gold gradient pills with glow.
     [
       'items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer"',
       'items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer bw-pill bw-pill-gold"',
     ],
-    ['className="flex items-center gap-4 mt-6 w-[88%]"', 'className="bw-sendrow flex items-center gap-3 mt-3 w-[90%]"'],
+    ['className="flex items-center gap-4 mt-6 w-[88%]"', 'className="bw-sendrow grid grid-cols-2 gap-3 mt-3 w-[90%]"'],
     // Section label.
     [
       '              Assets\n            </span>\n            <div className="flex-1 ml-3 h-px opacity-20" style={{ backgroundColor: theme.color.global.gray }} />',
@@ -484,8 +485,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       "import { getPlatform } from '../platform';\nimport { WalletIndexing } from '../mobile/tokens/WalletIndexing';",
     ],
     [
-      '<MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>',
-      '<MintButton exchangeRate={exchangeRate} /></SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
+      '<WalletLockButton /></SectionBoundary>\n        </motion.div>',
+      '<WalletLockButton /></SectionBoundary>\n        </motion.div>\n<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',
     ],
   ],
   // UnlockWallet's mark is src/mobile/ui/UnlockMark (bare gold b, no tile).
@@ -511,7 +512,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
       'const favs = account?.settings?.favoriteTokens ?? [];\n    const hidden = (account?.settings as { hiddenTokens?: string[] } | undefined)?.hiddenTokens ?? [];\n    const held = bsv21s.filter((t) => t.id && (favs.includes(t.id) || (BigInt(t.amt || "0") > 0n && !hidden.includes(t.id))));\n    const filtered = [...held].sort((a, b) => (favs.indexOf(a.id!) + 1 || 1e9) - (favs.indexOf(b.id!) + 1 || 1e9));',
     ],
   ],
-  // Wallet tab: Tokens | NFTs | Names (+ Tickets | Credits | Shares from the cards). NFTs is the media library (src/mobile/wallet, src/mobile/media).
+  // Wallet tab: Tokens | NFTs | Names (+ Tickets | Shares from the cards). NFTs is the media library (src/mobile/wallet, src/mobile/media).
   'src/pages/BsvWallet.tsx#kinds': [
     [
       "import { ManageTokens } from '../components/ManageTokens';",
@@ -523,7 +524,7 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     [
       '        {/* Bottom breathing room */}',
-      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="names">\n          <SectionBoundary name="Names"><NamesSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="credits">\n          <SectionBoundary name="Credits"><CreditsRow /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="shares">\n          <SectionBoundary name="Shares"><SharesSection /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
+      '</SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="nfts">\n          <SectionBoundary name="NFTs"><MediaSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="names">\n          <SectionBoundary name="Names"><NamesSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="tickets">\n          <SectionBoundary name="Tickets"><TicketsSection /></SectionBoundary>\n        </WalletKindGate>\n        <WalletKindGate kind="shares">\n          <SectionBoundary name="Shares"><SharesSection /></SectionBoundary>\n        </WalletKindGate>\n        {/* Bottom breathing room */}',
     ],
     // The switch replaces the section label and its top margin.
     [
@@ -560,8 +561,8 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     ['<SectionBoundary name="Card"><WalletCard ', '<SectionBoundary name="Card"><HomeTop><WalletCard '],
     [
-      'refreshing={isRefreshing} rate={exchangeRate} /></SectionBoundary>',
-      'refreshing={isRefreshing} rate={exchangeRate} /></HomeTop></SectionBoundary>',
+      'refreshing={isRefreshing} rate={headlineRate} /></SectionBoundary>',
+      'refreshing={isRefreshing} rate={headlineRate} /></HomeTop></SectionBoundary>',
     ],
     [
       '<SectionBoundary name="Indexing"><WalletIndexing exchangeRate={exchangeRate} /></SectionBoundary>',

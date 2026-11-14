@@ -528,7 +528,11 @@ describe('06c final check (7fdfe423)', () => {
     expect((await txRow(w2, txid!))?.status).toBe('sending');
     // 1sat-stack keeps refusing anything built on the payment (it never accepted it).
     const ns = await nextSend(w2);
-    console.log('trade-off nextSend ->', JSON.stringify(ns));
+    // (Printed before as "trade-off nextSend -> …"; asserted instead.) The send built on the held payment's change
+    // is refused for review, and never spends the held coin.
+    expect(ns).toBe(
+      'WERR_REVIEW_ACTIONS WERR_REVIEW_ACTIONS Undelayed createAction or signAction results require review.',
+    );
     expect(String(ns)).not.toContain(coin); // the coin is never freed
     expect((await txRow(w2, txid!))?.status).toBe('sending');
     // The orphan release never touches it (it is 'sending', and in the outbox).

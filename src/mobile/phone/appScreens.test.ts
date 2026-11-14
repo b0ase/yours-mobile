@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   defaultScreens,
+  appendToBapps,
   gatherBapps,
   ownIconsFirst,
   moveToScreen,
@@ -133,6 +134,15 @@ describe('all bApps in one section', () => {
       'b:movies',
       'b:music',
     ]);
+  });
+
+  test('appendToBapps adds new tiles at the end of the bApps section, once, and keeps the arrangement', () => {
+    const s = { v: 1 as const, screens: [{ items: ['a'] }, { title: 'bApps', items: ['b:1', 'b:2'] }] };
+    const out = appendToBapps(s, ['b:new', 'a', 'b:docked'], new Set(['b:docked']));
+    expect(out.screens[1].items).toEqual(['b:1', 'b:2', 'b:new']);
+    expect(out.screens[0].items).toEqual(['a']);
+    const noBapps = { v: 1 as const, screens: [{ items: ['a'] }] };
+    expect(appendToBapps(noBapps, ['b:new'])).toBe(noBapps);
   });
 
   test('gatherBapps pulls bApps off Home into the bApps screen, own icons first, nothing lost', () => {

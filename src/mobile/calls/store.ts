@@ -15,6 +15,7 @@ import { verifyCaller } from './peer';
 import { isShareCancelled } from './screenShare';
 import {
   calleeShouldHangUp,
+  checkCardToken,
   decideMeterPayment,
   parsePayNotice,
   payNotice,
@@ -78,6 +79,16 @@ let myLabel: string | undefined;
 let mneeKeyCount = 5;
 let payFailures = 0;
 const seenIncoming = new Set<string>();
+/** Token decimals this wallet looked up itself (dial), by token id; pay() sends nothing on any other value. */
+const checkedTokenDec = new Map<string, number>();
+
+/** The token's details from this wallet's own indexer (deploy data, cached), or null when unavailable. */
+async function lookupToken(id: string): Promise<unknown> {
+  const bsv21 = (
+    ctxRef?.services as unknown as { bsv21?: { getTokenDetails(id: string): Promise<unknown> } } | undefined
+  )?.bsv21;
+  return bsv21 ? bsv21.getTokenDetails(id).catch(() => null) : null;
+}
 
 const set = (patch: Partial<Snapshot>) => {
   snap = { ...snap, ...patch };
@@ -248,8 +259,19 @@ export async function dial(peer: Peer, opts: { video?: boolean } = {}) {
   if (!client || busy(snap.call)) return;
   if (PAID_CALLS_ENABLED) {
     const bp = await fetchPeerBPhone(f, peer.key).catch(() => null);
-    const card = bp?.profile.rate ?? null;
-    if (card) {
+    const offered = bp?.profile.rate ?? null;
+    if (offered) {
+      // A token card's decimals come from our own lookup, never from the callee (checkCardToken).
+      const checked =
+        offered.asset.kind === 'bsv21'
+          ? checkCardToken(offered, await lookupToken(offered.asset.id))
+          : { ok: true as const, card: offered };
+      if (!checked.ok) {
+        set({ error: `${peer.label}: ${checked.error}` });
+        return;
+      }
+      const card = checked.card;
+      if (card.asset.kind === 'bsv21') checkedTokenDec.set(card.asset.id, card.asset.dec);
       const payTo = payToFor(card, bp?.paymail ?? null);
       if (!payTo) {
         set({ error: `${peer.label} charges for calls but has nowhere to be paid yet` });
@@ -395,6 +417,7 @@ async function pay(ctx: OneSatContext, card: RateCard, payTo: PayTo, units: numb
     if (res.error) throw new Error(res.error);
     return res.txid ?? null;
   }
+  if (checkedTokenDec.get(asset.id) !== asset.dec) throw new Error(`${asset.sym}'s details were not checked`);
   const raw = BigInt(Math.round(units * 10 ** asset.dec));
   const res = await guardedSendBsv21.execute(ctx, {
     tokenId: asset.id,

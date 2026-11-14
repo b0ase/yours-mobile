@@ -36,6 +36,16 @@ export interface UncreditedResult {
 export const normOutpoint = (o: string) => o.replace('_', '.');
 
 /**
+ * Can this output be BSV money? More than 1 sat. A 1-sat output is an ordinal: an inscription, a token, a name or a bare
+ * marker (a Store receipt, say). The coin intake never takes one in as BSV (prioritySyncRun.ts coinOutputs), so the
+ * balance must never add one as "arriving" either. Owner, 13 Nov 2026: the extension showed 9,532,115 sats while storage
+ * held 9,532,114 and the iPhone showed 9,532,114; the extra sat was a 1-sat output at a receive address that storage
+ * holds in no basket the guard reads (or as an unadmitted ordinal), counted as arriving on every balance read.
+ */
+export const isCoinSats = (satoshis: number | undefined): boolean =>
+  typeof satoshis === 'number' && Number.isFinite(satoshis) && satoshis > 1;
+
+/**
  * Outputs the wallet has already moved itself (receiveRescue.ts), so they are spent even while the indexer still
  * lists them as unspent: the spend sits in the mempool until the next block, and the owner sync only reports a
  * spendTxid once it is mined. Owner, 11 Oct 2026 (5.2.1): right after the rescue the card showed $9.84 for $4.92,
@@ -193,7 +203,8 @@ export const setArriving = (outputs: ChainOutput[], since?: number) => {
 export const addArriving = (outputs: ChainOutput[], at = Date.now()) => {
   for (const o of outputs) {
     const k = normOutpoint(o.outpoint);
-    if (o.satoshis > 0)
+    // Only money: a 1-sat ordinal / marker is never BSV (isCoinSats).
+    if (isCoinSats(o.satoshis))
       arriving.set(k, {
         satoshis: o.satoshis,
         at: arriving.get(k)?.at ?? at,
@@ -212,6 +223,11 @@ export const dropArriving = (outpoints: Iterable<string>, o: { keepWaiting?: boo
     arriving.delete(k);
   }
 };
+/** Of `outputs`, those the balance may count as arriving money (more than 1 sat), and their total. */
+export const arrivingCoins = (outputs: ChainOutput[]): { outputs: ChainOutput[]; satoshis: number } => {
+  const coins = outputs.filter((o) => isCoinSats(o.satoshis));
+  return { outputs: coins, satoshis: coins.reduce((t, o) => t + o.satoshis, 0) };
+};
 /** The last known arriving total (for messages; the balance uses arrivingNow). */
 export const arrivingSats = () => [...arriving.values()].reduce((t, e) => t + e.satoshis, 0);
 export const arrivingOutputs = (): ChainOutput[] =>
@@ -225,7 +241,8 @@ export const arrivingOutputs = (): ChainOutput[] =>
 const unconfirmed = new Map<string, { satoshis: number; at: number }>();
 export const UNCONFIRMED_TTL_MS = 2 * 60 * 60 * 1000;
 export const noteUnconfirmed = (outputs: ChainOutput[], at = Date.now()) => {
-  for (const o of outputs) if (o.satoshis > 0) unconfirmed.set(normOutpoint(o.outpoint), { satoshis: o.satoshis, at });
+  for (const o of outputs)
+    if (isCoinSats(o.satoshis)) unconfirmed.set(normOutpoint(o.outpoint), { satoshis: o.satoshis, at });
 };
 export const noteConfirmed = (outpoints: Iterable<string>) => {
   for (const o of outpoints) unconfirmed.delete(normOutpoint(o));
@@ -279,14 +296,14 @@ export async function arrivingNow(
   let counted = 0;
   let pending = 0;
   for (const [k, e] of [...arriving]) {
-    if (held.has(k)) {
-      arriving.delete(k); // storage holds it now: counted there
+    if (held.has(k) || !isCoinSats(e.satoshis)) {
+      arriving.delete(k); // storage holds it now (counted there), or it is a 1-sat ordinal, never BSV
       continue;
     }
     counted += e.satoshis;
     pending += e.satoshis;
   }
-  for (const [k, u] of unconfirmed) if (held.has(k)) pending += u.satoshis;
+  for (const [k, u] of unconfirmed) if (held.has(k) && isCoinSats(u.satoshis)) pending += u.satoshis;
   return { counted, pending };
 }
 

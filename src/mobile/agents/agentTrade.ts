@@ -15,14 +15,21 @@ import { MARKET_ENABLED } from '../storeBuild';
 import { buyBsv21, type OneSatContext } from '@1sat/actions';
 import { sendBsv } from '../../utils/guardedSendBsv';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
-import { appendAgentLog, getAgentAccount } from './agentAccounts';
+import { appendAgentLog, checkAgentSpend, getAgentAccount } from './agentAccounts';
 import { serialSpend } from './spendQueue';
 import { checkAgentAction, getLoadedStrategy, getPaperBook, type ActionRequest, type StrategyAction } from './strategy';
 import { describeRules, inactiveRuleNotices, paperRuleGaps } from './describeRules';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
-import { parseRoom, roomMarket, roomMeta, type Listing } from '../market/indexer';
+import {
+  parseRoom,
+  roomMarket as indexerRoomMarket,
+  roomMeta as indexerRoomMeta,
+  type Listing,
+} from '../market/indexer';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { marketFeeOptions } from '../market/fee';
+import { checkedPurchaseContext as realCheckedPurchaseContext } from '../p2p/checkedPurchase';
+import { isPaused } from '../config/killSwitch';
 
 export type AgentActionBlock = { kind: StrategyAction; token: string; usd: number; to?: string; amount?: number };
 
@@ -127,18 +134,125 @@ export const strategyHolding = async (ctx: OneSatContext, id: string): Promise<n
 
 export type ActionResult = { ok: boolean; text: string; txid?: string };
 
+/** What runAgentAction talks to outside this file; every field is swappable for tests. */
+export type AgentTradeIo = {
+  roomMarket: typeof indexerRoomMarket;
+  roomMeta: typeof indexerRoomMeta;
+  assertOrdLockV2: typeof assertOrdLockV2;
+  checkedPurchaseContext: typeof realCheckedPurchaseContext;
+  buy: typeof buyBsv21.execute;
+  send: typeof sendBsv.execute;
+  /** The `spending` kill switch (config/killSwitch.ts). */
+  spendingPaused: () => Promise<boolean>;
+};
+const realIo: AgentTradeIo = {
+  roomMarket: indexerRoomMarket,
+  roomMeta: indexerRoomMeta,
+  assertOrdLockV2,
+  checkedPurchaseContext: realCheckedPurchaseContext,
+  buy: (ctx, input) => buyBsv21.execute(ctx, input),
+  send: (ctx, input) => sendBsv.execute(ctx, input),
+  spendingPaused: () => isPaused('spending'),
+};
+
+export type AgentActionHooks = {
+  /**
+   * The caller's own last look, run with the account's (lastLook below) after every listing / destination check and
+   * again inside the wallet's createAction, right before anything is signed. Return a reason to refuse, or null.
+   * It runs first, so its reason is the one shown. It may also throw: the error refuses (fail closed), and the caller
+   * can keep its own error (paired computers keep the AgentCallError code: UNPAIRED, STOPPED, PAUSED).
+   * Paired computers use it for "still paired", Stop and the spending pause (pair/agentPairing.ts).
+   */
+  beforeSign?: () => Promise<string | null> | string | null;
+  io?: Partial<AgentTradeIo>;
+};
+
+type WalletLike = { createAction: (args: never, originator?: string) => Promise<unknown> };
+
+/** Thrown from a gated createAction: the last look refused, nothing was signed. */
+class SpendRefused extends Error {}
+
+/**
+ * A context whose wallet runs `look` before every createAction and refuses (throws, nothing signed) when it returns a
+ * reason. createAction is where the wallet signs, so awaits inside buyBsv21 / sendBsv (a paymail's destination is
+ * fetched inside sendBsv) all happen before this check, the way bizAgent.ts re-runs its gate right before tx.sign().
+ */
+export const gatedContext = <C extends { wallet: W }, W extends WalletLike>(
+  ctx: C,
+  look: () => Promise<string | null>,
+): C => {
+  const wallet = new Proxy(ctx.wallet, {
+    get(target, prop, receiver) {
+      if (prop === 'createAction')
+        return async (args: never, originator?: string) => {
+          const why = await look();
+          if (why) throw new SpendRefused(why);
+          return target.createAction(args, originator);
+        };
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+  return Object.assign(Object.create(Object.getPrototypeOf(ctx)), ctx, { wallet });
+};
+
 /** Quote, gate and run one action on the current (agent) account. */
 export const runAgentAction = async (
   ctx: OneSatContext,
   id: string,
   a: AgentActionBlock,
   bsvUsd: number,
+  hooks: AgentActionHooks = {},
 ): Promise<ActionResult> => {
   if (!getAgentAccount(id)) return { ok: false, text: 'This isn’t an agent account, so b can’t act on it.' };
   if (!(bsvUsd > 0)) return { ok: false, text: 'No BSV price right now; try again shortly.' };
   if (a.kind === 'sell' || a.kind === 'list') return { ok: false, text: 'Selling from chat isn’t available yet.' };
   // Buying tokens is exchange functionality: bWalletX only (MARKET_ENABLED, App Review 3.1.5(iii)).
   if (!MARKET_ENABLED && a.kind !== 'send') return { ok: false, text: 'This edition can only send BSV.' };
+  const io: AgentTradeIo = { ...realIo, ...hooks.io };
+
+  /**
+   * b-Aware report (13 Nov 2026): a Stop pressed (or a pairing removed) after checkAgentAction passed but while the
+   * listing or destination was being checked must still win. The caller's own look first, then the account gate (Stop
+   * all, the account's Stop, hourly limit, daily cap), a strategy switched to paper meanwhile, and the `spending` pause
+   * (b agent chat sends had no pause check: guardedSendBsv has none). Fails closed: a look that throws, or a pause
+   * status that can't be read, refuses. The first refusal is logged once.
+   */
+  let refusal: string | null = null;
+  const lastLook = async (kind: string, usd: number): Promise<string | null> => {
+    if (refusal) return refusal;
+    let why: string | null;
+    try {
+      why = (await hooks.beforeSign?.()) ?? null;
+      if (!why) {
+        const s = checkAgentSpend(id, usd);
+        if (!s.ok) why = s.reason;
+        else if (getLoadedStrategy(id)?.mode === 'paper') why = 'The strategy was switched to paper mode';
+        else if (await io.spendingPaused().catch(() => true)) why = 'Spending is paused in bWalletX right now';
+      }
+    } catch (e) {
+      why = e instanceof Error && e.message ? e.message : 'The last check before signing failed';
+    }
+    if (why) {
+      refusal = why;
+      appendAgentLog(id, { at: Date.now(), action: 'refused', detail: `Refused ${kind} ${a.token}: ${why}`, usd: 0 });
+    }
+    return why;
+  };
+  const refused = () => ({ ok: false, text: `Refused: ${refusal}` });
+  /** Run the signing call; a refusal from the gated createAction comes back as a refused result. */
+  const signing = async <R extends { txid?: string; error?: unknown }>(run: () => Promise<R>): Promise<R | null> => {
+    try {
+      const res = await run();
+      // A txid means the payment went out (a paymail send can come back { txid, error: 'delivery-failed…' }): it is
+      // always reported and logged so the caps count it, even if a look refused afterwards. No txid: nothing went out.
+      if (refusal && !res.txid) return null;
+      return res;
+    } catch (e) {
+      if (e instanceof SpendRefused || refusal) return null;
+      throw e;
+    }
+  };
 
   // stop.holdTokens in live mode: how many of the strategy's tokens this account holds now.
   const holding = await strategyHolding(ctx, id);
@@ -151,26 +265,37 @@ export const runAgentAction = async (
     if (g.paper) return { ok: true, text: `Paper send of $${a.usd.toFixed(2)} to ${a.to}` };
     const sats = Math.round((a.usd / bsvUsd) * 1e8);
     const to = a.to.includes('@') ? { paymail: a.to } : { address: a.to };
-    const res = await sendBsv.execute(ctx, {
-      requests: [{ ...to, satoshis: sats }],
-      requireVerified: true,
-    } as Parameters<typeof sendBsv.execute>[1]);
-    if (!res.txid || res.error) return { ok: false, text: `Send failed: ${String(res.error ?? 'unknown error')}` };
+    if (await lastLook('send', a.usd)) return refused();
+    // A paymail's destination is fetched and checked inside send; the gated createAction looks again after that.
+    const res = await signing(() =>
+      io.send(
+        gatedContext(ctx, () => lastLook('send', a.usd)),
+        {
+          requests: [{ ...to, satoshis: sats }],
+          requireVerified: true,
+        } as Parameters<typeof sendBsv.execute>[1],
+      ),
+    );
+    if (!res) return refused();
+    if (!res.txid) return { ok: false, text: `Send failed: ${String(res.error ?? 'unknown error')}` };
+    // Review 13 Nov 2026: a txid with an error (paymail delivery failed after broadcast) is still money sent. Log it
+    // so the caps see it, and answer ok so the caller doesn't retry and pay twice.
+    const note = res.error ? ` (broadcast, but ${String(res.error)}; the payment was sent, don't send it again)` : '';
     appendAgentLog(id, {
       at: Date.now(),
       action: 'send',
-      detail: `Sent $${a.usd.toFixed(2)} to ${a.to}`,
+      detail: `Sent $${a.usd.toFixed(2)} to ${a.to}${note}`,
       usd: a.usd,
       txid: res.txid,
       rule: getLoadedStrategy(id)?.strategy.name,
     });
-    return { ok: true, text: `Sent $${a.usd.toFixed(2)} to ${a.to}`, txid: res.txid };
+    return { ok: true, text: `Sent $${a.usd.toFixed(2)} to ${a.to}${note}`, txid: res.txid };
   }
 
   // buy
   const ref = parseRoom('bsv21', a.token);
   if (!ref) return { ok: false, text: `${a.token} isn’t a BSV-21 token id.` };
-  const [market, meta] = await Promise.all([roomMarket(ref, 40), roomMeta('bsv21', a.token).catch(() => null)]);
+  const [market, meta] = await Promise.all([io.roomMarket(ref, 40), io.roomMeta('bsv21', a.token).catch(() => null)]);
   const ticker = meta?.title?.replace(/^\$/, '');
   const pick = pickListing(market.listings, a.usd, bsvUsd);
   if (!pick) return { ok: false, text: `No listing of that token fits $${a.usd.toFixed(2)}.` };
@@ -183,27 +308,48 @@ export const runAgentAction = async (
   if (g.paper) return { ok: true, text: `Paper buy: ${pick.label} for $${usd.toFixed(2)}` };
   const outpoint = walletOutpoint(pick.outpoint);
   try {
-    await assertOrdLockV2(outpoint);
+    await io.assertOrdLockV2(outpoint);
   } catch (e) {
     return { ok: false, text: e instanceof Error ? e.message : 'Listing check failed' };
   }
-  const res = await buyBsv21.execute(purchaseContext(ctx, outpoint), {
-    tokenId: a.token,
-    outpoint,
-    amount: pick.amount ?? '0',
-    ...marketFeeOptions(),
-    ...MODULE_FINISHES,
-  });
-  if (!res.txid || res.error) return { ok: false, text: `Buy failed: ${String(res.error ?? 'unknown error')}` };
+  // The cap above was checked against pick.priceSats, so that is the only price the wallet may sign.
+  let checked: OneSatContext;
+  try {
+    checked = await io.checkedPurchaseContext(ctx, {
+      tokenId: a.token,
+      outpoint,
+      amount: BigInt(pick.amount ?? '0'),
+      priceSats: pick.priceSats,
+    });
+  } catch (e) {
+    return { ok: false, text: e instanceof Error ? e.message : 'Listing check failed' };
+  }
+  if (await lastLook('buy', usd)) return refused();
+  const res = await signing(() =>
+    io.buy(
+      gatedContext(purchaseContext(checked, outpoint), () => lastLook('buy', usd)),
+      {
+        tokenId: a.token,
+        outpoint,
+        amount: pick.amount ?? '0',
+        ...marketFeeOptions(),
+        ...MODULE_FINISHES,
+      },
+    ),
+  );
+  if (!res) return refused();
+  if (!res.txid) return { ok: false, text: `Buy failed: ${String(res.error ?? 'unknown error')}` };
+  // As for send: a txid means it went out, so it is logged against the caps even if an error came with it.
+  const note = res.error ? ` (broadcast, but ${String(res.error)})` : '';
   appendAgentLog(id, {
     at: Date.now(),
     action: 'buy',
-    detail: `Bought ${pick.label}`,
+    detail: `Bought ${pick.label}${note}`,
     usd,
     txid: res.txid,
     rule: getLoadedStrategy(id)?.strategy.name,
   });
-  return { ok: true, text: `Bought ${pick.label} for $${usd.toFixed(2)}`, txid: res.txid };
+  return { ok: true, text: `Bought ${pick.label} for $${usd.toFixed(2)}${note}`, txid: res.txid };
 };
 
 /**

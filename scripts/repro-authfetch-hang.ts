@@ -7,7 +7,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import puppeteer, { type Browser, type CDPSession, type Page, type Target, type WebWorker } from 'puppeteer';
+import puppeteer, { type CDPSession, type Page, type Target } from 'puppeteer';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -204,7 +204,7 @@ async function unlock(page: Page) {
   await page.waitForSelector('input[type=password]', { timeout: 15000 });
   const el = await page.$('input[type=password]');
   if (!el) throw new Error('no pw');
-  await el.click({ clickCount: 3 });
+  await el.click({ count: 3 });
   await el.type(secrets.password, { delay: 8 });
   await page.evaluate(() =>
     [...document.querySelectorAll('button')].find((b) => /unlock/i.test(b.textContent || ''))?.click(),
@@ -217,7 +217,7 @@ function dumpHang(reason: string) {
   log(`=== HANG ${reason} ===`);
   const open = [...pending.entries()];
   log(`CDP pending count=${open.length}`);
-  for (const [id, pe] of open) {
+  for (const [, pe] of open) {
     log(`  PENDING age=${Date.now() - pe.start}ms ${pe.method} ${pe.url}`);
     if (pe.postData) log(`    post=${pe.postData.slice(0, 200)}`);
   }

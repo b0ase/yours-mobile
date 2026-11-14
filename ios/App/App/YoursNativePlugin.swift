@@ -15,6 +15,11 @@ class YoursBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(YoursNativePlugin())
         bridge?.registerPluginInstance(PasskeysPlugin())
         bridge?.registerPluginInstance(AppBadgePlugin())
+        // Inert until JS turns the switch on (src/mobile/nativeChat/flag.ts).
+        bridge?.registerPluginInstance(NativeChatPlugin())
+        #if DEBUG
+        NCBench.maybeLoad(self)
+        #endif
         installBridgeGate()
     }
 
@@ -173,8 +178,10 @@ public class YoursNativePlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func secureRemove(_ call: CAPPluginCall) {
         guard let key = call.getString("key") else { return call.reject("Must provide key") }
-        SecItemDelete(query(storageService, key) as CFDictionary)
-        call.resolve()
+        // A delete that failed must not be reported as done: JS would drop the key while the Keychain keeps it.
+        let status = SecItemDelete(query(storageService, key) as CFDictionary)
+        status == errSecSuccess || status == errSecItemNotFound
+            ? call.resolve() : call.reject("Secure remove failed (\(status))")
     }
 
     @objc func secureKeys(_ call: CAPPluginCall) {

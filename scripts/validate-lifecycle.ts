@@ -48,7 +48,7 @@ async function unlock(page: Page) {
   await page.waitForSelector('input[type="password"]', { timeout: 15_000 });
   const el = await page.$('input[type="password"]');
   if (!el) throw new Error('no password field');
-  await el.click({ clickCount: 3 });
+  await el.click({ count: 3 });
   await el.type(secrets.password, { delay: 8 });
   await page.evaluate(() => {
     [...document.querySelectorAll('button')].find((b) => /unlock/i.test(b.textContent || ''))?.click();

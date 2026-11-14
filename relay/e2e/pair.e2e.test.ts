@@ -109,6 +109,35 @@ test('QR → scan → same code → connect → request reaches the wallet and t
   ]);
   expect(phone.pairedSites().map((s: { origin: string }) => s.origin)).toEqual([SITE_ORIGIN]);
 
+  // Wallet claim v2: the relay bound the wallet role to the phone's session claim, so the QR claim (which anyone who
+  // saw the QR can compute) no longer admits anyone, and the phone keeps the session claim for rejoins.
+  const proto = await import('../../src/pair/protocol.ts');
+  const [stored] = JSON.parse(localStorage.getItem('bwallet.pair.sessions') ?? '[]') as {
+    c: string;
+    claim: string;
+    wcv?: number;
+    phoneKey: string;
+    sitePub: string;
+  }[];
+  expect(stored.wcv).toBe(2);
+  expect(stored.claim).toBe(
+    proto.sessionWalletClaim((await import('@bsv/sdk')).PrivateKey.fromHex(stored.phoneKey), stored.sitePub, stored.c),
+  );
+  const refused = await new Promise<boolean>((res) => {
+    const w = new Native(
+      proto.relaySocketUrl(
+        `localhost:${port}`,
+        stored.c,
+        'wallet',
+        undefined,
+        proto.walletClaimFor(stored.c, stored.sitePub),
+      ),
+    );
+    w.onopen = () => (w.close(), res(false));
+    w.onerror = () => res(true);
+  });
+  expect(refused).toBe(true);
+
   // A QR claiming another origin is refused by the phone (relay reports the real one).
   const forged = link.replace(encodeURIComponent(SITE_ORIGIN), encodeURIComponent('https://tokenblaster.lol'));
   const stop2 = site.startPairing(() => {});
@@ -120,6 +149,58 @@ test('QR → scan → same code → connect → request reaches the wallet and t
   // whatever WebSocket is global by then: a later test file's fake. Close it for good first.
   site.disconnectPhone();
   // Close the phone's live sessions before the relay goes, so no reconnect timer outlives the test.
+  for (const s of phone.pairedSites() as { c: string }[]) phone.forget(s.c, false);
+  relay.close();
+  server.closeAllConnections?.();
+  server.close();
+}, 20000);
+
+// Review 13 Nov 2026 (B1): pairing after the compatibility window. A site that sends its claim and `wc` pairs as
+// before; one that sends neither (TokenBlaster's site.ts, bit-sign's phone-wallet.ts today) can't open a channel.
+test('after the window: a site with claim + wc pairs; one without is refused', async () => {
+  const server = http.createServer();
+  const relay = createRelay({ server, legacyUntil: 0 });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const relayHost = `localhost:${(server.address() as { port: number }).port}`;
+  const site = await import('./fixtures/site/site.ts');
+  const phone = await import('../../src/mobile/pair/sessions.ts');
+  const proto = await import('../../src/pair/protocol.ts');
+  const until = async (f: () => unknown, ms = 5000) => {
+    const t = Date.now();
+    while (!f()) {
+      if (Date.now() - t > ms) throw new Error('timeout');
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+
+  // No claim, no wc: the relay answers 403 and the site says pairing is unreachable.
+  const old: { k: string }[] = [];
+  const stopOld = site.startPairing((s: { k: string }) => old.push(s), { relay: relayHost });
+  await until(() => old.find((s) => s.k === 'error'));
+  expect(old.find((s) => s.k === 'qr')).toBeUndefined();
+  stopOld();
+
+  // With the site claim and wc (as @bwalletx/connect >= 0.5.4 sends on a first pairing): the full flow works.
+  const states: { k: string; [x: string]: unknown }[] = [];
+  const stop = site.startPairing((s: { k: string }) => states.push(s), {
+    relay: relayHost,
+    siteClaims: async (c: string, sitePub: string) => ({
+      claim: proto.newClaim(),
+      wc: await proto.claimDigest(proto.walletClaimFor(c, sitePub)),
+    }),
+  });
+  await until(() => states.find((s) => s.k === 'qr'));
+  const link = (states.find((s) => s.k === 'qr') as { link: string }).link;
+  const pending = await phone.beginPairing(link);
+  await until(() => states.find((s) => s.k === 'code'));
+  pending.confirm();
+  await until(() => states.find((s) => s.k === 'ready'));
+  const wallet = (states.find((s) => s.k === 'ready') as { wallet: { getPublicKey: (a: unknown) => Promise<unknown> } })
+    .wallet;
+  expect(await wallet.getPublicKey({ identityKey: true })).toEqual({ publicKey: '02' + 'ab'.repeat(32) });
+
+  stop();
+  site.disconnectPhone();
   for (const s of phone.pairedSites() as { c: string }[]) phone.forget(s.c, false);
   relay.close();
   server.closeAllConnections?.();

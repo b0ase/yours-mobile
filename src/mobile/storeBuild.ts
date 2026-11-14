@@ -26,8 +26,8 @@ export const STORE_AGENT_NOTE = 'Use your own AI provider key';
 /** Fee addresses that pay bCorp (Mint, Market, ticket resale): none in a store build. */
 export const bcorpFeeAddress = (address: string, store = STORE_BUILD): string => (store ? '' : address);
 
-/** Wallet tab switch: no Tickets (token-gated rooms) or Credits (prepaid bCorp credits) in a store build. */
-export const STORE_HIDDEN_WALLET_KINDS: readonly string[] = ['tickets', 'credits', 'shares'];
+/** Wallet tab switch: no Tickets (token-gated rooms) or Shares in a store build. */
+export const STORE_HIDDEN_WALLET_KINDS: readonly string[] = ['tickets', 'shares'];
 export const walletKindsFor = <T extends readonly [string, ...unknown[]]>(
   kinds: readonly T[],
   store = STORE_BUILD,
@@ -217,7 +217,7 @@ export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] =>
 /** Token indexing fee: paid to the third-party 1Sat overlay (a network cost, like gas), so on everywhere. */
 export const indexingEnabled = (_store = STORE_BUILD) => true;
 
-/** Paid features shown outside a store build only: Credits, paid indexing, personal token + room. */
+/** Paid features shown outside a store build only: paid indexing, personal token + room. */
 export const paidFeaturesEnabled = (store = STORE_BUILD) => !store;
 
 /** bWalletX = every non-store build (private channels, web, dev); the store app is plain bWallet. */
@@ -475,17 +475,6 @@ export const BMOVIES_FEED_ENABLED: boolean = !(
 );
 
 /**
- * bCredits (prepaid credit for b, src/mobile/credits): bWalletX only, absent from a store build even as code
- * (prepaid credit for a digital service is IAP territory: Apple 3.1.1, Play Payments). Literal env check so Vite
- * inlines it and Rollup drops the lazy CreditsPanel chunk and the bCredits path in Ask b.
- */
-export const BCREDITS_ENABLED: boolean = !(
-  import.meta.env.VITE_STORE_BUILD === '1' ||
-  import.meta.env.VITE_CHANNEL === 'ios-store' ||
-  import.meta.env.VITE_CHANNEL === 'android-play'
-);
-
-/**
  * Feed › bExchange (the token reel: price, 24h change, sparkline, BUY / SELL): bWalletX only, absent from a store
  * build even as code (exchange functionality, Apple 3.1.5(iii); the same rejection as the Market). Literal env
  * check so Vite inlines it and Rollup drops feed/reels/BexReel and its Feed picker entry. Feed › bApps stays in
@@ -515,6 +504,18 @@ export const BALANCE_CARDS_ENABLED: boolean = !(
  * updater from every other build (STORE-AUDIT.md lists its strings for the store grep).
  */
 export const DIRECT_UPDATE_ENABLED: boolean = import.meta.env.VITE_CHANNEL === 'android-direct';
+
+/**
+ * "A newer bWalletX is available" banner (update/updateNotice.ts) for the unpacked extension, Ad Hoc iOS and Desktop
+ * (owner, 13 Nov 2026: a week on a stale extension build). Never in a store build: the stores update their apps and the
+ * store bundle must not fetch bwalletx.com/download/latest.json. Literal env check so Rollup drops the chunk; its
+ * strings are in the STORE-AUDIT.md grep (`bwallet.update.notice`).
+ */
+export const UPDATE_NOTICE_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 
 /**
  * Room X invites (chat/xInvites.ts, XInvitesSheet, XInviteClaim): a room host pre-funds one-time keys with the

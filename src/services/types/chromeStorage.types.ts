@@ -72,6 +72,11 @@ export type Settings = {
 export type StorageConfig = {
   activeRemote?: string;
   remotes?: string[];
+  /**
+   * @deprecated Written by one 5.2.56 candidate build only; moved to `bwx.ownServerKeys.<account>` and removed at
+   * startup (initWallet migrateServerKeys). Never write it: the store keys live outside `accounts`.
+   */
+  serverKeys?: Record<string, string>;
 };
 
 export interface Account {
@@ -161,6 +166,9 @@ export type ExchangeRateCache = {
   timestamp: number;
 };
 
+/** The key-swap recovery note (ChromeStorageObject.kdfPending). */
+export type KdfPending = { prevSalt: string; salt: string; older?: string[] };
+
 export interface ChromeStorageObject {
   accounts: { [identityAddress: string]: Account };
   selectedAccount: string;
@@ -193,9 +201,11 @@ export interface ChromeStorageObject {
   /**
    * Written before the one-time password-key upgrade (100k → 600k) and cleared after it. Phones store `accounts`
    * and `salt` as separate secure items, so an app killed between the two writes could pair new blobs with the old
-   * salt; unlock then finds whichever of these salts opens the stored keys and repairs `salt`.
+   * salt; unlock then finds whichever of these salts opens the stored keys and repairs `salt`. Password changes write
+   * it too. `older`: salts a note left by an earlier swap that didn't finish still named (ChromeStorage.service.ts
+   * kdfNote); builds before 5.2.56 ignore it.
    */
-  kdfPending?: { prevSalt: string; salt: string } | null;
+  kdfPending?: KdfPending | null;
   /** identityAddress → last USB backup. Written by the popup's sync loop. */
   usbBackupStatus?: Record<string, UsbBackupAccountStatus>;
 }
