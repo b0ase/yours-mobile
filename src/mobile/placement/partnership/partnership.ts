@@ -211,31 +211,37 @@ export type AgreementVersion = {
   signed: string[];
 };
 
+/** What the check reads: the text and what it must regenerate from, plus status/signatures for legacy wording. */
+type Checkable = Pick<AgreementVersion, 'version' | 'partners' | 'rule' | 'agreementText' | 'agreementSha256'> &
+  Partial<Pick<AgreementVersion, 'status' | 'signed'>>;
+
+export const LEGACY_DRAFT_PROBLEM = 'This draft uses old wording; ask the room to regenerate it.';
+
+/**
+ * Legacy wording stands only for a version already in force or already signed by a partner (bit-sign #713 drafts
+ * every new version in the strict-consent wording since 14 Nov 2026), never for a fresh draft.
+ */
+const legacyAllowed = (v: Checkable) => v.status === 'active' || (v.signed?.length ?? 0) > 0;
+
 /**
  * Checks a draft before the wallet signs it: the text regenerates exactly from the draft's own partners and rule
  * (room name, ticker, version and date read from its header) and hashes to the recorded sha256. Null = safe to
  * sign; otherwise the reason, and the Sign button stays off.
  */
-export function agreementProblem(
-  v: Pick<AgreementVersion, 'version' | 'partners' | 'rule' | 'agreementText' | 'agreementSha256'>,
-  expectTicker?: string,
-): string | null {
+export function agreementProblem(v: Checkable, expectTicker?: string): string | null {
   return checkAgreement(v, expectTicker).problem;
 }
 
 /**
  * The wording a standard agreement uses ('current' or 'legacy', see agreementText), or null when it is not one
- * (agreementProblem says why). An agreement signed with the older majority wording still checks.
+ * (agreementProblem says why). The older majority wording checks only for a version already active or signed.
  */
-export function agreementWording(
-  v: Pick<AgreementVersion, 'version' | 'partners' | 'rule' | 'agreementText' | 'agreementSha256'>,
-  expectTicker?: string,
-): AgreementWording | null {
+export function agreementWording(v: Checkable, expectTicker?: string): AgreementWording | null {
   return checkAgreement(v, expectTicker).wording;
 }
 
 function checkAgreement(
-  v: Pick<AgreementVersion, 'version' | 'partners' | 'rule' | 'agreementText' | 'agreementSha256'>,
+  v: Checkable,
   expectTicker?: string,
 ): { wording: AgreementWording; problem: null } | { wording: null; problem: string } {
   const no = (problem: string) => ({ wording: null, problem });
@@ -259,5 +265,6 @@ function checkAgreement(
   if (!wording) return no('The text differs from the standard agreement for these partners.');
   if (sha256Hex(v.agreementText) !== v.agreementSha256.toLowerCase())
     return no('The recorded fingerprint does not match.');
+  if (wording === 'legacy' && !legacyAllowed(v)) return no(LEGACY_DRAFT_PROBLEM);
   return { wording, problem: null };
 }
