@@ -771,7 +771,10 @@ export class World {
       listQueued: () =>
         sm.runAsStorageProvider(async (sp) => {
           const out: QueuedSend[] = [];
-          for (const t of await sp.findTransactions({ partial: { status: 'sending', isOutgoing: true }, noRawTx: true })) {
+          for (const t of await sp.findTransactions({
+            partial: { status: 'sending', isOutgoing: true },
+            noRawTx: true,
+          })) {
             if (!t.txid) continue;
             const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
             out.push({
@@ -1262,7 +1265,9 @@ type WriteAheadModule = {
 let writeAheadMod: Promise<WriteAheadModule | undefined> | undefined;
 /** services/changeWriteAhead.ts when the build under test has it (loaded by URL, as postPullStep). */
 export const writeAheadModule = (): Promise<WriteAheadModule | undefined> =>
-  (writeAheadMod ??= import(/* @vite-ignore */ new URL('../../services/changeWriteAhead.ts', import.meta.url).href).then(
+  (writeAheadMod ??= import(
+    /* @vite-ignore */ new URL('../../services/changeWriteAhead.ts', import.meta.url).href
+  ).then(
     (m: Partial<WriteAheadModule>) =>
       typeof m.createChangeWriteAhead === 'function' ? (m as WriteAheadModule) : undefined,
     (e: unknown) => {
@@ -1275,8 +1280,7 @@ export const writeAheadModule = (): Promise<WriteAheadModule | undefined> =>
 const OFFLINE_BACKUP = new Proxy(
   {},
   {
-    get: (_t, p) =>
-      p === 'then' ? undefined : () => Promise.reject(new Error('network: this device is offline')),
+    get: (_t, p) => (p === 'then' ? undefined : () => Promise.reject(new Error('network: this device is offline'))),
   },
 );
 

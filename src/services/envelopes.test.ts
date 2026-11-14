@@ -536,7 +536,9 @@ describe('13 Nov 2026: one envelope lock per storage key, across store instances
     const main = readFileSync(new URL('../mobile/main.ts', import.meta.url), 'utf8');
     expect(main).toContain('sharedEnvelopeLock: !Capacitor.isNativePlatform() && !IS_TAURI');
     const worker = readFileSync(new URL('../mobile/background.worker.ts', import.meta.url), 'utf8');
-    expect(worker).toContain("if (sharedEnvelopeLock) (await import('../services/envelopes')).requireSharedEnvelopeLock();");
+    expect(worker).toContain(
+      "if (sharedEnvelopeLock) (await import('../services/envelopes')).requireSharedEnvelopeLock();",
+    );
   });
 });
 
@@ -642,8 +644,12 @@ describe('review of fix/envelope-queue (13 Nov 2026): deadlines, carrying on, fa
     const backends = new Map<string, EnvelopeBackend>();
     const be = (id: string): EnvelopeBackend =>
       id === 'broken'
-        ? { key: 'bwxEnvelopes:broken', load: async () => Promise.reject(new Error('read failed')), save: async () => {} }
-        : backends.get(id) ?? (backends.set(id, memBackend()), backends.get(id)!);
+        ? {
+            key: 'bwxEnvelopes:broken',
+            load: async () => Promise.reject(new Error('read failed')),
+            save: async () => {},
+          }
+        : (backends.get(id) ?? (backends.set(id, memBackend()), backends.get(id)!));
     await new EnvelopeStore(be('x2')).fill(A, 300);
     await new EnvelopeStore(be('z2')).fill(A, 200);
     await expect(closeEnvelopeInAccounts(['x2', 'broken', 'z2'], A, be)).rejects.toThrow('1 account(s): read failed');
@@ -695,4 +701,3 @@ describe('review of fix/envelope-queue (13 Nov 2026): deadlines, carrying on, fa
     expect((await new EnvelopeStore(cell.backend(key)).get(A))?.balanceSats).toBe(90);
   });
 });
-

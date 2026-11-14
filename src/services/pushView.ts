@@ -157,13 +157,10 @@ export function pushView<T extends object>(
         return Promise.race([
           call,
           new Promise((_, reject) => {
-            timer = setTimer(
-              () => {
-                o.inFlight.add(call); // still running on the backup's side: no second request until it settles
-                reject(new Error(`network: the backup did not answer in time (${name})`));
-              },
-              ms,
-            );
+            timer = setTimer(() => {
+              o.inFlight.add(call); // still running on the backup's side: no second request until it settles
+              reject(new Error(`network: the backup did not answer in time (${name})`));
+            }, ms);
           }),
         ]).finally(() => clearTimer(timer));
       };

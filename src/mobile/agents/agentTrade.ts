@@ -20,7 +20,12 @@ import { serialSpend } from './spendQueue';
 import { checkAgentAction, getLoadedStrategy, getPaperBook, type ActionRequest, type StrategyAction } from './strategy';
 import { describeRules, inactiveRuleNotices, paperRuleGaps } from './describeRules';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
-import { parseRoom, roomMarket as indexerRoomMarket, roomMeta as indexerRoomMeta, type Listing } from '../market/indexer';
+import {
+  parseRoom,
+  roomMarket as indexerRoomMarket,
+  roomMeta as indexerRoomMeta,
+  type Listing,
+} from '../market/indexer';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
 import { marketFeeOptions } from '../market/fee';
 import { checkedPurchaseContext as realCheckedPurchaseContext } from '../p2p/checkedPurchase';
@@ -263,10 +268,13 @@ export const runAgentAction = async (
     if (await lastLook('send', a.usd)) return refused();
     // A paymail's destination is fetched and checked inside send; the gated createAction looks again after that.
     const res = await signing(() =>
-      io.send(gatedContext(ctx, () => lastLook('send', a.usd)), {
-        requests: [{ ...to, satoshis: sats }],
-        requireVerified: true,
-      } as Parameters<typeof sendBsv.execute>[1]),
+      io.send(
+        gatedContext(ctx, () => lastLook('send', a.usd)),
+        {
+          requests: [{ ...to, satoshis: sats }],
+          requireVerified: true,
+        } as Parameters<typeof sendBsv.execute>[1],
+      ),
     );
     if (!res) return refused();
     if (!res.txid) return { ok: false, text: `Send failed: ${String(res.error ?? 'unknown error')}` };
@@ -318,13 +326,16 @@ export const runAgentAction = async (
   }
   if (await lastLook('buy', usd)) return refused();
   const res = await signing(() =>
-    io.buy(gatedContext(purchaseContext(checked, outpoint), () => lastLook('buy', usd)), {
-      tokenId: a.token,
-      outpoint,
-      amount: pick.amount ?? '0',
-      ...marketFeeOptions(),
-      ...MODULE_FINISHES,
-    }),
+    io.buy(
+      gatedContext(purchaseContext(checked, outpoint), () => lastLook('buy', usd)),
+      {
+        tokenId: a.token,
+        outpoint,
+        amount: pick.amount ?? '0',
+        ...marketFeeOptions(),
+        ...MODULE_FINISHES,
+      },
+    ),
   );
   if (!res) return refused();
   if (!res.txid) return { ok: false, text: `Buy failed: ${String(res.error ?? 'unknown error')}` };

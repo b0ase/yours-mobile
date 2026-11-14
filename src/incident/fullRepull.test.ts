@@ -1026,53 +1026,65 @@ describe('rows that land on the backup late with old times (extension, 6 Nov 202
     T,
   );
 
-  test('a check when nothing is missing is a few one-row probes and starts nothing; not again within the interval', async () => {
-    const d = await phoneWith(200);
-    try {
-      await d.pullToEnd();
-      const st0 = await d.state();
-      const before = { ...d.stats };
-      const t0 = Date.now();
-      expect(await tail(d, t0)).toBe('in-step');
-      expect(d.stats.pages - before.pages).toBeLessThanOrEqual(24); // ≤ 2 probes per entity with ids
-      expect(d.stats.items - before.items).toBeLessThanOrEqual(d.stats.pages - before.pages); // one row each at most
-      const st = await d.state();
-      expect(+new Date(st.when as string)).toBe(+new Date(st0.when as string)); // the cursor untouched
-      expect(passUnderWay(st)).toBe(false);
-      expect(await tail(d, t0 + TAIL_CHECK_EVERY_MS - 1)).toBe('not-due');
-    } finally {
-      d.off();
-    }
-  }, T);
+  test(
+    'a check when nothing is missing is a few one-row probes and starts nothing; not again within the interval',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        const st0 = await d.state();
+        const before = { ...d.stats };
+        const t0 = Date.now();
+        expect(await tail(d, t0)).toBe('in-step');
+        expect(d.stats.pages - before.pages).toBeLessThanOrEqual(24); // ≤ 2 probes per entity with ids
+        expect(d.stats.items - before.items).toBeLessThanOrEqual(d.stats.pages - before.pages); // one row each at most
+        const st = await d.state();
+        expect(+new Date(st.when as string)).toBe(+new Date(st0.when as string)); // the cursor untouched
+        expect(passUnderWay(st)).toBe(false);
+        expect(await tail(d, t0 + TAIL_CHECK_EVERY_MS - 1)).toBe('not-due');
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
 
-  test('never while a pass is under way (the pass reads everything anyway)', async () => {
-    const d = await phoneWith(200);
-    try {
-      await d.pullToEnd();
-      expect(await d.pull(Date.now() + 8 * DAY)).toBe('started'); // a weekly full pass begins
-      _setFullPassSlice(0);
-      await d.pull();
-      expect(await tail(d, Date.now() + 9 * DAY)).toBe('busy');
-    } finally {
-      d.off();
-    }
-  }, T);
+  test(
+    'never while a pass is under way (the pass reads everything anyway)',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        expect(await d.pull(Date.now() + 8 * DAY)).toBe('started'); // a weekly full pass begins
+        _setFullPassSlice(0);
+        await d.pull();
+        expect(await tail(d, Date.now() + 9 * DAY)).toBe('busy');
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
 
-  test('several late rows spread through history: one tail from the first, and each arrives', async () => {
-    const d = await phoneWith(200);
-    try {
-      await d.pullToEnd();
-      const a = await latePush(d.backup, d.kd.identityKey, 2 * DAY, 1_111);
-      await d.pullToEnd(); // the cursor moves (an ordinary pull), a is still missing
-      const b = await latePush(d.backup, d.kd.identityKey, 3 * DAY, 2_222);
-      for (const t of [a, b]) d.built.txids.add(t);
-      expect(await tail(d, Date.now() + TAIL_CHECK_EVERY_MS + 1)).toBe('tail');
-      await d.pullToEnd();
-      expect([await has(d, a), await has(d, b)]).toEqual([1, 1]);
-    } finally {
-      d.off();
-    }
-  }, T);
+  test(
+    'several late rows spread through history: one tail from the first, and each arrives',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        const a = await latePush(d.backup, d.kd.identityKey, 2 * DAY, 1_111);
+        await d.pullToEnd(); // the cursor moves (an ordinary pull), a is still missing
+        const b = await latePush(d.backup, d.kd.identityKey, 3 * DAY, 2_222);
+        for (const t of [a, b]) d.built.txids.add(t);
+        expect(await tail(d, Date.now() + TAIL_CHECK_EVERY_MS + 1)).toBe('tail');
+        await d.pullToEnd();
+        expect([await has(d, a), await has(d, b)]).toEqual([1, 1]);
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
 });
 
 describe('review of 8d59e33b: a stuck pass, an offset cap, an unfiled tail', () => {
@@ -1156,70 +1168,82 @@ describe('review of 8d59e33b: a stuck pass, an offset cap, an unfiled tail', () 
     T,
   );
 
-  test('a long pass that keeps moving is never given up, even opened briefly once a day for a week', async () => {
-    const d = await phoneWith(400);
-    try {
-      await d.pullToEnd();
-      const t0 = Date.now();
-      await d.sm.runAsSync(async () => rewind(d.phone as never, await d.state(), t0, { onDemandAt: t0 }));
-      _setFullPassSlice(0); // one page a pull: the pass takes many opens
-      for (let day = 0; day < 7; day++) {
-        const at = t0 + day * DAY;
-        expect(await ask(d, at)).not.toBe('abandoned');
-        await d.pull(at);
+  test(
+    'a long pass that keeps moving is never given up, even opened briefly once a day for a week',
+    async () => {
+      const d = await phoneWith(400);
+      try {
+        await d.pullToEnd();
+        const t0 = Date.now();
+        await d.sm.runAsSync(async () => rewind(d.phone as never, await d.state(), t0, { onDemandAt: t0 }));
+        _setFullPassSlice(0); // one page a pull: the pass takes many opens
+        for (let day = 0; day < 7; day++) {
+          const at = t0 + day * DAY;
+          expect(await ask(d, at)).not.toBe('abandoned');
+          await d.pull(at);
+        }
+        expect(passUnderWay(await d.state()) || markOf(await d.state()).doneAt !== undefined).toBe(true);
+        expect(markOf(await d.state()).abandonedAt).toBeUndefined();
+      } finally {
+        _setFullPassSlice();
+        d.off();
       }
-      expect(passUnderWay(await d.state()) || markOf(await d.state()).doneAt !== undefined).toBe(true);
-      expect(markOf(await d.state()).abandonedAt).toBeUndefined();
-    } finally {
-      _setFullPassSlice();
-      d.off();
-    }
-  }, T);
+    },
+    T,
+  );
 
-  test('a stuck pass on a phone opened briefly each day is still given up (each open counts up to 5 minutes)', async () => {
-    const d = await phoneWith(200);
-    try {
-      await d.pullToEnd();
-      const t0 = Date.now();
-      await stuck(d, t0);
-      let plan = '';
-      let opens = 0;
-      while (opens < 20 && plan !== 'abandoned') plan = await ask(d, t0 + ++opens * DAY);
-      expect(plan).toBe('abandoned');
-      expect(opens).toBeLessThanOrEqual(STUCK_PASS_MS / (5 * 60_000) + 1);
-    } finally {
-      d.o.failAfterPages = undefined;
-      d.off();
-    }
-  }, T);
-
-  test('a pass from the start that has not moved for 30 minutes of uptime is given up; a long gap counts 5 minutes', async () => {
-    const d = await phoneWith(200);
-    try {
-      await d.pullToEnd();
-      const t0 = Date.now();
-      await stuck(d, t0);
-      // Checks a minute apart while the wallet is open; one 2-hour gap (closed) in the middle counts for nothing.
-      let t = t0 + 10;
-      let plan = '';
-      let minutes = 0;
-      while (minutes < 40) {
-        plan = await ask(d, t);
-        await d.pull(t).catch(() => undefined); // the merge still fails (the pass's next page)
-        if (plan === 'abandoned') break;
-        t += minutes === 10 ? 2 * 3_600_000 : 60_000;
-        minutes++;
+  test(
+    'a stuck pass on a phone opened briefly each day is still given up (each open counts up to 5 minutes)',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        const t0 = Date.now();
+        await stuck(d, t0);
+        let plan = '';
+        let opens = 0;
+        while (opens < 20 && plan !== 'abandoned') plan = await ask(d, t0 + ++opens * DAY);
+        expect(plan).toBe('abandoned');
+        expect(opens).toBeLessThanOrEqual(STUCK_PASS_MS / (5 * 60_000) + 1);
+      } finally {
+        d.o.failAfterPages = undefined;
+        d.off();
       }
-      expect(plan).toBe('abandoned');
-      expect(minutes).toBeGreaterThanOrEqual(STUCK_PASS_MS / 60_000 - 6);
-      expect(minutes).toBeLessThan(STUCK_PASS_MS / 60_000 + 3);
-      // A cursor saved at the rewind is the one put back.
-      expect((await d.state()).when == null).toBe(false);
-    } finally {
-      d.o.failAfterPages = undefined;
-      d.off();
-    }
-  }, T);
+    },
+    T,
+  );
+
+  test(
+    'a pass from the start that has not moved for 30 minutes of uptime is given up; a long gap counts 5 minutes',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        const t0 = Date.now();
+        await stuck(d, t0);
+        // Checks a minute apart while the wallet is open; one 2-hour gap (closed) in the middle counts for nothing.
+        let t = t0 + 10;
+        let plan = '';
+        let minutes = 0;
+        while (minutes < 40) {
+          plan = await ask(d, t);
+          await d.pull(t).catch(() => undefined); // the merge still fails (the pass's next page)
+          if (plan === 'abandoned') break;
+          t += minutes === 10 ? 2 * 3_600_000 : 60_000;
+          minutes++;
+        }
+        expect(plan).toBe('abandoned');
+        expect(minutes).toBeGreaterThanOrEqual(STUCK_PASS_MS / 60_000 - 6);
+        expect(minutes).toBeLessThan(STUCK_PASS_MS / 60_000 + 3);
+        // A cursor saved at the rewind is the one put back.
+        expect((await d.state()).when == null).toBe(false);
+      } finally {
+        d.o.failAfterPages = undefined;
+        d.off();
+      }
+    },
+    T,
+  );
 
   test(
     'an older-build pass stopped mid-outputs, early coins touched recently: the fallback goes 48 h back and no output is skipped',
@@ -1267,66 +1291,78 @@ describe('review of 8d59e33b: a stuck pass, an offset cap, an unfiled tail', () 
     T,
   );
 
-  test('an entity too large to skip: the earlier ones still get their tail, and the pass ends where it begins', async () => {
-    const d = await phoneWith(400);
-    try {
-      await d.pullToEnd();
-      const late = await latePush(d.backup, d.kd.identityKey, 34 * 60_000, 4_321);
-      d.built.txids.add(late);
-      _setTailOffsetCap(200); // proofs and transactions (~100) fit; outputs (401) count as oversized here
-      expect(await tailCheck(d, Date.now())).toBe('tail');
-      await d.pullToEnd();
-      expect((await d.phone.findTransactions({ partial: { txid: late }, noRawTx: true })).length).toBe(1);
-      const st = await d.state();
-      expect(passUnderWay(st)).toBe(false); // ended cleanly at the outputs, offsets reset
-      expect(st.when == null).toBe(false);
-      expect(markOf(st).tailStartedAt).toBeUndefined();
-    } finally {
-      _setTailOffsetCap();
-      d.off();
-    }
-  }, T);
+  test(
+    'an entity too large to skip: the earlier ones still get their tail, and the pass ends where it begins',
+    async () => {
+      const d = await phoneWith(400);
+      try {
+        await d.pullToEnd();
+        const late = await latePush(d.backup, d.kd.identityKey, 34 * 60_000, 4_321);
+        d.built.txids.add(late);
+        _setTailOffsetCap(200); // proofs and transactions (~100) fit; outputs (401) count as oversized here
+        expect(await tailCheck(d, Date.now())).toBe('tail');
+        await d.pullToEnd();
+        expect((await d.phone.findTransactions({ partial: { txid: late }, noRawTx: true })).length).toBe(1);
+        const st = await d.state();
+        expect(passUnderWay(st)).toBe(false); // ended cleanly at the outputs, offsets reset
+        expect(st.when == null).toBe(false);
+        expect(markOf(st).tailStartedAt).toBeUndefined();
+      } finally {
+        _setTailOffsetCap();
+        d.off();
+      }
+    },
+    T,
+  );
 
-  test('a backup that refuses the probes (an offset cap): tried again after TAIL_RETRY_MS, never before every pull', async () => {
-    const d = await phoneWith(200);
-    try {
-      await d.pullToEnd();
-      const capped = new Proxy(d.client, {
-        get: (t, p) =>
-          p === 'getSyncChunk'
-            ? async (a: { offsets: { offset: number }[] }) => {
-                if (a.offsets.some((o) => o.offset > 3)) throw new Error('offset exceeds the cap');
-                return (t as unknown as { getSyncChunk: (x: unknown) => Promise<unknown> }).getSyncChunk(a);
-              }
-            : Reflect.get(t, p, t),
-      });
-      const t0 = Date.now();
-      expect(await tailCheck(d, t0, capped)).toBe('unknown');
-      expect(await tailCheck(d, t0 + 60_000, capped)).toBe('not-due');
-      expect(await tailCheck(d, t0 + TAIL_RETRY_MS + 1, d.client)).toBe('in-step');
-    } finally {
-      d.off();
-    }
-  }, T);
+  test(
+    'a backup that refuses the probes (an offset cap): tried again after TAIL_RETRY_MS, never before every pull',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        const capped = new Proxy(d.client, {
+          get: (t, p) =>
+            p === 'getSyncChunk'
+              ? async (a: { offsets: { offset: number }[] }) => {
+                  if (a.offsets.some((o) => o.offset > 3)) throw new Error('offset exceeds the cap');
+                  return (t as unknown as { getSyncChunk: (x: unknown) => Promise<unknown> }).getSyncChunk(a);
+                }
+              : Reflect.get(t, p, t),
+        });
+        const t0 = Date.now();
+        expect(await tailCheck(d, t0, capped)).toBe('unknown');
+        expect(await tailCheck(d, t0 + 60_000, capped)).toBe('not-due');
+        expect(await tailCheck(d, t0 + TAIL_RETRY_MS + 1, d.client)).toBe('in-step');
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
 
-  test('a tail pass given up (an unfiled row): the cursor back, offsets reset, a full pass asked for', async () => {
-    const d = await phoneWith(200);
-    try {
-      await d.pullToEnd();
-      const late = await latePush(d.backup, d.kd.identityKey, 34 * 60_000, 1_234);
-      d.built.txids.add(late);
-      const cursor = (await d.state()).when;
-      expect(await tailCheck(d, Date.now())).toBe('tail');
-      expect(passUnderWay(await d.state())).toBe(true);
-      await d.sm.runAsSync(async () => abandonTail(d.phone as never, await d.state(), { due: 'unfiled' }));
-      const st = await d.state();
-      expect(+new Date(st.when as string)).toBe(+new Date(cursor as string));
-      expect(passUnderWay(st)).toBe(false);
-      expect(markOf(st).due).toBe('unfiled');
-      expect(markOf(st).tailStartedAt).toBeUndefined();
-      expect(await d.pull(Date.now() + 1)).toBe('started'); // the full pass it asked for
-    } finally {
-      d.off();
-    }
-  }, T);
+  test(
+    'a tail pass given up (an unfiled row): the cursor back, offsets reset, a full pass asked for',
+    async () => {
+      const d = await phoneWith(200);
+      try {
+        await d.pullToEnd();
+        const late = await latePush(d.backup, d.kd.identityKey, 34 * 60_000, 1_234);
+        d.built.txids.add(late);
+        const cursor = (await d.state()).when;
+        expect(await tailCheck(d, Date.now())).toBe('tail');
+        expect(passUnderWay(await d.state())).toBe(true);
+        await d.sm.runAsSync(async () => abandonTail(d.phone as never, await d.state(), { due: 'unfiled' }));
+        const st = await d.state();
+        expect(+new Date(st.when as string)).toBe(+new Date(cursor as string));
+        expect(passUnderWay(st)).toBe(false);
+        expect(markOf(st).due).toBe('unfiled');
+        expect(markOf(st).tailStartedAt).toBeUndefined();
+        expect(await d.pull(Date.now() + 1)).toBe('started'); // the full pass it asked for
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
 });

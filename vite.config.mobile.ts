@@ -442,7 +442,10 @@ const MOBILE_TEXT: Record<string, [string, string][]> = {
     ],
     // The truth lines show under WalletCard on the phone and web (src/components/BalanceTruthLines): not a second copy
     // polling inside the hidden balance block.
-    ['{balanceKnown && (\n            <BalanceTruthLines', '{false && balanceKnown && (\n            <BalanceTruthLines'],
+    [
+      '{balanceKnown && (\n            <BalanceTruthLines',
+      '{false && balanceKnown && (\n            <BalanceTruthLines',
+    ],
     // Receive / Send: gold gradient pills with glow.
     [
       'items-center justify-center gap-2 py-3 rounded-2xl font-semibold text-sm border-0 outline-none cursor-pointer"',

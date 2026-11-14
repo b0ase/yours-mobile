@@ -11,7 +11,10 @@
 export type Step = readonly [label: string, run: () => unknown];
 
 /** Run every step in order whatever the others do. Resolves to "label: message" for each step that failed. */
-export async function runEveryStep(steps: readonly Step[], log: (msg: string) => void = console.error): Promise<string[]> {
+export async function runEveryStep(
+  steps: readonly Step[],
+  log: (msg: string) => void = console.error,
+): Promise<string[]> {
   const failed: string[] = [];
   for (const [label, run] of steps) {
     try {
