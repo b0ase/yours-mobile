@@ -111,6 +111,20 @@ export const UNFINISHED_PASSWORD_CHANGE =
 export const KEYS_CHANGED_SINCE_UNLOCK =
   "Your wallet's keys changed since you unlocked, so nothing was changed. Lock bWalletX, unlock again and try again.";
 
+/** ChromeStorageService.set: the write landed, but reading storage back afterwards failed. */
+export class SavedNotReloadedError extends Error {
+  constructor(cause: unknown) {
+    const why = cause instanceof Error ? cause.message : (cause as { message?: string } | null)?.message;
+    super(`Saved, but bWalletX could not read its storage back${why ? ` (${why})` : ''}`);
+    this.name = 'SavedNotReloadedError';
+  }
+}
+
+/** changePassword: the new password is stored, but reading storage back failed; the session already uses it. */
+export const PASSWORD_SAVED_NOT_RELOADED =
+  'Your new password is saved, but bWalletX could not read its storage back. Lock bWalletX and unlock with the new ' +
+  'password.';
+
 /** A note's `older` salts; anything not a list of strings (a damaged note) counts as none. */
 const kdfOlder = (note?: KdfPending | null): string[] =>
   Array.isArray(note?.older) ? note.older.filter((s): s is string => typeof s === 'string') : [];
@@ -165,15 +179,22 @@ export class ChromeStorageService {
    */
   replaceTopLevel = async (obj: Partial<ChromeStorageObject>): Promise<void> => this.set(obj);
 
+  /**
+   * Write, then refresh this copy (getAndSetStorage). A refresh that fails rejects with SavedNotReloadedError: the
+   * write HAS landed. It used to throw inside the callback, so the promise never settled and the password, unlock and
+   * re-key paths hung (phones and web read the key material fresh, and such a read can fail).
+   */
   private set = async (obj: Partial<ChromeStorageObject>): Promise<void> => {
     return new Promise<void>((resolve, reject) => {
-      chrome.storage.local.set(obj, async () => {
+      chrome.storage.local.set(obj, () => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError);
-        } else {
-          await this.getAndSetStorage();
-          resolve();
+          return;
         }
+        this.getAndSetStorage().then(
+          () => resolve(),
+          (error: unknown) => reject(new SavedNotReloadedError(error)),
+        );
       });
     });
   };
@@ -695,9 +716,17 @@ export class ChromeStorageService {
     // The note keeps every salt an earlier unfinished note named (kdfNote): this swap must never be what erases the
     // only record of the salt the stored keys are under.
     if (typeof prevSalt === 'string' && prevSalt) await this.set({ kdfPending: kdfNote(prevSalt, salt, kdfPending) });
-    await this.set({ accounts: next, salt } as Partial<ChromeStorageObject>);
+    let reloaded = true;
+    try {
+      await this.set({ accounts: next, salt } as Partial<ChromeStorageObject>);
+    } catch (error) {
+      // Landed, only the read-back failed: the session key must follow the stored keys, as after a clean swap.
+      if (!(error instanceof SavedNotReloadedError)) throw error;
+      reloaded = false;
+    }
     await this.setPassKey(newKey);
     await this.set({ kdfPending: null }).catch(() => undefined);
+    if (!reloaded) throw new Error(PASSWORD_SAVED_NOT_RELOADED);
     await this.getAndSetStorage();
   };
 
@@ -739,7 +768,12 @@ export class ChromeStorageService {
       }
       // Recovery note first (one item, one write), then the swap, then clear the note.
       await this.set({ kdfPending: { prevSalt: salt as string, salt: nextSalt } });
-      await this.set({ accounts: next, salt: nextSalt } as Partial<ChromeStorageObject>);
+      try {
+        await this.set({ accounts: next, salt: nextSalt } as Partial<ChromeStorageObject>);
+      } catch (error) {
+        // Landed, only the read-back failed: the session key must follow the stored keys.
+        if (!(error instanceof SavedNotReloadedError)) throw error;
+      }
       await this.setPassKey(newKey);
       await this.set({ kdfPending: null }).catch(() => undefined);
       return true;
@@ -823,7 +857,9 @@ export class ChromeStorageService {
         // Two writes, salt first, the note cleared LAST in its own write: phones store each key as its own secure
         // item, and an app kill between them must still leave the note for the next unlock (cleared first, a kill
         // left the wrong salt and no note: neither password opened the wallet, only the 12 words).
-        await this.set({ salt: candidate } as Partial<ChromeStorageObject>);
+        await this.set({ salt: candidate } as Partial<ChromeStorageObject>).catch((error: unknown) => {
+          if (!(error instanceof SavedNotReloadedError)) throw error; // landed: the salt is right now
+        });
         await this.set({ kdfPending: null }).catch(() => undefined); // the salt is right now: a left note is harmless
         return true;
       }

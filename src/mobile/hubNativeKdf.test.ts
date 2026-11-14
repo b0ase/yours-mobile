@@ -20,6 +20,7 @@ import { WEB_FRESH_KEYS, isFreshWebKey } from './webTab';
 import { derivePassKey } from '../services/passKey';
 import { decrypt, encrypt } from '../utils/crypto';
 import { CHROME_STORAGE_OBJECT_VERSION } from '../utils/constants';
+import { ENVELOPES_KEY_PREFIX } from '../services/envelopes';
 
 const P = 'chrome.storage.local:';
 const PW = 'correct horse battery staple';
@@ -47,7 +48,8 @@ afterAll(() => {
   else delete g.sessionStorage;
 });
 
-const { ChromeStorageService, UNFINISHED_PASSWORD_CHANGE } = await import('../services/ChromeStorage.service');
+const { ChromeStorageService, PASSWORD_SAVED_NOT_RELOADED, SavedNotReloadedError, UNFINISHED_PASSWORD_CHANGE } =
+  await import('../services/ChromeStorage.service');
 
 /** The phone's secure store: one item per key; a write fails only the keys `failing` names, the rest land. */
 const phoneDisk = async () => {
@@ -63,10 +65,16 @@ const phoneDisk = async () => {
     '1B': { addresses: { identityAddress: '1B' }, encryptedKeys: await encrypt(plainB, k0) },
   });
   let failing: ((key: string) => boolean) | undefined;
+  /** Reads fail (a Keychain / localStorage read error) from now on; `afterWrite` turns them on once a write lands. */
+  const reads = { fail: false, afterWrite: undefined as ((sets: Record<string, string>) => boolean) | undefined };
+  const readable = () => {
+    if (reads.fail) throw new Error('Secure read failed (-25308)');
+  };
   const stats = { loads: 0, applies: 0 };
   const backend: LocalBackend = {
     load: async () => {
       stats.loads++;
+      readable();
       return Object.fromEntries(items);
     },
     // As nativeLocalBackend.apply on a phone: every key its own secure write, in parallel; one failing never stops
@@ -80,19 +88,30 @@ const phoneDisk = async () => {
         }),
         ...removes.map(async (k) => void items.delete(k)),
       ]);
+      if (reads.afterWrite?.(sets)) reads.fail = true;
     },
-    loadKeys: async (keys) => Object.fromEntries(keys.map((k) => [k, items.get(k) ?? null])),
+    loadKeys: async (keys) => {
+      readable();
+      return Object.fromEntries(keys.map((k) => [k, items.get(k) ?? null]));
+    },
   };
   const read = (k: string) => (items.has(P + k) ? JSON.parse(items.get(P + k)!) : undefined);
-  return { items, backend, stats, read, failOnly: (f?: (key: string) => boolean) => (failing = f) };
+  return { items, backend, stats, read, reads, failOnly: (f?: (key: string) => boolean) => (failing = f) };
 };
 
-/** One app start: a hub over the disk (fresh key reads as main.ts sets them on a phone, or as before), its page. */
-const startApp = async (backend: LocalBackend, fresh: boolean) => {
+/**
+ * One app start: a hub over the disk (fresh key reads as main.ts sets them on a phone, or as before), its page.
+ * `web`: main.ts's web settings instead (envelope keys too, no fixed list: get(null) lists the store).
+ */
+const startApp = async (backend: LocalBackend, fresh: boolean, web = false) => {
   const hub = new Hub(async () => undefined, backend, {
-    persistSession: true,
-    freshLocalKeys: fresh ? isFreshWebKey : undefined,
-    freshKeyNames: fresh ? [...WEB_FRESH_KEYS] : undefined,
+    persistSession: !web,
+    freshLocalKeys: web
+      ? (key) => isFreshWebKey(key) || key.startsWith(ENVELOPES_KEY_PREFIX)
+      : fresh
+        ? isFreshWebKey
+        : undefined,
+    freshKeyNames: fresh && !web ? [...WEB_FRESH_KEYS] : undefined,
   });
   const { chrome, receive } = createChromeShim({
     post: (json) => void hub.handle('page', JSON.parse(json)),
@@ -234,5 +253,96 @@ describe('hub: fresh key reads on a phone', () => {
     expect(src).toContain('freshKeyNames: !webTab && nativeApp ? [...WEB_FRESH_KEYS] : undefined,');
     const desktop = readFileSync(new URL('./desktop/storage.ts', import.meta.url), 'utf8');
     expect(desktop).not.toContain('loadKeys');
+  });
+});
+
+/** Settles within `ms`, or 'HUNG'. */
+const settle = <T>(p: Promise<T>, ms = 3000) =>
+  Promise.race([
+    p.then(
+      () => 'resolved' as const,
+      (e: unknown) => e,
+    ),
+    new Promise<'HUNG'>((r) => setTimeout(() => r('HUNG'), ms)),
+  ]);
+
+describe('a write that lands but cannot be read back rejects (it used to hang for ever)', () => {
+  for (const web of [false, true])
+    test(`${web ? 'web' : 'phone'}: set rejects with SavedNotReloadedError, and the write is stored`, async () => {
+      const disk = await phoneDisk();
+      const { svc } = await startApp(disk.backend, true, web);
+      disk.reads.fail = true;
+      const out = await settle(svc.update({ lastActiveTime: 42 } as any));
+      expect(out).not.toBe('HUNG');
+      expect(out).not.toBe('resolved');
+      expect(String(out)).toContain('could not read its storage back');
+      expect(disk.read('lastActiveTime')).toBe(42);
+    });
+
+  test('the set itself rejects with SavedNotReloadedError (callers that care can tell it from a failed write)', async () => {
+    const disk = await phoneDisk();
+    const { svc } = await startApp(disk.backend, true);
+    disk.reads.fail = true;
+    await expect((svc as any).set({ lastActiveTime: 7 })).rejects.toBeInstanceOf(SavedNotReloadedError);
+  });
+
+  test(
+    'password change: the swap lands, the read-back fails: a clear error, the session follows, the new password opens',
+    async () => {
+      const disk = await phoneDisk();
+      const { svc } = await startApp(disk.backend, true);
+      expect(await svc.verifyPassword(PW)).toBe(true);
+      disk.reads.afterWrite = (sets) => P + 'salt' in sets && P + 'accounts' in sets;
+      const out = await settle(svc.changePassword(NEW_PW, { currentPassword: PW }), 30_000);
+      expect(out).not.toBe('HUNG');
+      expect((out as Error).message).toBe(PASSWORD_SAVED_NOT_RELOADED);
+      const salt = disk.read('salt') as string;
+      expect(await svc.getPassKey()).toBe(await derivePassKey(NEW_PW, salt, undefined));
+      disk.reads.fail = false;
+      disk.reads.afterWrite = undefined;
+      expect(await opensAfterRestart(disk, true)).toBe(NEW_PW);
+    },
+    TIMEOUT,
+  );
+});
+
+describe('phones: a failed single-key write (envelope balances) leaves the hub copy equal to what is stored', () => {
+  test('the hub answers what is stored, never the value of the refused write', async () => {
+    const disk = await phoneDisk();
+    const { hub } = await startApp(disk.backend, true);
+    const key = `${ENVELOPES_KEY_PREFIX}acct`;
+    const before = { envelopes: { site: { balanceSats: 100 } } };
+    const results: unknown[] = [];
+    hub.register('bg', {
+      sender: { id: 'x', url: 'u', origin: 'o' },
+      post: (j) => {
+        const m = JSON.parse(j);
+        if (m.t === 'storageResult') results.push(m.error ?? m.result);
+      },
+    });
+    const op = (o: 'get' | 'set', arg: unknown) =>
+      hub.handle('bg', { t: 'storage', reqId: results.length + 1, area: 'local', op: o, arg } as never);
+    await op('set', { [key]: before });
+    disk.failOnly((k) => k === key);
+    await op('set', { [key]: { envelopes: { site: { balanceSats: 90 } } } }); // the spend's save: refused
+    disk.failOnly(undefined);
+    await op('get', key);
+    expect(String(results[1])).toContain('Secure write failed');
+    expect(results[2]).toEqual({ [key]: before });
+    expect(disk.read(key)).toEqual(before);
+  });
+
+  test('native secure stores: a write or remove that fails changes nothing the next read sees', () => {
+    const java = readFileSync(
+      new URL('../../android/app/src/main/java/org/yours/wallet/YoursNativePlugin.java', import.meta.url),
+      'utf8',
+    ).replace(/\s+/g, ' ');
+    // Android: commit() == false already changed SharedPreferences in memory; the old value is put back.
+    expect(java).toContain('if (!p.edit().putString(key, seal(cipher, value)).commit()) { restore(p, key, before);');
+    expect(java).toContain('if (before != null && !p.edit().remove(key).commit()) { restore(p, key, before);');
+    const swift = readFileSync(new URL('../../ios/App/App/YoursNativePlugin.swift', import.meta.url), 'utf8');
+    // iOS: SecItemUpdate / SecItemAdd change nothing when they fail; a failed delete is now reported.
+    expect(swift).toContain('status == errSecSuccess || status == errSecItemNotFound');
+    expect(swift).toContain('call.reject("Secure remove failed');
   });
 });
