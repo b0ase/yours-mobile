@@ -79,7 +79,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsx scripts/build.ts",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 tsx scripts/build.ts",
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
