@@ -91,17 +91,62 @@ describe('the catalogue checks the same signature (site/lib/contracts.js)', () =
     expect(site.contractSigningBytes(reordered)).toEqual(contractSigningBytes(env));
   });
 
+  // Arrays keep their order and the objects inside them are sorted too (review of 2e409da3): a contract with
+  // params, spend paths and oracle signers, its keys written in a scrambled order.
+  const rich = {
+    ...base,
+    contract: {
+      summary: 's',
+      spendPaths: [
+        { requires: 'sig', who: 'ann', name: 'claim' },
+        { who: 'bob', name: 'refund', requires: 'timeout' },
+      ],
+      params: { z: 1, a: 'x', m: 2 },
+      oracle: { signers: ['03' + 'b'.repeat(64), '02' + 'a'.repeat(64)], quorum: 1 },
+      network: 'mainnet',
+      name: 'Escrow',
+      version: '1',
+      format: 'bwalletx.contract/1',
+    },
+  } as ContractEnvelope;
+
+  test('arrays and the objects in them: the same bytes on both sides; array order is signed', async () => {
+    const env = await signContractEnvelope(asWallet(ann), rich, 'ann@bwallet.space');
+    const wire = JSON.parse(JSON.stringify(env));
+    wire.contract.spendPaths = wire.contract.spendPaths.map((p: Record<string, string>) =>
+      Object.fromEntries(Object.entries(p).reverse()),
+    );
+    expect(site.contractSigningBytes(wire)).toEqual(contractSigningBytes(env));
+    expect(new TextDecoder().decode(new Uint8Array(site.contractSigningBytes(wire)))).toContain(
+      '"spendPaths":[{"name":"claim","requires":"sig","who":"ann"},{"name":"refund","requires":"timeout","who":"bob"}]',
+    );
+    expect(await site.contractAuthorKey(wire)).toBe(await keyOf(ann));
+    const swapped = { ...wire, contract: { ...wire.contract, oracle: { ...wire.contract.oracle } } };
+    swapped.contract.oracle.signers = [...wire.contract.oracle.signers].reverse();
+    expect(site.contractSigningBytes(swapped)).not.toEqual(contractSigningBytes(env));
+    expect(await site.contractAuthorKey(swapped)).toBeNull();
+    expect(await contractAuthorKey(swapped)).toBeNull();
+  });
+
   test('a wallet-signed paid listing is listed; a tampered or unsigned one is refused', async () => {
     const env = JSON.parse(JSON.stringify(await signContractEnvelope(asWallet(ann), base, 'ann@bwallet.space')));
     expect(await site.contractAuthorKey(env)).toBe(await keyOf(ann));
-    expect(await site.listingRefusal(env, [])).toBeNull();
-    expect(await site.listingRefusal({ ...env, sale: { ...env.sale, priceUsd: 50 } }, [])).toEqual([
+    expect(await site.envelopeRefusal(env)).toBeNull();
+    expect(await site.envelopeRefusal({ ...env, sale: { ...env.sale, priceUsd: 50 } })).toEqual([
       400,
       'This contract isn’t signed by its author',
     ]);
-    expect((await site.listingRefusal(base, []))?.[0]).toBe(400);
-    const clone = await signContractEnvelope(asWallet(mallory), base);
-    expect((await site.listingRefusal(clone, [env]))?.[0]).toBe(409);
+    expect(await site.envelopeRefusal(base)).toEqual([400, site.UPDATE_TO_SIGN]);
+    const clone = JSON.parse(JSON.stringify(await signContractEnvelope(asWallet(mallory), base)));
+    const row = (origin: string, envelope: unknown, at: string) => ({ origin, envelope, created_at: at });
+    const kept = await site.servedListings(
+      [
+        row('a'.repeat(64) + '_0', env, '2026-11-01T00:00:00Z'),
+        row('b'.repeat(64) + '_0', clone, '2026-11-02T00:00:00Z'),
+      ],
+      async () => null,
+    );
+    expect([...kept]).toEqual(['a'.repeat(64) + '_0']);
   });
 });
 

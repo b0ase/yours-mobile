@@ -150,6 +150,38 @@ const chain = {
     const m = await r.json().catch(() => null);
     return m?.origin ? normOutpoint(m.origin) : null;
   },
+  /**
+   * Where a transaction sits on chain: { height, index } (index = its position in the block, when known), or null
+   * while unconfirmed or unknown. From the 1Sat BEEF's merkle path (the leaf offset is the position), else JungleBus.
+   * Not checked against block headers: it ranks listings (lib/contracts.js), it never moves money.
+   */
+  async position(txid) {
+    try {
+      const r = await fetch(`${ONESAT}/beef/${txid}`, { signal: AbortSignal.timeout(10_000) });
+      if (r.ok) {
+        const tx = Transaction.fromBEEF(Array.from(new Uint8Array(await r.arrayBuffer())));
+        const mp = tx.id('hex') === txid ? tx.merklePath : null;
+        const leaf = mp?.path[0]?.find((l) => l.hash === txid);
+        if (mp && Number.isInteger(mp.blockHeight) && mp.blockHeight > 0)
+          return { height: mp.blockHeight, index: Number.isInteger(leaf?.offset) ? leaf.offset : null };
+      }
+    } catch {
+      /* next source */
+    }
+    try {
+      const r = await fetch(`https://junglebus.gorillapool.io/v1/transaction/get/${txid}`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (r.ok) {
+        const j = await r.json();
+        if (j?.id === txid && Number.isInteger(j.block_height) && j.block_height > 0)
+          return { height: j.block_height, index: Number.isInteger(j.block_index) ? j.block_index : null };
+      }
+    } catch {
+      /* unknown */
+    }
+    return null;
+  },
   async bsvUsd() {
     const r = await fetch('https://api.whatsonchain.com/v1/bsv/main/exchangerate', {
       signal: AbortSignal.timeout(8_000),

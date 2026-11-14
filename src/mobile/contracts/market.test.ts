@@ -207,6 +207,44 @@ describe('buyContract pays only the payee the author inscribed', () => {
     expect(err).toBe('wallet reached');
   });
 
+  // Review of 2e409da3: the same author rule as the catalogue (site/lib/contracts.js mayFollow): signed listings
+  // are compared by verified key, unsigned ones by address.
+  test("a later signed copy under another key is refused even when it names the author's own address", async () => {
+    const sameAddr = await signContractEnvelope(asWallet(attacker), annBase);
+    const body = JSON.stringify(sameAddr);
+    const theirs = { ...theCopy, envelope: sameAddr, body };
+    const { calls, err } = await run(theirs, body, [theirs, anns]);
+    expect(calls).toEqual([]);
+    expect(err).toContain('copies a contract first listed by');
+  });
+
+  test("an earlier unsigned listing from another address doesn't block the signed author", async () => {
+    const unsignedFirst = {
+      ...theCopy,
+      createdAt: '2026-10-01T00:00:00Z',
+      envelope: {
+        ...annBase,
+        author: { name: 'M', address: '1Attackerxxxxxxxxxxxxxxxxxxxxxxxxx' },
+      } as ContractEnvelope,
+    };
+    const { calls, err } = await run(anns, authorBody, [unsignedFirst, anns]);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(err).toBe('wallet reached');
+  });
+
+  test('the author listing again from another address, under the same key, is not a copy', async () => {
+    const moved = await signContractEnvelope(asWallet(ann), {
+      ...annBase,
+      author: { name: 'Ann', address: '1AnnNewAddressxxxxxxxxxxxxxxxxxxx' },
+      sale: { ...annBase.sale, payTo: '1AnnNewAddressxxxxxxxxxxxxxxxxxxx' },
+    });
+    const body = JSON.stringify(moved);
+    const again = { ...theCopy, envelope: moved, body };
+    const { calls, err } = await run(again, body, [again, anns]);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(err).toBe('wallet reached');
+  });
+
   test('when the catalogue list cannot be read, nothing is paid', async () => {
     const { calls, err } = await run(anns, authorBody, null);
     expect(calls).toEqual([]);

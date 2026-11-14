@@ -100,24 +100,31 @@ export const checkAgainstOriginal = async (listing: Pick<ContractListing, 'origi
 };
 
 /**
- * An earlier listing of the same contract (descriptor and description) by a different author address, or undefined.
- * Anyone can inscribe a copy of someone's contract with their own name and payee and list it (review of row 115, 14
- * Nov 2026): the copy is a valid inscription, so checkAgainstOriginal passes it. Nothing on chain ties an author's
- * address to the original (it is locked to a fresh wallet key, not to author.address), so the earliest listing is
- * the one paid; a later copy under another address is refused. Best effort: it sees what the catalogue lists.
+ * An earlier listing of the same contract (descriptor and description) by another author, or undefined. Anyone can
+ * inscribe a copy of someone's contract with their own name and payee and list it (review of row 115, 14 Nov 2026):
+ * the copy is a valid inscription, so checkAgainstOriginal passes it. The earliest listing is the one paid. Same rule
+ * as the catalogue (site/lib/contracts.js mayFollow, review of 2e409da3): a signed listing may be listed again only
+ * under the same verified key; an unsigned one blocks only a later unsigned one from another address. Best effort: it
+ * sees what the catalogue lists (which already leaves later copies out, ranked by chain order).
  */
-export const copiedFrom = (listing: ContractListing, all: readonly ContractListing[]): ContractListing | undefined => {
+export const copiedFrom = async (
+  listing: ContractListing,
+  all: readonly ContractListing[],
+): Promise<ContractListing | undefined> => {
   const at = Date.parse(listing.createdAt);
   const same = (o: ContractListing) =>
     JSON.stringify(canon(o.envelope.contract)) === JSON.stringify(canon(listing.envelope.contract)) &&
     o.envelope.description === listing.envelope.description;
-  return all.find(
-    (o) =>
-      o.origin !== listing.origin &&
-      same(o) &&
-      o.envelope.author.address !== listing.envelope.author.address &&
-      !(Date.parse(o.createdAt) > at),
-  );
+  const mine = await contractAuthorKey(listing.envelope);
+  for (const o of all) {
+    if (o.origin === listing.origin || !same(o) || Date.parse(o.createdAt) > at) continue;
+    const theirs = await contractAuthorKey(o.envelope);
+    const mayFollow = theirs
+      ? mine === theirs
+      : !!mine || o.envelope.author.address === listing.envelope.author.address;
+    if (!mayFollow) return o;
+  }
+  return undefined;
 };
 
 /**
@@ -149,7 +156,7 @@ export const buyContract = async (ctx: OneSatContext, approved: ContractListing,
     } catch {
       throw new Error("Couldn't check this contract against the catalogue. Nothing was paid; try again shortly.");
     }
-    const first = copiedFrom({ ...approved, createdAt: c.createdAt }, all);
+    const first = await copiedFrom({ ...approved, createdAt: c.createdAt }, all);
     if (first)
       throw new Error(
         `This listing copies a contract first listed by ${first.envelope.author.address}. Nothing was paid.`,

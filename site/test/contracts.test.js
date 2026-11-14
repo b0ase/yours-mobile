@@ -2,7 +2,8 @@
 // the wallet side is src/mobile/contracts/contractNft.ts). These drive the real publish route (api/contracts.js)
 // with the chain and the database answered in memory; every key is a throwaway made here.
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { LockingScript, OP, P2PKH, PrivateKey, ProtoWallet, Transaction, Utils } from '@bsv/sdk';
+import { createHash } from 'node:crypto';
+import { LockingScript, MerklePath, OP, P2PKH, PrivateKey, ProtoWallet, Transaction, Utils } from '@bsv/sdk';
 import K from '../lib/strategyKeys.js';
 import C from '../lib/contracts.js';
 import api from '../api/contracts.js';
@@ -48,25 +49,37 @@ const listing = (who, priceUsd = 5, over = {}) => ({
   ...over,
 });
 
-// ---- the chain and the catalogue table, in memory ----
+// ---- the chain and the catalogue tables, in memory ----
 const txs = new Map();
+/** txid → { height, index } once "mined"; anything else is unconfirmed. */
+const positions = new Map();
 let table = [];
+/** The catalogue saw older rows an hour ago, a millisecond apart (the route stamps a new listing with now). */
+const BASE = Date.now() - 3_600_000;
 let clock = 0;
 const queries = [];
+/** PostgREST's `in.("a","b")` list, as the route quotes it. */
+const inList = (v) => [...v.slice(4, -1).matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1].replace(/\\(.)/g, '$1'));
 const fakeDb = async (url, init = {}) => {
   const u = new URL(url);
+  const q = u.searchParams;
+  if (u.pathname === '/rest/v1/bwallet_contract_copies')
+    return init.method === 'POST' ? new Response('', { status: 201 }) : new Response('[]', { status: 200 });
   if (u.pathname !== '/rest/v1/bwallet_contracts') throw new Error(`unexpected fetch ${u.pathname}`);
   if (init.method === 'POST') {
     const row = JSON.parse(init.body);
     if (table.some((r) => r.origin === row.origin)) return new Response('{}', { status: 409 });
-    table.push({ ...row, created_at: new Date(1_800_000_000_000 + clock++).toISOString() });
+    table.push({ ...row, created_at: new Date(BASE + clock++).toISOString() });
     return new Response('', { status: 201 });
   }
-  const name = u.searchParams.get('envelope->contract->>name');
-  queries.push(name);
+  const name = q.get('envelope->contract->>name');
+  if (name) queries.push(name);
+  const names = name?.startsWith('in.') ? inList(name) : name ? [name.slice(3)] : null;
   const out = table
-    .filter((r) => !name || name === `eq.${r.envelope.contract.name}`)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    .filter((r) => !names || names.includes(r.envelope.contract.name))
+    .filter((r) => !q.get('origin') || q.get('origin') === `eq.${r.origin}`)
+    .filter((r) => !q.get('body_hash') || q.get('body_hash') === `eq.${r.body_hash}`)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) * (q.get('order')?.endsWith('desc') ? -1 : 1));
   return new Response(JSON.stringify(out), { status: 200 });
 };
 const ENV_KEYS = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
@@ -76,6 +89,7 @@ beforeAll(() => {
   K.chain.tx = async (txid) => txs.get(txid) ?? null;
   K.chain.spent = async () => false;
   K.chain.origin = async () => null;
+  K.chain.position = async (txid) => positions.get(txid) ?? null;
   process.env.SUPABASE_URL = 'https://db.test';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-only';
   globalThis.fetch = fakeDb;
@@ -108,23 +122,7 @@ const inscribed = (body, to) => {
   ]);
 };
 let ip = 0;
-/** Mint `env` to a fresh key and publish it the way the wallet does: [status, body]. */
-const publish = async (env) => {
-  const minter = PrivateKey.fromRandom();
-  const tx = new Transaction();
-  tx.addOutput({ lockingScript: inscribed(JSON.stringify(env), minter.toAddress()), satoshis: 1 });
-  tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 2 });
-  const txid = tx.id('hex');
-  txs.set(txid, tx);
-  const outpoint = `${txid}_0`;
-  const message = K.proofMessage('publish', outpoint, Date.now());
-  const body = {
-    action: 'publish',
-    outpoint,
-    message,
-    pubkey_hex: minter.toPublicKey().toString(),
-    signature: Utils.toHex(minter.sign(Utils.toArray(message, 'utf8')).toDER()),
-  };
+const call = async (req) => {
   const res = {
     statusCode: 0,
     out: null,
@@ -133,8 +131,54 @@ const publish = async (env) => {
       this.out = s ? JSON.parse(s) : null;
     },
   };
-  await api({ method: 'POST', url: '/api/contracts', headers: { 'x-forwarded-for': `10.0.0.${ip++}` }, body }, res);
+  await api({ url: '/api/contracts', headers: { 'x-forwarded-for': `10.0.0.${ip++}` }, ...req }, res);
   return [res.statusCode, res.out];
+};
+const proof = (action, outpoint, key) => {
+  const message = K.proofMessage(action, outpoint, Date.now());
+  return {
+    outpoint,
+    message,
+    pubkey_hex: key.toPublicKey().toString(),
+    signature: Utils.toHex(key.sign(Utils.toArray(message, 'utf8')).toDER()),
+  };
+};
+/** Mint `env` to a fresh key (mined at `pos`, or unconfirmed) and publish it the way the wallet does. */
+const mint = (env, pos) => {
+  const minter = PrivateKey.fromRandom();
+  const tx = new Transaction();
+  tx.addOutput({ lockingScript: inscribed(JSON.stringify(env), minter.toAddress()), satoshis: 1 });
+  tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 2 });
+  const txid = tx.id('hex');
+  txs.set(txid, tx);
+  if (pos) positions.set(txid, pos);
+  return { outpoint: `${txid}_0`, minter };
+};
+const publishMinted = ({ outpoint, minter }) =>
+  call({ method: 'POST', body: { action: 'publish', ...proof('publish', outpoint, minter) } });
+/** [status, body, { outpoint, minter }] */
+const publish = async (env, pos) => {
+  const m = mint(env, pos);
+  return [...(await publishMinted(m)), m];
+};
+/** Origins the catalogue serves (GET), and one listing by origin. */
+const served = async () => (await call({ method: 'GET' }))[1].contracts.map((c) => c.origin);
+const getOne = async (origin) => (await call({ method: 'GET', url: `/api/contracts?origin=${origin}` }))[0];
+/** The author's own original, registered as a copy (claim): 200 when the catalogue serves it. */
+const claimOriginal = ({ outpoint, minter }) =>
+  call({ method: 'POST', body: { action: 'claim', ...proof('unlock', outpoint, minter) } });
+/** A row from before this check, put straight into the table (as an older catalogue stored it). */
+const oldRow = (env) => {
+  const m = mint(env);
+  const body = JSON.stringify(env);
+  table.push({
+    origin: m.outpoint,
+    envelope: env,
+    body,
+    body_hash: createHash('sha256').update(body).digest('hex'),
+    created_at: new Date(BASE + clock++).toISOString(),
+  });
+  return m;
 };
 
 describe('contract catalogue: paid listings are signed by their author', () => {
@@ -146,8 +190,13 @@ describe('contract catalogue: paid listings are signed by their author', () => {
     expect(table[0].envelope.author.identityKey).toBe(ann.key);
   });
 
-  test('an unsigned paid listing is refused', async () => {
-    expect((await publish(listing(ann)))[0]).toBe(400);
+  test('an unsigned paid listing is refused, telling the author to update (owner, 14 Nov 2026)', async () => {
+    const [status, out] = await publish(listing(ann));
+    expect(status).toBe(400);
+    // Older wallets show this text as it is, after minting.
+    expect(out.error).toBe(
+      "This contract wasn't listed: paid contracts now carry your signature. Update bWalletX (5.2.57 or later) and publish it again.",
+    );
     expect(table).toHaveLength(0);
   });
 
@@ -248,5 +297,145 @@ describe('contract catalogue: paid listings are signed by their author', () => {
 
   test('a free listing from the wallet (signed) is listed', async () => {
     expect((await publish(await signAs(ann, listing(ann, 0))))[0]).toBe(200);
+  });
+});
+
+describe('contract catalogue: who keeps a contract (review of 2e409da3)', () => {
+  test("an unsigned free listing doesn't block the real author's signed listing", async () => {
+    const [, , squat] = await publish(listing(mallory, 0));
+    const [status, , anns] = await publish(await signAs(ann, listing(ann)));
+    expect(status).toBe(200);
+    expect((await served()).sort()).toEqual([squat.outpoint, anns.outpoint].sort());
+  });
+
+  test("an unsigned free copy under the author's own name and address is refused after a signed listing", async () => {
+    expect((await publish(await signAs(ann, listing(ann))))[0]).toBe(200);
+    const [status, out] = await publish(listing(ann, 0));
+    expect(status).toBe(409);
+    expect(out.error).toContain('another author');
+    expect(table).toHaveLength(1);
+  });
+
+  test('the earliest on chain stays, not the first to reach the catalogue (front-running)', async () => {
+    // Ann mints first (block 100); Mallory copies it from the chain, mints later (block 101) and lists first.
+    const anns = mint(await signAs(ann, listing(ann)), { height: 100, index: 5 });
+    const [first, , mal] = await publish(await signAs(mallory, listing(mallory)), { height: 101, index: 0 });
+    expect(first).toBe(200);
+    expect((await publishMinted(anns))[0]).toBe(200);
+    expect(await served()).toEqual([anns.outpoint]);
+    expect(await getOne(mal.outpoint)).toBe(404);
+    expect(await getOne(anns.outpoint)).toBe(200);
+    expect(await claimOriginal(mal)).toEqual([404, { error: 'This contract isn’t listed' }]);
+    expect((await claimOriginal(anns))[0]).toBe(200);
+    // And Mallory can't list her copy again.
+    expect((await publish(await signAs(mallory, listing(mallory)), { height: 102, index: 0 }))[0]).toBe(409);
+  });
+
+  test('in one block, the earlier position wins', async () => {
+    const anns = mint(await signAs(ann, listing(ann)), { height: 100, index: 2 });
+    expect((await publish(await signAs(mallory, listing(mallory)), { height: 100, index: 9 }))[0]).toBe(200);
+    expect((await publishMinted(anns))[0]).toBe(200);
+    expect(await served()).toEqual([anns.outpoint]);
+  });
+
+  test('an unconfirmed listing ranks after a confirmed one; two unconfirmed: the catalogue saw it first', async () => {
+    const [, , anns] = await publish(await signAs(ann, listing(ann)));
+    expect((await publish(await signAs(mallory, listing(mallory)), { height: 100, index: 0 }))[0]).toBe(200);
+    expect(await served()).not.toContain(anns.outpoint);
+    table = [];
+    expect((await publish(await signAs(ann, listing(ann))))[0]).toBe(200);
+    expect((await publish(await signAs(mallory, listing(mallory))))[0]).toBe(409);
+  });
+
+  test('older rows: an unsigned or badly signed paid listing is never served or counted; free ones still are', async () => {
+    const unsigned = oldRow(listing(ann, 5, { contract: { ...listing(ann).contract, name: 'Old' } }));
+    const signed = await signAs(ann, listing(ann, 5, { contract: { ...listing(ann).contract, name: 'Forged' } }));
+    const forged = oldRow({ ...signed, sale: { ...signed.sale, priceUsd: 500 } });
+    const free = oldRow(listing(ann, 0, { contract: { ...listing(ann).contract, name: 'Free' } }));
+    expect(await served()).toEqual([free.outpoint]);
+    expect(await getOne(unsigned.outpoint)).toBe(404);
+    expect(await getOne(forged.outpoint)).toBe(404);
+    expect(await claimOriginal(unsigned)).toEqual([404, { error: 'This contract isn’t listed' }]);
+    expect(await claimOriginal(forged)).toEqual([404, { error: 'This contract isn’t listed' }]);
+    expect((await claimOriginal(free))[0]).toBe(200);
+  });
+
+  test("an older unsigned paid copy doesn't block the author's signed listing", async () => {
+    oldRow(listing(mallory));
+    expect((await publish(await signAs(ann, listing(ann))))[0]).toBe(200);
+  });
+
+  test('names with PostgREST punctuation are quoted in the catalogue lookup', async () => {
+    const odd = 'a,b) "c" \\d';
+    const [, , m] = await publish(listing(ann, 0, { contract: { ...listing(ann).contract, name: odd } }));
+    expect(await served()).toEqual([m.outpoint]);
+  });
+});
+
+describe('contract names the catalogue lookup must survive', () => {
+  const named = (name) => listing(ann, 0, { contract: { ...listing(ann).contract, name } });
+  test('a name with a lone surrogate is not a contract inscription (400, not a crash)', async () => {
+    expect((await publish(named('x\ud800')))[0]).toBe(400);
+    expect((await publish(named('ok \ud83d\ude00')))[0]).toBe(200);
+  });
+  test("an older row with such a name doesn't take the catalogue down", async () => {
+    oldRow(named('\ud800'));
+    const [, , good] = await publish(named('Fine'));
+    expect(await served()).toEqual([good.outpoint]);
+  });
+});
+
+describe('where an origin sits on chain (strategyKeys chain.position)', () => {
+  const withFetch = async (answer, fn) => {
+    const before = globalThis.fetch;
+    globalThis.fetch = async (url) => answer(String(url));
+    try {
+      return await fn();
+    } finally {
+      globalThis.fetch = before;
+    }
+  };
+  const minedTx = () => {
+    const tx = new Transaction();
+    tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 5 });
+    const txid = tx.id('hex');
+    // Fourth of four in block 975470: its sibling at level 0, the left pair's hash at level 1.
+    tx.merklePath = new MerklePath(975470, [
+      [
+        { offset: 2, hash: 'aa'.repeat(32) },
+        { offset: 3, hash: txid, txid: true },
+      ],
+      [{ offset: 0, hash: 'bb'.repeat(32) }],
+    ]);
+    return { tx, txid };
+  };
+
+  test('from the 1Sat BEEF: block height and position in the block', async () => {
+    const { tx, txid } = minedTx();
+    const pos = await withFetch(
+      (u) =>
+        u.endsWith(`/beef/${txid}`) ? new Response(new Uint8Array(tx.toBEEF())) : new Response('', { status: 404 }),
+      () => saved.chain.position(txid),
+    );
+    expect(pos).toEqual({ height: 975470, index: 3 });
+  });
+
+  test('else from JungleBus; unconfirmed or unknown is null', async () => {
+    const txid = 'cd'.repeat(32);
+    const jb = (body) => (u) =>
+      u.includes('junglebus') ? new Response(JSON.stringify(body)) : new Response('', { status: 404 });
+    expect(
+      await withFetch(jb({ id: txid, block_height: 975470, block_index: 1 }), () => saved.chain.position(txid)),
+    ).toEqual({ height: 975470, index: 1 });
+    expect(await withFetch(jb({ id: txid, block_height: 0 }), () => saved.chain.position(txid))).toBeNull();
+    expect(await withFetch(jb({ id: 'ef'.repeat(32), block_height: 9 }), () => saved.chain.position(txid))).toBeNull();
+    expect(
+      await withFetch(
+        () => {
+          throw new Error('offline');
+        },
+        () => saved.chain.position(txid),
+      ),
+    ).toBeNull();
   });
 });

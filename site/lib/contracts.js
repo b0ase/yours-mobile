@@ -13,6 +13,7 @@ function parseContractEnvelope(text) {
     if (o?.format !== CONTRACT_FORMAT || !o.contract || typeof o.contract !== 'object' || !o.sale || !o.author)
       return null;
     if (o.contract.format !== 'bwalletx.contract/1' || typeof o.contract.name !== 'string') return null;
+    if (/[\ud800-\udfff]/.test(o.contract.name.replace(/[\ud800-\udbff][\udc00-\udfff]/g, ''))) return null;
     const price = Number(o.sale.priceUsd);
     const copies = Number(o.sale.copies);
     if (!(price >= 0) || !Number.isInteger(copies) || copies < 1 || typeof o.sale.payTo !== 'string') return null;
@@ -71,37 +72,98 @@ async function contractAuthorKey(env) {
 }
 
 /** Same contract: the same canonical descriptor and the same description (as the wallet's copiedFrom). */
-const sameContract = (a, b) =>
-  JSON.stringify(canonical(a.contract)) === JSON.stringify(canonical(b.contract)) && a.description === b.description;
+const contractId = (e) => JSON.stringify([canonical(e.contract), e.description]);
 
 /**
- * Why the catalogue refuses to list `env`, as [status, error], or null to list it. `earlier` = envelopes already in
- * the catalogue (any contract; only the same contract counts).
- * - A paid listing must be signed by its author: author.identityKey a compressed key, authorSig valid by it, and the
- *   payee the author's own address. A listing that claims a key or carries a signature must verify too (a free one
- *   from the wallet's own publish is signed); a free listing with neither is accepted, as before.
- * - The earliest listing of a contract stays: a later one under another author is refused. Authors are compared by
- *   their verified identity key when both listings are signed, otherwise by author.address (unsigned free listings
- *   and older rows). The wallet also refuses to buy a later copy (copiedFrom); this keeps it out of the catalogue.
+ * Older wallets list paid contracts unsigned. The released wallet shows this text as it is, after it has minted,
+ * so it says what to do (owner, 14 Nov 2026).
  */
-async function listingRefusal(env, earlier = []) {
+const UPDATE_TO_SIGN =
+  "This contract wasn't listed: paid contracts now carry your signature. Update bWalletX (5.2.57 or later) and publish it again.";
+
+/**
+ * Why the catalogue won't list (or serve) `env`, as [status, error], or null. A paid listing must be signed by its
+ * author: author.identityKey a compressed key, authorSig valid by it, and the payee the author's own address. A
+ * listing that claims a key or carries a signature must verify too (a free one from the wallet's own publish is
+ * signed); a free listing with neither is accepted, as before.
+ */
+async function envelopeRefusal(env) {
   const paid = Number(env.sale.priceUsd) > 0;
-  const claimsKey = env.author.identityKey !== undefined || env.authorSig !== undefined;
-  let key = null;
-  if (paid || claimsKey) {
-    if (typeof env.author.identityKey !== 'string' || !PUBKEY_RE.test(env.author.identityKey))
+  const author = env.author;
+  if (paid && author.identityKey === undefined && env.authorSig === undefined) return [400, UPDATE_TO_SIGN];
+  if (paid || author.identityKey !== undefined || env.authorSig !== undefined) {
+    if (typeof author.identityKey !== 'string' || !PUBKEY_RE.test(author.identityKey))
       return [400, paid ? 'A paid contract must carry its author’s identity key' : 'Bad author identity key'];
-    key = await contractAuthorKey(env);
-    if (!key) return [400, 'This contract isn’t signed by its author'];
+    if (!(await contractAuthorKey(env))) return [400, 'This contract isn’t signed by its author'];
   }
-  if (paid && env.sale.payTo !== env.author.address) return [400, 'A paid contract must pay its author’s address'];
-  for (const e of earlier) {
-    if (!e || typeof e !== 'object' || !e.author || !sameContract(e, env)) continue;
-    const theirs = key ? await contractAuthorKey(e) : null;
-    const same = key && theirs ? theirs === key : e.author.address === env.author.address;
-    if (!same) return [409, 'This contract is already listed by another author'];
-  }
+  if (paid && env.sale.payTo !== author.address) return [400, 'A paid contract must pay its author’s address'];
   return null;
+}
+
+/**
+ * May `later` be listed after `earlier` (the same contract)? A signed listing can be listed again only under the
+ * same key; an unsigned one blocks only a later unsigned one from another address (review of 2e409da3). `key` is the
+ * verified identity key (contractAuthorKey) or null.
+ */
+const mayFollow = (earlier, later) =>
+  earlier.key ? later.key === earlier.key : !!later.key || earlier.env.author.address === later.env.author.address;
+
+/**
+ * Chain order of two origins: earlier block first, then earlier in the block (when both positions are known), then
+ * the output number in one transaction. Unconfirmed (or unknown) ranks after confirmed; ties fall back to when the
+ * catalogue first saw it. Negative = `a` first.
+ */
+function chainOrder(a, b) {
+  if (a.pos && b.pos) {
+    if (a.pos.height !== b.pos.height) return a.pos.height - b.pos.height;
+    if (a.txid === b.txid) return a.vout - b.vout;
+    if (a.pos.index !== null && b.pos.index !== null && a.pos.index !== b.pos.index) return a.pos.index - b.pos.index;
+  } else if (a.pos || b.pos) return a.pos ? -1 : 1;
+  return a.seen - b.seen || (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0);
+}
+
+const checked = new Map();
+/** envelopeRefusal + contractAuthorKey for a catalogue row. An origin's inscription never changes: kept per origin. */
+async function checkRow(origin, env) {
+  const memo = `${origin}|${env.authorSig ?? ''}`;
+  if (checked.has(memo)) return checked.get(memo);
+  const out = { refused: await envelopeRefusal(env), key: await contractAuthorKey(env) };
+  if (checked.size > 5000) checked.clear();
+  checked.set(memo, out);
+  return out;
+}
+
+/**
+ * The listings the catalogue serves, as a Set of origins, from rows `{ origin, envelope, created_at }`:
+ * - a row that fails envelopeRefusal is left out (older unsigned or badly signed paid listings: fail closed);
+ * - of the listings of one contract, the earliest ON CHAIN stays (chainOrder, from `position(origin)`, asked only
+ *   when listings of a contract disagree about the author) and a later one that may not follow it (mayFollow) is
+ *   left out. So listing first in the catalogue is no way to take over an author's contract.
+ */
+async function servedListings(rows, position) {
+  const groups = new Map();
+  for (const r of rows) {
+    if (!r?.envelope || typeof r.envelope !== 'object' || !r.envelope.author || !r.envelope.sale) continue;
+    const { refused, key } = await checkRow(r.origin, r.envelope);
+    if (refused) continue;
+    const id = contractId(r.envelope);
+    if (!groups.has(id)) groups.set(id, []);
+    const [txid, vout] = String(r.origin).split('_');
+    const seen = Date.parse(r.created_at);
+    groups.get(id).push({ origin: r.origin, env: r.envelope, key, txid, vout: Number(vout), seen: seen || Infinity });
+  }
+  const served = new Set();
+  for (const g of groups.values()) {
+    const agree = g.every((a) => g.every((b) => a === b || mayFollow(a, b)));
+    if (!agree) {
+      for (const l of g) l.pos = await position(l.origin).catch(() => null);
+      g.sort(chainOrder);
+    }
+    const kept = [];
+    for (const l of g) if (kept.every((k) => mayFollow(k, l))) kept.push(l);
+    for (const k of kept) served.add(k.origin);
+  }
+  return served;
 }
 
 module.exports = {
@@ -109,9 +171,14 @@ module.exports = {
   CONTRACT_FORMAT,
   CONTRACT_SIGN_PROTOCOL,
   CONTRACT_SIGN_KEY_ID,
+  UPDATE_TO_SIGN,
   canonical,
+  chainOrder,
   contractAuthorKey,
+  contractId,
   contractSigningBytes,
-  listingRefusal,
+  envelopeRefusal,
+  mayFollow,
   parseContractEnvelope,
+  servedListings,
 };

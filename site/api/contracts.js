@@ -2,13 +2,15 @@
 //   GET  /api/contracts                    → { contracts: [{ origin, envelope, sold, createdAt }] }
 //   GET  /api/contracts?origin=<origin>    → { contract: { origin, envelope, sold, createdAt } }
 //   POST { action:'publish', outpoint, message, pubkey_hex, signature }   the author's freshly minted copy
-//        A paid contract must be signed by its author, and a contract already listed by another author is refused
-//        (lib/contracts.js listingRefusal).
+//        A paid contract must be signed by its author (lib/contracts.js envelopeRefusal), and a contract listed
+//        earlier on chain by another author is refused (servedListings).
 //   POST { action:'claim',   outpoint, message, pubkey_hex, signature }   a buyer's copy: checked as paid, counted
 // Contracts are public (not encrypted): the catalogue only vouches that a copy is genuine and paid for.
+// GET and claim serve only listings servedListings keeps: an older paid listing that isn't signed by its author, or a
+// later copy of an earlier author's contract, is never shown or counted (fail closed).
 // Env (Vercel only): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 const K = require('../lib/strategyKeys');
-const { CONTRACT_TYPE, listingRefusal, parseContractEnvelope } = require('../lib/contracts');
+const { CONTRACT_TYPE, envelopeRefusal, parseContractEnvelope, servedListings } = require('../lib/contracts');
 
 const WINDOW_MS = 10 * 60 * 1000;
 const hits = new Map();
@@ -57,6 +59,46 @@ async function readBody(req) {
 }
 const at = (origin) => K.envelopeAt(origin, K.chain, CONTRACT_TYPE, parseContractEnvelope);
 
+// Where each origin sits on chain (K.chain.position), asked only when listings of one contract disagree about the
+// author. A confirmed position never changes; an unconfirmed one is asked again after a minute.
+const positions = new Map();
+async function position(origin) {
+  const txid = String(origin).split('_')[0];
+  const hit = positions.get(txid);
+  if (hit && (hit.pos || Date.now() - hit.at < 60_000)) return hit.pos;
+  const pos = await K.chain.position(txid).catch(() => null);
+  if (positions.size > 5000) positions.clear();
+  positions.set(txid, { pos, at: Date.now() });
+  return pos;
+}
+const LISTING = 'bwallet_contracts?select=origin,envelope,created_at';
+/** encodeURIComponent that never throws (a lone surrogate in an older row's name would fail the whole catalogue). */
+const enc = (s) => {
+  try {
+    return encodeURIComponent(s);
+  } catch {
+    return encodeURIComponent(s.replace(/[\ud800-\udfff]/g, '\ufffd'));
+  }
+};
+/** Every listing of a contract with this name (servedListings picks the same contract), earliest first. */
+const sameName = (name) => rows(`${LISTING}&envelope->contract->>name=eq.${enc(name)}&order=created_at.asc&limit=500`);
+/** Every listing of contracts with these names, so a page of the catalogue is judged against older listings too. */
+async function sameNames(names) {
+  const quoted = [...new Set(names)].map((n) => `"${n.replace(/["\\]/g, '\\$&')}"`);
+  const out = [];
+  for (let i = 0; i < quoted.length; i += 25)
+    out.push(
+      ...(await rows(
+        `${LISTING}&envelope->contract->>name=in.${enc(`(${quoted.slice(i, i + 25).join(',')})`)}&limit=2000`,
+      )),
+    );
+  return out;
+}
+/** Is the listing at `origin` (with envelope `env`) one the catalogue serves? */
+const served = async (origin, env) =>
+  typeof env?.contract?.name === 'string' &&
+  (await servedListings(await sameName(env.contract.name), position)).has(origin);
+
 async function list(req, res) {
   const origin = K.normOutpoint(new URL(req.url, 'http://x').searchParams.get('origin'));
   const [all, copies] = await Promise.all([
@@ -67,14 +109,22 @@ async function list(req, res) {
   ]);
   const sold = new Map();
   for (const c of copies) sold.set(c.contract_origin, (sold.get(c.contract_origin) || 0) + 1);
+  const ok = origin
+    ? new Set(all[0] && (await served(all[0].origin, all[0].envelope)) ? [all[0].origin] : [])
+    : await servedListings(
+        await sameNames(all.map((c) => c.envelope?.contract?.name).filter((n) => typeof n === 'string')),
+        position,
+      );
   // `body` = the exact inscribed text: buyers inscribe it byte for byte, so their copy's hash matches.
-  const out = all.map((c) => ({
-    origin: c.origin,
-    envelope: c.envelope,
-    body: c.body,
-    sold: sold.get(c.origin) || 0,
-    createdAt: c.created_at,
-  }));
+  const out = all
+    .filter((c) => ok.has(c.origin))
+    .map((c) => ({
+      origin: c.origin,
+      envelope: c.envelope,
+      body: c.body,
+      sold: sold.get(c.origin) || 0,
+      createdAt: c.created_at,
+    }));
   if (origin) return out[0] ? send(res, 200, { contract: out[0] }) : send(res, 404, { error: 'Not found' });
   return send(res, 200, { contracts: out });
 }
@@ -96,15 +146,14 @@ async function publish(b, res) {
     return send(res, 400, { error: 'Publish from the newly minted copy' });
   const a = await at(p.outpoint);
   if (!a) return send(res, 400, { error: 'That output isn’t a contract inscription' });
-  // Earlier listings of a contract with this name (the same contract is checked in listingRefusal), earliest first.
-  const earlier = await rows(
-    `bwallet_contracts?select=envelope&envelope->contract->>name=eq.${encodeURIComponent(a.env.contract.name)}&order=created_at.asc&limit=500`,
-  );
-  const refused = await listingRefusal(
-    a.env,
-    earlier.map((e) => e.envelope),
-  );
+  const refused = await envelopeRefusal(a.env);
   if (refused) return send(res, refused[0], { error: refused[1] });
+  // The earliest listing on chain stays: refused if an earlier one of this contract is by another author.
+  const others = (await sameName(a.env.contract.name)).filter((e) => e.origin !== p.outpoint);
+  // Not in the catalogue yet: among unconfirmed listings it ranks last (no clock of ours is compared with the db's).
+  const mine = { origin: p.outpoint, envelope: a.env, created_at: null };
+  if (!(await servedListings([...others, mine], position)).has(p.outpoint))
+    return send(res, 409, { error: 'This contract is already listed by another author' });
   const r = await db('bwallet_contracts', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
@@ -129,6 +178,7 @@ async function claim(b, res) {
   if (!a) return send(res, 400, { error: 'That isn’t a contract NFT' });
   const [c] = await rows(`bwallet_contracts?select=origin,envelope&body_hash=eq.${a.bodyHash}`);
   if (!c) return send(res, 404, { error: 'This contract isn’t published (or the copy was altered)' });
+  if (!(await served(c.origin, c.envelope))) return send(res, 404, { error: 'This contract isn’t listed' });
   if (origin === c.origin) return send(res, 200, { ok: true, contract: c.origin, original: true });
   const [known] = await rows(`bwallet_contract_copies?select=origin&origin=eq.${origin}`);
   if (!known) {
