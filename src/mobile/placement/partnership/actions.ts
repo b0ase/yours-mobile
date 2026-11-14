@@ -31,6 +31,7 @@ import {
   type MovePlan,
   type PartnerProposal,
   describeProposalMoves,
+  planKeysetProblem,
   proposalMoveProblem,
 } from './partnerLock';
 import { guardedSendBsv21 } from '../../../services/tokenSpendGuard';
@@ -76,8 +77,17 @@ export async function lockUp(
   return { outpoint: `${res.txid}.${vout}`, rawTx: tx.toHex() };
 }
 
-/** Proposer's sheet: put the exact network fee on a one-off seed-derived key, then build + fee-sign the proposal. */
-export async function proposeMove(ctx: OneSatContext, plan: MovePlan): Promise<PartnerProposal> {
+/**
+ * Proposer's sheet: put the exact network fee on a one-off seed-derived key, then build + fee-sign the proposal.
+ * `expected` is the agreement's keyset (agreedKeyset); nothing is funded unless the plan stays on it.
+ */
+export async function proposeMove(
+  ctx: OneSatContext,
+  plan: MovePlan,
+  expected: Keyset | null,
+): Promise<PartnerProposal> {
+  const planProblem = planKeysetProblem(plan, expected);
+  if (planProblem) throw new Error(planProblem);
   const keyID = feeKeyId(plan.partnershipId, plan.proposalId);
   const { publicKey } = await ctx.wallet.getPublicKey({
     protocolID: PARTNER_LOCK_PROTOCOL,
@@ -110,12 +120,21 @@ export async function proposeMove(ctx: OneSatContext, plan: MovePlan): Promise<P
   });
 }
 
-/** "Signature needed" sheet: sign every locked input this partner can sign. Returns the updated proposal. */
-export async function signProposal(ctx: OneSatContext, p: PartnerProposal): Promise<PartnerProposal> {
-  // Sign only what the transaction itself does, never on the strength of the proposer's summary (b-Aware report).
-  const problem = proposalMoveProblem(describeProposalMoves(p));
+/**
+ * "Signature needed" sheet: sign every locked input this partner can sign. Returns the updated proposal.
+ * `expected` is the agreement's keyset (agreedKeyset): a move that re-keys the shares is refused before any sheet.
+ */
+export async function signProposal(
+  ctx: OneSatContext,
+  p: PartnerProposal,
+  expected: Keyset | null,
+): Promise<PartnerProposal> {
+  // Sign only what the transaction itself does, never on the strength of the proposer's summary (b-Aware report),
+  // and only when every input and output sits under the agreed keyset (b-Aware, 0xRen).
+  const problem = proposalMoveProblem(describeProposalMoves(p), expected);
   if (problem) throw new Error(problem);
   const myKey = await partnerKey(ctx, p.partnershipId);
+  if (!expected!.pubKeys.includes(myKey.toLowerCase())) throw new Error('Your key is not on this partnership lock');
   const mine = inputsFor(p, myKey);
   if (!mine.length) throw new Error('Your key is not on this partnership lock');
   const tx = proposalTx(p);
@@ -132,8 +151,16 @@ export async function signProposal(ctx: OneSatContext, p: PartnerProposal): Prom
   return addSignatures(p, myKey, sigs);
 }
 
-/** Once enough partners have signed: finalize (refuses otherwise) and broadcast. Any partner may do this. */
-export async function broadcastProposal(p: PartnerProposal): Promise<{ txid: string; rawTx: string }> {
+/**
+ * Once enough partners have signed: finalize (refuses otherwise) and broadcast. Any partner may do this, but never
+ * for a move off the agreed keyset, even if others signed it.
+ */
+export async function broadcastProposal(
+  p: PartnerProposal,
+  expected: Keyset | null,
+): Promise<{ txid: string; rawTx: string }> {
+  const problem = proposalMoveProblem(describeProposalMoves(p), expected);
+  if (problem) throw new Error(problem.replace('Not signed.', 'Nothing was broadcast.'));
   const { rawTx, txid } = finalize(p);
   await broadcastRaw(rawTx);
   return { txid, rawTx };

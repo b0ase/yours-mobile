@@ -16,6 +16,7 @@ import { broadcastProposal, lockUp, partnerKey, proposeMove, signProposal } from
 import { PARTNER_SIGN_PROTOCOL, lockKeyKeyID, lockKeyMessage, type PartnerLockState } from './lockState';
 import {
   RULE_WARNING,
+  agreedKeyset,
   describeProposalMoves,
   proposalMoveProblem,
   isReady,
@@ -89,6 +90,8 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
   const mine = s.holdings.filter((h) => h.holder === s.myKey);
   const myTotal = mine.reduce((t, h) => t + BigInt(h.amt), 0n);
   const keysetOf = () => ({ m: ks!.m, pubKeys: ks!.pubKeys });
+  // The keyset every holding must sit under (agreement rule + recorded keys, mine among them). Null = refuse all.
+  const agreed = agreedKeyset(s, s.myKey);
 
   const addKey = run(async () => {
     const [pk, idKey] = await Promise.all([partnerKey(ctx, s.partnershipId), identityKey(ctx)]);
@@ -114,6 +117,7 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
 
   const lockMine = run(async () => {
     if (!s.tokenId || !s.supply || !s.myShareBps || !s.myKey) throw new Error('This room has no token to lock yet');
+    if (!agreed) throw new Error("Your partnership's agreed partner keys aren't known yet. Nothing was locked.");
     const amount = (BigInt(s.supply) * BigInt(s.myShareBps)) / 10_000n;
     const r = await lockUp(ctx, { tokenId: s.tokenId, amt: amount, keyset: keysetOf(), myKey: s.myKey });
     await api.partnerLockAction(ticker, {
@@ -130,30 +134,25 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
     const dest = s.keys.find((k) => k.handle === to.replace(/^\$/, ''));
     if (!dest) throw new Error('Choose one of your partners');
     if (!/^\d+$/.test(amt) || BigInt(amt) <= 0n || BigInt(amt) > myTotal) throw new Error(`Up to ${myTotal} shares`);
-    // M comes from the signed agreement (server keyset), never from us: every locked input must already sit
-    // under exactly the agreement's keyset, or the mailbox refuses the proposal (409).
-    const want = [...ks!.pubKeys].sort().join();
-    for (const h of mine) {
-      const vout = Number(h.outpoint.split('.')[1]);
-      const lock = parsePartnerLock(Transaction.fromHex(h.rawTx).outputs[vout].lockingScript);
-      if (!lock || lock.m !== ks!.m || [...lock.pubKeys].sort().join() !== want)
-        throw new Error(
-          'Your locked shares are under an older partner key set. They need re-locking under the current agreement first.',
-        );
-    }
+    // M comes from the signed agreement, never from us: proposeMove refuses (before funding the fee) unless every
+    // locked input and every new holding sits under exactly the agreed keyset.
     const n = BigInt(amt);
     const outputs: Holding[] = [{ tokenId: s.tokenId!, amt: n, holder: dest.partnerKey }];
     if (myTotal - n > 0n) outputs.push({ tokenId: s.tokenId!, amt: myTotal - n, holder: s.myKey! });
-    const p = await proposeMove(ctx, {
-      partnershipId: s.partnershipId,
-      agreementVersion: s.agreementVersion!,
-      proposalId: newId(),
-      kind: 'transfer',
-      summary: `Send ${n.toLocaleString('en-GB')} shares to $${dest.handle}`,
-      inputs: mine.map((h) => ({ sourceTx: Transaction.fromHex(h.rawTx), vout: Number(h.outpoint.split('.')[1]) })),
-      outputs,
-      keyset: keysetOf(),
-    });
+    const p = await proposeMove(
+      ctx,
+      {
+        partnershipId: s.partnershipId,
+        agreementVersion: s.agreementVersion!,
+        proposalId: newId(),
+        kind: 'transfer',
+        summary: `Send ${n.toLocaleString('en-GB')} shares to $${dest.handle}`,
+        inputs: mine.map((h) => ({ sourceTx: Transaction.fromHex(h.rawTx), vout: Number(h.outpoint.split('.')[1]) })),
+        outputs,
+        keyset: keysetOf(),
+      },
+      agreed,
+    );
     await api.partnerLockAction(ticker, { action: 'propose', proposal: p });
     setAmt('');
     return 'Proposed. Your partners will see “Signature needed”. Sign it too.';
@@ -223,7 +222,7 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
           let movesText = '';
           try {
             const d = describeProposalMoves(p.proposal);
-            problem = proposalMoveProblem(d);
+            problem = proposalMoveProblem(d, agreed);
             movesText = d.moves.map((m) => `${partnershipLabel(m.amt)} → ${handleOf(m.holder)}`).join(', ');
           } catch {
             problem = 'This move could not be read. Not signed.';
@@ -244,7 +243,7 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
               onApprove={
                 p.signatureNeeded && !problem
                   ? run(async () => {
-                      const signedP = await signProposal(ctx, p.proposal);
+                      const signedP = await signProposal(ctx, p.proposal, agreed);
                       try {
                         await api.partnerLockAction(ticker, { action: 'sign', id: p.id, sigs: signedP.sigs });
                       } catch (e) {
@@ -257,10 +256,10 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
                   : undefined
               }
               onSend={
-                ready
+                ready && !problem
                   ? run(async () => {
                       // Broadcast FIRST (the wallet, not the server), then report the txid; the server checks it on chain.
-                      const { txid, rawTx } = await broadcastProposal(p.proposal);
+                      const { txid, rawTx } = await broadcastProposal(p.proposal, agreed);
                       try {
                         await api.reportBroadcast(ticker, p.id, txid);
                       } catch (e) {
