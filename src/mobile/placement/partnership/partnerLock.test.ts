@@ -16,7 +16,9 @@ import {
 import { BSV21 } from '@1sat/templates';
 import {
   AWAITING_OWNER,
+  MULTI_LOSER,
   RULE_WARNING,
+  checkPlan,
   addSignatures,
   agreedKeyset,
   agreedKeysetCheck,
@@ -47,7 +49,7 @@ import {
   type MovePlan,
 } from './partnerLock';
 import { buildListingScript } from '../../sell/sell';
-import { broadcastProposal, proposeMove, signProposal } from './actions';
+import { broadcastProposal, inputsOnChainProblem, proposeMove, signProposal, type ChainCheck } from './actions';
 import type { OneSatContext } from '@1sat/actions';
 
 const TOKEN = 'a'.repeat(64) + '_0';
@@ -111,6 +113,8 @@ function plan(keyset: Keyset, over: Partial<MovePlan> = {}): MovePlan {
   };
 }
 const make = async (p: MovePlan) => propose(p, feeUtxo(feeFor(p)), signFee);
+// Chain reads for proposeMove: every input is a known transaction and unspent (tests never touch the network).
+const onChain: ChainCheck = { txKnown: async () => 'known', spent: async () => ({ state: 'unspent' }) };
 
 const k2of3 = keysetFor({ kind: 'majority', m: 2 }, [pub(ann), pub(ben), pub(cat)]);
 const k3of3 = keysetFor({ kind: 'unanimous' }, [pub(cat), pub(ann), pub(ben)]);
@@ -512,12 +516,14 @@ describe('wallet actions refuse a re-keyed move before any sheet (b-Aware, 0xRen
 
   test('proposeMove: genuine plan is funded and proposed; a re-keyed plan funds nothing', async () => {
     const w = wallet(ann);
-    const p = await proposeMove(w.ctx, plan(k2of3), k2of3);
+    const p = await proposeMove(w.ctx, plan(k2of3), k2of3, onChain);
     expect(proposalMoveProblem(describeProposalMoves(p), k2of3, { signer: pub(ann) })).toBeNull();
     expect(w.calls).toContain('createAction');
 
     const v = wallet(ben);
-    await expect(proposeMove(v.ctx, plan(k2of3, { keyset: rekeyed }), k2of3)).rejects.toThrow('agreed partners');
+    await expect(proposeMove(v.ctx, plan(k2of3, { keyset: rekeyed }), k2of3, onChain)).rejects.toThrow(
+      'agreed partners',
+    );
     expect(v.calls).toEqual([]);
   });
 
@@ -706,7 +712,7 @@ describe('proposer: every check before the fee is funded (review)', () => {
         { tokenId: TOKEN, amt: 2500n, holder: pub(ann) }, // built from a bogus 3,500 record row; the script says 3,000
       ],
     });
-    await expect(proposeMove(ctx, bad, k2of3)).rejects.toThrow('Shares must balance');
+    await expect(proposeMove(ctx, bad, k2of3, onChain)).rejects.toThrow('Shares must balance');
     expect(calls).toEqual([]);
   });
 
@@ -717,9 +723,9 @@ describe('proposer: every check before the fee is funded (review)', () => {
       { outpoint: 'x.0', rawTx: 'not hex', amt: '5' },
       { outpoint: `${h.sourceTx.id('hex')}.0`, rawTx: locked(k2of3, ben, 9n).sourceTx.toHex(), amt: '9' }, // not mine
     ];
-    const mine = holdingsFromRecord(rows, pub(ann), TOKEN);
+    const mine = holdingsFromRecord(rows, pub(ann), TOKEN, k2of3).holdings;
     expect(mine.map((m) => m.amt)).toEqual([3000n]);
-    expect(holdingsFromRecord(rows, pub(ann), 'b'.repeat(64) + '_0')).toEqual([]);
+    expect(holdingsFromRecord(rows, pub(ann), 'b'.repeat(64) + '_0', k2of3).holdings).toEqual([]);
   });
 });
 
@@ -748,3 +754,122 @@ function wallet2(me: PrivateKey): OneSatContext {
     },
   } as unknown as OneSatContext;
 }
+
+// Re-review follow-ups.
+describe('a move takes shares from one partner only (re-review: two losers deadlock)', () => {
+  const twoLosers = () =>
+    plan(k2of3, {
+      inputs: [locked(k2of3, ann, 1000n), locked(k2of3, cat, 1000n)],
+      outputs: [{ tokenId: TOKEN, amt: 2000n, holder: pub(ben) }],
+    });
+
+  test('refused for every signer and for broadcast, even once one loser has signed', async () => {
+    const p = await make(twoLosers());
+    const d = describeProposalMoves(p);
+    for (const signer of [pub(ann), pub(cat), pub(ben), null])
+      expect(proposalMoveProblem(d, k2of3, { signer })).toBe(`${MULTI_LOSER} Not signed.`);
+    const byAnn = addSignatures(p, pub(ann), signAs(ann, proposalTx(p), [0]));
+    expect(proposalMoveProblem(describeProposalMoves(byAnn), k2of3, { signer: pub(cat) })).toContain(
+      'more than one partner',
+    );
+  });
+
+  test('signProposal and proposeMove refuse before any signature or fee', async () => {
+    const calls: string[] = [];
+    const ctx = {
+      wallet: {
+        getPublicKey: async () => {
+          calls.push('getPublicKey');
+          return { publicKey: pub(ann) };
+        },
+        createSignature: async () => {
+          calls.push('createSignature');
+          throw new Error('must not sign');
+        },
+        createAction: async () => {
+          calls.push('createAction');
+          throw new Error('must not fund');
+        },
+      },
+    } as unknown as OneSatContext;
+    await expect(signProposal(ctx, await make(twoLosers()), k2of3)).rejects.toThrow('more than one partner');
+    await expect(proposeMove(ctx, twoLosers(), k2of3, onChain)).rejects.toThrow('more than one partner');
+    expect(calls).not.toContain('createSignature');
+    expect(calls).not.toContain('createAction');
+  });
+});
+
+describe('holding rows: by the script, exact template, on chain (re-review)', () => {
+  const row = (u: { sourceTx: Transaction; vout: number }, holder?: PrivateKey) => ({
+    outpoint: `${u.sourceTx.id('hex')}.${u.vout}`,
+    rawTx: u.sourceTx.toHex(),
+    ...(holder ? { holder: pub(holder) } : {}),
+  });
+
+  test('a malformed row tagged $ann is skipped (noted), not allowed to block her real holdings', () => {
+    const real = locked(k2of3, ann, 3000n);
+    const bad = locked(k2of3, ann, 5n);
+    const s = new Script([...bad.sourceTx.outputs[0].lockingScript.chunks]).writeOpCode(OP.OP_NOP);
+    bad.sourceTx.outputs[0].lockingScript = new LockingScript(s.chunks);
+    const otherKeys = locked(k3of3, ann, 7n); // a well-formed lock, but not the agreed keyset
+    const r = holdingsFromRecord([row(real), row(bad), row(otherKeys)], pub(ann), TOKEN, k2of3);
+    expect(r.holdings.map((h) => h.amt)).toEqual([3000n]);
+    expect(r.skipped).toBe(2);
+    expect(planKeysetProblem({ inputs: r.holdings, keyset: k2of3 }, k2of3)).toBeNull();
+    expect(holdingsFromRecord([row(real)], pub(ann), TOKEN, null).holdings).toEqual([]); // no agreed keyset: none
+  });
+
+  test("rows are chosen by the holder tag in the script, not the row's holder column (no hijack)", () => {
+    const bens = locked(k2of3, ben, 900n);
+    const anns = locked(k2of3, ann, 3000n);
+    // $ben's holding filed under $ann's name, and $ann's filed under $ben's
+    const r = holdingsFromRecord([row(bens, ann), row(anns, ben)], pub(ann), TOKEN, k2of3);
+    expect(r.holdings.map((h) => h.amt)).toEqual([3000n]);
+    expect(r.skipped).toBe(1); // the row that claimed to be hers
+    expect(holdingsFromRecord([row(bens, ann), row(anns, ben)], pub(ben), TOKEN, k2of3).holdings).toHaveLength(1);
+  });
+
+  test('the same outpoint posted twice counts once; a plan listing it twice is refused', () => {
+    const real = locked(k2of3, ann, 3000n);
+    const r = holdingsFromRecord([row(real), row(real)], pub(ann), TOKEN, k2of3);
+    expect(r.holdings.map((h) => h.amt)).toEqual([3000n]);
+    expect(r.skipped).toBe(1);
+    expect(() =>
+      checkPlan(plan(k2of3, { inputs: [real, real], outputs: [{ tokenId: TOKEN, amt: 6000n, holder: pub(ben) }] })),
+    ).toThrow('listed twice');
+  });
+
+  test('proposeMove funds nothing unless every input is on chain and unspent (fails closed)', async () => {
+    const cases: [ChainCheck, string][] = [
+      [{ ...onChain, txKnown: async () => 'unknown' }, "isn't on chain"],
+      [{ ...onChain, txKnown: async () => 'unclear' }, "Couldn't check"],
+      [{ ...onChain, spent: async () => ({ state: 'spent', by: 'f'.repeat(64) }) }, 'already moved'],
+      [{ ...onChain, spent: async () => ({ state: 'unclear' }) }, "Couldn't check"],
+    ];
+    for (const [chain, why] of cases) {
+      const calls: string[] = [];
+      const ctx = {
+        wallet: new Proxy(
+          {},
+          {
+            get: (_, k) => async () => {
+              calls.push(String(k));
+              throw new Error('wallet must not be called');
+            },
+          },
+        ),
+      } as unknown as OneSatContext;
+      await expect(proposeMove(ctx, plan(k2of3), k2of3, chain)).rejects.toThrow(why);
+      expect(calls).toEqual([]);
+    }
+    // asks about the real outpoint
+    const asked: string[] = [];
+    const pl = plan(k2of3);
+    await inputsOnChainProblem(pl.inputs, {
+      txKnown: async (t) => (asked.push(t), 'known'),
+      spent: async (o) => (asked.push(o), { state: 'unspent' }),
+    });
+    const id = pl.inputs[0].sourceTx.id('hex');
+    expect(asked).toEqual([id, `${id}.0`]);
+  });
+});

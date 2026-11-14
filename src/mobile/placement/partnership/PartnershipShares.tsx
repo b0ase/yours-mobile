@@ -89,13 +89,14 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
     const h = s.keys.find((x) => x.partnerKey.toLowerCase() === k.toLowerCase())?.handle;
     return h ? `$${h}` : `${k.slice(0, 8)}…`;
   };
-  // My holdings and their amounts come from the locking scripts themselves, never the server's amt column: a plan
-  // built from a wrong row would fail only after the fee was funded.
-  const recorded = s.holdings.filter((h) => h.holder === s.myKey);
-  const mine = holdingsFromRecord(recorded, s.myKey, s.tokenId);
-  const myTotal = mine.reduce((t, h) => t + h.amt, 0n);
   // The keyset every holding must sit under (agreement rule + recorded keys, mine among them), or why there isn't one.
   const { keyset: agreed, why: noKeyset } = agreedKeysetCheck(s, s.myKey);
+  // My holdings: chosen by the holder tag inside each script, amounts from the script, exact template under the
+  // agreed keyset only (never the record's holder/amt columns, which any partner can post).
+  const { holdings: mine, skipped } = holdingsFromRecord(s.holdings, s.myKey, s.tokenId, agreed);
+  const myTotal = mine.reduce((t, h) => t + h.amt, 0n);
+  // Never offer to lock again while anything is recorded as mine (a second lock would double the allocation).
+  const anyRecorded = mine.length > 0 || skipped > 0 || s.holdings.some((h) => h.holder === s.myKey);
 
   const addKey = run(async () => {
     const [pk, idKey] = await Promise.all([partnerKey(ctx, s.partnershipId), identityKey(ctx)]);
@@ -176,6 +177,12 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
       </div>
       <PartnershipAgreement api={api} ticker={ticker} />
       {myTotal > 0n && <div className="text-sm text-white">{partnershipLabel(myTotal)}</div>}
+      {skipped > 0 && (
+        <p className="m-0 text-xs" style={{ color: MUTED }}>
+          {skipped === 1 ? '1 recorded holding' : `${skipped} recorded holdings`} didn’t match your partnership’s lock
+          and {skipped === 1 ? 'isn’t' : 'aren’t'} counted.
+        </p>
+      )}
       {ks && (
         <p className="m-0 text-xs" style={{ color: MUTED }}>
           Moves only with {ks.m} of {ks.pubKeys.length || s.keys.length} partners’ signatures. Profits still pay
@@ -203,7 +210,7 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
           Waiting for every partner to add their lock key.
         </p>
       )}
-      {s.myKey && ks?.complete && recorded.length === 0 && (
+      {s.myKey && ks?.complete && !anyRecorded && (
         <button
           type="button"
           disabled={busy}

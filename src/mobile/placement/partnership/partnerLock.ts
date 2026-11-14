@@ -211,6 +211,8 @@ export function feeFor(plan: Omit<MovePlan, 'proposalId'> & { proposalId?: strin
 export function checkPlan(plan: MovePlan): void {
   if (!plan.inputs.length) throw new Error('Nothing to move');
   if (!plan.outputs.length) throw new Error('Say where the shares go');
+  const outpoints = plan.inputs.map((u) => `${u.sourceTx.id('hex')}.${u.vout}`);
+  if (new Set(outpoints).size !== outpoints.length) throw new Error('The same holding is listed twice');
   const parsed = plan.inputs.map((u) => parsePartnerLock(outOf(u).lockingScript));
   if (parsed.some((p) => !p)) throw new Error('Every input must be a partner-locked holding');
   const tokenId = parsed[0]!.tokenId;
@@ -291,28 +293,79 @@ export function findMyHoldings<T extends { lockingScript: Script }>(
   });
 }
 
+export type RecordHolding = LockedUtxo & { amt: bigint; outpoint: string };
+
 /**
- * My spendable holdings from the record's rows, with amounts read from each row's own locking script (never the
- * row's amt column, which any partner can post). Rows that don't parse, aren't mine or aren't this token are dropped.
+ * My holdings from the record's rows, chosen by the holder tag INSIDE each row's locking script (never the row's
+ * holder or amt columns, which any partner can post) and kept only when that output is exactly the partner lock
+ * template under the agreed keyset. Each outpoint counts once. `skipped` counts rows that claim to be mine (by
+ * column or by tag) but were not kept: malformed, another token, off the agreed keyset, or a duplicate. Whether a
+ * kept row is really on chain and unspent is checked before anything is funded (proposeMove).
  */
 export function holdingsFromRecord(
-  rows: { outpoint: string; rawTx: string }[],
+  rows: { outpoint: string; rawTx: string; holder?: string }[],
   myKey: string | null,
   tokenId: string | null,
-): (LockedUtxo & { amt: bigint })[] {
-  if (!myKey || !tokenId) return [];
-  return rows.flatMap((h) => {
+  expected: Keyset | null,
+): { holdings: RecordHolding[]; skipped: number } {
+  const holdings: RecordHolding[] = [];
+  let skipped = 0;
+  if (!myKey) return { holdings, skipped };
+  const me = myKey.toLowerCase();
+  const seen = new Set<string>();
+  for (const h of rows) {
+    let lock: ParsedPartnerLock | null = null;
     try {
       const vout = Number(h.outpoint.split('.')[1]);
       const sourceTx = Transaction.fromHex(h.rawTx);
-      const lock = parsePartnerLock(sourceTx.outputs[vout].lockingScript);
-      return lock && lock.holder === myKey.toLowerCase() && lock.tokenId === tokenId
-        ? [{ sourceTx, vout, amt: lock.amt }]
-        : [];
+      const out = sourceTx.outputs[vout];
+      lock = out ? parsePartnerLock(out.lockingScript) : null;
+      const outpoint = `${sourceTx.id('hex')}.${vout}`;
+      if (
+        lock &&
+        lock.holder === me &&
+        !!tokenId &&
+        lock.tokenId === tokenId &&
+        !!expected &&
+        sameKeyset(lock, expected) &&
+        isExactPartnerLock(out.lockingScript.toHex(), lock, expected) &&
+        !seen.has(outpoint)
+      ) {
+        seen.add(outpoint);
+        holdings.push({ sourceTx, vout, amt: lock.amt, outpoint });
+        continue;
+      }
     } catch {
-      return [];
+      /* malformed row */
     }
-  });
+    if (h.holder?.toLowerCase() === me || lock?.holder === me) skipped++;
+  }
+  return { holdings, skipped };
+}
+
+/** Each holder's shares out minus in (negative = that partner loses shares). Zero changes are left out. */
+export function netByHolder(
+  inputs: { holder: string; amt: bigint }[],
+  outputs: { holder: string; amt: bigint }[],
+): { holder: string; change: bigint }[] {
+  const change = new Map<string, bigint>();
+  for (const i of inputs) change.set(i.holder.toLowerCase(), (change.get(i.holder.toLowerCase()) ?? 0n) - i.amt);
+  for (const o of outputs) change.set(o.holder.toLowerCase(), (change.get(o.holder.toLowerCase()) ?? 0n) + o.amt);
+  return [...change].map(([holder, c]) => ({ holder, change: c })).filter((x) => x.change !== 0n);
+}
+
+/**
+ * A move may take shares from ONE partner only. With two losers each wallet would wait for the other's signature
+ * (deadlock), and no partner may approve the loss of another's shares for them.
+ */
+export const MULTI_LOSER = "This move takes shares from more than one partner; move each partner's shares separately.";
+
+/** Before funding: refuse a plan that takes shares from more than one partner. */
+export function planLoserProblem(plan: Pick<MovePlan, 'inputs' | 'outputs'>): string | null {
+  const ins = plan.inputs.map((u) => parsePartnerLock(outOf(u).lockingScript));
+  if (ins.some((p) => !p)) return 'Every input must be a partner-locked holding. Nothing was proposed.';
+  const losers = netByHolder(ins as ParsedPartnerLock[], plan.outputs).filter((x) => x.change < 0n);
+  return losers.length > 1 ? `${MULTI_LOSER} Nothing was proposed.` : null;
 }
 
 export type ProposalMoves = {
@@ -373,10 +426,7 @@ export function describeProposalMoves(
       const real = inputs.find((x) => x.index === l.index);
       return !!real && sameKeyset(real, l);
     });
-  const change = new Map<string, bigint>();
-  for (const i of inputs) change.set(i.holder, (change.get(i.holder) ?? 0n) - i.amt);
-  for (const m of moves) change.set(m.holder, (change.get(m.holder) ?? 0n) + m.amt);
-  const net = [...change].map(([holder, c]) => ({ holder, change: c })).filter((x) => x.change !== 0n);
+  const net = netByHolder(inputs, moves);
   let approvedBy: string[] = [];
   if (lockedMatches && p.sigs) {
     try {
@@ -490,6 +540,7 @@ export function proposalMoveProblem(
   if (d.moves.some((m) => !isExactPartnerLock(m.script, m, o.next ?? expected))) return NOT_TEMPLATE;
   if (d.sharesIn !== d.sharesOut) return `Shares don't balance (${d.sharesIn} in, ${d.sharesOut} out). Not signed.`;
   if (new Set([...d.inputs, ...d.moves].map((x) => x.tokenId)).size > 1) return 'This move mixes tokens. Not signed.';
+  if (d.net.filter((x) => x.change < 0n).length > 1) return `${MULTI_LOSER} Not signed.`;
   const me = o.signer?.toLowerCase() ?? null;
   if (d.net.some((x) => x.change < 0n && x.holder !== me && !d.approvedBy.includes(x.holder))) return AWAITING_OWNER;
   return null;
