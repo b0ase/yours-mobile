@@ -19,7 +19,11 @@ const OLD = 'c'.repeat(64);
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** A storage manager stand-in: writerLocks as the toolbox keeps them, syncToWriter driving the backup view it is given. */
-function harness(o: Partial<WriteAheadDeps> & { push?: (view: Record<string, (...a: unknown[]) => Promise<unknown>>) => Promise<void> } = {}) {
+function harness(
+  o: Partial<WriteAheadDeps> & {
+    push?: (view: Record<string, (...a: unknown[]) => Promise<unknown>>) => Promise<void>;
+  } = {},
+) {
   const events: string[] = [];
   const active = {
     name: 'device store',
@@ -167,7 +171,10 @@ describe('the push before a broadcast', () => {
       },
     });
     await h.pa({ txid: TX });
-    const chunk = h.backup.chunks[0] as { transactions: { status: string; rawTx?: number[] }[]; provenTxReqs: unknown[] };
+    const chunk = h.backup.chunks[0] as {
+      transactions: { status: string; rawTx?: number[] }[];
+      provenTxReqs: unknown[];
+    };
     expect(chunk.transactions[0]).toMatchObject({ status: 'sending', rawTx: [1, 2, 3] });
     expect(chunk.provenTxReqs[0]).toMatchObject({ status: 'nosend' });
   });

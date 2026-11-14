@@ -266,16 +266,19 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
     },
   );
 
-  kdfTest('an earlier unfinished note: the upgrade note carries its salts forward (kdfNote), never erases them', async () => {
-    gate.expectLines('warn [ChromeStorageService] password key upgrade deferred: Error'); // the kill after the note
-    local.kdfPending = { prevSalt: 'earlier-prev', salt: 'earlier-salt', older: ['earlier-older'] };
-    const svc = await service();
-    killMidWrite = 'accounts-only'; // the note lands, the swap is cut off: the note is what recovery reads
-    expect(await svc.upgradeKdf(PW)).toBe(false);
-    expect(local.kdfPending.prevSalt).toBe(LEGACY_SALT);
-    expect(saltIterations(local.kdfPending.salt)).toBe(KDF_ITERATIONS);
-    expect(local.kdfPending.older).toEqual(['earlier-salt', 'earlier-prev', 'earlier-older']);
-  });
+  kdfTest(
+    'an earlier unfinished note: the upgrade note carries its salts forward (kdfNote), never erases them',
+    async () => {
+      gate.expectLines('warn [ChromeStorageService] password key upgrade deferred: Error'); // the kill after the note
+      local.kdfPending = { prevSalt: 'earlier-prev', salt: 'earlier-salt', older: ['earlier-older'] };
+      const svc = await service();
+      killMidWrite = 'accounts-only'; // the note lands, the swap is cut off: the note is what recovery reads
+      expect(await svc.upgradeKdf(PW)).toBe(false);
+      expect(local.kdfPending.prevSalt).toBe(LEGACY_SALT);
+      expect(saltIterations(local.kdfPending.salt)).toBe(KDF_ITERATIONS);
+      expect(local.kdfPending.older).toEqual(['earlier-salt', 'earlier-prev', 'earlier-older']);
+    },
+  );
 
   test('the unlock screen runs it, only with the USB key off', async () => {
     const { readFileSync } = await import('node:fs');

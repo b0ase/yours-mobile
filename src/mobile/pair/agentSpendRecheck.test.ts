@@ -8,12 +8,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { OneSatContext } from '@1sat/actions';
 import { PrivateKey } from '@bsv/sdk';
 import { stubGlobals } from '../../testing/stubGlobals';
-import {
-  getAgentLog,
-  markAgentAccount,
-  setAgentStopped,
-  setAllAgentsStopped,
-} from '../agents/agentAccounts';
+import { getAgentLog, markAgentAccount, setAgentStopped, setAllAgentsStopped } from '../agents/agentAccounts';
 import { appendAgentLog, MAX_SPENDS_PER_HOUR } from '../agents/agentAccounts';
 import { runAgentAction, type AgentTradeIo } from '../agents/agentTrade';
 import { checkedPurchaseContext } from '../p2p/checkedPurchase';
@@ -347,9 +342,15 @@ describe('Stop pressed after the spend passed its check (report b)', () => {
 
   test('a strategy switched to paper meanwhile is not signed live', async () => {
     const { loadStrategy, exampleStrategy } = await import('../agents/strategy');
-    const r = await runAgentAction(ctx, ID, { kind: 'send', token: 'BSV', usd: 0.5, to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' }, RATE, {
-      io: io({ send: viaWallet(() => void loadStrategy(ID, exampleStrategy(), 'paper')) as never }),
-    });
+    const r = await runAgentAction(
+      ctx,
+      ID,
+      { kind: 'send', token: 'BSV', usd: 0.5, to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },
+      RATE,
+      {
+        io: io({ send: viaWallet(() => void loadStrategy(ID, exampleStrategy(), 'paper')) as never }),
+      },
+    );
     expect(r.ok).toBe(false);
     expect(signed).toBe(0);
   });
@@ -385,7 +386,14 @@ describe('review fixes (13 Nov 2026)', () => {
   test('a send with no txid is still a failure and not logged as spent', async () => {
     const g = grantFor();
     const send = async () => ({ error: 'no-txid-returned' });
-    expect(await callCode(g, 'send', { to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', usd: 0.5 }, deps(g, { tradeIo: io({ send: send as never }) }))).toBe('REFUSED');
+    expect(
+      await callCode(
+        g,
+        'send',
+        { to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', usd: 0.5 },
+        deps(g, { tradeIo: io({ send: send as never }) }),
+      ),
+    ).toBe('REFUSED');
     expect(getAgentLog(ID).filter((e) => e.action === 'send')).toHaveLength(0);
   });
 

@@ -1,6 +1,7 @@
 # Self-check (balance integrity, fix 6)
 
 Status, 13 Nov 2026:
+
 - [x] Reconcile pass over every spendable default and `1sat-deposit` coin, at unlock (light run, 90 s floor) and every 30 min (full run)
 - [x] Result object stored per account and announced to open pages
 - [x] Count of unsent holds (nosend / unsigned actions holding coins) and stuck device-sync passes
@@ -32,19 +33,19 @@ result is stored and announced only while its account is still the unlocked one.
 `src/services/selfCheck.ts` → `SelfCheckResult`, stored in `chrome.storage.local` under `bwxSelfCheck[identityKey]`
 and sent as the runtime message `{ action: 'SELF_CHECK_RESULT', data }`. Read it with `readSelfCheck(kv, identityKey)`.
 
-| Field | Meaning |
-|---|---|
-| `checkedAt`, `mode` | when, and full or light |
-| `coins` | spendable coins checked |
-| `mismatches[]` | `{ outpoint, sats, kind }`: `marked-spent` and `restored` were fixed in this run; `unconfirmed-spend` (one lookup names a spender, the other answered against it) and `update-failed` (storage write failed) were not. At most 50 kept, unsettled and biggest first |
-| `mismatchCount` | the full number of mismatches |
-| `differsBySats` | sats of the unsettled kinds (over all of them, not just the 50 kept). Show "Your records differ from the chain by X" when not 0 |
-| `unchecked` | coins not verified to the `verifiedBy` level: the index failed (whatever WhatsOnChain said), the index named a spender and WhatsOnChain failed (429/timeout), or in a full run WhatsOnChain failed. Never counted in `differsBySats` |
-| `verifiedBy` | `index+woc`: a full run, every coin the index calls unspent also looked up on WhatsOnChain. `index`: a light run (or off mainnet): small coins the index calls unspent taken at its word |
-| `agrees` | true only after a full run verified `index+woc` with nothing unsettled and nothing unchecked. `differsBySats = 0` alone after a light run means only "the index agrees"; don't show "agrees" for it |
-| `unsentHolds` | `{ count, sats }` of nosend / unsigned actions holding coins |
-| `stuckSyncs` | device-sync passes from the start that haven't moved for 10 min of uptime |
-| `fingerprint` | `{ sats, count, coinListHash, buildId, at }` of the coin set after this run: minus coins marked spent or no longer spendable in storage (an in-flight send), plus restored coins of these two baskets |
+| Field               | Meaning                                                                                                                                                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checkedAt`, `mode` | when, and full or light                                                                                                                                                                                                                                             |
+| `coins`             | spendable coins checked                                                                                                                                                                                                                                             |
+| `mismatches[]`      | `{ outpoint, sats, kind }`: `marked-spent` and `restored` were fixed in this run; `unconfirmed-spend` (one lookup names a spender, the other answered against it) and `update-failed` (storage write failed) were not. At most 50 kept, unsettled and biggest first |
+| `mismatchCount`     | the full number of mismatches                                                                                                                                                                                                                                       |
+| `differsBySats`     | sats of the unsettled kinds (over all of them, not just the 50 kept). Show "Your records differ from the chain by X" when not 0                                                                                                                                     |
+| `unchecked`         | coins not verified to the `verifiedBy` level: the index failed (whatever WhatsOnChain said), the index named a spender and WhatsOnChain failed (429/timeout), or in a full run WhatsOnChain failed. Never counted in `differsBySats`                                |
+| `verifiedBy`        | `index+woc`: a full run, every coin the index calls unspent also looked up on WhatsOnChain. `index`: a light run (or off mainnet): small coins the index calls unspent taken at its word                                                                            |
+| `agrees`            | true only after a full run verified `index+woc` with nothing unsettled and nothing unchecked. `differsBySats = 0` alone after a light run means only "the index agrees"; don't show "agrees" for it                                                                 |
+| `unsentHolds`       | `{ count, sats }` of nosend / unsigned actions holding coins                                                                                                                                                                                                        |
+| `stuckSyncs`        | device-sync passes from the start that haven't moved for 10 min of uptime                                                                                                                                                                                           |
+| `fingerprint`       | `{ sats, count, coinListHash, buildId, at }` of the coin set after this run: minus coins marked spent or no longer spendable in storage (an in-flight send), plus restored coins of these two baskets                                                               |
 
 Results of accounts no longer in the wallet are dropped on the next save.
 
@@ -55,12 +56,14 @@ Each device should publish its `fingerprint` for the account so the others can r
 same set gives the same hash in any order.
 
 There is no place to put it today without a server change:
+
 - The backup the devices sync (the wallet-toolbox store on wallet.1sat.app) only carries the toolbox's tables. `users`
   has no free-form fields, `settings` is per store, and `sync_states` are per device and never synced.
 - Putting the data in basket names, tags or labels would work but abuses the schema and would show up in every
   device's history and basket lists. Not recommended.
 
 Options, in order of preference:
+
 1. **Small endpoint on our push server** (`push.bwalletx.com`): `PUT/GET /fingerprint/<identityKey>/<deviceId>`, the
    body signed with the identity key (BRC-3 signature, `protocolID [2, 'bwallet fingerprint']`), keep the last one per
    device for 7 days. The server stores only totals and a hash (no outpoints).

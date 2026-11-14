@@ -1125,7 +1125,8 @@ export const initWallet = async (
   void loadMayBeOut();
   if (!rememberRefusals(toolboxServices)) console.warn('[initWallet] broadcast refusals not recorded');
   // Last postBeef wrapper (outermost): the backup push before a payment's broadcast is not timed as the broadcast.
-  if (!onBroadcast(toolboxServices, writeAhead)) console.warn('[initWallet] payments are not backed up before broadcast');
+  if (!onBroadcast(toolboxServices, writeAhead))
+    console.warn('[initWallet] payments are not backed up before broadcast');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
   // The wallet's own sends check the coins storage picked against the chain before signing; coins another device

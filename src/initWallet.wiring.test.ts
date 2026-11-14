@@ -367,11 +367,17 @@ describe('the real initWallet wiring', () => {
   test("a payment's rows reach the backup before it is broadcast (fix 4: services/changeWriteAhead.ts)", () => {
     const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
     // The device sync's own push pieces: its in-flight records, its pushNow as the urgent retry, the health line.
-    expect(src).toMatch(/writeAhead = createChangeWriteAhead\(\{[\s\S]*?inFlightFor: pushInFlightFor,[\s\S]*?pushNow: \(\) => deviceSync\.pushNow\(\),[\s\S]*?onChange: \(n\) => pullHealth\.changeNotBackedUp\(n\),/);
+    expect(src).toMatch(
+      /writeAhead = createChangeWriteAhead\(\{[\s\S]*?inFlightFor: pushInFlightFor,[\s\S]*?pushNow: \(\) => deviceSync\.pushNow\(\),[\s\S]*?onChange: \(n\) => pullHealth\.changeNotBackedUp\(n\),/,
+    );
     expect(src).toMatch(/watchStorage\(storage, writeAhead\)/);
     // The outermost postBeef wrapper: installed after every other one.
     const hook = src.indexOf('onBroadcast(toolboxServices, writeAhead)');
-    for (const other of ['sizeAwareBroadcast(toolboxServices)', 'recheckRefusals(toolboxServices)', 'rememberRefusals(toolboxServices)'])
+    for (const other of [
+      'sizeAwareBroadcast(toolboxServices)',
+      'recheckRefusals(toolboxServices)',
+      'rememberRefusals(toolboxServices)',
+    ])
       expect(src.indexOf(other)).toBeLessThan(hook);
     expect(src).toMatch(/changeUnbacked: writeAhead\?\.count\(\) \?\? 0/);
     expect(src).toMatch(/writeAhead\?\.stop\(\);/);

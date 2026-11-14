@@ -175,7 +175,8 @@ export class EnvelopeUnavailableError extends Error {
   readonly envelopeUnavailable = true;
 }
 export const isEnvelopeUnavailable = (e: unknown): boolean =>
-  e instanceof EnvelopeUnavailableError || (e as { envelopeUnavailable?: unknown } | null)?.envelopeUnavailable === true;
+  e instanceof EnvelopeUnavailableError ||
+  (e as { envelopeUnavailable?: unknown } | null)?.envelopeUnavailable === true;
 /**
  * The web wallet calls this in each tab's background worker: other tabs run their own worker over the same storage,
  * so only navigator.locks serialises them. Without it every envelope operation is refused (fail closed).
@@ -266,10 +267,7 @@ export class EnvelopeStore {
    * - once the deadline has passed nothing is written (the caller was already told no);
    * - a write already sent keeps the lock until it settles, so no other op can read around it (no unlocked spend).
    */
-  private run<T>(
-    fn: (s: EnvelopeState) => { state?: EnvelopeState; result: T },
-    removalOnly = false,
-  ): Promise<T> {
+  private run<T>(fn: (s: EnvelopeState) => { state?: EnvelopeState; result: T }, removalOnly = false): Promise<T> {
     if (stuckWrites.has(this.lockName)) return Promise.reject(new EnvelopeUnavailableError(ENVELOPE_TIMED_OUT));
     const ac = typeof AbortController === 'function' ? new AbortController() : undefined;
     let late = false;

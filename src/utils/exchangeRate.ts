@@ -337,7 +337,12 @@ export function paymentRateEntry(): RateEntry | null {
   if (!ref) return null;
   const d = cache;
   if (d && d.rate > 0 && drift(d.rate, ref.rate) <= PAYMENT_TOLERANCE) return d;
-  return { rate: ref.rate, timestamp: ref.at, ...(ref.sourceTime ? { sourceTime: ref.sourceTime } : {}), source: 'woc' };
+  return {
+    rate: ref.rate,
+    timestamp: ref.at,
+    ...(ref.sourceTime ? { sourceTime: ref.sourceTime } : {}),
+    source: 'woc',
+  };
 }
 
 /** The PAYMENT rate (USD per BSV), or 0. Synchronous; payment-safe. */

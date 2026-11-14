@@ -28,7 +28,9 @@ export const closeAndReload = async (wallet: LegacyWallet | undefined) => {
     closeBackground: IS_EXTENSION
       ? undefined
       : async () => {
-          const r = (await chrome.runtime.sendMessage({ action: CLOSE_FOR_RELOAD_ACTION })) as { data?: unknown } | undefined;
+          const r = (await chrome.runtime.sendMessage({ action: CLOSE_FOR_RELOAD_ACTION })) as
+            | { data?: unknown }
+            | undefined;
           // Which close steps ran and how long each took, into the boot trace (bootWatchdog.ts).
           markBootStage(`switch: background close ${JSON.stringify(r?.data ?? null).slice(0, 400)}`);
         },
