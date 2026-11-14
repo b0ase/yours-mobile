@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
-import { bindPayee, payeeLabel, signPayee } from './payee';
+import { bindPayee, payeeLabel, payoutNeedsSigning, signPayee } from './payee';
 import { parseAsset, type RateAsset, type RateCard } from './rateCard';
 
 const callee = new ProtoWallet(PrivateKey.fromRandom());
@@ -72,13 +72,17 @@ describe('bindPayee: MNEE and token meters pay only an address the callee signed
 describe('bindPayee: BSV pays the paymail only through the callee key', () => {
   test("the payee carries the callee's identity key, shown with the paymail", async () => {
     const key = await keyOf(callee);
-    const r = await bindPayee(card({ kind: 'bsv' }), 'ann@bwalletx.com', key);
-    expect(r).toEqual({ ok: true, payTo: { paymail: 'ann@bwalletx.com', identityKey: key } });
-    if (r.ok) expect(payeeLabel(r.payTo)).toContain('ann@bwalletx.com');
+    const r = await bindPayee(card({ kind: 'bsv' }), 'ann@bwallet.space', key);
+    expect(r).toEqual({ ok: true, payTo: { paymail: 'ann@bwallet.space', identityKey: key } });
+    if (r.ok) expect(payeeLabel(r.payTo)).toContain('ann@bwallet.space');
+  });
+  test('a paymail on a third-party host is refused (it could drop the payment after deriving outputs)', async () => {
+    const r = await bindPayee(card({ kind: 'bsv' }), 'ann@handcash.io', await keyOf(callee));
+    expect(r).toEqual({ ok: false, error: expect.stringContaining("isn't a bWalletX paymail") });
   });
   test('no paymail, or no key, is refused', async () => {
     expect((await bindPayee(card({ kind: 'bsv' }), null, await keyOf(callee))).ok).toBe(false);
-    expect((await bindPayee(card({ kind: 'bsv' }), 'ann@bwalletx.com', 'not-a-key')).ok).toBe(false);
+    expect((await bindPayee(card({ kind: 'bsv' }), 'ann@bwallet.space', 'not-a-key')).ok).toBe(false);
   });
 });
 
@@ -96,8 +100,33 @@ describe('the meter and the sheets', () => {
     const sheet = readFileSync(new URL('./QuoteSheet.tsx', import.meta.url), 'utf8');
     expect(sheet).toContain('{payeeLabel(s.payTo)}');
   });
-  test('saving bPhone settings signs the MNEE / token payout address', () => {
+  test("saving bPhone settings signs the wallet's own MNEE / token payout address", () => {
     const settings = readFileSync(new URL('./BPhoneSettings.tsx', import.meta.url), 'utf8');
-    expect(settings.match(/await signPayee\(apiContext\.wallet, next\.rate\.asset, address\)/g)?.length).toBe(2);
+    expect(settings).toContain('const address = await ownPayout(next.rate.asset.kind);');
+    expect(settings).toContain('await signPayee(apiContext.wallet, next.rate.asset, address)');
+  });
+  test("opening bPhone settings re-signs an old card with the wallet's own address, never the served one", () => {
+    const settings = readFileSync(new URL('./BPhoneSettings.tsx', import.meta.url), 'utf8');
+    expect(settings).toContain('const own = await ownPayout(kind);');
+    expect(settings).toContain('await payoutNeedsSigning(publicKey.toLowerCase(), p.rate.asset, own)');
+    expect(settings).toMatch(/await signPayee\(myKey, p\.rate\.asset[^;]*, own\);/);
+  });
+});
+
+describe("payoutNeedsSigning: the callee's wallet re-signs only its own address", () => {
+  test('an unsigned card, a swapped address, or a stale signature needs signing; a good one does not', async () => {
+    const key = await keyOf(callee);
+    const good = await signed(callee, { kind: 'mnee' });
+    expect(await payoutNeedsSigning(key, good, ADDR)).toBe(false);
+    expect(await payoutNeedsSigning(key, { kind: 'mnee', address: ADDR }, ADDR)).toBe(true);
+    // The server served a different address: sign the wallet's own, not that one.
+    expect(await payoutNeedsSigning(key, { ...good, address: SWAP } as RateAsset, ADDR)).toBe(true);
+    expect(await payoutNeedsSigning(key, await signed(other, { kind: 'mnee' }), ADDR)).toBe(true);
+  });
+  test('a BSV card, no card, or no own address: nothing to sign', async () => {
+    const key = await keyOf(callee);
+    expect(await payoutNeedsSigning(key, { kind: 'bsv' }, ADDR)).toBe(false);
+    expect(await payoutNeedsSigning(key, undefined, ADDR)).toBe(false);
+    expect(await payoutNeedsSigning(key, { kind: 'mnee', address: ADDR }, undefined)).toBe(false);
   });
 });

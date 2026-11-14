@@ -8,7 +8,7 @@ import { useAccountNames } from '../names/accountNames';
 import { bareName } from '../names/names';
 import { fmtSats, useBsvUsd, usdToSats } from '../money/money';
 import { actBooking, bphoneEnabled, listBookings, loadMyProfile, saveMyProfile } from './bphone';
-import { signPayee } from './payee';
+import { payoutNeedsSigning, signPayee } from './payee';
 import { busy as callBusy, shortKey } from './machine';
 import {
   ABOUT_MAX,
@@ -166,10 +166,29 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
         setTo(p.listing.hours[0].to);
       }
       setLoaded(true);
+      // A card saved before payout signatures (or one whose address isn't this wallet's own): re-sign it with my own
+      // address, quietly (my wallet's reserved signing key, no site involved), so callers can keep paying me (row 114).
+      const kind = p.rate?.asset.kind;
+      if (p.rate && kind && kind !== 'bsv') {
+        try {
+          const own = await ownPayout(kind);
+          if (!(await payoutNeedsSigning(publicKey.toLowerCase(), p.rate.asset, own))) return;
+          const proof = await signPayee(myKey, p.rate.asset as Exclude<typeof p.rate.asset, { kind: 'bsv' }>, own);
+          const saved = await saveMyProfile(f, myKey, {
+            ...p,
+            rate: { ...p.rate, asset: { ...p.rate.asset, address: own, proof } as typeof p.rate.asset },
+          });
+          if (live) setProfile(saved);
+        } catch {
+          /* offline or paymail off: the next open (or Save) signs it */
+        }
+      }
     })();
     return () => {
       live = false;
     };
+    // ownPayout reads the account at load time; the effect runs once per unlocked wallet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myKey]);
 
   useEffect(() => {
@@ -208,6 +227,23 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
     [days, from, to],
   );
 
+  /**
+   * Where MNEE / token payments land: my own deposit addresses, derived here so callers never guess, and signed with my
+   * identity key so a caller pays them only if the server didn't swap them (calls/payee.ts, row 114).
+   */
+  const ownPayout = async (kind: 'mnee' | 'bsv21'): Promise<string> => {
+    if (!apiContext) throw new Error('Wallet is locked');
+    if (kind === 'mnee') {
+      const d = await deriveDepositAddresses.execute(apiContext, { startIndex: 0, count: 1 });
+      const address = d.derivations[0]?.address;
+      if (!address) throw new Error('Could not derive an MNEE address');
+      return address;
+    }
+    const address = account?.addresses?.ordAddress;
+    if (!address) throw new Error('No ordinals address for tokens');
+    return address;
+  };
+
   const save = async () => {
     if (!apiContext?.wallet) return;
     setProblem('');
@@ -219,17 +255,8 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
     if (next.listing.listed && !paymail) return setProblem('Claim a bWallet paymail first so callers can pay you');
     setSaving(true);
     try {
-      // Where MNEE / token payments land: my own deposit addresses, filled in here so callers never guess, and signed
-      // with my identity key so a caller pays them only if the server didn't swap them (calls/payee.ts, row 114).
-      if (next.rate?.asset.kind === 'mnee') {
-        const d = await deriveDepositAddresses.execute(apiContext, { startIndex: 0, count: 1 });
-        const address = d.derivations[0]?.address;
-        if (!address) throw new Error('Could not derive an MNEE address');
-        const proof = await signPayee(apiContext.wallet, next.rate.asset, address);
-        next.rate = { ...next.rate, asset: { kind: 'mnee', address, proof } };
-      } else if (next.rate?.asset.kind === 'bsv21') {
-        const address = account?.addresses?.ordAddress;
-        if (!address) throw new Error('No ordinals address for tokens');
+      if (next.rate && next.rate.asset.kind !== 'bsv') {
+        const address = await ownPayout(next.rate.asset.kind);
         const proof = await signPayee(apiContext.wallet, next.rate.asset, address);
         next.rate = { ...next.rate, asset: { ...next.rate.asset, address, proof } };
       }

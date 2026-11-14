@@ -5,14 +5,17 @@
  * meter pays with no sheet in front of each payment, so the payee must be tied to the callee's identity key (the key
  * the call is placed to) before the quote is shown, or the call is not paid at all:
  *  - BSV goes to their paymail, and the request carries their identity key: the paymail host must derive every output
- *    from that key (utils/guardedSendBsv.ts checkedDestination), whatever paymail the server named.
+ *    from that key (utils/guardedSendBsv.ts checkedDestination), whatever paymail the server named. The paymail must
+ *    be a bWalletX one (isOurDomain): a third-party host could return correctly derived outputs and then throw the
+ *    payment away instead of delivering it (review of row 114). Our server only ever names our own paymails.
  *  - MNEE and BSV-21 go to an address the callee's own wallet signed with its identity key when it saved the card
  *    (signPayee, BRC-43 [2,'bwallet paymail'], a protocol no site can use). A card with no signature, or one that
- *    doesn't verify against the callee's key, is refused. Cards saved before this signature existed are refused too
- *    until the callee saves their bPhone settings again.
+ *    doesn't verify against the callee's key, is refused. A card saved before this signature existed is re-signed by
+ *    the callee's wallet the next time it opens bPhone settings (payoutNeedsSigning), with the wallet's own address.
  * The quote sheet shows the payee in full.
  */
 import { ProtoWallet, Utils, type WalletInterface } from '@bsv/sdk';
+import { isOurDomain } from '../names/names';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage, signRequest } from '../names/signRequest';
 import type { PayeeProof, PayTo, RateAsset, RateCard } from './rateCard';
 
@@ -70,10 +73,13 @@ export const bindPayee = async (card: RateCard, calleePaymail: string | null, pe
   const key = peerKey.toLowerCase();
   if (!PUBKEY_RE.test(key)) return { ok: false, error: "can't be paid: we don't have their wallet's key" };
   const asset = card.asset;
-  if (asset.kind === 'bsv')
-    return calleePaymail
-      ? { ok: true, payTo: { paymail: calleePaymail, identityKey: key } }
-      : { ok: false, error: 'charges for calls but has nowhere to be paid yet' };
+  if (asset.kind === 'bsv') {
+    if (!calleePaymail) return { ok: false, error: 'charges for calls but has nowhere to be paid yet' };
+    const domain = calleePaymail.split('@')[1] ?? '';
+    if (!isOurDomain(domain))
+      return { ok: false, error: `can't be paid: ${calleePaymail} isn't a bWalletX paymail. Nothing was paid.` };
+    return { ok: true, payTo: { paymail: calleePaymail, identityKey: key } };
+  }
   if (!asset.address) return { ok: false, error: 'charges for calls but has nowhere to be paid yet' };
   if (!(await checkPayeeProof(key, asset)))
     return {
@@ -83,6 +89,21 @@ export const bindPayee = async (card: RateCard, calleePaymail: string | null, pe
     };
   return { ok: true, payTo: { address: asset.address } };
 };
+
+/**
+ * The callee's own wallet, opening bPhone settings: does its saved MNEE / token card need (re-)signing? True when the
+ * card's address is not `ownAddress` (what this wallet derives for it now; never re-sign an address the server
+ * served) or its signature doesn't verify against `identityKey`. A BSV card or no card: false.
+ */
+export const payoutNeedsSigning = async (
+  identityKey: string,
+  asset: RateAsset | undefined,
+  ownAddress: string | undefined,
+): Promise<boolean> =>
+  !!asset &&
+  asset.kind !== 'bsv' &&
+  !!ownAddress &&
+  (asset.address !== ownAddress || !(await checkPayeeProof(identityKey, asset)));
 
 /** The payee line on the quote sheet. */
 export const payeeLabel = (payTo: PayTo): string =>
