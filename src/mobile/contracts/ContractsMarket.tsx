@@ -284,7 +284,15 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
                       )}
                       {open.envelope.contract.codeHash && <Row k="Code hash" v={open.envelope.contract.codeHash} />}
                       {open.envelope.contract.source && <Row k="Source" v={open.envelope.contract.source} />}
-                      <Row k="Author" v={open.envelope.author.name || open.envelope.author.address} />
+                      {/* The author's address in full: the name is whatever the author typed (review of row 115). */}
+                      <Row
+                        k="Author"
+                        v={
+                          open.envelope.author.name
+                            ? `${open.envelope.author.name} (as they call themselves) · ${open.envelope.author.address}`
+                            : open.envelope.author.address
+                        }
+                      />
                       {/* The address a paid buy pays, in full (b-Aware 25 Oct 2026, row 115): never paid unseen. */}
                       {open.envelope.sale.priceUsd > 0 && <Row k="Pays" v={open.envelope.sale.payTo} />}
                       <Row k="Copies" v={`${open.sold} of ${open.envelope.sale.copies} taken`} />

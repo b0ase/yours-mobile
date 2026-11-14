@@ -86,11 +86,34 @@ export const checkAgainstOriginal = async (listing: Pick<ContractListing, 'origi
 };
 
 /**
+ * An earlier listing of the same contract (descriptor and description) by a different author address, or undefined.
+ * Anyone can inscribe a copy of someone's contract with their own name and payee and list it (review of row 115, 14
+ * Nov 2026): the copy is a valid inscription, so checkAgainstOriginal passes it. Nothing on chain ties an author's
+ * address to the original (it is locked to a fresh wallet key, not to author.address), so the earliest listing is
+ * the one paid; a later copy under another address is refused. Best effort: it sees what the catalogue lists.
+ */
+export const copiedFrom = (listing: ContractListing, all: readonly ContractListing[]): ContractListing | undefined => {
+  const at = Date.parse(listing.createdAt);
+  const same = (o: ContractListing) =>
+    JSON.stringify(canon(o.envelope.contract)) === JSON.stringify(canon(listing.envelope.contract)) &&
+    o.envelope.description === listing.envelope.description;
+  return all.find(
+    (o) =>
+      o.origin !== listing.origin &&
+      same(o) &&
+      o.envelope.author.address !== listing.envelope.author.address &&
+      !(Date.parse(o.createdAt) > at),
+  );
+};
+
+/**
  * Buy a copy: mint the exact published text, paying the author (and the 1% fee) in the same transaction.
- * `approved` is the listing the buyer saw and pressed Buy on (the sheet shows sale.payTo in full). The catalogue is
- * asked again (sold out?), and the buy is refused if its price, payee, copies or text differ from what was approved
- * (b-Aware 25 Oct 2026): the catalogue must never change what is paid or minted between showing it and paying. A
- * paid buy also needs the approved terms to be the author's own inscription (checkAgainstOriginal).
+ * `approved` is the listing the buyer saw and pressed Buy on (the sheet shows the author's address, which is the
+ * payee, in full). The catalogue is asked again (sold out?), and the buy is refused if its price, payee, copies or
+ * text differ from what was approved (b-Aware 25 Oct 2026): the catalogue must never change what is paid or minted
+ * between showing it and paying. A paid buy also needs: the payee to be the author's own address (as every publish
+ * writes it), the terms to be the inscription at the origin (checkAgainstOriginal), and the listing not to be a
+ * later copy of another author's contract (copiedFrom).
  */
 export const buyContract = async (ctx: OneSatContext, approved: ContractListing, bsvUsd: number) => {
   const c = await getContract(approved.origin);
@@ -99,7 +122,22 @@ export const buyContract = async (ctx: OneSatContext, approved: ContractListing,
   const env = approved.envelope;
   if (c.sold >= env.sale.copies) throw new Error('Sold out');
   if (env.sale.priceUsd > 0 && !(bsvUsd > 0)) throw new Error('No BSV price right now; try again shortly.');
-  if (env.sale.priceUsd > 0) await checkAgainstOriginal(approved);
+  if (env.sale.priceUsd > 0) {
+    if (env.sale.payTo !== env.author.address)
+      throw new Error("This contract pays someone other than its author's address. Nothing was paid.");
+    await checkAgainstOriginal(approved);
+    let all: ContractListing[];
+    try {
+      all = await listContracts();
+    } catch {
+      throw new Error("Couldn't check this contract against the catalogue. Nothing was paid; try again shortly.");
+    }
+    const first = copiedFrom({ ...approved, createdAt: c.createdAt }, all);
+    if (first)
+      throw new Error(
+        `This listing copies a contract first listed by ${first.envelope.author.address}. Nothing was paid.`,
+      );
+  }
   const sats = contractPriceSats(env, bsvUsd);
   const paying =
     sats > 0 ? withFeeOutput(withFeeOutput(ctx, marketFeeSats(sats), marketFeeAddress()), sats, env.sale.payTo) : ctx;
