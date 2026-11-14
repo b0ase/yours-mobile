@@ -17,7 +17,6 @@ import {
   bsv21FilterTags,
   buildBsv21CustomInstructions,
   executeTrackedAction,
-  sendBsv21,
   ORDINALS_BASKET,
   type OneSatContext,
 } from '@1sat/actions';
@@ -42,6 +41,7 @@ import {
 } from './tokenLocks';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { cappedOverlayFee } from '../wallet/send/tokenFee';
+import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 /** The wallet's token-lock address (seed-derived; never the BSV lock key). */
 export async function tokenLockAddress(ctx: OneSatContext): Promise<string> {
@@ -107,7 +107,9 @@ export async function createTokenLock(
       customInstructions: out.ci,
     } as Parameters<typeof withExtraOutput>[1]);
   }
-  const res = await sendBsv21.execute(
+  // guardedSendBsv21: the indexer's fee output must pay this token's own fee address, capped per token output
+  // (withOverlayFeeAddressCheck; review of b-Aware row 123), plus the token key check every send gets.
+  const res = await guardedSendBsv21.execute(
     { ...ctx, wallet },
     {
       tokenId: input.token.id,

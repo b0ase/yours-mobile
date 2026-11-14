@@ -14,6 +14,7 @@ import {
   type SwapStore,
 } from './swapActions';
 import { SwapError } from './swap';
+import { deriveFeeAddress } from '../../tokens/indexFund';
 
 const ID = '7d11b6bf2af3a773ac8975542b0fe4006dac2c87d5829774310ca33427210d12_0';
 const RATE = 25;
@@ -76,7 +77,7 @@ const memStore = (init?: SwapRecord) => {
   return { m, store };
 };
 
-const ctxWith = (o: { state?: string; createAction?: (args: unknown) => Promise<unknown> }) =>
+const ctxWith = (o: { state?: string; createAction?: (args: unknown) => Promise<unknown>; feeAddress?: string }) =>
   ({
     wallet: {
       getPublicKey: (a: Parameters<ProtoWallet['getPublicKey']>[0]) => buyerWallet.getPublicKey(a),
@@ -84,7 +85,10 @@ const ctxWith = (o: { state?: string; createAction?: (args: unknown) => Promise<
     },
     services: {
       bsv21: {
-        getTokenDetails: async () => ({ status: { is_active: true }, token: { sym: 'T', dec: 0 } }),
+        getTokenDetails: async () => ({
+          status: { is_active: true, ...(o.feeAddress ? { fee_address: o.feeAddress, fee_per_output: 1000 } : {}) },
+          token: { sym: 'T', dec: 0 },
+        }),
         getOutputStatus: async (_id: string, ops: string[]) =>
           ops.map((outpoint) => ({ outpoint, state: o.state ?? 'valid' })),
       },
@@ -226,5 +230,46 @@ describe('acceptSwap: createAction throws', () => {
     expect(failedBeforeSigning(new Error('WERR_INVALID_PARAMETER'))).toBe(true);
     expect(failedBeforeSigning(new Error('broadcast rejected: double spend'))).toBe(false);
     expect(failedBeforeSigning(new Error('something odd'))).toBe(false);
+  });
+});
+
+/** Review of b-Aware row 123: the swap's overlay fee output pays only the token's own fee address. */
+describe("acceptSwap: the indexer's fee address", () => {
+  test("an address that isn't the token's own is refused before the sheet and before anything is built", async () => {
+    const { store, m } = memStore();
+    let asked = 0;
+    const ctx = ctxWith({
+      feeAddress: PrivateKey.fromRandom().toAddress(),
+      createAction: async () => expect.unreachable(),
+    });
+    await expect(
+      acceptSwap(ctx, {
+        offer: await makeOffer(),
+        terms,
+        quote,
+        ask: async () => (asked++, true as const),
+        store,
+        now: () => NOW,
+      }),
+    ).rejects.toThrow("isn't this token's fee address");
+    expect(asked).toBe(0);
+    expect(m.size).toBe(0);
+  });
+
+  test("the token's own fee address is paid", async () => {
+    const { store } = memStore();
+    const own = deriveFeeAddress(ID) as string;
+    let outs: { lockingScript: string; satoshis: number }[] = [];
+    const ctx = ctxWith({
+      feeAddress: own,
+      createAction: async (a) => {
+        outs = (a as { outputs: typeof outs }).outputs;
+        return { txid: 'ef'.repeat(32) };
+      },
+    });
+    await acceptSwap(ctx, { offer: await makeOffer(), terms, quote, ask: yes, store, now: () => NOW });
+    expect(outs).toContainEqual(
+      expect.objectContaining({ lockingScript: new P2PKH().lock(own).toHex(), satoshis: 1000 }),
+    );
   });
 });

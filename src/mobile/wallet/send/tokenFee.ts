@@ -39,15 +39,27 @@ export const feeScriptFor = (tokenId: string): string | null => {
   return a ? new P2PKH().lock(a).toHex() : null;
 };
 
+/**
+ * The indexer's served fee_address for `tokenId`, only if it is the token's own (deriveFeeAddress); null when none was
+ * served (no fee). Throws OVERLAY_FEE_ADDRESS_REFUSAL for any other address, so a caller refuses before signing
+ * (purchases, swaps; review of b-Aware row 123).
+ */
+export const checkedServedFeeAddress = (tokenId: string, served: unknown): string | null => {
+  if (typeof served !== 'string' || !served) return null;
+  if (served !== deriveFeeAddress(tokenId)) throw new Error(OVERLAY_FEE_ADDRESS_REFUSAL);
+  return served;
+};
+
 /** What upstream sendBsv21 (and our own fee outputs) call the indexer's fee output. */
 export const OVERLAY_FEE_DESCRIPTION = 'Overlay processing fee';
 const isOverlayFeeOutput = (o: { outputDescription?: string; tags?: string[] }) =>
   o.outputDescription === OVERLAY_FEE_DESCRIPTION || !!o.tags?.includes('fee:overlay');
 
 /**
- * Why a token spend's overlay fee outputs pay somewhere other than `tokenId`'s own fee address, or null when they
- * don't (none at all is fine). The indexer serves fee_address at spend time; this is checked against the token id
- * on every sendBsv21 (guardedSendBsv21) and every confirmed send (withTokenSendGuard). Review of row 123.
+ * Why a token spend's overlay fee outputs pay somewhere other than `tokenId`'s own fee address, or more than
+ * MAX_OVERLAY_FEE_PER_OUTPUT per token output (1-sat outputs), or null when they don't (none at all is fine). The
+ * indexer serves fee_address and fee_per_output at spend time; this is checked on every sendBsv21
+ * (guardedSendBsv21). Review of row 123.
  */
 export const overlayFeeAddressProblem = (
   tokenId: string,
@@ -56,7 +68,10 @@ export const overlayFeeAddressProblem = (
   const fees = outputs.filter(isOverlayFeeOutput);
   if (!fees.length) return null;
   const want = feeScriptFor(tokenId);
-  return !want || fees.some((o) => o.lockingScript !== want) ? OVERLAY_FEE_ADDRESS_REFUSAL : null;
+  if (!want || fees.some((o) => o.lockingScript !== want)) return OVERLAY_FEE_ADDRESS_REFUSAL;
+  const tokenOuts = outputs.filter((o) => o.satoshis === 1).length;
+  const paid = fees.reduce((n, o) => n + o.satoshis, 0);
+  return paid > MAX_OVERLAY_FEE_PER_OUTPUT * Math.max(1, tokenOuts) ? OVERLAY_FEE_REFUSAL : null;
 };
 
 /** A wallet whose createAction refuses an overlay fee output that doesn't pay `tokenId`'s own fee address. */

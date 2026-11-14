@@ -11,6 +11,7 @@ import { BSV21_BASKET, OPNS_BASKET, ORDINALS_BASKET, P1SAT_PROTOCOL, type OneSat
 import { BSV21 } from '@1sat/templates';
 import { P2PKH, PublicKey } from '@bsv/sdk';
 import { marketFeeOptions, marketFeeSats } from '../market/fee';
+import { checkedServedFeeAddress } from '../wallet/send/tokenFee';
 import { checkedContext } from './checkedWallet';
 import { verifyOrdinalPurchaseArgs, verifyPurchaseArgs } from './verify';
 
@@ -49,6 +50,8 @@ export async function checkedPurchaseContext<C extends OneSatContext>(ctx: C, sh
   const bsv21 = (ctx.services as unknown as { bsv21?: { getTokenDetails(id: string): Promise<unknown> } } | undefined)
     ?.bsv21;
   const details = bsv21 ? ((await bsv21.getTokenDetails(shown.tokenId).catch(() => null)) as Details | null) : null;
+  // The indexer's fee address only if it is the token's own (review of b-Aware row 123); otherwise refused here.
+  const feeAddress = checkedServedFeeAddress(shown.tokenId, details?.status?.fee_address);
   const mf = marketFeeOptions();
   return checkedContext(ctx, (args) =>
     verifyPurchaseArgs(args, {
@@ -64,7 +67,7 @@ export async function checkedPurchaseContext<C extends OneSatContext>(ctx: C, sh
           : mf.marketplaceAddress
             ? { address: mf.marketplaceAddress, sats: marketFeeSats(shown.priceSats) }
             : null,
-      feeAddress: details?.status?.fee_address ?? null,
+      feeAddress,
       maxOverlayFee: shown.maxOverlayFee ?? overlayFeeOf(details),
     }),
   );

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { deriveFeeAddress } from '../../tokens/indexFund';
 import { P2PKH } from '@bsv/sdk';
 import * as tokenFee from './tokenFee';
@@ -110,5 +111,47 @@ describe("the token send guards pay only the token's own fee address", () => {
     expect(read('../../../services/tokenSpendGuard.ts')).toContain('sendBsv21.execute(sending, input)');
     expect(read('../../../components/SendBsv21View.tsx')).toMatch(/withTokenSendGuard\([\s\S]*?token\.info\.id!,\s*\)/);
     expect(read('../../holderDrop/HolderDropSheet.tsx')).toMatch(/withTokenSendGuard\([\s\S]*?a\.tokenId,\s*\)/);
+  });
+});
+
+/** Second review of row 123: creating a token lock called upstream sendBsv21 directly (fee unchecked, uncapped). */
+describe('every token send goes through a fee check', () => {
+  const ID = `${'ab'.repeat(32)}_0`;
+  const own = new P2PKH().lock(deriveFeeAddress(ID) as string).toHex();
+  const fee = (sats: number) => ({ lockingScript: own, satoshis: sats, outputDescription: 'Overlay processing fee' });
+  const tokenOut = { lockingScript: 'tok', satoshis: 1 };
+  const problem = (tokenFee as Record<string, unknown>).overlayFeeAddressProblem as (
+    id: string,
+    outs: unknown[],
+  ) => string | null;
+
+  test("the shared check caps the fee per token output, even at the token's own address", () => {
+    expect(problem(ID, [tokenOut, tokenOut, fee(20_000)])).toBeNull();
+    expect(problem(ID, [tokenOut, tokenOut, fee(20_001)])).toContain('fee looks wrong');
+    expect(problem(ID, [tokenOut, fee(50_000_000)])).toContain('fee looks wrong');
+  });
+
+  test('creating a token lock uses guardedSendBsv21', () => {
+    const src = readFileSync(new URL('../../locks/tokenLockApi.ts', import.meta.url), 'utf8');
+    expect(src).toContain('await guardedSendBsv21.execute(');
+    expect(src).not.toMatch(/[^d]sendBsv21\.execute\(/);
+  });
+
+  test('no other code calls upstream sendBsv21.execute (Send wraps its wallet in withTokenSendGuard)', () => {
+    const root = join(import.meta.dir, '../../..');
+    const files: string[] = [];
+    const walk = (d: string) => {
+      for (const f of readdirSync(d)) {
+        const p = join(d, f);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f)) files.push(p);
+      }
+    };
+    walk(root);
+    const raw = files
+      .filter((f) => /(^|[^dA-Za-z_.])sendBsv21\.execute\(/m.test(readFileSync(f, 'utf8')))
+      .map((f) => f.slice(root.length + 1))
+      .sort();
+    expect(raw).toEqual(['components/SendBsv21View.tsx', 'services/tokenSpendGuard.ts']);
   });
 });
