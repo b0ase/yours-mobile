@@ -7,6 +7,7 @@ import {
   locationVerdict,
   privateMintLocationNote,
   revealBlockedMessage,
+  stripJpegLocation,
 } from './location';
 import type { PrivateItem } from './privateMint';
 
@@ -35,6 +36,46 @@ describe('locationVerdict: real tiny files', () => {
     expect(v(F.jpeg({ exif: 'corrupt' }), 'image/jpeg')).toBe('unknown');
     const cut = F.jpeg({ exif: 'plain' }).slice(0, 30);
     expect(v(cut, 'image/jpeg')).toBe('unknown');
+  });
+
+  test('EXIF: a GPS pointer outside IFD0 is found (Exif IFD, Interop IFD, IFD1, SubIFDs; b-Aware #230)', () => {
+    for (const where of ['exif', 'interop', 'ifd1', 'subifds'] as const) {
+      expect([where, v(F.jpeg({ tiff: F.tiffGpsIn(where) }), 'image/jpeg')]).toEqual([where, 'found']);
+      expect([where, v(F.tiffGpsIn(where), 'image/tiff')]).toEqual([where, 'found']);
+    }
+  });
+
+  test('EXIF: every IFD walked with no GPS passes; a pointer that cannot be followed may contain location', () => {
+    expect(v(F.jpeg({ tiff: F.tiffNoGps() }), 'image/jpeg')).toBe('none');
+    expect(v(F.tiffNoGps(), 'image/tiff')).toBe('none');
+    expect(v(F.jpeg({ tiff: F.tiffIfds([[[0x8769, 4, 1, 0x7fff]]]) }), 'image/jpeg')).toBe('unknown');
+    expect(v(F.jpeg({ tiff: F.tiffIfds([[[0x8769, 4, 1, 0]]]) }), 'image/jpeg')).toBe('unknown');
+    // An Exif IFD that points back at IFD0 (a loop) ends; GPS in the loop is still found.
+    expect(v(F.jpeg({ tiff: F.tiffIfds([[[0x8769, 4, 1, [1]]], [[0x8769, 4, 1, [0]]]]) }), 'image/jpeg')).toBe('none');
+    expect(
+      v(
+        F.jpeg({
+          tiff: F.tiffIfds([
+            [[0x8769, 4, 1, [1]]],
+            [
+              [0xa005, 4, 1, [0]],
+              [0x8825, 4, 1, 0],
+            ],
+          ]),
+        }),
+        'image/jpeg',
+      ),
+    ).toBe('found');
+  });
+
+  test('JPEG: a loose "Exif\\0x" header or an unknown APP1 may contain location', () => {
+    expect(v(F.jpeg({ app1: [[...F.ascii('Exif\0\xff'), ...F.tiff(true)]] }), 'image/jpeg')).toBe('unknown');
+    expect(v(F.jpeg({ app1: [F.tiff(true)] }), 'image/jpeg')).toBe('unknown');
+  });
+
+  test('JPEG: extended XMP split over APP1 parts (a tag cut in two, parts out of order) is found', () => {
+    expect(v(F.jpeg({ app1: F.extendedXmp() }), 'image/jpeg')).toBe('found');
+    expect(v(F.jpeg({ app1: F.extendedXmp(true) }), 'image/jpeg')).toBe('found');
   });
 
   test('the claimed type does not matter for a recognised format', () => {
@@ -119,6 +160,55 @@ describe('locationVerdict: real tiny files', () => {
     expect(privateMintLocationNote('image/heic')).toBe(
       'This photo contains location data; it stays encrypted, but would be published if you ever reveal it.',
     );
+  });
+});
+
+// ── JPEG location removal ────────────────────────────────────────────────────
+
+const hasSeq = (b: Uint8Array, seq: number[]) => b.some((_, i) => seq.every((x, j) => b[i + j] === x));
+
+describe('stripJpegLocation', () => {
+  test('drops EXIF (GPS in any IFD), XMP, extended XMP, comments, IPTC and trailing images; keeps the image', () => {
+    const src = F.jpeg({
+      tiff: F.tiffGpsIn('exif', 6),
+      xmp: 'gps',
+      app1: F.extendedXmp(),
+      extra: [
+        F.jpegSeg(0xfe, F.ascii('GPSLatitude 51.5')),
+        F.jpegSeg(0xed, F.ascii('Photoshop 3.0\0 city')),
+        F.jpegSeg(0xe2, F.ascii('ICC_PROFILE\0\x01\x01profile')),
+      ],
+      trailer: F.jpeg({ exif: 'gps' }),
+    });
+    expect(v(src, 'image/jpeg')).toBe('found');
+    const out = stripJpegLocation(F.u8(src))!;
+    expect(out).not.toBeNull();
+    expect(locationVerdict(out, 'image/jpeg')).toBe('none');
+    // SOI, the JFIF APP0 still first, then the one-entry EXIF with Orientation 6.
+    expect([...out.subarray(0, 4)]).toEqual([0xff, 0xd8, 0xff, 0xe0]);
+    expect(hasSeq(out, [0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6])).toBe(true);
+    expect(hasSeq(out, F.ascii('ICC_PROFILE'))).toBe(true);
+    expect(hasSeq(out, F.ascii('Photoshop'))).toBe(false);
+    expect(hasSeq(out, F.ascii('xmpmeta'))).toBe(false);
+    // Tables, frame and both scans byte for byte, ending at the first EOI (the trailing image is gone).
+    const body = F.jpegBody();
+    expect([...out.subarray(out.length - body.length)]).toEqual(body);
+  });
+
+  test('an upright or EXIF-less photo gets no EXIF back; GPS in IFD1 / SubIFDs is removed too', () => {
+    for (const t of [F.tiffGpsIn('ifd1'), F.tiffGpsIn('subifds'), F.tiff(true)]) {
+      const out = stripJpegLocation(F.u8(F.jpeg({ tiff: t })))!;
+      expect(locationVerdict(out, 'image/jpeg')).toBe('none');
+      expect(hasSeq(out, F.ascii('Exif'))).toBe(false);
+    }
+    expect(stripJpegLocation(F.u8(F.jpeg()))!.length).toBe(F.jpeg().length);
+  });
+
+  test('anything that does not read through to EOI is not "cleaned"', () => {
+    const src = F.jpeg({ exif: 'gps' });
+    expect(stripJpegLocation(F.u8(src.slice(0, src.length - 1)))).toBeNull();
+    expect(stripJpegLocation(F.u8(src.slice(0, 40)))).toBeNull();
+    expect(stripJpegLocation(F.u8(F.png([F.pngExif(true)])))).toBeNull();
   });
 });
 

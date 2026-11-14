@@ -3,15 +3,20 @@
  * legal/RULING-2026-11-05-MINT-PRIVACY.md). Until location stripping ships, nothing that carries (or may carry) where
  * a photo or video was taken may be published: Reveal, a public mint and a feed post refuse it.
  *
- * Pure and dependency-free (no DOM, no Node APIs): the same file runs in bwalletx-indexer (src/location.ts).
+ * Pure and dependency-free (no DOM, no Node APIs), so it can also run server-side. (No copy is in bwalletx-indexer
+ * yet, despite earlier notes: checked 14 Nov 2026.)
+ *
+ * Chat (photos, videos, files, my picture, room covers) goes through chat/uploadLocation.ts: a JPEG has its metadata
+ * removed by stripJpegLocation; anything else with (possible) location is refused (b-Aware #288).
  *
  * Verdicts:
  *   'found'   location metadata is there (EXIF GPS IFD, XMP GPS / geo, QuickTime ©xyz / ISO6709, 3GPP loci, …);
  *   'unknown' a format that can carry location which this parser could not read through: treat as "may contain";
  *   'none'    read through and nothing found.
  *
- * Covered: JPEG (EXIF APP1, XMP, MPF / trailing EXIF blocks), TIFF, PNG (eXIf, tEXt / iTXt XMP, ImageMagick raw
- * profiles), WebP (EXIF, XMP), GIF / SVG (XMP text), HEIC / HEIF / AVIF (Exif and XMP items via iinf / iloc),
+ * Covered: JPEG (EXIF APP1 with a GPS pointer in any IFD, XMP + extended XMP, MPF / trailing EXIF blocks), TIFF,
+ * PNG (eXIf, tEXt / iTXt XMP, ImageMagick raw profiles), WebP (EXIF, XMP), GIF / SVG (XMP text), HEIC / HEIF / AVIF
+ * (Exif and XMP items via iinf / iloc),
  * MP4 / MOV / 3GP / M4A (©xyz, loci, com.apple.quicktime.location.ISO6709, XMP, GPS metadata tracks), WebM / MKV.
  */
 
@@ -30,6 +35,8 @@ const TEXT_NEEDLES = [
   'GpsLatitude',
   'GpsLongitude',
   'GPSCoordinates',
+  'GPSDest',
+  'GPSAreaInformation',
   'wgs84_pos',
   'xmlns:geo',
   'geo:lat',
@@ -99,22 +106,56 @@ const latin1 = (b: Bytes, s: number, e: number) => {
 
 // ── EXIF / TIFF ──────────────────────────────────────────────────────────────
 
-/** A TIFF structure (EXIF body) starting at `o`: 'found' when IFD0 points to a GPS IFD (tag 0x8825). */
+/** Tags whose value points at another IFD: Exif, Interoperability, SubIFDs (and any entry of type IFD, 13). */
+const IFD_POINTER_TAGS = new Set([0x8769, 0xa005, 0x014a]);
+/** More than any real file has (IFD0, IFD1, Exif, Interop, a few SubIFDs): past this it is a crafted file. */
+const MAX_IFDS = 32;
+
+/**
+ * A TIFF structure (EXIF body) starting at `o`: 'found' when ANY IFD in it has a GPS IFD pointer (tag 0x8825).
+ * Every IFD is walked (IFD0 → IFD1 chain, Exif, Interoperability, SubIFDs, their next-IFD links): readers such as
+ * exiftool decode a GPS pointer wherever it sits, and one in the Exif sub-IFD used to pass (b-Aware #230). An IFD
+ * that is pointed at but can't be read is 'unknown'.
+ */
 function tiffVerdict(b: Bytes, o: number, end = b.length): LocationVerdict {
   try {
     const t = b.subarray(o, Math.min(end, b.length));
     const le = t[0] === 0x49 && t[1] === 0x49;
     const be = t[0] === 0x4d && t[1] === 0x4d;
     if ((!le && !be) || u16(t, 2, le) !== 42) return 'unknown';
-    const ifd = u32(t, 4, le);
-    if (ifd < 8) return 'unknown';
-    const n = u16(t, ifd, le);
-    need(t, ifd + 2, n * 12);
-    for (let i = 0; i < n; i++) if (u16(t, ifd + 2 + i * 12, le) === 0x8825) return 'found';
+    const todo = [u32(t, 4, le)];
+    const seen = new Set<number>();
+    while (todo.length) {
+      const ifd = todo.pop()!;
+      if (seen.has(ifd)) continue;
+      if (ifd < 8 || seen.size >= MAX_IFDS) return 'unknown';
+      seen.add(ifd);
+      const n = u16(t, ifd, le);
+      need(t, ifd + 2, n * 12 + 4);
+      for (let i = 0; i < n; i++) {
+        const e = ifd + 2 + i * 12;
+        const tag = u16(t, e, le);
+        if (tag === 0x8825) return 'found';
+        if (IFD_POINTER_TAGS.has(tag) || u16(t, e + 2, le) === 13) todo.push(...ifdOffsets(t, e, le));
+      }
+      const next = u32(t, ifd + 2 + n * 12, le);
+      if (next) todo.push(next);
+    }
     return 'none';
   } catch {
     return 'unknown';
   }
+}
+
+/** The IFD offsets an entry points at: SHORT, LONG or IFD values, inline when they fit in 4 bytes. */
+function ifdOffsets(t: Bytes, e: number, le: boolean): number[] {
+  const type = u16(t, e + 2, le);
+  const count = u32(t, e + 4, le);
+  const size = type === 3 ? 2 : type === 4 || type === 13 ? 4 : 0;
+  if (!size || count === 0 || count > MAX_IFDS) throw new Short();
+  const at = count * size <= 4 ? e + 8 : u32(t, e + 8, le);
+  need(t, at, count * size);
+  return Array.from({ length: count }, (_, k) => (size === 2 ? u16(t, at + k * 2, le) : u32(t, at + k * 4, le)));
 }
 
 /** An EXIF payload, with or without the "Exif\0\0" prefix. */
@@ -131,22 +172,46 @@ function wholeFileScan(b: Bytes, from = 0, to = b.length): LocationVerdict {
 
 // ── image containers ─────────────────────────────────────────────────────────
 
-/** JPEG: the marker segments must read through to SOS / EOI; EXIF itself is checked by wholeFileScan. */
+const XMP_NS = enc('http://ns.adobe.com/xap/1.0/\0');
+const XMP_EXT_NS = enc('http://ns.adobe.com/xmp/extension/\0');
+/** Extended XMP APP1: namespace, 32-byte GUID, u32 full length, u32 offset, then this part of the packet. */
+const XMP_EXT_HEAD = XMP_EXT_NS.length + 32 + 8;
+
+/**
+ * JPEG: the marker segments must read through to SOS / EOI; EXIF itself is checked by wholeFileScan. An APP1 that is
+ * not "Exif\0\0", XMP or extended XMP is 'unknown' (exiftool also reads a loose "Exif\0x" header). Extended XMP is
+ * split over several APP1s, so its parts are joined in offset order before looking for GPS text (a tag could
+ * straddle two).
+ */
 function jpeg(b: Bytes): LocationVerdict {
   let i = 2;
+  const ext: { at: number; part: Bytes }[] = [];
+  const done = (): LocationVerdict => {
+    if (!ext.length) return 'none';
+    ext.sort((x, y) => x.at - y.at);
+    const all = new Uint8Array(ext.reduce((n, x) => n + x.part.length, 0));
+    ext.reduce((o, x) => (all.set(x.part, o), o + x.part.length), 0);
+    return textHasLocation(all) ? 'found' : 'none';
+  };
   try {
     for (;;) {
       if (b[i] !== 0xff) return 'unknown';
       while (i < b.length && b[i] === 0xff) i++;
       need(b, i, 1);
       const m = b[i++];
-      if (m === 0xd9 || m === 0xda) return 'none';
+      if (m === 0xd9 || m === 0xda) return done();
       if (m === 0x01 || (m >= 0xd0 && m <= 0xd8)) continue;
       const len = u16(b, i);
       if (len < 2) return 'unknown';
       need(b, i, len);
-      if (m === 0xe1 && startsWith(b, i + 2, EXIF_HDR) && tiffVerdict(b, i + 8, i + len) === 'unknown')
-        return 'unknown';
+      if (m === 0xe1) {
+        if (startsWith(b, i + 2, EXIF_HDR)) {
+          if (tiffVerdict(b, i + 8, i + len) === 'unknown') return 'unknown';
+        } else if (startsWith(b, i + 2, XMP_EXT_NS)) {
+          if (len < 2 + XMP_EXT_HEAD) return 'unknown';
+          ext.push({ at: u32(b, i + 2 + XMP_EXT_HEAD - 4), part: b.subarray(i + 2 + XMP_EXT_HEAD, i + len) });
+        } else if (!startsWith(b, i + 2, XMP_NS)) return 'unknown';
+      }
       i += len;
     }
   } catch {
@@ -403,6 +468,138 @@ function readItem(b: Bytes, it: IlocItem, idat: Box | undefined): Bytes | null {
   return out;
 }
 
+// ── JPEG location removal ────────────────────────────────────────────────────
+
+const JFIF = enc('JFIF\0');
+const ICC = enc('ICC_PROFILE\0');
+const ADOBE = enc('Adobe');
+
+/** EXIF Orientation (IFD0 tag 0x0112) from the TIFF at `o`, or 0 when absent, upright or unreadable. */
+function orientationOf(b: Bytes, o: number, end: number): number {
+  try {
+    const t = b.subarray(o, end);
+    const le = t[0] === 0x49 && t[1] === 0x49;
+    const ifd = u32(t, 4, le);
+    const n = u16(t, ifd, le);
+    for (let i = 0; i < n; i++) {
+      const e = ifd + 2 + i * 12;
+      if (u16(t, e, le) !== 0x0112 || u16(t, e + 2, le) !== 3) continue;
+      const v = u16(t, e + 8, le);
+      return v >= 2 && v <= 8 ? v : 0;
+    }
+  } catch {
+    /* no orientation */
+  }
+  return 0;
+}
+
+/** A minimal EXIF APP1 carrying only the Orientation, so a phone photo still shows the right way up. */
+const orientationApp1 = (v: number): Bytes =>
+  Uint8Array.from([
+    0xff,
+    0xe1,
+    0,
+    34,
+    ...EXIF_HDR,
+    0x4d,
+    0x4d,
+    0,
+    42,
+    0,
+    0,
+    0,
+    8,
+    0,
+    1,
+    1,
+    0x12,
+    0,
+    3,
+    0,
+    0,
+    0,
+    1,
+    0,
+    v,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]);
+
+/**
+ * A copy of a JPEG with its metadata removed, or null when it doesn't read through cleanly (then refuse it). Kept:
+ * the image segments (tables, frame, scans, restarts), a JFIF APP0, the ICC colour profile (APP2) and Adobe's APP14
+ * colour transform. Dropped: every other APPn (EXIF with its GPS IFD and thumbnail, XMP, extended XMP, IPTC /
+ * Photoshop, MPF), comments, and anything after EOI (MPF / gain-map images). The EXIF Orientation is written back as
+ * a one-entry EXIF block. Callers still run locationVerdict on the result and send it only when that says 'none'.
+ */
+export function stripJpegLocation(input: Uint8Array): Uint8Array | null {
+  const b = input;
+  if (!magic(b, 0xff, 0xd8, 0xff)) return null;
+  const kept: Bytes[] = [];
+  let app0 = 0; // leading JFIF APP0 segments, which stay first
+  let orientation = 0;
+  let scans = 0;
+  let i = 2;
+  try {
+    for (;;) {
+      if (b[i] !== 0xff) return null;
+      while (i < b.length && b[i] === 0xff) i++;
+      need(b, i, 1);
+      const m = b[i++];
+      const s = i - 2;
+      if (m === 0xd9) {
+        kept.push(b.subarray(s, i));
+        break;
+      }
+      if (m === 0x01 || (m >= 0xd0 && m <= 0xd7)) {
+        kept.push(b.subarray(s, i));
+        continue;
+      }
+      if (m === 0x00 || m === 0xd8) return null;
+      const len = u16(b, i);
+      if (len < 2) return null;
+      need(b, i, len);
+      let e = i + len;
+      if (m === 0xda) {
+        // Entropy-coded data runs to the next marker that is not a stuffed 0xFF00 or a restart.
+        scans++;
+        for (;;) {
+          const ff = b.indexOf(0xff, e);
+          if (ff < 0 || ff + 1 >= b.length) return null;
+          const x = b[ff + 1];
+          e = ff + (x === 0 || (x >= 0xd0 && x <= 0xd7) ? 2 : 0);
+          if (e === ff) break;
+        }
+      }
+      const at = i + 2;
+      if (m === 0xe1 && !orientation && startsWith(b, at, EXIF_HDR)) orientation = orientationOf(b, at + 6, i + len);
+      const keep =
+        m >= 0xe0 && m <= 0xef
+          ? (m === 0xe0 && startsWith(b, at, JFIF)) ||
+            (m === 0xe2 && startsWith(b, at, ICC)) ||
+            (m === 0xee && startsWith(b, at, ADOBE))
+          : m !== 0xfe;
+      if (keep) {
+        if (m === 0xe0 && app0 === kept.length) app0++;
+        kept.push(b.subarray(s, e));
+      }
+      i = e;
+    }
+  } catch {
+    return null;
+  }
+  if (!scans) return null;
+  const parts = [b.subarray(0, 2), ...kept.slice(0, app0), ...(orientation ? [orientationApp1(orientation)] : [])];
+  parts.push(...kept.slice(app0));
+  const out = new Uint8Array(parts.reduce((n, x) => n + x.length, 0));
+  parts.reduce((o, x) => (out.set(x, o), o + x.length), 0);
+  return out;
+}
+
 // ── entry point ──────────────────────────────────────────────────────────────
 
 const magic = (b: Bytes, ...m: number[]) => b.length >= m.length && m.every((x, i) => b[i] === x);
@@ -455,6 +652,11 @@ export const publicMintBlockedMessage = (mime: string, v: LocationVerdict = 'fou
 export const postBlockedMessage = (mime: string, v: LocationVerdict = 'found') =>
   `This ${noun(mime)} ${has(v)} location data (where it was taken). Posting it would publish that for good. ` +
   `Location removal is coming soon; until then it can't be posted.`;
+
+/** Shown when a chat photo / video / file, my picture or a room cover would carry location (it is not sent). */
+export const shareBlockedMessage = (mime: string, v: LocationVerdict = 'found') =>
+  `This ${noun(mime)} ${has(v)} location data (where it was taken). Sending it would share that with everyone who ` +
+  `sees it. Location removal for this kind of file is coming soon; until then it can't be sent.`;
 
 /** Informational line on a private mint (the mint is not blocked). */
 export const privateMintLocationNote = (mime: string, v: LocationVerdict = 'found') =>
