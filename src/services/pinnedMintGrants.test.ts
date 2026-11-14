@@ -2,22 +2,28 @@
  * b-Aware 25 Oct 2026 (fzsusanto row 120) and 3 Nov (izkalavender row 207): a pinned mint site's let-through
  * self-encrypt was answered with a 60 s grant. The permission manager stores protocol grants per site + protocol with
  * no usage type, so inside that minute a decrypt, signature or HMAC on the same protocol rode the encrypt's grant.
- * Grants from builds before 5.2.44 had no expiry at all and were never removed.
- * Real LocalWalletPermissionsManager over an in-memory grant store; the wallet underneath is a stub.
+ * Grants from builds before 5.2.44 had no expiry at all and were never removed. The answer is now oneUseGrant, given by
+ * sheetlessAnswer.ts (fix/oneshot-grants; its own tests in oneShotGrant.test.ts run it through guardSharedKeySigning).
+ * Here: a bare LocalWalletPermissionsManager over an in-memory grant store, the wallet underneath a stub.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { InMemoryPermissionStore, LocalWalletPermissionsManager } from '@1sat/wallet';
+import { oneUseGrant } from './oneShotGrant';
 import {
-  deferredEncryptGrant,
+  DeferredEncrypts,
   isLegacyPinnedMintGrant,
   labelCoveredByIntent,
   mintIntentFor,
   PINNED_MINT_MIGRATION_KEY,
+  ProtocolCalls,
   revokeLegacyPinnedMintGrants,
   revokeLegacyPinnedMintGrantsOnce,
+  type MintIntent,
 } from './pinnedMint';
+import { answerWithoutSheet, type SheetlessRequest } from './sheetlessAnswer';
+import type { StreamPass } from './streamGrants';
 
 const ADMIN = 'wallet-admin-id';
 const SITE = 'bvideox.com';
@@ -67,7 +73,7 @@ const asked = async (p: Promise<unknown>, prompts: () => number, n: number) => {
 describe('a let-through encrypt answers that one request only', () => {
   test('after it, decrypt, sign and HMAC on the same protocol each ask', async () => {
     const store = new InMemoryPermissionStore();
-    const first = manager(store, (m, id) => void m.grantPermission(deferredEncryptGrant(id)));
+    const first = manager(store, (m, id) => void m.grantPermission(oneUseGrant(id)));
     expect(await allowed(first.mgr.encrypt({ ...args, plaintext: [1] } as never, SITE))).toBe('allowed');
     expect(first.prompts()).toBe(1);
 
@@ -88,21 +94,21 @@ describe('a let-through encrypt answers that one request only', () => {
 
   test('the next encrypt asks again too (it is let through by its own answer, inside the rate cap)', async () => {
     const store = new InMemoryPermissionStore();
-    const first = manager(store, (m, id) => void m.grantPermission(deferredEncryptGrant(id)));
+    const first = manager(store, (m, id) => void m.grantPermission(oneUseGrant(id)));
     await first.mgr.encrypt({ ...args, plaintext: [1] } as never, SITE);
     const next = manager(store);
     expect(await asked(next.mgr.encrypt({ ...args, plaintext: [2] } as never, SITE), next.prompts, 1)).toBe('asked');
   });
 
-  test('the background answers a deferred encrypt with deferredEncryptGrant, never the 60 s oneShotGrant', () => {
-    const bg = readFileSync(join(import.meta.dir, '..', 'background.ts'), 'utf8');
-    const branch = bg.slice(
-      bg.indexOf('if (shouldDeferEncrypt(asSite'),
-      bg.indexOf('const intent = mintIntents.get(mintSite)'),
+  test('the sheet-free branch answers a deferred encrypt with oneUseGrant, never a time window', () => {
+    const src = readFileSync(join(import.meta.dir, 'sheetlessAnswer.ts'), 'utf8');
+    const branch = src.slice(
+      src.indexOf('if (shouldDeferEncrypt(asSite'),
+      src.indexOf('const intent = deps.mintIntents.get(mintSite)'),
     );
     expect(branch.length).toBeGreaterThan(0);
-    expect(branch).toContain('grantPermission(deferredEncryptGrant(request.requestID))');
-    expect(branch).not.toContain('oneShotGrant');
+    expect(branch).toContain('wallet.grantPermission(oneUseGrant(request.requestID))');
+    expect(branch).not.toMatch(/oneShotGrant|expiry:/);
   });
 });
 
@@ -204,4 +210,55 @@ describe("a mint's label cover is a label use only", () => {
     expect(seen.map((r) => r.usageType).sort()).toEqual(['generic', 'hmac']);
     for (const r of seen) expect(labelCoveredByIntent(r as never, intent)).toBe(r.usageType === 'generic');
   });
+});
+
+/**
+ * The label gates (usageType 'generic', never a 'once:' request) reach the background through sheetlessAnswer.ts:
+ * during bvideox.com's own mint createAction, and under a stream pass, a level-1 decrypt, an HMAC and a one-signature
+ * request under the label's name each go to a sheet; the label check itself is answered.
+ */
+describe('the label gates hold through the sheet-free branch', () => {
+  const LABEL_PID: [1, string] = [1, 'action label bvideox records'];
+  const asRaised = { type: 'protocol', originator: SITE, protocolID: LABEL_PID };
+  const requests: Record<string, SheetlessRequest> = {
+    label: { ...asRaised, usageType: 'generic', requestID: 'proto:bvideox.com:false:1,x::generic' },
+    decrypt: { ...asRaised, usageType: 'encrypting', requestID: 'proto:bvideox.com:false:1,x::encrypting' },
+    hmac: { ...asRaised, usageType: 'hmac', requestID: 'proto:bvideox.com:false:1,x::hmac' },
+    once: { ...asRaised, counterparty: '', usageType: 'signing', requestID: 'once:bvideox.com:1,x:a.1' },
+    onceGeneric: { ...asRaised, counterparty: '', usageType: 'generic', requestID: 'once:bvideox.com:1,x:a.2' },
+  };
+  const run = (r: SheetlessRequest, opts: { mint?: boolean; pass?: StreamPass }) => {
+    const granted: unknown[] = [];
+    const intent = mintIntentFor(SITE, {
+      description: 'bVideoX: 1 private video record',
+      labels: ['bvideox records'],
+      outputs: [{ satoshis: 0 }],
+      options: { spendingAuthorization: { protocolID: PID } },
+    }) as MintIntent & { spendSeen?: boolean };
+    const answered = answerWithoutSheet(r, {
+      wallet: { grantPermission: async (p) => void granted.push(p) },
+      mintSite: SITE,
+      protocolCalls: new ProtocolCalls(),
+      deferredEncrypts: new DeferredEncrypts(),
+      mintIntents: opts.mint ? new Map([[SITE, intent]]) : new Map(),
+      streamPass: opts.pass,
+      normalize: (o) => o,
+    });
+    return { sheet: answered === null, granted };
+  };
+  const pass: StreamPass = { grantId: 'g', originator: SITE, label: 'bvideox records', maxSats: 5000 };
+
+  for (const [name, opts] of [
+    ['a running mint', { mint: true }],
+    ['a stream pass', { pass }],
+  ] as const)
+    test(`${name}: only the label check is answered; decrypt, HMAC and one-signature requests get a sheet`, () => {
+      const label = run(requests.label!, opts);
+      expect(label.sheet).toBe(false);
+      expect(label.granted).toEqual([oneUseGrant(requests.label!.requestID)]);
+      for (const k of ['decrypt', 'hmac', 'once', 'onceGeneric']) {
+        const r = run(requests[k]!, opts);
+        expect({ k, sheet: r.sheet, granted: r.granted.length }).toEqual({ k, sheet: true, granted: 0 });
+      }
+    });
 });

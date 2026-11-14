@@ -61,7 +61,6 @@ import {
   withoutStreamOption,
   parseSpendingAuthRequest,
   parseStreamState,
-  passCovers,
   publicGrant,
   reserveStream,
   settleHold,
@@ -268,16 +267,14 @@ import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOrigina
 import { pinnedProtocol, pinnedProtocolRefusal, PINNED_PROTOCOLS_VERSION, versionWithPins } from './services/pinnedProtocols';
 import {
   DeferredEncrypts,
-  deferredEncryptGrant,
-  labelCoveredByIntent,
   mintIntentFor,
   mintSheetFor,
   ProtocolCalls,
-  shouldDeferEncrypt,
   type MintIntent,
   type MintSheet,
 } from './services/pinnedMint';
-import { oneShotGrant, oneUseGrant } from './services/oneShotGrant';
+import { oneUseGrant } from './services/oneShotGrant';
+import { answerWithoutSheet, type SheetlessRequest } from './services/sheetlessAnswer';
 import { isOneUseRequestID } from './services/sharedKeySigning';
 import {
   SEAL_BUSY_REFUSAL,
@@ -2248,33 +2245,28 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     return Promise.reject(new Error(RESERVED_BASKET_REFUSAL));
   }
   // A pinned site's paid action (services/pinnedMint.ts): its self-encrypts, and its own label while its
-  // createAction runs, go through without a sheet; its spend is the one sheet. An encrypt's answer covers that one
-  // request (deferredEncryptGrant, stored already expired): the manager keys protocol grants without the operation,
-  // so a grant that outlived it would let decrypt, sign or HMAC ride (b-Aware rows 120 and 207).
+  // createAction runs, go through for that one request only (oneUseGrant: nothing stored, so a decrypt, signature or
+  // HMAC on the same protocol right after still asks; b-Aware row 207); its spend is the one sheet.
   const mintSite = request.originator && request.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(request.originator) : '';
   // The manager's own site key (hostname only, services/permissionSite.ts): the seal pass, protocol and pay calls,
   // spend recipients and labels are all keyed with it, so a port never makes a second site.
   const permSite = mintSite ? permissionSite(request.originator) : '';
-  if (mintSite && accountContext?.wallet) {
-    const asSite = { ...request, originator: mintSite };
-    const now = Date.now();
-    if (shouldDeferEncrypt(asSite, protocolCalls, deferredEncrypts, now)) {
-      deferredEncrypts.note(mintSite, request.protocolID as [number, string], now);
-      return accountContext.wallet.grantPermission(deferredEncryptGrant(request.requestID));
-    }
-    const intent = mintIntents.get(mintSite);
-    if (intent && !intent.spendSeen && labelCoveredByIntent(asSite, intent))
-      return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
-  }
   // A stream-approved createAction is running for this site: its spend (within the budget) and its label are
-  // answered here, without a sheet. Nothing else is (services/streamGrants.ts passCovers).
+  // answered here too (services/streamGrants.ts passCovers). Nothing else is.
   // Streaming grants are allowances: with envelopes (the default) no pass ever answers a spend (allowanceFlag.ts).
-  const pass =
-    ALLOWANCES_ENABLED && request.originator ? streamPasses.get(normalizeOriginator(request.originator)) : undefined;
-  if (pass && accountContext?.wallet && passCovers(pass, { ...request, originator: normalizeOriginator(request.originator) })) {
-    if (request.type === 'spending') pass.charged = request.spending?.satoshis;
-    return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
-  }
+  // NO await may come before this call, here or above it in this function (services/sheetlessAnswer.ts): the answer
+  // must be decided and released in one turn, or a decrypt could join the encrypt's request and ride its answer.
+  const sheetless = answerWithoutSheet(request as SheetlessRequest, {
+    wallet: accountContext?.wallet,
+    mintSite,
+    protocolCalls,
+    deferredEncrypts,
+    mintIntents,
+    streamPass:
+      ALLOWANCES_ENABLED && request.originator ? streamPasses.get(normalizeOriginator(request.originator)) : undefined,
+    normalize: normalizeOriginator,
+  });
+  if (sheetless) return sheetless;
   // The one Seal sheet already approved this seal's sign or its matching payment (services/sealPass.ts). Answered
   // below, after the blocked-site check, for a current pairing only.
   // Not in a store build (storeBuild.ts NATIVE_SEAL_ENABLED written out, literal env, so the minifier drops it; review

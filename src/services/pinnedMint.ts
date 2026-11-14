@@ -15,9 +15,9 @@
  *    that home site, and only while no other call on the same site+protocol is in flight (so the request the manager
  *    raises is known to be the encrypt). Encrypting to yourself discloses nothing: the site already holds the
  *    plaintext, and the ciphertext opens only with a decrypt, which still needs the real grant.
- *  - the grant answers that one request only (deferredEncryptGrant = oneUseGrant: stored already expired), and at
- *    most MAX_DEFERRED_ENCRYPTS per site per window. The manager keys a protocol grant by protocol, never by
- *    operation, so any grant that outlived the call would let decrypt, sign or HMAC on that protocol ride it.
+ *  - the answer covers that one request only (sheetlessAnswer.ts, oneUseGrant: nothing is stored), and at most
+ *    MAX_DEFERRED_ENCRYPTS per site per window. The manager keys a protocol grant by protocol, never by operation, so
+ *    any grant that outlived the call would let decrypt, sign or HMAC on that protocol ride it (rows 120, 207).
  *  - the label is let through only while that site's own createAction carrying that label and naming that pinned
  *    protocol is running. A label only tags the action in your history; if the spend is refused the action is
  *    aborted, so nothing is written and nothing is paid.
@@ -27,7 +27,6 @@
  * Pure (no chrome APIs) so it can be unit tested.
  */
 
-import { oneUseGrant } from './oneShotGrant';
 import { isOneUseRequestID } from './sharedKeySigning';
 import { PINNED_PROTOCOLS, pinnedProtocol } from './pinnedProtocols';
 
@@ -134,7 +133,10 @@ export type MintPermissionRequest = {
   privileged?: boolean;
   protocolID?: unknown;
   counterparty?: string;
-  /** The toolbox's operation: 'generic' for a label (ensureLabelAccess), 'encrypting', 'hmac', 'signing'... */
+  /**
+   * The manager's usage type: 'encrypting' for encrypt and decrypt, 'signing', 'hmac', ..., and 'generic' for an
+   * action label (ensureLabelAccess). shouldDeferEncrypt lets through 'encrypting' only; the label covers 'generic' only.
+   */
   usageType?: string;
   /** A 'once:' id is a one-signature request (services/sharedKeySigning.ts), never a label. */
   requestID?: string;
@@ -144,6 +146,9 @@ export type MintPermissionRequest = {
  * Let this protocol request through for one call, without a sheet? Only a self-encrypt by a pinned protocol's home
  * site on a protocol that has a mint action, with nothing else in flight on it, inside the rate cap.
  * `req.originator` must already be normalised.
+ * The request must be the manager's 'encrypting' kind whatever the call tracking says (review of 8155671a): a
+ * signature, HMAC or key linkage is never let through. A decrypt is 'encrypting' too; it is kept out by
+ * calls.onlyEncrypt (any decrypt in flight on the protocol means a sheet).
  */
 export const shouldDeferEncrypt = (
   req: MintPermissionRequest,
@@ -152,6 +157,7 @@ export const shouldDeferEncrypt = (
   now: number,
 ): boolean => {
   if (req.type !== 'protocol' || req.privileged || !req.originator) return false;
+  if (req.usageType !== 'encrypting') return false;
   if ((req.counterparty ?? 'self') !== 'self') return false;
   const pid = asPid(req.protocolID);
   const pin = pid ? pinnedProtocol(pid) : undefined;
@@ -160,16 +166,6 @@ export const shouldDeferEncrypt = (
   if (!calls.onlyEncrypt(req.originator, pid)) return false;
   return deferred.canDefer(req.originator, pid, now);
 };
-
-/**
- * grantPermission arguments for an encrypt let through by shouldDeferEncrypt: THIS request only. The permission
- * manager stores protocol grants per (site, protocol, counterparty) with no usage type, and ignores `ephemeral`, so
- * the 60 s oneShotGrant used before let a decrypt, signature or HMAC on the same protocol go through without a sheet
- * inside that minute (b-Aware 25 Oct 2026 fzsusanto row 120, 3 Nov izkalavender row 207). oneUseGrant is stored
- * already expired: the waiting encrypt is released by the answer, and the next call on the protocol asks again
- * (another self-encrypt is let through the same way, inside the rate cap).
- */
-export const deferredEncryptGrant = (requestID: string) => oneUseGrant(requestID);
 
 type GrantStore = {
   listGrants(filter?: { type?: 'protocol' }): Promise<
