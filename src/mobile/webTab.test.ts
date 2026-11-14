@@ -886,7 +886,7 @@ describe('web wallet: one active tab', () => {
       );
       // The key material is re-read on the web (a merge with fix/envelope-queue ORs its envelope predicate in here).
       const hubCall = src.slice(src.indexOf('new Hub('), src.indexOf(');', src.indexOf('new Hub(')));
-      expect(hubCall).toMatch(/freshLocalKeys: webTab \? [^\n]*isFreshWebKey/);
+      expect(hubCall).toMatch(/freshLocalKeys: webTab\s*\? [^\n]*isFreshWebKey/);
       const between = src.slice(src.indexOf('new Hub('), src.indexOf('webTab?.onRelease('));
       expect(between).not.toMatch(/\bawait\b/);
     });

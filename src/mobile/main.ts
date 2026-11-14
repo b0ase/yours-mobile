@@ -5,7 +5,15 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { createChromeShim } from './chromeShim';
 import { Hub, nativeLocalBackend } from './hub';
-import { fencedBackend, isFreshWebKey, isWebEdition, releaseWallet, SpendGauge, startWebTab } from './webTab';
+import {
+  fencedBackend,
+  isFreshWebKey,
+  isWebEdition,
+  releaseWallet,
+  SpendGauge,
+  startWebTab,
+  WEB_FRESH_KEYS,
+} from './webTab';
 import { ENVELOPES_KEY_PREFIX } from '../services/envelopes';
 import { IS_TAURI, invoke as tauriInvoke } from './desktop/ipc';
 import { tauriLocalBackend } from './desktop/storage';
@@ -75,12 +83,24 @@ const defineChrome = (target: any, chrome: unknown) =>
 // Web: storage.local is fresh from localStorage here (this tab only just became the active one), every write checks
 // this tab still holds the wallet (webTab.ts fencedBackend), and the key material (accounts, salt, re-key markers) and
 // envelope balances are re-read from localStorage on every get/set.
+// Phones: the key material is re-read from the Keychain / Keystore on every get/set too (13 Nov 2026 review). A phone
+// writes each key as its own secure item, so a write that throws without killing the app (full disk, a Keychain
+// error) can leave new accounts beside the old salt while the hub's copy goes back to the old pair; a password change
+// retried in the same session then worked from that copy and could overwrite the only note of the salt the stored
+// keys are under. Read fresh, the retry sees the stored keys, cannot open them and stops (ChromeStorage.service.ts).
+// Desktop's file is rewritten whole and atomically from the Rust side's copy, so its reads already match the disk.
+const nativeApp = Capacitor.isNativePlatform();
 const hub = new Hub(
   handleHostOp,
   IS_TAURI ? tauriLocalBackend(tauriInvoke) : webTab ? fencedBackend(nativeLocalBackend, webTab) : undefined,
   {
     persistSession: Capacitor.isNativePlatform(),
-    freshLocalKeys: webTab ? (key) => isFreshWebKey(key) || key.startsWith(ENVELOPES_KEY_PREFIX) : undefined,
+    freshLocalKeys: webTab
+      ? (key) => isFreshWebKey(key) || key.startsWith(ENVELOPES_KEY_PREFIX)
+      : nativeApp
+        ? isFreshWebKey
+        : undefined,
+    freshKeyNames: !webTab && nativeApp ? [...WEB_FRESH_KEYS] : undefined,
   },
 );
 
