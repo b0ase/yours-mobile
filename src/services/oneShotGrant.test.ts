@@ -16,15 +16,10 @@ import { PrivateKey, ProtoWallet } from '@bsv/sdk';
 import { InMemoryPermissionStore, LocalWalletPermissionsManager } from '@1sat/wallet';
 import * as grants from './oneShotGrant';
 import { isOneUseAnswer, oneUseGrant } from './oneShotGrant';
-import {
-  DeferredEncrypts,
-  labelCoveredByIntent,
-  mintIntentFor,
-  ProtocolCalls,
-  shouldDeferEncrypt,
-  type MintIntent,
-} from './pinnedMint';
+import { DeferredEncrypts, mintIntentFor, ProtocolCalls, type MintIntent } from './pinnedMint';
 import { guardSharedKeySigning } from './sharedKeySigning';
+import { answerWithoutSheet, type SheetlessDeps, type SheetlessRequest } from './sheetlessAnswer';
+import type { StreamPass } from './streamGrants';
 
 const ADMIN = 'admin.bwalletx.invalid';
 const SITE = 'bvideox.com';
@@ -56,7 +51,12 @@ type Wallet = {
 };
 
 const setup = (opts: {
-  answer: (r: Req, n: number) => Answer;
+  answer?: (r: Req, n: number) => Answer;
+  /**
+   * Decide with background.ts's real sheet-free branch (sheetlessAnswer.ts), called synchronously as
+   * showPermissionPrompt calls it; anything it does not answer is a sheet the person says No to.
+   */
+  real?: Omit<SheetlessDeps, 'wallet' | 'mintSite'>;
   /** Runs when a request arrives, before it is answered (a returned promise is awaited first). */
   before?: (r: Req, n: number, wallet: Wallet) => void | Promise<void>;
   /** Every store write waits for this (an IndexedDB write takes a while). */
@@ -82,12 +82,19 @@ const setup = (opts: {
   const mgr = new LocalWalletPermissionsManager(underlying as never, ADMIN, {}, { store });
   const wallet = guardSharedKeySigning(mgr, { adminOriginator: ADMIN }) as unknown as Wallet;
   const asked: Req[] = [];
+  const sheets: Req[] = [];
   mgr.bindCallback('onProtocolPermissionRequested', (async (r: Req) => {
     asked.push(r);
     const n = asked.length;
+    if (opts.real) {
+      const answered = answerWithoutSheet(r as SheetlessRequest, { ...opts.real, wallet, mintSite: r.originator });
+      if (answered) return void (await answered);
+      sheets.push(r);
+      return void (await wallet.denyPermission(r.requestID));
+    }
     const pre = opts.before?.(r, n, wallet);
     if (pre) await pre;
-    const a = opts.answer(r, n);
+    const a = opts.answer ? opts.answer(r, n) : 'deny';
     if (a === 'deny') return void (await wallet.denyPermission(r.requestID));
     await wallet.grantPermission(
       a === 'oneUse'
@@ -95,7 +102,7 @@ const setup = (opts: {
         : { requestID: r.requestID, ephemeral: true, expiry: Math.floor(Date.now() / 1000) + 60 },
     );
   }) as never);
-  return { wallet, store, asked, writes };
+  return { wallet, store, asked, sheets, writes };
 };
 
 const encryptArgs = (keyID: string, text = 'video record') => ({
@@ -215,40 +222,37 @@ describe("a mint's let-through label covers that label check only", () => {
   });
 });
 
-describe('the pinned mint still needs no sheet for its encrypts and label (callers keep working)', () => {
-  test("bvideox.com: 3 encrypts and the action's label go through, then a decrypt still asks", async () => {
-    const calls = new ProtocolCalls();
-    const deferred = new DeferredEncrypts();
-    const intent = mintIntentFor(SITE, {
-      description: 'bVideoX: 3 private video records',
-      labels: [LABEL],
-      outputs: [{ satoshis: 0 }, { satoshis: 0 }, { satoshis: 0 }, { satoshis: 3600 }],
-      options: { spendingAuthorization: { protocolID: PID } },
-    }) as MintIntent & { spendSeen?: boolean };
+const mintDeps = (streamPass?: StreamPass) => {
+  const intent = mintIntentFor(SITE, {
+    description: 'bVideoX: 3 private video records',
+    labels: [LABEL],
+    outputs: [{ satoshis: 0 }, { satoshis: 0 }, { satoshis: 0 }, { satoshis: 3600 }],
+    options: { spendingAuthorization: { protocolID: PID } },
+  }) as MintIntent & { spendSeen?: boolean };
+  const real = {
+    protocolCalls: new ProtocolCalls(),
+    deferredEncrypts: new DeferredEncrypts(),
+    mintIntents: new Map([[SITE, intent]]),
+    streamPass,
+    normalize: (o: string) => o,
+  };
+  // The site's calls go through the router, which notes each one (background.ts trackProtocolCall).
+  const tracked = async <T>(method: string, args: unknown, run: () => Promise<T>) => {
+    const end = real.protocolCalls.start(method, SITE, args);
+    try {
+      return await run();
+    } finally {
+      end();
+    }
+  };
+  return { intent, real, tracked };
+};
+
+describe("background.ts's sheet-free branch, with the real manager", () => {
+  test("bvideox.com mint: 3 encrypts and the action's label need no sheet, then a decrypt still asks", async () => {
+    const { intent, real, tracked } = mintDeps();
     expect(intent).not.toBeNull();
-    const sheets: Req[] = [];
-    // background.ts showPermissionPrompt's pinned-mint branch; anything else is a sheet (here: the person says No).
-    const { wallet, asked } = setup({
-      answer: (r) => {
-        const now = Date.now();
-        if (shouldDeferEncrypt(r, calls, deferred, now)) {
-          deferred.note(r.originator, r.protocolID as [number, string], now);
-          return 'oneUse';
-        }
-        if (!intent.spendSeen && labelCoveredByIntent(r, intent)) return 'oneUse';
-        sheets.push(r);
-        return 'deny';
-      },
-    });
-    // The site's calls go through the router, which notes each one (background.ts trackProtocolCall).
-    const tracked = async <T>(method: string, args: unknown, run: () => Promise<T>) => {
-      const end = calls.start(method, SITE, args);
-      try {
-        return await run();
-      } finally {
-        end();
-      }
-    };
+    const { wallet, asked, sheets } = setup({ real });
     const records: number[][] = [];
     for (const k of ['v1', 'v2', 'v3']) {
       const a = encryptArgs(k, `record ${k}`);
@@ -260,6 +264,77 @@ describe('the pinned mint still needs no sheet for its encrypts and label (calle
     intent.spendSeen = true; // the spend reached its sheet: nothing more is let through
     const d = { protocolID: PID, keyID: 'v1', counterparty: 'self', ciphertext: records[0] };
     await expect(tracked('decrypt', d, () => wallet.decrypt(d, SITE))).rejects.toThrow('Permission denied');
+    expect(sheets.length).toBe(1);
+  });
+
+  test('an encrypt and a decrypt fired together: 2 asks, neither rides the other, the decrypt is refused', async () => {
+    const { real, tracked } = mintDeps();
+    const { wallet, asked, sheets } = setup({ real });
+    const e = encryptArgs('v1');
+    const d = { protocolID: PID, keyID: 'v1', counterparty: 'self', ciphertext: [1, 2, 3, 4] };
+    const [enc, dec] = await Promise.allSettled([
+      tracked('encrypt', e, () => wallet.encrypt(e, SITE)),
+      tracked('decrypt', d, () => wallet.decrypt(d, SITE)),
+    ]);
+    // Neither rides the other's answer: the decrypt is asked on its own (a sheet, refused here).
+    expect(asked.length).toBe(2);
+    expect(dec.status).toBe('rejected');
+    expect(String((dec as PromiseRejectedResult).reason?.message)).toContain('Permission denied');
+    // While the decrypt was in flight the encrypt was not let through either: it got a sheet too (refused).
+    expect(enc.status).toBe('rejected');
+    expect(sheets.length).toBe(2);
+  });
+
+  test('a decrypt started after the encrypt was let through, before its answer, cannot ride it', async () => {
+    // The window the synchronous answer closes: the check (no decrypt in flight) has passed and the answer is on its
+    // way. DeferredEncrypts.note runs right between the two, so the decrypt starts there.
+    const { real, tracked } = mintDeps();
+    let decrypting: Promise<unknown> | undefined;
+    let wallet!: Wallet;
+    const d = { protocolID: PID, keyID: 'v1', counterparty: 'self', ciphertext: [1, 2, 3, 4] };
+    class StartDecryptOnNote extends DeferredEncrypts {
+      note(origin: string, pid: readonly [number, string], now: number) {
+        super.note(origin, pid, now);
+        if (!decrypting) decrypting = tracked('decrypt', d, () => wallet.decrypt(d, SITE));
+      }
+    }
+    real.deferredEncrypts = new StartDecryptOnNote();
+    const made = setup({ real });
+    wallet = made.wallet;
+    const e = encryptArgs('v1');
+    await tracked('encrypt', e, () => wallet.encrypt(e, SITE));
+    await expect(decrypting).rejects.toThrow('Permission denied');
+    expect(made.asked.length).toBe(2);
+    expect(made.sheets.length).toBe(1);
+  });
+
+  test('the same pair the other way round, and a signature with the encrypt: nothing rides', async () => {
+    const { real, tracked } = mintDeps();
+    const { wallet, asked } = setup({ real });
+    const e = encryptArgs('v1');
+    const d = { protocolID: PID, keyID: 'v1', counterparty: 'self', ciphertext: [1, 2, 3, 4] };
+    const sg = { protocolID: PID, keyID: 'k', counterparty: 'self', data: bytes('x') };
+    const out = await Promise.allSettled([
+      tracked('decrypt', d, () => wallet.decrypt(d, SITE)),
+      tracked('encrypt', e, () => wallet.encrypt(e, SITE)),
+      tracked('createSignature', sg, () => wallet.createSignature(sg, SITE)),
+    ]);
+    expect(out[0].status).toBe('rejected');
+    expect(out[2].status).toBe('rejected');
+    expect(asked.length).toBe(3);
+  });
+
+  test("a stream pass's label is let through one check at a time; without the pass the next check asks", async () => {
+    const pass: StreamPass = { grantId: 'g', originator: SITE, label: LABEL, maxSats: 5000 };
+    const { real } = mintDeps(pass);
+    real.mintIntents.clear(); // no mint running: only the pass answers
+    const { wallet, asked, sheets, store } = setup({ real });
+    expect(await wallet.ensureLabelAccess({ originator: SITE, label: LABEL, usageType: 'apply' })).toBe(true);
+    expect(await wallet.ensureLabelAccess({ originator: SITE, label: LABEL, usageType: 'apply' })).toBe(true);
+    expect(asked.length).toBe(2); // the second check was judged again, not answered by the first
+    expect(await store.listGrants()).toEqual([]);
+    real.streamPass = undefined; // the stream-approved createAction finished
+    await expect(wallet.ensureLabelAccess({ originator: SITE, label: LABEL, usageType: 'apply' })).rejects.toThrow();
     expect(sheets.length).toBe(1);
   });
 });
@@ -274,17 +349,28 @@ describe('no time-window answer is left', () => {
     expect(/import\s*\{[^}]*\boneShotGrant\b/.test(bg)).toBe(false);
   });
 
-  test('the pinned-mint branch answers its encrypt and its label with oneUseGrant', () => {
-    const at = bg.indexOf('if (mintSite && accountContext?.wallet) {');
-    const branch = bg.slice(at, bg.indexOf('// A stream-approved createAction', at));
-    expect(branch.split('grantPermission(oneUseGrant(request.requestID))').length - 1).toBe(2);
-    expect(branch).not.toMatch(/grantPermission\((?!oneUseGrant)/);
+  test('the sheet-free branch answers only with oneUseGrant, and never awaits before it', () => {
+    const mod = readFileSync(join(import.meta.dir, 'sheetlessAnswer.ts'), 'utf8');
+    const code = mod.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    expect(code.split('grantPermission(oneUseGrant(request.requestID))').length - 1).toBe(3);
+    expect(code).not.toMatch(/grantPermission\((?!oneUseGrant)/);
+    expect(code).not.toMatch(/\bawait\b|\basync\b|\.then\(/);
   });
 
-  test('the stream-pass branch answers with oneUseGrant', () => {
-    const at = bg.indexOf('passCovers(pass, {');
-    const branch = bg.slice(at, bg.indexOf('}\n', at));
-    expect(branch).toContain('grantPermission(oneUseGrant(request.requestID))');
+  test('showPermissionPrompt reaches the sheet-free branch with no await on the way', () => {
+    const at = bg.indexOf('const showPermissionPrompt = (');
+    expect(at).toBeGreaterThan(0);
+    const head = bg
+      .slice(at, bg.indexOf('answerWithoutSheet(request', at))
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+    expect(head.length).toBeLessThan(4000);
+    expect(head).not.toMatch(/\bawait\b|\.then\(/);
+    expect(bg.slice(at, at + 120)).not.toMatch(/\basync\b/);
+    // Its protocol callback calls it directly.
+    const cb = bg.slice(bg.indexOf("bindCallback('onProtocolPermissionRequested'"));
+    const upTo = cb.slice(0, cb.indexOf('showPermissionPrompt(request)') + 'showPermissionPrompt(request)'.length);
+    expect(upTo.replace('await showPermissionPrompt(request)', '')).not.toMatch(/\bawait\b|\.then\(/);
   });
 
   test('oneUseGrant is marked one-use and, unguarded, already expired', () => {

@@ -11,7 +11,14 @@ import {
 
 const PID: [number, string] = [2, 'bvideox records'];
 const SITE = 'bvideox.com';
-const enc = { type: 'protocol', originator: SITE, protocolID: PID, counterparty: 'self', privileged: false };
+const enc = {
+  type: 'protocol',
+  originator: SITE,
+  protocolID: PID,
+  counterparty: 'self',
+  privileged: false,
+  usageType: 'encrypting',
+};
 const mintParams = {
   description: 'bVideoX: 3 private video records',
   labels: ['bvideox records'],
@@ -49,6 +56,10 @@ describe('shouldDeferEncrypt: a pinned site self-encrypt goes through for one ca
     expect(shouldDeferEncrypt({ ...enc, privileged: true }, calls, d, 0)).toBe(false);
     expect(shouldDeferEncrypt({ ...enc, protocolID: [2, 'other thing'] }, calls, d, 0)).toBe(false);
     expect(shouldDeferEncrypt({ ...enc, type: 'spending' }, calls, d, 0)).toBe(false);
+    expect(shouldDeferEncrypt(enc, calls, d, 0)).toBe(true);
+    // Only the manager's 'encrypting' request, whatever the call tracking says (review of 8155671a).
+    for (const usageType of ['signing', 'hmac', 'linkageRevelation', 'publicKey', undefined])
+      expect(shouldDeferEncrypt({ ...enc, usageType }, calls, d, 0)).toBe(false);
     // bmintx archive is pinned but has no mint action: always its own sheet.
     calls.start('encrypt', 'bmintx.com', { protocolID: [2, 'bmintx archive'] });
     expect(
