@@ -301,9 +301,16 @@ describe('PNEE overlay fee bound (auto-pay has no per-payment prompt)', () => {
     expect(pneeOverlayFee(undefined, 100, 2)).toBe(0);
     expect(pneeOverlayFee('1abc', 0, 2)).toBe(0);
   });
-  test('normal fee: per token output', async () => {
+  test("normal fee: per token output, to PNEE's own fee address", async () => {
     const { pneeOverlayFee } = await import('./pneePot');
-    expect(pneeOverlayFee('1abc', 1000, 3)).toBe(3000);
+    const { deriveFeeAddress } = await import('../tokens/indexFund');
+    const { PNEE_TOKEN_ID } = await import('../notes/pnee');
+    expect(pneeOverlayFee(deriveFeeAddress(PNEE_TOKEN_ID), 1000, 3)).toBe(3000);
+  });
+  // Review of b-Aware row 123: the address is read from the network and paid with no prompt.
+  test("a fee address that is not PNEE's own fails the payment", async () => {
+    const { pneeOverlayFee } = await import('./pneePot');
+    expect(() => pneeOverlayFee('1BoatSLRHtKNngkdXEeobR76b53LETtpyT', 1000, 1)).toThrow("isn't PNEE's own");
   });
   test('an inflated or fractional fee fails the payment instead of draining the pot', async () => {
     const { pneeOverlayFee, MAX_PNEE_OVERLAY_FEE_PER_OUTPUT } = await import('./pneePot');

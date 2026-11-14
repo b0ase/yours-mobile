@@ -1,3 +1,4 @@
+import { P2PKH } from '@bsv/sdk';
 import { deriveFeeAddress } from '../../tokens/indexFund';
 
 /**
@@ -31,6 +32,47 @@ export const OVERLAY_FEE_REFUSAL = "The token indexer's fee looks wrong, so noth
 
 export const OVERLAY_FEE_ADDRESS_REFUSAL =
   "The token indexer asked to be paid at an address that isn't this token's fee address, so nothing was sent.";
+
+/** The locking script of `tokenId`'s own fee address (deriveFeeAddress), or null for a malformed id. */
+export const feeScriptFor = (tokenId: string): string | null => {
+  const a = deriveFeeAddress(tokenId);
+  return a ? new P2PKH().lock(a).toHex() : null;
+};
+
+/** What upstream sendBsv21 (and our own fee outputs) call the indexer's fee output. */
+export const OVERLAY_FEE_DESCRIPTION = 'Overlay processing fee';
+const isOverlayFeeOutput = (o: { outputDescription?: string; tags?: string[] }) =>
+  o.outputDescription === OVERLAY_FEE_DESCRIPTION || !!o.tags?.includes('fee:overlay');
+
+/**
+ * Why a token spend's overlay fee outputs pay somewhere other than `tokenId`'s own fee address, or null when they
+ * don't (none at all is fine). The indexer serves fee_address at spend time; this is checked against the token id
+ * on every sendBsv21 (guardedSendBsv21) and every confirmed send (withTokenSendGuard). Review of row 123.
+ */
+export const overlayFeeAddressProblem = (
+  tokenId: string,
+  outputs: readonly { lockingScript: string; satoshis: number; outputDescription?: string; tags?: string[] }[],
+): string | null => {
+  const fees = outputs.filter(isOverlayFeeOutput);
+  if (!fees.length) return null;
+  const want = feeScriptFor(tokenId);
+  return !want || fees.some((o) => o.lockingScript !== want) ? OVERLAY_FEE_ADDRESS_REFUSAL : null;
+};
+
+/** A wallet whose createAction refuses an overlay fee output that doesn't pay `tokenId`'s own fee address. */
+export const withOverlayFeeAddressCheck = <W extends object>(wallet: W, tokenId: string): W =>
+  new Proxy(wallet, {
+    get(target, prop) {
+      const v = Reflect.get(target, prop, target) as unknown;
+      if (typeof v !== 'function') return v;
+      if (prop !== 'createAction') return (v as (...a: unknown[]) => unknown).bind(target);
+      return (args: { outputs?: { lockingScript: string; satoshis: number }[] }, ...rest: unknown[]) => {
+        const problem = overlayFeeAddressProblem(tokenId, args.outputs ?? []);
+        if (problem) throw new Error(problem);
+        return (v as (...a: unknown[]) => unknown).call(target, args, ...rest);
+      };
+    },
+  });
 
 /**
  * The overlay fee output for `tokenOuts` token outputs of `tokenId`, or null when the token charges nothing. Throws
@@ -73,10 +115,14 @@ export const tokenSendProblem = (outputs: readonly Out[], fee: { feeScript: stri
   return null;
 };
 
-/** A wallet whose createAction refuses outputs that tokenSendProblem flags (wraps sendBsv21's wallet). */
+/**
+ * A wallet whose createAction refuses outputs that tokenSendProblem flags (wraps sendBsv21's wallet). The confirmed
+ * fee must pay `tokenId`'s own fee address (feeScriptFor), whatever the indexer served (review of row 123).
+ */
 export const withTokenSendGuard = <W extends object>(
   wallet: W,
   fee: { feeScript: string; maxSats: number } | null,
+  tokenId: string,
 ): W =>
   new Proxy(wallet, {
     get(target, prop) {
@@ -84,7 +130,10 @@ export const withTokenSendGuard = <W extends object>(
       if (typeof v !== 'function') return v;
       if (prop !== 'createAction') return (v as (...a: unknown[]) => unknown).bind(target);
       return (args: { outputs?: Out[] }, ...rest: unknown[]) => {
-        const problem = tokenSendProblem(args.outputs ?? [], fee);
+        const problem =
+          fee && fee.feeScript !== feeScriptFor(tokenId)
+            ? OVERLAY_FEE_ADDRESS_REFUSAL.replace(', so nothing was sent.', '.')
+            : tokenSendProblem(args.outputs ?? [], fee);
         if (problem) throw new Error(`${problem} Nothing was sent. Review and try again.`);
         return (v as (...a: unknown[]) => unknown).call(target, args, ...rest);
       };

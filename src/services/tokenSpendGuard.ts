@@ -21,6 +21,7 @@ import type { OneSatServices } from '@1sat/wallet-browser';
 import type { WalletInterface } from '@bsv/sdk';
 import { EMPTY_UNLOCK_MESSAGE, isEmptyUnlockError } from '../utils/bsv21SendErrors';
 import { runUnseenHeal } from './tokenRecoveryWallet';
+import { withOverlayFeeAddressCheck } from '../mobile/wallet/send/tokenFee';
 
 /** Runs the keys-only check: tokenId undefined = every token; fresh = ignore the verified cache. */
 export type KeyCheckFn = (tokenId: string | undefined, fresh: boolean) => Promise<unknown>;
@@ -103,11 +104,16 @@ export const withTokenKeyCheck = <T>(
 type SendInput = Parameters<typeof sendBsv21.execute>[1];
 type SendResult = Awaited<ReturnType<typeof sendBsv21.execute>>;
 
-/** sendBsv21 with the guard; a second empty unlock comes back as { error: EMPTY_UNLOCK_MESSAGE }. */
+/**
+ * sendBsv21 with the guard; a second empty unlock comes back as { error: EMPTY_UNLOCK_MESSAGE }. Its overlay fee output
+ * must pay the token's own fee address (withOverlayFeeAddressCheck: sendBsv21 pays the indexer's fee_address as
+ * served; review of b-Aware row 123); anything else is refused before it is signed.
+ */
 export const guardedSendBsv21 = {
   async execute(ctx: OneSatContext, input: SendInput): Promise<SendResult> {
+    const sending = { ...ctx, wallet: withOverlayFeeAddressCheck(ctx.wallet, input.tokenId) };
     try {
-      const r = await withTokenKeyCheck(ctx, input.tokenId, () => sendBsv21.execute(ctx, input), {
+      const r = await withTokenKeyCheck(ctx, input.tokenId, () => sendBsv21.execute(sending, input), {
         failure: (x) => x.error,
       });
       return isEmptyUnlockError(r.error) ? { ...r, error: EMPTY_UNLOCK_MESSAGE } : r;
