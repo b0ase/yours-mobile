@@ -18,12 +18,26 @@ export type AssetKind = 'bsv' | 'mnee' | 'bsv21';
 /**
  * Where the money goes. BSV is paid to the callee's paymail (P2P, a fresh key per payment), so
  * BSV needs no address. MNEE and BSV-21 transfers go to an address: the callee's wallet fills in
- * its own MNEE deposit / ordinals address when it saves the rate card.
+ * its own MNEE deposit / ordinals address when it saves the rate card, and signs it with its
+ * identity key (`proof`, calls/payee.ts) so a caller can check the server didn't swap it.
  */
 export type RateAsset =
   | { kind: 'bsv' }
-  | { kind: 'mnee'; address?: string }
-  | { kind: 'bsv21'; id: string; sym: string; dec: number; address?: string };
+  | { kind: 'mnee'; address?: string; proof?: PayeeProof }
+  | { kind: 'bsv21'; id: string; sym: string; dec: number; address?: string; proof?: PayeeProof };
+
+/** The callee's identity-key signature over its payout address (calls/payee.ts signPayee). */
+export type PayeeProof = { timestamp: string; signature: string };
+const parseProof = (raw: unknown): PayeeProof | undefined => {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  return r &&
+    typeof r.timestamp === 'string' &&
+    /^\d{1,16}$/.test(r.timestamp) &&
+    typeof r.signature === 'string' &&
+    /^[0-9a-f]{2,200}$/i.test(r.signature)
+    ? { timestamp: r.timestamp, signature: r.signature }
+    : undefined;
+};
 
 export const ADDRESS_RE = /^1[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 
@@ -116,12 +130,14 @@ export const parseAsset = (raw: unknown): RateAsset | null => {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
   if (!r) return null;
   const address = typeof r.address === 'string' && ADDRESS_RE.test(r.address) ? r.address : undefined;
+  const proof = address ? parseProof(r.proof) : undefined;
+  const at = address ? { address, ...(proof ? { proof } : {}) } : {};
   if (r.kind === 'bsv') return { kind: 'bsv' };
-  if (r.kind === 'mnee') return address ? { kind: 'mnee', address } : { kind: 'mnee' };
+  if (r.kind === 'mnee') return { kind: 'mnee', ...at };
   if (r.kind === 'bsv21' && typeof r.id === 'string' && TOKEN_ID_RE.test(r.id)) {
     const dec = typeof r.dec === 'number' && Number.isInteger(r.dec) && r.dec >= 0 && r.dec <= 18 ? r.dec : 0;
     const sym = typeof r.sym === 'string' ? r.sym.trim().slice(0, 16) : '';
-    return { kind: 'bsv21', id: r.id, sym: sym || 'tokens', dec, ...(address ? { address } : {}) };
+    return { kind: 'bsv21', id: r.id, sym: sym || 'tokens', dec, ...at };
   }
   return null;
 };
@@ -154,13 +170,11 @@ export const checkCardToken = (card: RateCard, details: unknown): CheckedCard =>
   return { ok: true, card: { ...card, asset: { ...asset, dec, sym } } };
 };
 
-/** Where a caller pays this card: the callee's paymail for BSV, the card's address for MNEE / tokens. */
-export type PayTo = { paymail: string } | { address: string };
-
-export const payToFor = (card: RateCard, calleePaymail: string | null): PayTo | null => {
-  if (card.asset.kind === 'bsv') return calleePaymail ? { paymail: calleePaymail } : null;
-  return card.asset.address ? { address: card.asset.address } : null;
-};
+/**
+ * Where a caller pays this card, bound to the callee's identity key (calls/payee.ts bindPayee): BSV to their
+ * paymail, whose host must derive every output from `identityKey`; MNEE / tokens to the address the callee signed.
+ */
+export type PayTo = { paymail: string; identityKey: string } | { address: string };
 
 /** A stored / fetched rate card, or null when it is missing or malformed (= free calls). */
 export const parseRateCard = (raw: unknown): RateCard | null => {

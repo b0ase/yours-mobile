@@ -8,6 +8,7 @@ import { useAccountNames } from '../names/accountNames';
 import { bareName } from '../names/names';
 import { fmtSats, useBsvUsd, usdToSats } from '../money/money';
 import { actBooking, bphoneEnabled, listBookings, loadMyProfile, saveMyProfile } from './bphone';
+import { signPayee } from './payee';
 import { busy as callBusy, shortKey } from './machine';
 import {
   ABOUT_MAX,
@@ -218,16 +219,19 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
     if (next.listing.listed && !paymail) return setProblem('Claim a bWallet paymail first so callers can pay you');
     setSaving(true);
     try {
-      // Where MNEE / token payments land: my own deposit addresses, filled in here so callers never guess.
+      // Where MNEE / token payments land: my own deposit addresses, filled in here so callers never guess, and signed
+      // with my identity key so a caller pays them only if the server didn't swap them (calls/payee.ts, row 114).
       if (next.rate?.asset.kind === 'mnee') {
         const d = await deriveDepositAddresses.execute(apiContext, { startIndex: 0, count: 1 });
         const address = d.derivations[0]?.address;
         if (!address) throw new Error('Could not derive an MNEE address');
-        next.rate = { ...next.rate, asset: { kind: 'mnee', address } };
+        const proof = await signPayee(apiContext.wallet, next.rate.asset, address);
+        next.rate = { ...next.rate, asset: { kind: 'mnee', address, proof } };
       } else if (next.rate?.asset.kind === 'bsv21') {
         const address = account?.addresses?.ordAddress;
         if (!address) throw new Error('No ordinals address for tokens');
-        next.rate = { ...next.rate, asset: { ...next.rate.asset, address } };
+        const proof = await signPayee(apiContext.wallet, next.rate.asset, address);
+        next.rate = { ...next.rate, asset: { ...next.rate.asset, address, proof } };
       }
       const saved = await saveMyProfile(f, apiContext.wallet, next);
       setProfile(saved);

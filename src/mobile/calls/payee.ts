@@ -1,0 +1,91 @@
+/**
+ * bPhone: who a metered call pays, bound to the person being called (b-Aware 25 Oct 2026, fzsusanto row 114).
+ *
+ * The rate card and the paymail come from the bWallet paymail server (bphone-get), which only vouches for them. The
+ * meter pays with no sheet in front of each payment, so the payee must be tied to the callee's identity key (the key
+ * the call is placed to) before the quote is shown, or the call is not paid at all:
+ *  - BSV goes to their paymail, and the request carries their identity key: the paymail host must derive every output
+ *    from that key (utils/guardedSendBsv.ts checkedDestination), whatever paymail the server named.
+ *  - MNEE and BSV-21 go to an address the callee's own wallet signed with its identity key when it saved the card
+ *    (signPayee, BRC-43 [2,'bwallet paymail'], a protocol no site can use). A card with no signature, or one that
+ *    doesn't verify against the callee's key, is refused. Cards saved before this signature existed are refused too
+ *    until the callee saves their bPhone settings again.
+ * The quote sheet shows the payee in full.
+ */
+import { ProtoWallet, Utils, type WalletInterface } from '@bsv/sdk';
+import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage, signRequest } from '../names/signRequest';
+import type { PayeeProof, PayTo, RateAsset, RateCard } from './rateCard';
+
+export const PAYEE_ACTION = 'bphone-payee';
+const PUBKEY_RE = /^0[23][0-9a-f]{64}$/;
+
+/** The signed fields: the asset's kind, its token id ('' for MNEE) and the address. */
+const payeeFields = (asset: Exclude<RateAsset, { kind: 'bsv' }>, address: string) => ({
+  kind: asset.kind,
+  token: asset.kind === 'bsv21' ? asset.id : '',
+  address,
+});
+
+/** The callee's wallet, on save: sign "MNEE / this token is paid to `address`" with the identity key. */
+export const signPayee = async (
+  wallet: Pick<WalletInterface, 'getPublicKey' | 'createSignature'>,
+  asset: Exclude<RateAsset, { kind: 'bsv' }>,
+  address: string,
+): Promise<PayeeProof> => {
+  const { timestamp, signature } = await signRequest(wallet, PAYEE_ACTION, payeeFields(asset, address));
+  return { timestamp: String(timestamp), signature };
+};
+
+/** Does the card's address carry a valid signature by `identityKey`? */
+export const checkPayeeProof = async (identityKey: string, asset: RateAsset): Promise<boolean> => {
+  if (asset.kind === 'bsv' || !asset.address || !asset.proof || !PUBKEY_RE.test(identityKey)) return false;
+  try {
+    const { valid } = await new ProtoWallet('anyone').verifySignature({
+      data: Utils.toArray(
+        signedMessage(PAYEE_ACTION, {
+          ...payeeFields(asset, asset.address),
+          identityKey,
+          timestamp: asset.proof.timestamp,
+        }),
+        'utf8',
+      ),
+      signature: Utils.toArray(asset.proof.signature, 'hex'),
+      protocolID: SIGN_PROTOCOL,
+      keyID: SIGN_KEY_ID,
+      counterparty: identityKey,
+    });
+    return valid;
+  } catch {
+    return false;
+  }
+};
+
+export type BoundPayee = { ok: true; payTo: PayTo } | { ok: false; error: string };
+
+/**
+ * Where this call pays, bound to the callee's identity key `peerKey`, or why it can't be paid. `calleePaymail` is the
+ * paymail the server named for that key (BSV only). An error reads after the callee's name ("$ann charges for…").
+ */
+export const bindPayee = async (card: RateCard, calleePaymail: string | null, peerKey: string): Promise<BoundPayee> => {
+  const key = peerKey.toLowerCase();
+  if (!PUBKEY_RE.test(key)) return { ok: false, error: "can't be paid: we don't have their wallet's key" };
+  const asset = card.asset;
+  if (asset.kind === 'bsv')
+    return calleePaymail
+      ? { ok: true, payTo: { paymail: calleePaymail, identityKey: key } }
+      : { ok: false, error: 'charges for calls but has nowhere to be paid yet' };
+  if (!asset.address) return { ok: false, error: 'charges for calls but has nowhere to be paid yet' };
+  if (!(await checkPayeeProof(key, asset)))
+    return {
+      ok: false,
+      error:
+        "their payout address isn't signed by their wallet, so this call can't be paid. They can fix it by saving their bPhone settings again.",
+    };
+  return { ok: true, payTo: { address: asset.address } };
+};
+
+/** The payee line on the quote sheet. */
+export const payeeLabel = (payTo: PayTo): string =>
+  'paymail' in payTo
+    ? `Paid to ${payTo.paymail}, checked against their wallet's key`
+    : `Paid to ${payTo.address}, signed by their wallet`;
