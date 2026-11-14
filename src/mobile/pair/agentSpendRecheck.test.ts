@@ -485,17 +485,33 @@ describe('review fixes (13 Nov 2026)', () => {
   // (checkedContext), and the real guardedSendBsv → upstream sendBsv → createAction.
   test('real guardedSendBsv: a refusal inside createAction comes back Refused and the wallet never signs', async () => {
     let looks = 0;
-    const r = await runAgentAction(
-      ctx,
-      ID,
-      { kind: 'send', token: 'BSV', usd: 0.5, to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },
-      RATE,
-      {
-        io: { spendingPaused: async () => false }, // the real send
-        // Passes the look before sendBsv, refuses the one inside createAction.
-        beforeSign: () => (++looks === 1 ? null : 'Pressed Stop while sending'),
-      },
-    );
+    // Upstream sendBsv (@1sat/actions payments) catches whatever createAction throws, logs it with
+    // console.error('[sendBsv]', error) and returns { error }. So the refusal is not an unhandled rejection: it
+    // reaches runAgentAction as { error } and comes back Refused. Capture that one log and assert it is exactly the
+    // refusal, so any other error printed here fails the test instead of passing silently.
+    const logged: unknown[][] = [];
+    const orig = console.error;
+    console.error = (...a: unknown[]) => void logged.push(a);
+    let r: Awaited<ReturnType<typeof runAgentAction>>;
+    try {
+      r = await runAgentAction(
+        ctx,
+        ID,
+        { kind: 'send', token: 'BSV', usd: 0.5, to: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },
+        RATE,
+        {
+          io: { spendingPaused: async () => false }, // the real send
+          // Passes the look before sendBsv, refuses the one inside createAction.
+          beforeSign: () => (++looks === 1 ? null : 'Pressed Stop while sending'),
+        },
+      );
+    } finally {
+      console.error = orig;
+    }
+    expect(logged).toHaveLength(1);
+    expect(logged[0][0]).toBe('[sendBsv]');
+    expect(logged[0][1]).toBeInstanceOf(Error);
+    expect((logged[0][1] as Error).message).toBe('Pressed Stop while sending');
     expect(looks).toBe(2);
     expect(r).toEqual({ ok: false, text: 'Refused: Pressed Stop while sending' });
     expect(signed).toBe(0);
