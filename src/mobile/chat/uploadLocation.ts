@@ -8,32 +8,43 @@ import { blankBmffLocation, locationVerdict, shareBlockedMessage, stripJpegLocat
  * inscribe a room file publicly on chain (bit-sign rooms/[ticker]/media/[id]/stamp, mode 'full'). So nothing leaves
  * the device with location in it:
  *   - every JPEG goes without its metadata (private/location.ts stripJpegLocation, orientation kept), whatever the
- *     detector says: EXIF / XMP / IPTC also carry city names, maker notes and UTF-16 XMP it can't read;
+ *     detector says: EXIF / XMP / IPTC also carry city names, maker notes and UTF-16 XMP it can't read. A JPEG the
+ *     stripper can't read through (truncated, no EOI) is refused: it would go with all its metadata;
  *   - other files with no location found go as they are;
  *   - MOV / MP4 / M4A / HEIC with location have it blanked in place (blankBmffLocation), same length;
  *   - each changed copy is sent only if it then reads as clean;
- *   - audio the detector can't read through, and the app's own voice recordings (`recorded`), go as they are;
+ *   - audio the detector can't read through, and the app's own MediaRecorder voice notes, go as they are;
  *   - anything else with (possible) location is refused, nothing is sent.
  */
+/**
+ * ⚠ MediaRecorder output ONLY (sendVoiceNote below): the app's own microphone recording, which carries no location,
+ * so the gate never refuses it. Never set it for a file the person picked, pasted or downloaded.
+ */
+export type MediaRecorderOnly = { mediaRecorderOutput?: true };
+
 export type CleanUpload = { ok: true; bytes: Uint8Array; stripped: boolean } | { ok: false; message: string };
 
-export function cleanForUpload(bytes: Uint8Array, mime: string, opts: { recorded?: boolean } = {}): CleanUpload {
-  const jpeg = stripJpegLocation(bytes);
-  if (jpeg && locationVerdict(jpeg, 'image/jpeg') === 'none') return { ok: true, bytes: jpeg, stripped: true };
+export function cleanForUpload(bytes: Uint8Array, mime: string, opts: MediaRecorderOnly = {}): CleanUpload {
   const v = locationVerdict(bytes, mime);
+  if (isJpeg(bytes)) {
+    const jpeg = stripJpegLocation(bytes);
+    if (jpeg && locationVerdict(jpeg, 'image/jpeg') === 'none') return { ok: true, bytes: jpeg, stripped: true };
+    return { ok: false, message: shareBlockedMessage(mime || 'image/jpeg', v === 'found' ? 'found' : 'unknown') };
+  }
   if (v === 'none') return { ok: true, bytes, stripped: false };
   const blanked = blankBmffLocation(bytes);
   if (blanked && locationVerdict(blanked, mime) === 'none') return { ok: true, bytes: blanked, stripped: true };
   // A voice note from the app's recorder carries no location (MediaRecorder writes none); other audio is refused
   // only on evidence, not because its container didn't parse.
-  if (opts.recorded || (v === 'unknown' && /^audio\//i.test(mime.trim()))) return { ok: true, bytes, stripped: false };
+  if (opts.mediaRecorderOutput || (v === 'unknown' && /^audio\//i.test(mime.trim())))
+    return { ok: true, bytes, stripped: false };
   return { ok: false, message: shareBlockedMessage(mime, v) };
 }
 
 const isJpeg = (b: Uint8Array) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
 
 /** A File ready to send: the same one, or a cleaned copy. Throws the reason when it can't be sent. */
-export async function cleanFileForUpload(file: File, opts: { recorded?: boolean } = {}): Promise<File> {
+export async function cleanFileForUpload(file: File, opts: MediaRecorderOnly = {}): Promise<File> {
   const r = cleanForUpload(new Uint8Array(await file.arrayBuffer()), file.type, opts);
   if (!r.ok) throw new Error(r.message);
   if (!r.stripped) return file;
@@ -72,6 +83,6 @@ export function cleanDataUrlForUpload(dataUrl: string): string {
     : dataUrl;
 }
 
-/** The chat bar's voice note: the app's own recording, so the gate runs with `recorded` and never refuses it. */
+/** The chat bar's voice note: MediaRecorder output, so the gate runs with `mediaRecorderOutput` (never refused). */
 export const sendVoiceNote = (client: Pick<BchatClient, 'uploadMedia'>, ticker: string, file: File) =>
-  client.uploadMedia(ticker, file, undefined, { recorded: true });
+  client.uploadMedia(ticker, file, undefined, { mediaRecorderOutput: true });

@@ -19,7 +19,7 @@ import type { ChatMessage, ChatRoom } from './messages';
 
 import type { BchatContact } from './contacts';
 import { BCHAT_PRIMARY_ORIGIN, routeBchatUrl } from '../../services/bchatOrigin';
-import { cleanDataUrlForUpload, cleanFileForUpload } from './uploadLocation';
+import { cleanDataUrlForUpload, cleanFileForUpload, type MediaRecorderOnly } from './uploadLocation';
 
 /** Primary bChatX origin; requests are moved to the live one (chat.bwalletx.com fallback) by services/bchatOrigin. */
 export const BCHAT_ORIGIN = BCHAT_PRIMARY_ORIGIN;
@@ -670,14 +670,15 @@ export class BchatClient {
    * through native HTTP (`dataType: 'formData'`, which Capacitor's iOS and Android layers turn into multipart), as
    * every other bChat call there does, so the WebView's origin never meets CORS.
    * Location first (chat/uploadLocation.ts, b-Aware #288): a JPEG goes without its metadata, a video / HEIC with its
-   * location blanked, anything else that has or may have location is refused before any request. `recorded`: the
-   * app's own voice note, never refused. Returns the file actually sent.
+   * location blanked, anything else that has or may have location is refused before any request.
+   * ⚠ `mediaRecorderOutput` is for the app's own voice recordings only (chat/uploadLocation.ts sendVoiceNote): it
+   * turns refusal off. Never pass it for a picked file. Returns the file actually sent.
    */
   async uploadMedia(
     ticker: string,
     original: File,
     onProgress?: (fraction: number) => void,
-    opts: { recorded?: boolean } = {},
+    opts: MediaRecorderOnly = {},
   ): Promise<File> {
     if (original.size > ROOM_UPLOAD_MAX_BYTES)
       throw new ChatApiError(`Files can be up to ${ROOM_UPLOAD_MAX_BYTES / 1024 / 1024} MB.`, 413);

@@ -98,6 +98,27 @@ describe('locationVerdict: real tiny files', () => {
     expect(v([...F.ascii('%PDF-1.4\n'), ...F.jpeg({ exif: 'plain' })], 'application/pdf')).toBe('none');
   });
 
+  test('a many-photo PDF, or one with an EXIF block that does not parse, is not refused (only GPS found counts)', () => {
+    expect(v(F.pdfWithPhotos(25), 'application/pdf')).toBe('none');
+    expect(v(F.pdfWithPhotos(80), 'application/pdf')).toBe('none');
+    expect(v(F.pdfWithPhotos(1, { broken: true }), 'application/pdf')).toBe('none');
+    expect(v(F.pdfWithPhotos(20, { gps: true }), 'application/pdf')).toBe('found');
+  });
+
+  test('MP4 / MOV: a subtitle or telemetry track (samples in mdat, e.g. DJI GPS subtitles) may contain location', () => {
+    for (const t of ['tx3g', 'text', 'wvtt', 'sbtt', 'stpp', 'djmd', 'mett', 'metx'])
+      expect([t, v(F.mp4({ tracks: ['avc1', 'mp4a', t] }), 'video/mp4')]).toEqual([t, 'unknown']);
+    expect(v(F.mp4({ tracks: ['avc1', 'camm'] }), 'video/mp4')).toBe('found'); // also a needle
+    expect(v(F.mp4({ tracks: ['avc1', 'mp4a', 'mebx'] }), 'video/quicktime')).toBe('none');
+    expect(v(F.mp4({ tracks: ['mp4a'] }), 'audio/mp4')).toBe('none');
+  });
+
+  test('ISO 6709 in degrees + minutes (+ seconds) is found, not only decimal degrees', () => {
+    expect(v(F.mp4({ comment: '+5130.20-00007.60/' }), 'video/mp4')).toBe('found');
+    expect(v(F.mp4({ comment: '+513012-0000736+012/' }), 'video/mp4')).toBe('found');
+    expect(v(F.mp4({ comment: 'Call +44-207 about it' }), 'video/mp4')).toBe('none');
+  });
+
   test('a file of thousands of EXIF headers is answered quickly ("may contain"), not after seconds', () => {
     const big = new Uint8Array(2_000_000);
     const hdr = [...F.ascii('Exif\0\0MM'), 0, 42, 0, 0, 0, 8];

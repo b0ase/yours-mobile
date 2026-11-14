@@ -54,8 +54,13 @@ const MOVIE_NEEDLES = [...TEXT_NEEDLES, enc('\xA9xyz'), enc('loci'), enc('gpmd')
 /** A movie / audio file read as a flat byte string. */
 const AUDIO_NEEDLES = [...TEXT_NEEDLES, enc('\xA9xyz')];
 
-/** An ISO 6709 coordinate as metadata stores it ("+51.5033-000.1276/", Apple "+37.3349-122.0090+010.000/"). */
-const ISO6709_RE = /[+-]\d{2}\.\d+[+-]\d{3}\.\d+/;
+/**
+ * An ISO 6709 coordinate as metadata stores it: decimal degrees ("+51.5033-000.1276/", Apple
+ * "+37.3349-122.0090+010.000/"), or degrees + minutes (+ seconds) with the closing "/" ("+5130.20-00007.60/",
+ * "+513012-0000736/").
+ */
+const ISO6709_RE =
+  /[+-]\d{2}\.\d+[+-]\d{3}\.\d+|[+-]\d{2}(?:\d{2}){0,2}(?:\.\d+)?[+-]\d{3}(?:\d{2}){0,2}(?:\.\d+)?(?:[+-]\d+(?:\.\d+)?)?(?:CRS[\w:]*)?\//;
 /** mdta key names with location in them: ffmpeg's plain "location", Apple's com.apple.quicktime.location.*. */
 const MDTA_LOCATION_RE = /mdta[\x20-\x7e]{0,64}location/i;
 
@@ -181,7 +186,7 @@ function ifdOffsets(t: Bytes, e: number, le: boolean): number[] {
 const exifVerdict = (b: Bytes, s: number, e = b.length) => tiffVerdict(b, startsWith(b, s, EXIF_HDR) ? s + 6 : s, e);
 
 /** Real files have a handful of EXIF blocks (main, thumbnail, MPF images); thousands are a stall attempt. */
-const MAX_EXIF_BLOCKS = 16;
+const MAX_EXIF_BLOCKS = 64;
 
 /** Every EXIF block anywhere in the file (embedded / MPF images, trailers) plus XMP text anywhere. */
 function wholeFileScan(b: Bytes, from = 0, to = b.length): LocationVerdict {
@@ -355,6 +360,44 @@ function boxes(b: Bytes, s: number, e: number): Box[] | null {
 const MOVIE_FIRST_BOX = new Set(['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip', 'pnot', 'uuid', 'styp']);
 const isBmff = (b: Bytes) => b.length >= 8 && MOVIE_FIRST_BOX.has(String.fromCharCode(b[4], b[5], b[6], b[7]));
 
+/**
+ * Sample entries of tracks whose samples (in mdat, never read here) can be text or vendor telemetry: subtitles
+ * (DJI drones write "[latitude: …] [longitude: …]" per frame), timed text / metadata, DJI / GoPro / camera-motion
+ * data. A movie with one of these may carry location. (Apple's 'mebx' metadata track is not here: every iPhone video
+ * has one, and its keys sit in the sample description, which the needle scan reads.)
+ */
+const TEXT_SAMPLE_ENTRIES = new Set([
+  'tx3g',
+  'text',
+  'wvtt',
+  'sbtt',
+  'stpp',
+  'c608',
+  'djmd',
+  'dbgi',
+  'camm',
+  'gpmd',
+  'mett',
+  'metx',
+  'rtmd',
+]);
+
+/** The sample entry types of every track (trak / mdia / minf / stbl / stsd), or null when a track doesn't read. */
+function sampleEntryTypes(b: Bytes, moov: Box): string[] | null {
+  const kids = (x: Box | undefined, at = 0) => (x ? boxes(b, x.data + at, x.end) : null);
+  const pick = (list: Box[] | null, type: string) => list?.find((x) => x.type === type);
+  const traks = kids(moov);
+  if (!traks) return null;
+  const out: string[] = [];
+  for (const trak of traks.filter((x) => x.type === 'trak')) {
+    const stbl = pick(kids(pick(kids(pick(kids(trak), 'mdia')), 'minf')), 'stbl');
+    const entries = kids(pick(kids(stbl), 'stsd'), 8);
+    if (!entries) return null;
+    out.push(...entries.map((x) => x.type));
+  }
+  return out;
+}
+
 function bmff(b: Bytes): LocationVerdict {
   const top = boxes(b, 0, b.length);
   if (!top) return 'unknown';
@@ -364,6 +407,11 @@ function bmff(b: Bytes): LocationVerdict {
   let v: LocationVerdict = 'none';
   // Everything but the media payload: udta / meta / keys / ilst / uuid (XMP) / sample descriptions.
   for (const x of top) if (x.type !== 'mdat' && movieHasLocation(b, x.start, x.end)) return 'found';
+  // Text / telemetry tracks keep their samples in mdat: may contain location.
+  if (moov) {
+    const entries = sampleEntryTypes(b, moov);
+    if (!entries || entries.some((t) => TEXT_SAMPLE_ENTRIES.has(t))) return 'unknown';
+  }
   if (meta) v = worst(v, heifItems(b, meta));
   // A still image (HEIC / AVIF): any other "Exif\0\0" block or XMP text in the item data too. (Not in meta, where an
   // infe's 'Exif' item type followed by its empty name reads as "Exif\0\0".)
@@ -856,7 +904,8 @@ export function locationVerdict(input: Uint8Array | ArrayLike<number>, mime = ''
   if (v === null) {
     if (visual) return 'unknown';
     // Any other file (a PDF, a RAW sent as octet-stream, a zip): GPS EXIF of an embedded photo, or location text.
-    return wholeFileScan(b);
+    // Only positive evidence counts: a deck of many photos, or an EXIF block that doesn't parse, is not refused.
+    return wholeFileScan(b) === 'found' ? 'found' : 'none';
   }
   if (still && v !== 'found') v = worst(v, wholeFileScan(b));
   return v;

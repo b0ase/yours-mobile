@@ -233,6 +233,21 @@ export const pngXmp = (gps: boolean, compressed = false) =>
       compressed ? noise(40) : ascii(gps ? GPS_XMP : PLAIN_XMP),
     ),
   );
+/** A PDF-like file with `n` embedded JPEGs (plain EXIF unless `gps`), as a photo deck exported to PDF. */
+export const pdfWithPhotos = (n: number, o: { gps?: boolean; broken?: boolean } = {}): B =>
+  cat(
+    ascii('%PDF-1.4\n'),
+    ...Array.from({ length: n }, (_, i) =>
+      cat(
+        ascii(`${i + 4} 0 obj<</Filter/DCTDecode>>stream\n`),
+        jpeg({ exif: o.gps && i === n - 1 ? 'gps' : 'plain' }),
+        ascii('\nendstream\n'),
+      ),
+    ),
+    o.broken ? cat(ascii('Exif\0\0'), ascii('XX'), noise(10)) : [],
+    ascii('%%EOF\n'),
+  );
+
 /** A tEXt chunk with any keyword and text. */
 export const pngRawText = (keyword: string, text: string) => chunk('tEXt', ascii(`${keyword}\0${text}`));
 /** ImageMagick also writes one tEXt per EXIF tag, keyword "exif:<Tag>". */
@@ -311,7 +326,15 @@ export function heic(o: { gps: boolean; prefixed?: boolean; xmpGps?: boolean; ti
  * use_metadata_tags form (a plain "location" mdta key, ISO 6709 value); 'gpmd' a GoPro-style GPS metadata track.
  */
 export function mp4(
-  o: { loc?: 'xyz' | 'keys' | 'ffkeys' | 'loci' | 'xmp' | 'gpmd'; noMoov?: boolean; mdat?: B } = {},
+  o: {
+    loc?: 'xyz' | 'keys' | 'ffkeys' | 'loci' | 'xmp' | 'gpmd';
+    noMoov?: boolean;
+    mdat?: B;
+    /** Tracks by sample entry type ('avc1', 'mp4a', 'tx3g' subtitles, 'djmd' DJI telemetry…). */
+    tracks?: string[];
+    /** A udta comment (©cmt) with this text. */
+    comment?: string;
+  } = {},
 ): B {
   const ftyp = box('ftyp', cat(ascii('qt  '), be32(0), ascii('qt  isom')));
   const udta =
@@ -341,7 +364,11 @@ export function mp4(
         )
       : [];
   const gpmd = o.loc === 'gpmd' ? box('trak', box('mdia', box('minf', box('stbl', box('stsd', ascii('gpmd')))))) : [];
-  const moov = box('moov', cat(full('mvhd', 0, noise(96)), udta, keys, gpmd));
+  const trak = (entry: string) =>
+    box('trak', box('mdia', box('minf', box('stbl', full('stsd', 0, cat(be32(1), box(entry, noise(16))))))));
+  const tracks = (o.tracks ?? []).flatMap(trak);
+  const comment = o.comment ? box('udta', box('\xA9cmt', cat(be16(o.comment.length), be16(0), ascii(o.comment)))) : [];
+  const moov = box('moov', cat(full('mvhd', 0, noise(96)), udta, keys, gpmd, tracks, comment));
   return cat(ftyp, o.noMoov ? [] : moov, box('mdat', o.mdat ?? noise(300)));
 }
 

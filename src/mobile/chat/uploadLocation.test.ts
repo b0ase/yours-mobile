@@ -132,6 +132,31 @@ describe('chat room uploads: no location leaves the device', () => {
     expect(r.posts).toHaveLength(1);
   });
 
+  test('a JPEG the stripper cannot read through is refused even with no GPS found (it would go with its metadata)', async () => {
+    const cut = F.jpeg({ exif: 'plain', xmp: 'plain' }).slice(0, -2); // no EOI
+    expect(locationVerdict(F.u8(cut), 'image/jpeg')).toBe('none');
+    const { client, posts } = recorder();
+    const err = await client
+      .uploadMedia('ROOM', new File([F.u8(cut)], 'c.jpg', { type: 'image/jpeg' }))
+      .catch((e) => e);
+    expect((err as Error).message).toBe(shareBlockedMessage('image/jpeg', 'unknown'));
+    expect(posts).toEqual([]);
+  });
+
+  test('a photo deck PDF is sent; a DJI-style subtitle-track video is refused', async () => {
+    let r = recorder();
+    const deck = F.u8(F.pdfWithPhotos(25));
+    await r.client.uploadMedia('ROOM', new File([deck], 'deck.pdf', { type: 'application/pdf' }));
+    expect(await sentBytes(r.posts[0])).toEqual(deck);
+    r = recorder();
+    const dji = F.u8(F.mp4({ tracks: ['avc1', 'tx3g'] }));
+    const err = await r.client
+      .uploadMedia('ROOM', new File([dji], 'DJI_0001.mp4', { type: 'video/mp4' }))
+      .catch((e) => e);
+    expect((err as Error).message).toBe(shareBlockedMessage('video/mp4', 'unknown'));
+    expect(r.posts).toEqual([]);
+  });
+
   test('a clean voice note or file goes as it is', async () => {
     for (const [bytes, mime] of [
       [F.webm(false), 'audio/webm'],
