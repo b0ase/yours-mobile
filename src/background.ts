@@ -276,7 +276,7 @@ import {
   type MintIntent,
   type MintSheet,
 } from './services/pinnedMint';
-import { oneShotGrant, oneUseGrant } from './services/oneShotGrant';
+import { oneUseGrant } from './services/oneShotGrant';
 import { isOneUseRequestID } from './services/sharedKeySigning';
 import {
   SEAL_BUSY_REFUSAL,
@@ -2247,7 +2247,8 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     return Promise.reject(new Error(RESERVED_BASKET_REFUSAL));
   }
   // A pinned site's paid action (services/pinnedMint.ts): its self-encrypts, and its own label while its
-  // createAction runs, go through for that one call (ephemeral, nothing stored); its spend is the one sheet.
+  // createAction runs, go through for that one request only (oneUseGrant: nothing stored, so a decrypt, signature or
+  // HMAC on the same protocol right after still asks; b-Aware row 207); its spend is the one sheet.
   const mintSite = request.originator && request.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(request.originator) : '';
   // The manager's own site key (hostname only, services/permissionSite.ts): the seal pass, protocol and pay calls,
   // spend recipients and labels are all keyed with it, so a port never makes a second site.
@@ -2257,20 +2258,21 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     const now = Date.now();
     if (shouldDeferEncrypt(asSite, protocolCalls, deferredEncrypts, now)) {
       deferredEncrypts.note(mintSite, request.protocolID as [number, string], now);
-      return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
+      return accountContext.wallet.grantPermission(oneUseGrant(request.requestID));
     }
     const intent = mintIntents.get(mintSite);
     if (intent && !intent.spendSeen && labelCoveredByIntent(asSite, intent))
-      return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
+      return accountContext.wallet.grantPermission(oneUseGrant(request.requestID));
   }
   // A stream-approved createAction is running for this site: its spend (within the budget) and its label are
-  // answered here, without a sheet. Nothing else is (services/streamGrants.ts passCovers).
+  // answered here, without a sheet, one request at a time (oneUseGrant: nothing stored). Nothing else is
+  // (services/streamGrants.ts passCovers).
   // Streaming grants are allowances: with envelopes (the default) no pass ever answers a spend (allowanceFlag.ts).
   const pass =
     ALLOWANCES_ENABLED && request.originator ? streamPasses.get(normalizeOriginator(request.originator)) : undefined;
   if (pass && accountContext?.wallet && passCovers(pass, { ...request, originator: normalizeOriginator(request.originator) })) {
     if (request.type === 'spending') pass.charged = request.spending?.satoshis;
-    return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
+    return accountContext.wallet.grantPermission(oneUseGrant(request.requestID));
   }
   // The one Seal sheet already approved this seal's sign or its matching payment (services/sealPass.ts). Answered
   // below, after the blocked-site check, for a current pairing only.
