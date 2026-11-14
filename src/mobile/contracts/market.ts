@@ -53,11 +53,44 @@ export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope)
 export const contractPriceSats = (env: ContractEnvelope, bsvUsd: number) =>
   env.sale.priceUsd > 0 ? Math.ceil((env.sale.priceUsd / bsvUsd) * 1e8) : 0;
 
+/** Raw content of the inscription at an outpoint (ORDFS, no origin resolution), read from outside the catalogue. */
+export const ORDFS_CONTENT = 'https://ordfs.network/content/';
+const OUTPOINT_RE = /^[0-9a-f]{64}_\d{1,10}$/;
+
+/**
+ * The listing's terms as its author inscribed them. The catalogue serves `envelope` (whose sale.payTo is paid) and
+ * `body` (what is minted); both must be exactly the original inscription at `origin`, read from the chain through
+ * ORDFS, not from the catalogue. A catalogue that names its own payee from the start then fails here (b-Aware
+ * 25 Oct 2026, fzsusanto row 115: 0579bc2b only caught a change between showing and paying). Throws when the
+ * original can't be read or differs: nothing is paid.
+ */
+export const checkAgainstOriginal = async (listing: Pick<ContractListing, 'origin' | 'envelope' | 'body'>) => {
+  const refuse = (why: string) => new Error(`${why} Nothing was paid.`);
+  if (!OUTPOINT_RE.test(listing.origin)) throw refuse('This contract has no valid original on chain.');
+  let text: string;
+  try {
+    const r = await fetch(`${ORDFS_CONTENT}${listing.origin}`);
+    if (!r.ok) throw new Error(String(r.status));
+    text = await r.text();
+  } catch {
+    throw refuse("Couldn't read this contract's original on chain to check who is paid. Try again shortly.");
+  }
+  let onChain: ContractEnvelope | null;
+  try {
+    onChain = JSON.parse(text) as ContractEnvelope;
+  } catch {
+    onChain = null;
+  }
+  if (text !== listing.body || !onChain || typeof onChain !== 'object' || !sameEnvelope(onChain, listing.envelope))
+    throw refuse("This listing doesn't match the contract its author put on chain.");
+};
+
 /**
  * Buy a copy: mint the exact published text, paying the author (and the 1% fee) in the same transaction.
- * `approved` is the listing the buyer saw and pressed Buy on. The catalogue is asked again (sold out?), and the
- * buy is refused if its price, payee, copies or text differ from what was approved (b-Aware 25 Oct 2026): the
- * catalogue must never change what is paid or minted between showing it and paying.
+ * `approved` is the listing the buyer saw and pressed Buy on (the sheet shows sale.payTo in full). The catalogue is
+ * asked again (sold out?), and the buy is refused if its price, payee, copies or text differ from what was approved
+ * (b-Aware 25 Oct 2026): the catalogue must never change what is paid or minted between showing it and paying. A
+ * paid buy also needs the approved terms to be the author's own inscription (checkAgainstOriginal).
  */
 export const buyContract = async (ctx: OneSatContext, approved: ContractListing, bsvUsd: number) => {
   const c = await getContract(approved.origin);
@@ -66,6 +99,7 @@ export const buyContract = async (ctx: OneSatContext, approved: ContractListing,
   const env = approved.envelope;
   if (c.sold >= env.sale.copies) throw new Error('Sold out');
   if (env.sale.priceUsd > 0 && !(bsvUsd > 0)) throw new Error('No BSV price right now; try again shortly.');
+  if (env.sale.priceUsd > 0) await checkAgainstOriginal(approved);
   const sats = contractPriceSats(env, bsvUsd);
   const paying =
     sats > 0 ? withFeeOutput(withFeeOutput(ctx, marketFeeSats(sats), marketFeeAddress()), sats, env.sale.payTo) : ctx;
