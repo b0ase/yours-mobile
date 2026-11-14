@@ -86,7 +86,8 @@ export type ExactLock = { address: string; until: number; token?: { id: string; 
 export function exactLock(script: Script): ExactLock | null {
   try {
     const d = Lock.decode(script);
-    if (!d || !(d.until > 0)) return null;
+    // A block height, as tokenLockScript allows: from 500,000,000 nLockTime is a time and the lock never opens.
+    if (!d || !(d.until > 0) || d.until >= 500_000_000) return null;
     const hex = script.toHex();
     if (hex === Lock.lock(d.address, d.until).toHex()) return { address: d.address, until: d.until };
     const t = BSV21.decode(script);

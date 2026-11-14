@@ -48,7 +48,7 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
       // Only the exact lock script counts (lockFinder's rule; a token lock may carry its BSV-21 envelope in front).
       // The lock pattern with anything else around it may be spendable now: never listed, never read as a receipt.
       const d = exactLock(o.lockingScript);
-      if (!d) problems.push(`Output ${vout} is not a valid lock: it may be spendable now.`);
+      if (!d) problems.push(`Output ${vout} is not a valid lock, so it is not counted as locked.`);
       else if ((o.satoshis ?? 0) > 0)
         locks.push({
           ...(d.token ? { token: { id: d.token.id, amt: String(d.token.amt) } } : {}),
@@ -66,7 +66,20 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
   const r = receipt as Receipt | null;
   if (r) {
     const byVout = new Map(locks.map((l) => [l.vout, l]));
+    // Each entry must name a different output with whole, non-negative numbers: a repeated vout would let one lock
+    // stand for two and hide another lock (someone else's, or one already open) behind the receipt.
+    const listed = new Set<number>();
+    const whole = (n: unknown) => Number.isInteger(n) && (n as number) >= 0;
     for (const s of r.schedule) {
+      if (!s || typeof s !== 'object' || !whole(s.vout) || !whole(s.height) || !whole(s.sats)) {
+        problems.push('The receipt has an entry that is not a whole output, block and amount.');
+        continue;
+      }
+      if (listed.has(s.vout)) {
+        problems.push(`The receipt lists output ${s.vout} twice.`);
+        continue;
+      }
+      listed.add(s.vout);
       const l = byVout.get(s.vout);
       if (!l) problems.push(`Output ${s.vout} is not a lock.`);
       else {
@@ -83,9 +96,11 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
         } else if (l.token) problems.push(`Output ${s.vout} is a token lock, but the receipt is for BSV.`);
       }
     }
+    for (const l of locks)
+      if (!listed.has(l.vout)) problems.push(`Output ${l.vout} is a lock the receipt does not list.`);
     if (r.schedule.length !== locks.length)
       problems.push(`The receipt lists ${r.schedule.length} locks; the transaction has ${locks.length}.`);
-    const sum = r.schedule.reduce((a, s) => a + s.sats, 0);
+    const sum = r.schedule.reduce((a, s) => a + (s && whole(s.sats) ? s.sats : NaN), 0);
     if (sum !== r.amountSats) problems.push('The receipt total does not add up.');
   }
   const spentN = locks.filter((l) => l.spent).length;

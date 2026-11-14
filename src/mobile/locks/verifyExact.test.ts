@@ -47,21 +47,37 @@ function txWith(outputs: { lockingScript: Script; satoshis: number }[]) {
   return tx;
 }
 
-/** A receipt (vout 1) claiming one lock at vout 0 of SATS until UNTIL, to `address`. */
-const receiptFor = (token?: boolean) => {
-  const r = buildReceipt({
-    mode: 'date',
-    pieces: [{ height: UNTIL, sats: token ? 1 : SATS }],
-    lockAddress: address,
-    identity: { handle: '$test', address },
-    ...(token ? { token: { id: TOKEN, amt: String(AMT), dec: 0, sym: 'TST' } } : {}),
-  });
-  return buildInscriptionScript(
+type Receipt = ReturnType<typeof buildReceipt>;
+const receiptScript = (r: Receipt) =>
+  buildInscriptionScript(
     new P2PKH().lock(address),
     new TextEncoder().encode(receiptSvg(r)),
     'image/svg+xml',
     receiptMap(r),
   );
+
+/** A receipt claiming one lock at vout 0 of SATS until UNTIL, to `address`. */
+const receiptFor = (token?: boolean) =>
+  receiptScript(
+    buildReceipt({
+      mode: 'date',
+      pieces: [{ height: UNTIL, sats: token ? 1 : SATS }],
+      lockAddress: address,
+      identity: { handle: '$test', address },
+      ...(token ? { token: { id: TOKEN, amt: String(AMT), dec: 0, sym: 'TST' } } : {}),
+    }),
+  );
+
+/** A BSV receipt for `address` with the schedule replaced (the total follows the listed sats). */
+const receiptWith = (schedule: unknown[]) => {
+  const r = buildReceipt({
+    mode: 'date',
+    pieces: [{ height: UNTIL, sats: SATS }],
+    lockAddress: address,
+    identity: { handle: '$test', address },
+  });
+  const listed = schedule as Receipt['schedule'];
+  return receiptScript({ ...r, schedule: listed, amountSats: listed.reduce((a, s) => a + (s?.sats ?? 0), 0) });
 };
 
 describe('the escape-hatch script really is spendable now', () => {
@@ -110,6 +126,12 @@ describe('exactLock', () => {
     expect(exactLock(tokenEscape())).toBeNull();
     expect(exactLock(LockingScript.fromHex(`${tokenLockScript(TOKEN, AMT, address, UNTIL).toHex()}7551`))).toBeNull();
     expect(exactLock(Lock.lock(address, 0))).toBeNull();
+  });
+  test('only block heights: from 500,000,000 nLockTime is a time and the lock never opens', () => {
+    expect(exactLock(Lock.lock(address, 499_999_999))).toEqual({ address, until: 499_999_999 });
+    for (const until of [500_000_000, 2 ** 31 - 1, 2 ** 32 - 1])
+      expect(exactLock(Lock.lock(address, until))).toBeNull();
+    expect(exactLock(BSV21.transfer(TOKEN, AMT).lock(lockScriptFor(address, 500_000_000)))).toBeNull();
   });
   test('only the well-formed BSV-21 transfer envelope may sit in front', () => {
     const lock = lockScriptFor(address, UNTIL);
@@ -170,7 +192,7 @@ describe('checkLockTx: only exact locks are locks', () => {
       expect(v.totalSats).toBe(0);
       expect(v.status).toBe('No locks');
       expect(v.receiptValid).toBe(false);
-      expect(v.problems).toContain('Output 0 is not a valid lock: it may be spendable now.');
+      expect(v.problems).toContain('Output 0 is not a valid lock, so it is not counted as locked.');
     });
   test('a lookalike beside a genuine lock is flagged and left out', () => {
     const v = checkLockTx(
@@ -185,7 +207,7 @@ describe('checkLockTx: only exact locks are locks', () => {
     expect(v.locks.map((l) => l.vout)).toEqual([0]);
     expect(v.totalSats).toBe(SATS);
     expect(v.receiptValid).toBe(false);
-    expect(v.problems).toEqual(['Output 2 is not a valid lock: it may be spendable now.']);
+    expect(v.problems).toEqual(['Output 2 is not a valid lock, so it is not counted as locked.']);
   });
   test('a lock to another address or another height does not match the receipt', () => {
     const wrongKey = checkLockTx(
@@ -208,6 +230,74 @@ describe('checkLockTx: only exact locks are locks', () => {
     );
     expect(wrongHeight.receiptValid).toBe(false);
     expect(wrongHeight.problems).toContain(`Output 0 unlocks at block ${UNTIL - 1}, not ${UNTIL}.`);
+  });
+});
+
+describe('checkLockTx: every lock is accounted for by exactly one receipt entry', () => {
+  const attacker = PrivateKey.fromRandom().toAddress();
+  test('a repeated vout cannot hide another lock (review repro)', () => {
+    const v = checkLockTx(
+      txWith([
+        { lockingScript: Lock.lock(address, UNTIL), satoshis: SATS },
+        { lockingScript: Lock.lock(attacker, 100), satoshis: SATS }, // someone else's, open since block 100
+        {
+          lockingScript: receiptWith([
+            { vout: 0, height: UNTIL, sats: SATS },
+            { vout: 0, height: UNTIL, sats: SATS },
+          ]),
+          satoshis: 1,
+        },
+      ]).toHex(),
+      new Set(),
+      UNTIL - 1,
+    );
+    expect(v.receiptValid).toBe(false);
+    expect(v.problems).toContain('The receipt lists output 0 twice.');
+    expect(v.problems).toContain('Output 1 is a lock the receipt does not list.');
+  });
+  test('a lock the receipt leaves out is named', () => {
+    const v = checkLockTx(
+      txWith([
+        { lockingScript: Lock.lock(address, UNTIL), satoshis: SATS },
+        { lockingScript: Lock.lock(address, UNTIL), satoshis: SATS },
+        { lockingScript: receiptWith([{ vout: 1, height: UNTIL, sats: SATS }]), satoshis: 1 },
+      ]).toHex(),
+      new Set(),
+      0,
+    );
+    expect(v.receiptValid).toBe(false);
+    expect(v.problems).toContain('Output 0 is a lock the receipt does not list.');
+  });
+  test('entries must be whole, non-negative numbers', () => {
+    for (const bad of [
+      { vout: 0.5, height: UNTIL, sats: SATS },
+      { vout: -1, height: UNTIL, sats: SATS },
+      { vout: '0', height: UNTIL, sats: SATS },
+      { vout: 0, height: UNTIL + 0.5, sats: SATS },
+      { vout: 0, height: UNTIL, sats: -SATS },
+      null,
+    ]) {
+      const v = checkLockTx(
+        txWith([
+          { lockingScript: Lock.lock(address, UNTIL), satoshis: SATS },
+          { lockingScript: receiptWith([bad]), satoshis: 1 },
+        ]).toHex(),
+        new Set(),
+        0,
+      );
+      expect(v.receiptValid).toBe(false);
+      expect(v.problems).toContain('The receipt has an entry that is not a whole output, block and amount.');
+    }
+  });
+  test('a lock that can never open (until ≥ 500,000,000) is not counted as locked', () => {
+    const v = checkLockTx(
+      txWith([{ lockingScript: Lock.lock(address, 500_000_000), satoshis: SATS }]).toHex(),
+      new Set(),
+      0,
+    );
+    expect(v.locks).toEqual([]);
+    expect(v.status).toBe('No locks');
+    expect(v.problems).toEqual(['Output 0 is not a valid lock, so it is not counted as locked.']);
   });
 });
 
