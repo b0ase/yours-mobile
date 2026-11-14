@@ -669,16 +669,22 @@ export class BchatClient {
    * Browser builds (web, desktop, extension) post FormData with fetch. The phone apps send the same multipart form
    * through native HTTP (`dataType: 'formData'`, which Capacitor's iOS and Android layers turn into multipart), as
    * every other bChat call there does, so the WebView's origin never meets CORS.
-   * Location first (chat/uploadLocation.ts, b-Aware #288): a JPEG goes without its metadata, anything else that has
-   * or may have location is refused before any request. Returns the file actually sent.
+   * Location first (chat/uploadLocation.ts, b-Aware #288): a JPEG goes without its metadata, a video / HEIC with its
+   * location blanked, anything else that has or may have location is refused before any request. `recorded`: the
+   * app's own voice note, never refused. Returns the file actually sent.
    */
-  async uploadMedia(ticker: string, original: File, onProgress?: (fraction: number) => void): Promise<File> {
+  async uploadMedia(
+    ticker: string,
+    original: File,
+    onProgress?: (fraction: number) => void,
+    opts: { recorded?: boolean } = {},
+  ): Promise<File> {
     if (original.size > ROOM_UPLOAD_MAX_BYTES)
       throw new ChatApiError(`Files can be up to ${ROOM_UPLOAD_MAX_BYTES / 1024 / 1024} MB.`, 413);
     const Authorization = this.bearer();
     let file: File;
     try {
-      file = await cleanFileForUpload(original);
+      file = await cleanFileForUpload(original, opts);
     } catch (e) {
       throw new ChatApiError(e instanceof Error ? e.message : 'This file could not be checked for location', 422);
     }

@@ -1,4 +1,5 @@
-import { locationVerdict, shareBlockedMessage, stripJpegLocation } from '../private/location';
+import type { BchatClient } from './api';
+import { blankBmffLocation, locationVerdict, shareBlockedMessage, stripJpegLocation } from '../private/location';
 
 /**
  * The location gate for everything the wallet sends to bChat (b-Aware #288): room photos, videos, voice notes and
@@ -6,28 +7,38 @@ import { locationVerdict, shareBlockedMessage, stripJpegLocation } from '../priv
  * room cover. bit-sign keeps the bytes exactly as sent and serves them to every member, and any member can then
  * inscribe a room file publicly on chain (bit-sign rooms/[ticker]/media/[id]/stamp, mode 'full'). So nothing leaves
  * the device with location in it:
- *   - nothing found: sent as it is;
- *   - a JPEG with (possible) location: its metadata is removed (private/location.ts stripJpegLocation, orientation
- *     kept) and the copy is sent only if it then reads as clean;
- *   - anything else with (possible) location: refused, nothing is sent.
+ *   - every JPEG goes without its metadata (private/location.ts stripJpegLocation, orientation kept), whatever the
+ *     detector says: EXIF / XMP / IPTC also carry city names, maker notes and UTF-16 XMP it can't read;
+ *   - other files with no location found go as they are;
+ *   - MOV / MP4 / M4A / HEIC with location have it blanked in place (blankBmffLocation), same length;
+ *   - each changed copy is sent only if it then reads as clean;
+ *   - audio the detector can't read through, and the app's own voice recordings (`recorded`), go as they are;
+ *   - anything else with (possible) location is refused, nothing is sent.
  */
 export type CleanUpload = { ok: true; bytes: Uint8Array; stripped: boolean } | { ok: false; message: string };
 
-export function cleanForUpload(bytes: Uint8Array, mime: string): CleanUpload {
+export function cleanForUpload(bytes: Uint8Array, mime: string, opts: { recorded?: boolean } = {}): CleanUpload {
+  const jpeg = stripJpegLocation(bytes);
+  if (jpeg && locationVerdict(jpeg, 'image/jpeg') === 'none') return { ok: true, bytes: jpeg, stripped: true };
   const v = locationVerdict(bytes, mime);
   if (v === 'none') return { ok: true, bytes, stripped: false };
-  const clean = stripJpegLocation(bytes);
-  if (clean && locationVerdict(clean, 'image/jpeg') === 'none') return { ok: true, bytes: clean, stripped: true };
+  const blanked = blankBmffLocation(bytes);
+  if (blanked && locationVerdict(blanked, mime) === 'none') return { ok: true, bytes: blanked, stripped: true };
+  // A voice note from the app's recorder carries no location (MediaRecorder writes none); other audio is refused
+  // only on evidence, not because its container didn't parse.
+  if (opts.recorded || (v === 'unknown' && /^audio\//i.test(mime.trim()))) return { ok: true, bytes, stripped: false };
   return { ok: false, message: shareBlockedMessage(mime, v) };
 }
 
-/** A File ready to send: the same one, or a JPEG copy without metadata. Throws the reason when it can't be sent. */
-export async function cleanFileForUpload(file: File): Promise<File> {
-  const r = cleanForUpload(new Uint8Array(await file.arrayBuffer()), file.type);
+const isJpeg = (b: Uint8Array) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+
+/** A File ready to send: the same one, or a cleaned copy. Throws the reason when it can't be sent. */
+export async function cleanFileForUpload(file: File, opts: { recorded?: boolean } = {}): Promise<File> {
+  const r = cleanForUpload(new Uint8Array(await file.arrayBuffer()), file.type, opts);
   if (!r.ok) throw new Error(r.message);
   if (!r.stripped) return file;
   return new File([r.bytes as BlobPart], file.name, {
-    type: file.type || 'image/jpeg',
+    type: file.type || (isJpeg(r.bytes) ? 'image/jpeg' : ''),
     lastModified: file.lastModified,
   });
 }
@@ -56,5 +67,11 @@ export function cleanDataUrlForUpload(dataUrl: string): string {
   }
   const r = cleanForUpload(bytes, mime);
   if (!r.ok) throw new Error(r.message);
-  return r.stripped ? `data:${mime || 'image/jpeg'};base64,${toBase64(r.bytes)}` : dataUrl;
+  return r.stripped
+    ? `data:${mime || (isJpeg(r.bytes) ? 'image/jpeg' : 'application/octet-stream')};base64,${toBase64(r.bytes)}`
+    : dataUrl;
 }
+
+/** The chat bar's voice note: the app's own recording, so the gate runs with `recorded` and never refuses it. */
+export const sendVoiceNote = (client: Pick<BchatClient, 'uploadMedia'>, ticker: string, file: File) =>
+  client.uploadMedia(ticker, file, undefined, { recorded: true });

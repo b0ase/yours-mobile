@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { OneSatContext } from '@1sat/actions';
 import * as F from './location.fixtures';
 import {
+  blankBmffLocation,
   hasLocationMetadata,
   LocationBlockedError,
   locationVerdict,
@@ -76,6 +77,47 @@ describe('locationVerdict: real tiny files', () => {
   test('JPEG: extended XMP split over APP1 parts (a tag cut in two, parts out of order) is found', () => {
     expect(v(F.jpeg({ app1: F.extendedXmp() }), 'image/jpeg')).toBe('found');
     expect(v(F.jpeg({ app1: F.extendedXmp(true) }), 'image/jpeg')).toBe('found');
+  });
+
+  test('PNG: every ImageMagick raw profile is decoded (xmp too); one that does not decode may contain location', () => {
+    expect(v(F.png([F.pngRawProfile(true, 'xmp')]), 'image/png')).toBe('found');
+    expect(v(F.png([F.pngRawProfile(false, 'xmp')]), 'image/png')).toBe('none');
+    expect(v(F.png([F.pngRawText('Raw profile type xmp', 'not hex at all')]), 'image/png')).toBe('unknown');
+  });
+
+  test('other files: a GPS photo embedded in them (a PDF, a RAW as octet-stream) is found', () => {
+    const pdf = [
+      ...F.ascii('%PDF-1.4\n4 0 obj<</Filter/DCTDecode>>stream\n'),
+      ...F.jpeg({ exif: 'gps' }),
+      ...F.ascii('\nendstream'),
+    ];
+    expect(v(pdf, 'application/pdf')).toBe('found');
+    expect(
+      v([...F.ascii('FUJIFILMCCD-RAW '), ...F.jpeg({ tiff: F.tiffGpsIn('exif') })], 'application/octet-stream'),
+    ).toBe('found');
+    expect(v([...F.ascii('%PDF-1.4\n'), ...F.jpeg({ exif: 'plain' })], 'application/pdf')).toBe('none');
+  });
+
+  test('a file of thousands of EXIF headers is answered quickly ("may contain"), not after seconds', () => {
+    const big = new Uint8Array(2_000_000);
+    const hdr = [...F.ascii('Exif\0\0MM'), 0, 42, 0, 0, 0, 8];
+    for (let i = 0; i + hdr.length < big.length; i += hdr.length) big.set(hdr, i);
+    big.set([0xff, 0xd8, 0xff, 0xe0, 0, 16], 0);
+    const t0 = performance.now();
+    expect(locationVerdict(big, 'image/jpeg')).toBe('unknown');
+    expect(locationVerdict(big, 'application/octet-stream')).toBe('unknown');
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
+
+  test('MP4: ffmpeg\'s plain "location" mdta key (ISO 6709 value) is found', () => {
+    expect(v(F.mp4({ loc: 'ffkeys' }), 'video/mp4')).toBe('found');
+  });
+
+  test('audio whose boxes do not read through is checked as a flat file, not refused outright', () => {
+    const odd = [...F.mp4({ noMoov: true }).slice(0, 20), ...F.ascii('opus'), 1, 2, 3];
+    expect(v(odd, 'audio/mp4')).toBe('none');
+    expect(v([...odd, ...F.ascii('\xA9xyz+51.5074-000.1278/')], 'audio/mp4')).toBe('found');
+    expect(v(F.mp4({ noMoov: true }), 'video/mp4')).toBe('unknown');
   });
 
   test('the claimed type does not matter for a recognised format', () => {
@@ -209,6 +251,55 @@ describe('stripJpegLocation', () => {
     expect(stripJpegLocation(F.u8(src.slice(0, src.length - 1)))).toBeNull();
     expect(stripJpegLocation(F.u8(src.slice(0, 40)))).toBeNull();
     expect(stripJpegLocation(F.u8(F.png([F.pngExif(true)])))).toBeNull();
+  });
+});
+
+// ── MOV / MP4 / HEIC: location blanked in place ──────────────────────────────
+
+describe('blankBmffLocation', () => {
+  const same = (a: number[], out: Uint8Array) => {
+    expect(out.length).toBe(a.length);
+    // The media payload (mdat, at the end of these fixtures) is untouched.
+    expect([...out.subarray(out.length - 308)]).toEqual(a.slice(a.length - 308));
+  };
+
+  test('MOV / MP4: ©xyz, loci, XMP, Apple and ffmpeg location keys are blanked, same length, then clean', () => {
+    for (const loc of ['xyz', 'loci', 'xmp', 'keys', 'ffkeys'] as const) {
+      const src = F.mp4({ loc });
+      const out = blankBmffLocation(F.u8(src))!;
+      expect([loc, locationVerdict(out, 'video/mp4')]).toEqual([loc, 'none']);
+      same(src, out);
+    }
+    // Other metadata stays: the title key and value.
+    const out = blankBmffLocation(F.u8(F.mp4({ loc: 'keys' })))!;
+    expect(new TextDecoder().decode(out)).toContain('Walk');
+  });
+
+  test('a GPS metadata track is not blanked: the result still reads as located', () => {
+    const out = blankBmffLocation(F.u8(F.mp4({ loc: 'gpmd' })))!;
+    expect(locationVerdict(out, 'video/mp4')).toBe('found');
+  });
+
+  test('HEIC: the GPS IFD and its pointer go (in any IFD), other EXIF stays, same length', () => {
+    for (const src of [
+      F.heic({ gps: true }),
+      F.heic({ gps: true, prefixed: true }),
+      F.heic({ gps: true, tiff: F.tiffGpsIn('exif', 6) }),
+      F.heic({ gps: false, xmpGps: true }),
+    ]) {
+      expect(v(src, 'image/heic')).toBe('found');
+      const out = blankBmffLocation(F.u8(src))!;
+      expect(out.length).toBe(src.length);
+      expect(locationVerdict(out, 'image/heic')).toBe('none');
+    }
+    const out = blankBmffLocation(F.u8(F.heic({ gps: true })))!;
+    expect(new TextDecoder().decode(out)).toContain('Cam');
+  });
+
+  test('not a box file, or boxes that do not read: null', () => {
+    expect(blankBmffLocation(F.u8(F.jpeg({ exif: 'gps' })))).toBeNull();
+    const m = F.mp4({ loc: 'xyz' });
+    expect(blankBmffLocation(F.u8(m.slice(0, m.length - 10)))).toBeNull();
   });
 });
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import * as F from '../private/location.fixtures';
 import { locationVerdict, shareBlockedMessage } from '../private/location';
 import { BchatClient, type FormPart, type Http } from './api';
-import { cleanDataUrlForUpload, cleanForUpload } from './uploadLocation';
+import { cleanDataUrlForUpload, cleanForUpload, sendVoiceNote } from './uploadLocation';
 
 /** b-Aware #288: a GPS-tagged chat photo went to bit-sign byte for byte (no location check on the chat path). */
 
@@ -55,11 +55,11 @@ describe('chat room uploads: no location leaves the device', () => {
     }
   });
 
-  test('a located video, HEIC or PNG is refused before any request', async () => {
+  test('a GPS track video, a located PNG / WebP, an unreadable video: refused before any request', async () => {
     for (const [bytes, mime] of [
-      [F.mp4({ loc: 'keys' }), 'video/quicktime'],
-      [F.heic({ gps: true }), 'image/heic'],
+      [F.mp4({ loc: 'gpmd' }), 'video/mp4'],
       [F.png([F.pngExif(true)]), 'image/png'],
+      [F.webp({ xmp: true }), 'image/webp'],
       [F.mp4({ noMoov: true }), 'video/mp4'],
     ] as const) {
       const { client, posts } = recorder();
@@ -80,9 +80,60 @@ describe('chat room uploads: no location leaves the device', () => {
     expect(posts).toEqual([]);
   });
 
-  test('a clean photo, voice note or file goes as it is', async () => {
+  test('phone videos and HEIC with location are sent with it blanked in place (same length), not refused', async () => {
     for (const [bytes, mime] of [
-      [F.jpeg({ exif: 'plain' }), 'image/jpeg'],
+      [F.mp4({ loc: 'keys' }), 'video/quicktime'],
+      [F.mp4({ loc: 'xyz' }), 'video/mp4'],
+      [F.mp4({ loc: 'ffkeys' }), 'video/mp4'],
+      [F.heic({ gps: true }), 'image/heic'],
+      [F.heic({ gps: true, tiff: F.tiffGpsIn('exif', 6) }), 'image/heic'],
+    ] as const) {
+      const { client, posts } = recorder();
+      const sent = await client.uploadMedia('ROOM', new File([F.u8([...bytes])], 'v', { type: mime }));
+      const out = await sentBytes(posts[0]);
+      expect([mime, locationVerdict(out, mime)]).toEqual([mime, 'none']);
+      expect(out.length).toBe(bytes.length);
+      expect(sent.type).toBe(mime);
+    }
+  });
+
+  test('every JPEG goes without its metadata, even with no GPS found (UTF-16 XMP, IPTC city, comments)', async () => {
+    const x16 = Array.from(F.xmp('exif:GPSLatitude="51,30.2N" exif:GPSLongitude="0,7.6W"')).flatMap((c) => [
+      0,
+      c.charCodeAt(0),
+    ]);
+    const photo = F.jpeg({
+      exif: 'plain',
+      app1: [[...F.ascii('http://ns.adobe.com/xap/1.0/\0'), ...x16]],
+      extra: [F.jpegSeg(0xed, F.ascii('Photoshop 3.0\x008BIM London')), F.jpegSeg(0xfe, F.ascii('Home'))],
+    });
+    expect(locationVerdict(F.u8(photo), 'image/jpeg')).toBe('none');
+    const { client, posts } = recorder();
+    await client.uploadMedia('ROOM', new File([F.u8(photo)], 'p.jpg', { type: 'image/jpeg' }));
+    const out = await sentBytes(posts[0]);
+    const text = new TextDecoder('latin1').decode(out);
+    expect(text).not.toContain('London');
+    expect(text).not.toContain('ns.adobe.com');
+    expect(text).not.toContain('Home');
+    expect(out.length).toBeLessThan(photo.length);
+  });
+
+  test("voice notes: audio that does not parse goes; the app recorder's file is never refused", async () => {
+    const odd = [...F.mp4({ noMoov: true }).slice(0, 20), ...F.ascii('opus'), 1, 2, 3];
+    let r = recorder();
+    await r.client.uploadMedia('ROOM', new File([F.u8(odd)], 'voice.m4a', { type: 'audio/mp4' }));
+    expect(await sentBytes(r.posts[0])).toEqual(F.u8(odd));
+    // Location text the gate can't remove: refused from the file picker, sent from the recorder.
+    const tagged = new File([F.u8(F.webm(true))], 'voice.webm', { type: 'audio/webm' });
+    r = recorder();
+    await expect(r.client.uploadMedia('ROOM', tagged)).rejects.toThrow('location data');
+    expect(r.posts).toEqual([]);
+    await sendVoiceNote(r.client, 'ROOM', tagged); // what the chat bar's voice note sheet calls
+    expect(r.posts).toHaveLength(1);
+  });
+
+  test('a clean voice note or file goes as it is', async () => {
+    for (const [bytes, mime] of [
       [F.webm(false), 'audio/webm'],
       [F.ascii('hello'), 'text/plain'],
     ] as const) {

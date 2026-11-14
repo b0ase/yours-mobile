@@ -233,13 +233,15 @@ export const pngXmp = (gps: boolean, compressed = false) =>
       compressed ? noise(40) : ascii(gps ? GPS_XMP : PLAIN_XMP),
     ),
   );
+/** A tEXt chunk with any keyword and text. */
+export const pngRawText = (keyword: string, text: string) => chunk('tEXt', ascii(`${keyword}\0${text}`));
 /** ImageMagick also writes one tEXt per EXIF tag, keyword "exif:<Tag>". */
 export const pngTagText = (tag: string, value: string) => chunk('tEXt', ascii(`exif:${tag}\0${value}`));
-/** ImageMagick's hex "Raw profile type exif" tEXt chunk. */
-export const pngRawProfile = (gps: boolean) => {
-  const body = cat(ascii('Exif\0\0'), tiff(gps));
+/** ImageMagick's hex "Raw profile type <kind>" tEXt chunk (exif by default; xmp carries the XMP packet). */
+export const pngRawProfile = (gps: boolean, kind: 'exif' | 'xmp' = 'exif') => {
+  const body = kind === 'xmp' ? ascii(gps ? GPS_XMP : PLAIN_XMP) : cat(ascii('Exif\0\0'), tiff(gps));
   const hex = body.map((x) => x.toString(16).padStart(2, '0')).join('');
-  return chunk('tEXt', ascii(`Raw profile type exif\0\nexif\n${String(body.length).padStart(8)}\n${hex}\n`));
+  return chunk('tEXt', ascii(`Raw profile type ${kind}\0\n${kind}\n${String(body.length).padStart(8)}\n${hex}\n`));
 };
 
 // ── WebP ─────────────────────────────────────────────────────────────────────
@@ -265,8 +267,9 @@ const full = (type: string, v: number, payload: B): B => box(type, cat([v, 0, 0,
  * HEIC: ftyp, meta (hdlr, iinf with an hvc1 image item and an Exif item, iloc pointing into mdat), mdat. `prefixed`
  * puts "Exif\0\0" before the TIFF header (Apple); without it only the iinf / iloc reader can find the EXIF.
  */
-export function heic(o: { gps: boolean; prefixed?: boolean; xmpGps?: boolean }): B {
-  const exifItem = o.prefixed ? cat(be32(6), ascii('Exif\0\0'), tiff(o.gps)) : cat(be32(0), tiff(o.gps));
+export function heic(o: { gps: boolean; prefixed?: boolean; xmpGps?: boolean; tiff?: B }): B {
+  const t = o.tiff ?? tiff(o.gps);
+  const exifItem = o.prefixed ? cat(be32(6), ascii('Exif\0\0'), t) : cat(be32(0), t);
   const xmpItem = o.xmpGps === undefined ? [] : ascii(o.xmpGps ? GPS_XMP : PLAIN_XMP);
   const ftyp = box('ftyp', cat(ascii('heic'), be32(0), ascii('mif1heic')));
   const build = (exifOff: number, xmpOff: number) => {
@@ -303,8 +306,13 @@ export function heic(o: { gps: boolean; prefixed?: boolean; xmpGps?: boolean }):
   return cat(ftyp, meta, box('mdat', cat(exifItem, xmpItem, noise(64))));
 }
 
-/** MP4 / MOV: ftyp, moov (mvhd + optional udta ©xyz or Apple keys ISO6709), mdat. */
-export function mp4(o: { loc?: 'xyz' | 'keys' | 'loci' | 'xmp'; noMoov?: boolean; mdat?: B } = {}): B {
+/**
+ * MP4 / MOV: ftyp, moov (mvhd + optional udta ©xyz or Apple keys ISO6709), mdat. 'ffkeys' is ffmpeg's
+ * use_metadata_tags form (a plain "location" mdta key, ISO 6709 value); 'gpmd' a GoPro-style GPS metadata track.
+ */
+export function mp4(
+  o: { loc?: 'xyz' | 'keys' | 'ffkeys' | 'loci' | 'xmp' | 'gpmd'; noMoov?: boolean; mdat?: B } = {},
+): B {
   const ftyp = box('ftyp', cat(ascii('qt  '), be32(0), ascii('qt  isom')));
   const udta =
     o.loc === 'xyz'
@@ -314,18 +322,26 @@ export function mp4(o: { loc?: 'xyz' | 'keys' | 'loci' | 'xmp'; noMoov?: boolean
         : o.loc === 'xmp'
           ? box('udta', box('XMP_', ascii(GPS_XMP)))
           : [];
+  const key = o.loc === 'keys' ? 'com.apple.quicktime.location.ISO6709' : 'location';
   const keys =
-    o.loc === 'keys'
+    o.loc === 'keys' || o.loc === 'ffkeys'
       ? box(
           'meta',
           cat(
             full('hdlr', 0, cat(be32(0), ascii('mdta'), new Array(13).fill(0))),
-            full('keys', 0, cat(be32(1), box('mdta', ascii('com.apple.quicktime.location.ISO6709')))),
-            box('ilst', box('\0\0\0\x01', box('data', cat(be32(1), be32(0), ascii('+51.5074-000.1278/'))))),
+            full('keys', 0, cat(be32(2), box('mdta', ascii('title')), box('mdta', ascii(key)))),
+            box(
+              'ilst',
+              cat(
+                box('\0\0\0\x01', box('data', cat(be32(1), be32(0), ascii('Walk')))),
+                box('\0\0\0\x02', box('data', cat(be32(1), be32(0), ascii('+51.5074-000.1278/')))),
+              ),
+            ),
           ),
         )
       : [];
-  const moov = box('moov', cat(full('mvhd', 0, noise(96)), udta, keys));
+  const gpmd = o.loc === 'gpmd' ? box('trak', box('mdia', box('minf', box('stbl', box('stsd', ascii('gpmd')))))) : [];
+  const moov = box('moov', cat(full('mvhd', 0, noise(96)), udta, keys, gpmd));
   return cat(ftyp, o.noMoov ? [] : moov, box('mdat', o.mdat ?? noise(300)));
 }
 

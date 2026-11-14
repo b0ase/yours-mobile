@@ -6,8 +6,9 @@
  * Pure and dependency-free (no DOM, no Node APIs), so it can also run server-side. (No copy is in bwalletx-indexer
  * yet, despite earlier notes: checked 14 Nov 2026.)
  *
- * Chat (photos, videos, files, my picture, room covers) goes through chat/uploadLocation.ts: a JPEG has its metadata
- * removed by stripJpegLocation; anything else with (possible) location is refused (b-Aware #288).
+ * Chat (photos, videos, files, my picture, room covers) goes through chat/uploadLocation.ts: every JPEG has its
+ * metadata removed by stripJpegLocation, MOV / MP4 / HEIC have their location blanked in place by blankBmffLocation,
+ * anything else with (possible) location is refused (b-Aware #288).
  *
  * Verdicts:
  *   'found'   location metadata is there (EXIF GPS IFD, XMP GPS / geo, QuickTime ©xyz / ISO6709, 3GPP loci, …);
@@ -15,9 +16,9 @@
  *   'none'    read through and nothing found.
  *
  * Covered: JPEG (EXIF APP1 with a GPS pointer in any IFD, XMP + extended XMP, MPF / trailing EXIF blocks), TIFF,
- * PNG (eXIf, tEXt / iTXt XMP, ImageMagick raw profiles), WebP (EXIF, XMP), GIF / SVG (XMP text), HEIC / HEIF / AVIF
- * (Exif and XMP items via iinf / iloc),
- * MP4 / MOV / 3GP / M4A (©xyz, loci, com.apple.quicktime.location.ISO6709, XMP, GPS metadata tracks), WebM / MKV.
+ * PNG (eXIf, tEXt / iTXt XMP, ImageMagick raw profiles of any type), WebP (EXIF, XMP), GIF / SVG (XMP text),
+ * HEIC / HEIF / AVIF (Exif and XMP items via iinf / iloc), MP4 / MOV / 3GP / M4A (©xyz, loci, location mdta keys,
+ * ISO 6709 values, XMP, GPS metadata tracks), WebM / MKV. Any other file: embedded EXIF blocks and location text.
  */
 
 export type LocationVerdict = 'none' | 'found' | 'unknown';
@@ -49,6 +50,14 @@ const TEXT_NEEDLES = [
 
 /** ISO BMFF / QuickTime (outside mdat): ©xyz, 3GPP loci, GoPro / Google camera-motion GPS tracks, dashcam gps box. */
 const MOVIE_NEEDLES = [...TEXT_NEEDLES, enc('\xA9xyz'), enc('loci'), enc('gpmd'), enc('camm'), enc('gps ')];
+
+/** A movie / audio file read as a flat byte string. */
+const AUDIO_NEEDLES = [...TEXT_NEEDLES, enc('\xA9xyz')];
+
+/** An ISO 6709 coordinate as metadata stores it ("+51.5033-000.1276/", Apple "+37.3349-122.0090+010.000/"). */
+const ISO6709_RE = /[+-]\d{2}\.\d+[+-]\d{3}\.\d+/;
+/** mdta key names with location in them: ffmpeg's plain "location", Apple's com.apple.quicktime.location.*. */
+const MDTA_LOCATION_RE = /mdta[\x20-\x7e]{0,64}location/i;
 
 /** Matroska / WebM tags. */
 const MKV_NEEDLES = [...TEXT_NEEDLES, enc('LOCATION'), enc('RECORDING_LOCATION')];
@@ -104,12 +113,20 @@ const latin1 = (b: Bytes, s: number, e: number) => {
   return out;
 };
 
+/** Movie metadata (outside mdat) with location: the needles, an ISO 6709 value, or an mdta key named "…location…". */
+function movieHasLocation(b: Bytes, s: number, e: number): boolean {
+  if (anyNeedle(b, MOVIE_NEEDLES, s, e)) return true;
+  const text = latin1(b, s, e);
+  return ISO6709_RE.test(text) || MDTA_LOCATION_RE.test(text);
+}
+
 // ── EXIF / TIFF ──────────────────────────────────────────────────────────────
 
 /** Tags whose value points at another IFD: Exif, Interoperability, SubIFDs (and any entry of type IFD, 13). */
 const IFD_POINTER_TAGS = new Set([0x8769, 0xa005, 0x014a]);
 /** More than any real file has (IFD0, IFD1, Exif, Interop, a few SubIFDs): past this it is a crafted file. */
 const MAX_IFDS = 32;
+const MAX_IFD_ENTRIES = 8192;
 
 /**
  * A TIFF structure (EXIF body) starting at `o`: 'found' when ANY IFD in it has a GPS IFD pointer (tag 0x8825).
@@ -125,6 +142,7 @@ function tiffVerdict(b: Bytes, o: number, end = b.length): LocationVerdict {
     if ((!le && !be) || u16(t, 2, le) !== 42) return 'unknown';
     const todo = [u32(t, 4, le)];
     const seen = new Set<number>();
+    let total = 0;
     while (todo.length) {
       const ifd = todo.pop()!;
       if (seen.has(ifd)) continue;
@@ -132,6 +150,7 @@ function tiffVerdict(b: Bytes, o: number, end = b.length): LocationVerdict {
       seen.add(ifd);
       const n = u16(t, ifd, le);
       need(t, ifd + 2, n * 12 + 4);
+      if ((total += n) > MAX_IFD_ENTRIES) return 'unknown';
       for (let i = 0; i < n; i++) {
         const e = ifd + 2 + i * 12;
         const tag = u16(t, e, le);
@@ -161,11 +180,20 @@ function ifdOffsets(t: Bytes, e: number, le: boolean): number[] {
 /** An EXIF payload, with or without the "Exif\0\0" prefix. */
 const exifVerdict = (b: Bytes, s: number, e = b.length) => tiffVerdict(b, startsWith(b, s, EXIF_HDR) ? s + 6 : s, e);
 
+/** Real files have a handful of EXIF blocks (main, thumbnail, MPF images); thousands are a stall attempt. */
+const MAX_EXIF_BLOCKS = 16;
+
 /** Every EXIF block anywhere in the file (embedded / MPF images, trailers) plus XMP text anywhere. */
 function wholeFileScan(b: Bytes, from = 0, to = b.length): LocationVerdict {
   let v: LocationVerdict = 'none';
-  for (let p = find(b, EXIF_HDR, from, to); p >= 0 && v !== 'found'; p = find(b, EXIF_HDR, p + 6, to))
+  let n = 0;
+  for (let p = find(b, EXIF_HDR, from, to); p >= 0 && v !== 'found'; p = find(b, EXIF_HDR, p + 6, to)) {
+    if (++n > MAX_EXIF_BLOCKS) {
+      v = worst(v, 'unknown');
+      break;
+    }
     v = worst(v, tiffVerdict(b, p + 6));
+  }
   if (v !== 'found' && textHasLocation(b, from, to)) v = 'found';
   return v;
 }
@@ -251,20 +279,26 @@ function pngText(b: Bytes, type: string, s: number, e: number): LocationVerdict 
   // A compressed XMP / raw profile can't be read without inflating it: it may carry anything.
   if (compressed) return meta && !/^exif:/.test(keyword) ? 'unknown' : 'none';
   if (textHasLocation(b, z + 1, e)) return 'found';
-  if (/^raw profile type (exif|app1)/.test(keyword)) return rawProfile(latin1(b, z + 1, e));
+  const raw = /^raw profile type (\S+)/.exec(keyword);
+  if (raw) return rawProfile(latin1(b, z + 1, e), raw[1]);
   return 'none';
 }
 
-/** ImageMagick raw profile: "\nexif\n   <len>\n<hex…>". */
-function rawProfile(text: string): LocationVerdict {
+/**
+ * ImageMagick raw profile: "\n<type>\n   <len>\n<hex…>". Every type is decoded (xmp, iptc, 8bim, exif, app1, …)
+ * and searched for location text and EXIF blocks; one that doesn't decode may contain anything.
+ */
+function rawProfile(text: string, kind: string): LocationVerdict {
   const m = /^\s*\S+\s+\d+\s+([0-9a-fA-F\s]+)$/.exec(text);
   if (!m) return 'unknown';
   const hex = m[1].replace(/\s+/g, '');
   if (hex.length % 2) return 'unknown';
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  const at = find(bytes, EXIF_HDR);
-  return at >= 0 ? tiffVerdict(bytes, at + 6) : exifVerdict(bytes, 0);
+  const v = wholeFileScan(bytes);
+  // A bare TIFF (no "Exif\0\0" in front) in an EXIF profile.
+  if (v === 'none' && /^(exif|app1)$/.test(kind) && find(bytes, EXIF_HDR) < 0) return exifVerdict(bytes, 0);
+  return v;
 }
 
 /** WebP (RIFF): EXIF and "XMP " chunks. */
@@ -329,7 +363,7 @@ function bmff(b: Bytes): LocationVerdict {
   if (!meta && !moov) return 'unknown';
   let v: LocationVerdict = 'none';
   // Everything but the media payload: udta / meta / keys / ilst / uuid (XMP) / sample descriptions.
-  for (const x of top) if (x.type !== 'mdat' && anyNeedle(b, MOVIE_NEEDLES, x.start, x.end)) return 'found';
+  for (const x of top) if (x.type !== 'mdat' && movieHasLocation(b, x.start, x.end)) return 'found';
   if (meta) v = worst(v, heifItems(b, meta));
   // A still image (HEIC / AVIF): any other "Exif\0\0" block or XMP text in the item data too. (Not in meta, where an
   // infe's 'Exif' item type followed by its empty name reads as "Exif\0\0".)
@@ -338,60 +372,79 @@ function bmff(b: Bytes): LocationVerdict {
   return v;
 }
 
+/** A meta box's children: QuickTime's meta has none of the full-box version / flags in front of them, ISO's has. */
+const metaKids = (b: Bytes, meta: Box) =>
+  boxes(b, meta.data + (meta.data + 8 <= meta.end && ascii4(b, meta.data + 4) === 'hdlr' ? 0 : 4), meta.end);
+
+/** An Exif or XMP item of a HEIF file; `data` null when it can't be read, `inPlace` when it is a view into the file. */
+type HeifItem = { kind: 'exif' | 'xmp'; data: Bytes | null; inPlace: boolean };
+
+/** HEIF meta: every Exif item and XMP (mime …xml) item through iinf + iloc. Null when the boxes can't be read. */
+function heifMetaItems(b: Bytes, meta: Box): HeifItem[] | null {
+  const kids = metaKids(b, meta);
+  if (!kids) return null;
+  const iinf = kids.find((k) => k.type === 'iinf');
+  if (!iinf) return [];
+  const iv = b[iinf.data];
+  const entries = boxes(b, iinf.data + 4 + (iv === 0 ? 2 : 4), iinf.end);
+  if (!entries) return null;
+  const wanted = new Map<number, 'exif' | 'xmp'>();
+  for (const infe of entries.filter((x) => x.type === 'infe')) {
+    const v = b[infe.data];
+    let p = infe.data + 4;
+    if (v >= 2) {
+      const id = v === 2 ? u16(b, p) : u32(b, p);
+      p += (v === 2 ? 2 : 4) + 2;
+      const type = ascii4(b, p);
+      p += 4;
+      const z = b.indexOf(0, p);
+      const contentType = type === 'mime' && z >= 0 && z < infe.end ? cString(b, z + 1, infe.end) : '';
+      if (type === 'Exif') wanted.set(id, 'exif');
+      else if (type === 'mime' && /xml|xmp/i.test(contentType)) wanted.set(id, 'xmp');
+    } else {
+      const id = u16(b, p);
+      const z = b.indexOf(0, p + 4);
+      const contentType = z >= 0 && z < infe.end ? cString(b, z + 1, infe.end) : '';
+      if (/xml|xmp/i.test(contentType)) wanted.set(id, 'xmp');
+      else if (/exif/i.test(contentType)) wanted.set(id, 'exif');
+    }
+  }
+  if (!wanted.size) return [];
+  const iloc = kids.find((k) => k.type === 'iloc');
+  if (!iloc) return null;
+  const idat = kids.find((k) => k.type === 'idat');
+  const items = ilocItems(b, iloc);
+  return [...wanted].map(([id, kind]) => {
+    const it = items.get(id);
+    return { kind, data: it ? readItem(b, it, idat) : null, inPlace: it?.extents.length === 1 };
+  });
+}
+
+/** Where the TIFF header of an Exif item starts: u32 offset, then (usually) "Exif\0\0" + TIFF; else a search. */
+function exifItemTiff(data: Bytes): number {
+  if (data.length >= 8) {
+    const at = 4 + u32(data, 0);
+    const t = startsWith(data, at, EXIF_HDR) ? at + 6 : at;
+    if (tiffVerdict(data, t) !== 'unknown') return t;
+  }
+  const at = find(data, EXIF_HDR, 0, 64);
+  return at >= 0 ? at + 6 : -1;
+}
+
 /** HEIF meta: read every Exif item and XMP (mime …xml) item through iinf + iloc. */
 function heifItems(b: Bytes, meta: Box): LocationVerdict {
   try {
-    const kids = boxes(b, meta.data + 4, meta.end);
-    if (!kids) return 'unknown';
-    const iinf = kids.find((k) => k.type === 'iinf');
-    if (!iinf) return 'none';
-    const iv = b[iinf.data];
-    const entries = boxes(b, iinf.data + 4 + (iv === 0 ? 2 : 4), iinf.end);
-    if (!entries) return 'unknown';
-    const wanted = new Map<number, 'exif' | 'xmp'>();
-    for (const infe of entries.filter((x) => x.type === 'infe')) {
-      const v = b[infe.data];
-      let p = infe.data + 4;
-      if (v >= 2) {
-        const id = v === 2 ? u16(b, p) : u32(b, p);
-        p += (v === 2 ? 2 : 4) + 2;
-        const type = ascii4(b, p);
-        p += 4;
-        const z = b.indexOf(0, p);
-        const contentType = type === 'mime' && z >= 0 && z < infe.end ? cString(b, z + 1, infe.end) : '';
-        if (type === 'Exif') wanted.set(id, 'exif');
-        else if (type === 'mime' && /xml|xmp/i.test(contentType)) wanted.set(id, 'xmp');
-      } else {
-        const id = u16(b, p);
-        const z = b.indexOf(0, p + 4);
-        const contentType = z >= 0 && z < infe.end ? cString(b, z + 1, infe.end) : '';
-        if (/xml|xmp/i.test(contentType)) wanted.set(id, 'xmp');
-        else if (/exif/i.test(contentType)) wanted.set(id, 'exif');
-      }
-    }
-    if (!wanted.size) return 'none';
-    const iloc = kids.find((k) => k.type === 'iloc');
-    if (!iloc) return 'unknown';
-    const idat = kids.find((k) => k.type === 'idat');
-    const items = ilocItems(b, iloc);
+    const items = heifMetaItems(b, meta);
+    if (!items) return 'unknown';
     let out: LocationVerdict = 'none';
-    for (const [id, kind] of wanted) {
-      const it = items.get(id);
-      if (!it) return 'unknown';
-      const data = readItem(b, it, idat);
+    for (const { kind, data } of items) {
       if (!data) return 'unknown';
       if (kind === 'xmp') {
         if (textHasLocation(data)) return 'found';
         continue;
       }
-      // Exif item: u32 offset to the TIFF header, then (usually) "Exif\0\0" + TIFF.
-      let v = 'unknown' as LocationVerdict;
-      if (data.length >= 4) v = exifVerdict(data, 4 + u32(data, 0));
-      if (v === 'unknown') {
-        const at = find(data, EXIF_HDR, 0, 64);
-        if (at >= 0) v = tiffVerdict(data, at + 6);
-      }
-      out = worst(out, v);
+      const t = exifItemTiff(data);
+      out = worst(out, t >= 0 ? tiffVerdict(data, t) : 'unknown');
       if (out === 'found') return out;
     }
     return out;
@@ -466,6 +519,176 @@ function readItem(b: Bytes, it: IlocItem, idat: Box | undefined): Bytes | null {
     o += x.length;
   }
   return out;
+}
+
+// ── MOV / MP4 / HEIC: location blanked in place ──────────────────────────────
+
+/** Bytes per value of each TIFF field type (1 BYTE … 13 IFD). */
+const TIFF_TYPE_SIZE = [0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8, 4];
+
+/** Zero an IFD (count, entries, next link) and every value it keeps out of line. */
+function zeroIfd(t: Bytes, ifd: number, le: boolean) {
+  const n = u16(t, ifd, le);
+  need(t, ifd + 2, n * 12 + 4);
+  for (let i = 0; i < n; i++) {
+    const e = ifd + 2 + i * 12;
+    const unit = TIFF_TYPE_SIZE[u16(t, e + 2, le)];
+    if (!unit) throw new Short();
+    const len = unit * u32(t, e + 4, le);
+    if (len <= 4) continue;
+    const at = u32(t, e + 8, le);
+    need(t, at, len);
+    t.fill(0, at, at + len);
+  }
+  t.fill(0, ifd, ifd + 2 + n * 12 + 4);
+}
+
+/**
+ * Remove every GPS IFD from a TIFF structure, in place and at the same length: the GPS IFD and its values are zeroed,
+ * and the 0x8825 entry pointing to it is taken out of its IFD (the later entries move up, the count drops by one, the
+ * next link follows, the freed 12 bytes are zeroed), so the IFD stays sorted and valid. False when it can't be read.
+ */
+function blankTiffGps(t: Bytes): boolean {
+  try {
+    const le = t[0] === 0x49 && t[1] === 0x49;
+    if ((!le && !(t[0] === 0x4d && t[1] === 0x4d)) || u16(t, 2, le) !== 42) return false;
+    const todo = [u32(t, 4, le)];
+    const seen = new Set<number>();
+    while (todo.length) {
+      const ifd = todo.pop()!;
+      if (seen.has(ifd)) continue;
+      if (ifd < 8 || seen.size >= MAX_IFDS) return false;
+      seen.add(ifd);
+      let n = u16(t, ifd, le);
+      need(t, ifd + 2, n * 12 + 4);
+      for (let i = 0; i < n; i++) {
+        const e = ifd + 2 + i * 12;
+        const tag = u16(t, e, le);
+        if (tag === 0x8825) {
+          zeroIfd(t, u32(t, e + 8, le), le);
+          const end = ifd + 2 + n * 12 + 4;
+          t.copyWithin(e, e + 12, end);
+          t.fill(0, end - 12, end);
+          n--;
+          t.set(le ? [n & 255, n >> 8] : [n >> 8, n & 255], ifd);
+          i--;
+        } else if (IFD_POINTER_TAGS.has(tag) || u16(t, e + 2, le) === 13) todo.push(...ifdOffsets(t, e, le));
+      }
+      const next = u32(t, ifd + 2 + n * 12, le);
+      if (next) todo.push(next);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const FREE = enc('free');
+/** A box becomes 'free' with a zeroed payload: same length, so chunk offsets (stco / co64, iloc) stay valid. */
+const freeBox = (b: Bytes, x: Box) => {
+  b.set(FREE, x.start + 4);
+  b.fill(0, x.data, x.end);
+};
+
+/** QuickTime / 3GPP location atoms, and boxes that hold XMP text. */
+const LOCATION_ATOMS = new Set(['\xA9xyz', 'loci', 'XMP_', 'uuid']);
+
+/**
+ * moov / trak / udta: location atoms, XMP with location and (in udta, where every child is a metadata atom) any atom
+ * with a location value become 'free'; meta boxes go to blankMeta.
+ */
+function blankMovie(b: Bytes, s: number, e: number, udta = false): boolean {
+  const kids = boxes(b, s, e);
+  if (!kids) return false;
+  for (const x of kids) {
+    if (x.type === 'mdat' || !movieHasLocation(b, x.start, x.end)) continue;
+    if (LOCATION_ATOMS.has(x.type) || (udta && x.type !== 'meta')) freeBox(b, x);
+    else if (x.type === 'meta') {
+      if (!blankMeta(b, x)) return false;
+    } else if (x.type === 'moov' || x.type === 'trak' || x.type === 'udta') {
+      if (!blankMovie(b, x.data, x.end, x.type === 'udta')) return false;
+    }
+    // Anything else with location (a GoPro / camm GPS track) stays: the re-check then refuses the file.
+  }
+  return true;
+}
+
+/**
+ * A meta box: Apple keys + ilst (com.apple.quicktime.location.*: the key name is zeroed, its ilst item becomes
+ * 'free'), iTunes-style ilst items (©xyz), and HEIF Exif / XMP items (GPS IFDs removed, XMP with location blanked
+ * to spaces). False when something with location can't be blanked in place.
+ */
+function blankMeta(b: Bytes, meta: Box): boolean {
+  const kids = metaKids(b, meta);
+  if (!kids) return false;
+  const gone = new Set<number>();
+  const keys = kids.find((k) => k.type === 'keys');
+  if (keys) {
+    let p = keys.data + 8;
+    for (let k = 1, count = u32(b, keys.data + 4); k <= count; k++) {
+      const size = u32(b, p);
+      if (size < 8 || p + size > keys.end) return false;
+      if (textHasLocation(b, p + 8, p + size) || /location/i.test(latin1(b, p + 8, p + size))) {
+        b.fill(0, p + 8, p + size);
+        gone.add(k);
+      }
+      p += size;
+    }
+  }
+  const ilst = kids.find((k) => k.type === 'ilst');
+  if (ilst) {
+    const items = boxes(b, ilst.data, ilst.end);
+    if (!items) return false;
+    for (const it of items)
+      if (gone.has(u32(b, it.start + 4)) || LOCATION_ATOMS.has(it.type) || movieHasLocation(b, it.start, it.end))
+        freeBox(b, it);
+  }
+  for (const x of kids) if (LOCATION_ATOMS.has(x.type) && movieHasLocation(b, x.start, x.end)) freeBox(b, x);
+  const items = heifMetaItems(b, meta);
+  if (!items) return false;
+  for (const { kind, data, inPlace } of items) {
+    if (!data) return false;
+    if (kind === 'xmp') {
+      if (!textHasLocation(data)) continue;
+      if (!inPlace) return false;
+      data.fill(0x20);
+      continue;
+    }
+    const t = exifItemTiff(data);
+    if (t < 0) return false;
+    if (tiffVerdict(data, t) === 'none') continue;
+    if (!inPlace || !blankTiffGps(data.subarray(t))) return false;
+  }
+  return true;
+}
+
+/**
+ * A copy of a MOV / MP4 / 3GP / M4A / HEIC file with its location blanked in place (same length, every offset still
+ * valid): QuickTime ©xyz, 3GPP loci, Apple com.apple.quicktime.location.* keys, XMP with location, and the GPS IFD of
+ * HEIF Exif items. Null when the boxes don't read. Callers run locationVerdict on the result and send it only when
+ * that says 'none' (a GPS metadata track, for one, is not blanked and so still refuses).
+ */
+export function blankBmffLocation(input: Uint8Array): Uint8Array | null {
+  if (!isBmff(input)) return null;
+  const b = input.slice();
+  try {
+    const top = boxes(b, 0, b.length);
+    if (!top) return null;
+    for (const x of top) {
+      if (x.type === 'mdat') continue;
+      if (x.type === 'meta') {
+        if (!blankMeta(b, x)) return null;
+      } else if (movieHasLocation(b, x.start, x.end)) {
+        if (x.type === 'uuid') freeBox(b, x);
+        else if (x.type === 'moov' || x.type === 'udta') {
+          if (!blankMovie(b, x.data, x.end, x.type === 'udta')) return null;
+        }
+      }
+    }
+    return b;
+  } catch {
+    return null;
+  }
 }
 
 // ── JPEG location removal ────────────────────────────────────────────────────
@@ -546,7 +769,9 @@ export function stripJpegLocation(input: Uint8Array): Uint8Array | null {
   let i = 2;
   try {
     for (;;) {
-      if (b[i] !== 0xff) return null;
+      // Stray bytes between segments (some cameras) are skipped to the next marker, as libjpeg does.
+      if (b[i] !== 0xff) i = b.indexOf(0xff, i);
+      if (i < 0) return null;
       while (i < b.length && b[i] === 0xff) i++;
       need(b, i, 1);
       const m = b[i++];
@@ -620,12 +845,18 @@ export function locationVerdict(input: Uint8Array | ArrayLike<number>, mime = ''
   else if (magic(b, 0x47, 0x49, 0x46, 0x38)) [v, still] = ['none', true];
   else if (magic(b, 0x49, 0x49, 0x2a, 0x00) || magic(b, 0x4d, 0x4d, 0x00, 0x2a)) [v, still] = [tiffVerdict(b, 0), true];
   else if (magic(b, 0x42, 0x4d) && /bmp/i.test(mime)) [v, still] = ['none', true];
-  else if (isBmff(b)) v = bmff(b);
-  else if (magic(b, 0x1a, 0x45, 0xdf, 0xa3)) v = anyNeedle(b, MKV_NEEDLES) ? 'found' : 'none';
+  else if (isBmff(b)) {
+    v = bmff(b);
+    // Audio whose boxes don't read through (a recorder's fragmented MP4): look for location anywhere instead of
+    // refusing it outright (only the longer, text needles: short atom names turn up by chance in audio data).
+    if (v === 'unknown' && /^audio\//i.test(mime.trim()))
+      v = anyNeedle(b, AUDIO_NEEDLES) || ISO6709_RE.test(latin1(b, 0, b.length)) ? 'found' : 'none';
+  } else if (magic(b, 0x1a, 0x45, 0xdf, 0xa3)) v = anyNeedle(b, MKV_NEEDLES) ? 'found' : 'none';
   else if (/svg|xml/i.test(mime)) [v, still] = ['none', true];
   if (v === null) {
     if (visual) return 'unknown';
-    return textHasLocation(b) ? 'found' : 'none';
+    // Any other file (a PDF, a RAW sent as octet-stream, a zip): GPS EXIF of an embedded photo, or location text.
+    return wholeFileScan(b);
   }
   if (still && v !== 'found') v = worst(v, wholeFileScan(b));
   return v;
