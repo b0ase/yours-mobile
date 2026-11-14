@@ -268,6 +268,7 @@ import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOrigina
 import { pinnedProtocol, pinnedProtocolRefusal, PINNED_PROTOCOLS_VERSION, versionWithPins } from './services/pinnedProtocols';
 import {
   DeferredEncrypts,
+  deferredEncryptGrant,
   labelCoveredByIntent,
   mintIntentFor,
   mintSheetFor,
@@ -2247,7 +2248,9 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     return Promise.reject(new Error(RESERVED_BASKET_REFUSAL));
   }
   // A pinned site's paid action (services/pinnedMint.ts): its self-encrypts, and its own label while its
-  // createAction runs, go through for that one call (ephemeral, nothing stored); its spend is the one sheet.
+  // createAction runs, go through without a sheet; its spend is the one sheet. An encrypt's answer covers that one
+  // request (deferredEncryptGrant, stored already expired): the manager keys protocol grants without the operation,
+  // so a grant that outlived it would let decrypt, sign or HMAC ride (b-Aware rows 120 and 207).
   const mintSite = request.originator && request.originator !== ADMIN_ORIGINATOR ? normalizeOriginator(request.originator) : '';
   // The manager's own site key (hostname only, services/permissionSite.ts): the seal pass, protocol and pay calls,
   // spend recipients and labels are all keyed with it, so a port never makes a second site.
@@ -2257,7 +2260,7 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     const now = Date.now();
     if (shouldDeferEncrypt(asSite, protocolCalls, deferredEncrypts, now)) {
       deferredEncrypts.note(mintSite, request.protocolID as [number, string], now);
-      return accountContext.wallet.grantPermission(oneShotGrant(request.requestID));
+      return accountContext.wallet.grantPermission(deferredEncryptGrant(request.requestID));
     }
     const intent = mintIntents.get(mintSite);
     if (intent && !intent.spendSeen && labelCoveredByIntent(asSite, intent))

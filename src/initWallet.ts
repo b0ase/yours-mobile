@@ -78,6 +78,7 @@ import { guardLabelsOnSpend } from './services/labelsOnSpend';
 import { chromeConsentStore, guardSiteTokens } from './services/siteTokens';
 import { guardReservedProtocols, revokeReservedProtocolGrants } from './services/reservedProtocols';
 import { guardSharedKeySigning, revokeSharedKeyGrantsOnce } from './services/sharedKeySigning';
+import { revokeLegacyPinnedMintGrantsOnce } from './services/pinnedMint';
 import { guardAllowance } from './services/allowanceGuard';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
 import { guardEverySpendAsks, revokeStoredSpendingGrants } from './services/everySpendAsks';
@@ -1277,6 +1278,17 @@ export const initWallet = async (
   )
     .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for keys every app shares`))
     .catch((e: unknown) => console.warn('[initWallet] shared-key grant cleanup failed (retried next unlock):', e));
+  // Upgrade migration, once per account (b-Aware 25 Oct 2026, row 120): never-expiring grants that builds before
+  // 5.2.44 stored for a pinned mint site's let-through encrypts and labels are removed; the site asks again
+  // (services/pinnedMint.ts revokeLegacyPinnedMintGrants).
+  await revokeLegacyPinnedMintGrantsOnce(
+    permissionStore,
+    ADMIN_ORIGINATOR,
+    { get: (k) => chrome.storage.local.get(k), set: (items) => chrome.storage.local.set(items) },
+    accountId || 'no-account',
+  )
+    .then((n) => n && console.warn(`[initWallet] revoked ${n} old never-expiring pinned-mint grant(s)`))
+    .catch((e: unknown) => console.warn('[initWallet] pinned-mint grant cleanup failed (retried next unlock):', e));
 
   // 5. Initialize sync context (derives addresses, creates services, queue, addressManager).
   // Background sync calls go through the manager-wrapped wallet (admin

@@ -15,7 +15,9 @@
  *    that home site, and only while no other call on the same site+protocol is in flight (so the request the manager
  *    raises is known to be the encrypt). Encrypting to yourself discloses nothing: the site already holds the
  *    plaintext, and the ciphertext opens only with a decrypt, which still needs the real grant.
- *  - the grant is ephemeral (one call, nothing stored), and at most MAX_DEFERRED_ENCRYPTS per site per window.
+ *  - the grant answers that one request only (deferredEncryptGrant = oneUseGrant: stored already expired), and at
+ *    most MAX_DEFERRED_ENCRYPTS per site per window. The manager keys a protocol grant by protocol, never by
+ *    operation, so any grant that outlived the call would let decrypt, sign or HMAC on that protocol ride it.
  *  - the label is let through only while that site's own createAction carrying that label and naming that pinned
  *    protocol is running. A label only tags the action in your history; if the spend is refused the action is
  *    aborted, so nothing is written and nothing is paid.
@@ -25,7 +27,8 @@
  * Pure (no chrome APIs) so it can be unit tested.
  */
 
-import { pinnedProtocol } from './pinnedProtocols';
+import { oneUseGrant } from './oneShotGrant';
+import { PINNED_PROTOCOLS, pinnedProtocol } from './pinnedProtocols';
 
 /** How long encrypts for one site may be let through before the rate cap below resets. */
 export const DEFER_WINDOW_MS = 10 * 60_000;
@@ -151,6 +154,88 @@ export const shouldDeferEncrypt = (
   if (!pin.origins.includes(req.originator)) return false;
   if (!calls.onlyEncrypt(req.originator, pid)) return false;
   return deferred.canDefer(req.originator, pid, now);
+};
+
+/**
+ * grantPermission arguments for an encrypt let through by shouldDeferEncrypt: THIS request only. The permission
+ * manager stores protocol grants per (site, protocol, counterparty) with no usage type, and ignores `ephemeral`, so
+ * the 60 s oneShotGrant used before let a decrypt, signature or HMAC on the same protocol go through without a sheet
+ * inside that minute (b-Aware 25 Oct 2026 fzsusanto row 120, 3 Nov izkalavender row 207). oneUseGrant is stored
+ * already expired: the waiting encrypt is released by the answer, and the next call on the protocol asks again
+ * (another self-encrypt is let through the same way, inside the rate cap).
+ */
+export const deferredEncryptGrant = (requestID: string) => oneUseGrant(requestID);
+
+type GrantStore = {
+  listGrants(filter?: { type?: 'protocol' }): Promise<
+    {
+      key: { type: string; originator: string; protocolLevel?: number; protocolName?: string };
+      expiry: number;
+    }[]
+  >;
+  deleteGrant(key: never): Promise<void>;
+};
+
+/**
+ * A never-expiring grant a pinned mint site may hold only because of the old let-through: builds before 5.2.44
+ * answered its encrypts and labels with `ephemeral: true` and no expiry, which the manager stores as a grant for
+ * ever (b-Aware 25 Oct 2026, row 120). The pinned protocol itself, or an action label, held by that protocol's home
+ * site with expiry 0. Every sheet since the 24 Oct audit (grantExpiry.ts) stores an expiry, so nothing a user
+ * approved since then matches.
+ */
+export const isLegacyPinnedMintGrant = (
+  g: { key: { type: string; originator: string; protocolLevel?: number; protocolName?: string }; expiry: number },
+  adminOriginator: string,
+): boolean => {
+  const k = g.key;
+  if (g.expiry || k.type !== 'protocol' || k.originator === adminOriginator) return false;
+  const site = String(k.originator).toLowerCase();
+  const name = String(k.protocolName ?? '')
+    .trim()
+    .toLowerCase();
+  return PINNED_PROTOCOLS.some(
+    (p) =>
+      !!p.mint &&
+      p.origins.includes(site) &&
+      ((k.protocolLevel === p.protocolID[0] && name === p.protocolID[1].toLowerCase()) ||
+        (k.protocolLevel === 1 && name.startsWith('action label '))),
+  );
+};
+
+/** Remove every isLegacyPinnedMintGrant; returns how many. The site asks again (fails closed). */
+export const revokeLegacyPinnedMintGrants = async (store: GrantStore, adminOriginator: string): Promise<number> => {
+  let removed = 0;
+  for (const g of await store.listGrants({ type: 'protocol' })) {
+    if (!isLegacyPinnedMintGrant(g, adminOriginator)) continue;
+    await store.deleteGrant(g.key as never);
+    removed++;
+  }
+  return removed;
+};
+
+export const PINNED_MINT_MIGRATION_KEY = (accountId: string) => `bwx-pinned-mint-grants-revoked-v1:${accountId}`;
+
+/**
+ * revokeLegacyPinnedMintGrants, once per account (upgrade migration). The done-flag is written only after the sweep
+ * succeeded; if it can't be read, the sweep runs (removing a grant only means the site asks again).
+ */
+export const revokeLegacyPinnedMintGrantsOnce = async (
+  store: GrantStore,
+  adminOriginator: string,
+  kv: { get: (k: string) => Promise<Record<string, unknown>>; set: (items: Record<string, unknown>) => Promise<void> },
+  accountId: string,
+): Promise<number> => {
+  const flag = PINNED_MINT_MIGRATION_KEY(accountId || 'no-account');
+  let done = false;
+  try {
+    done = (await kv.get(flag))?.[flag] === true;
+  } catch {
+    done = false;
+  }
+  if (done) return 0;
+  const n = await revokeLegacyPinnedMintGrants(store, adminOriginator);
+  await kv.set({ [flag]: true });
+  return n;
 };
 
 export type MintIntent = {
