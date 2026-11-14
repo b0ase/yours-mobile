@@ -80,12 +80,15 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
   /** How each listing's author is shown (contractAuthorLabel): signed → $name or short key; unsigned → null. */
   const [authors, setAuthors] = useState<Record<string, { label: string; named: boolean } | null>>({});
 
+  /** Labels are kept per listing AND signature, so a refresh that serves a different envelope is checked again. */
+  const authorKey = (c: ContractListing) => `${c.origin}|${c.envelope.authorSig ?? ''}`;
+
   useEffect(() => {
     let live = true;
     for (const c of items ?? [])
-      if (!(c.origin in authors))
+      if (!(authorKey(c) in authors))
         void contractAuthorLabel((u, i) => fetch(u, i), c.envelope).then(
-          (a) => live && setAuthors((m) => ({ ...m, [c.origin]: a })),
+          (a) => live && setAuthors((m) => ({ ...m, [authorKey(c)]: a })),
           () => {},
         );
     return () => {
@@ -93,14 +96,21 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
-  /** The author line: signed → $name (or short key); unsigned → the typed name, marked as the author's own words. */
+  /**
+   * The author line: signed → $name (or short key); unsigned → the typed name, marked as the author's own words; not
+   * checked yet → "checking", never the typed name (review of 00176fbe).
+   */
   const authorText = (c: ContractListing) => {
-    const a = authors[c.origin];
+    const a = authors[authorKey(c)];
     if (a) return a.label;
+    if (a === undefined) return 'checking the author…';
     const e = c.envelope;
     return e.author.name ? `${e.author.name} (as they call themselves)` : e.author.address.slice(0, 8);
   };
-  const unsignedPaid = (c: ContractListing) => c.envelope.sale.priceUsd > 0 && authors[c.origin] === null;
+  /** A paid listing found unsigned (or not signed by its claimed key). */
+  const unsignedPaid = (c: ContractListing) => c.envelope.sale.priceUsd > 0 && authors[authorKey(c)] === null;
+  /** Buy waits for the signature check on a paid listing, so it is never enabled before the check says yes. */
+  const paidNotVerified = (c: ContractListing) => c.envelope.sale.priceUsd > 0 && !authors[authorKey(c)];
 
   const refresh = () => {
     listContracts().then(setItems, (e) => setError(e instanceof Error ? e.message : String(e)));
@@ -340,7 +350,7 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
                         return (
                           <button
                             type="button"
-                            disabled={!!busy || soldOut || (paid && !rate) || !apiContext || unsignedPaid(open)}
+                            disabled={!!busy || soldOut || (paid && !rate) || !apiContext || paidNotVerified(open)}
                             onClick={() => void buy(open)}
                             className="flex items-center justify-center gap-2 rounded-full py-3 font-bold border-0"
                             style={{ background: GOLD, color: '#000', opacity: busy || soldOut ? 0.6 : 1 }}
