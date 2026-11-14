@@ -1,10 +1,26 @@
 import { describe, expect, test } from 'bun:test';
-import { BigNumber, ECDSA, Hash, P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
+import {
+  BigNumber,
+  ECDSA,
+  Hash,
+  LockingScript,
+  OP,
+  P2PKH,
+  PrivateKey,
+  Script,
+  Spend,
+  Transaction,
+  UnlockingScript,
+  Utils,
+} from '@bsv/sdk';
 import { BSV21 } from '@1sat/templates';
 import {
+  AWAITING_OWNER,
   RULE_WARNING,
   addSignatures,
   agreedKeyset,
+  agreedKeysetCheck,
+  holdingsFromRecord,
   defaultRule,
   describeProposalMoves,
   proposalMoveProblem,
@@ -299,7 +315,7 @@ describe('approval shows what the transaction really moves (b-Aware)', () => {
       [pub(ann), 2000n],
     ]);
     expect(d.sharesIn).toBe(3000n);
-    expect(proposalMoveProblem(d, k2of3)).toBeNull();
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann) })).toBeNull();
   });
   test('an output outside the partnership is refused', async () => {
     const p = await make(plan(k2of3));
@@ -313,20 +329,12 @@ describe('approval shows what the transaction really moves (b-Aware)', () => {
     expect(d.unexpected.length).toBe(1);
     expect(proposalMoveProblem(d, k2of3)).toContain('outside the partnership');
   });
-  test('unbalanced shares are refused', () => {
-    expect(
-      proposalMoveProblem(
-        {
-          moves: [{ holder: 'a', amt: 1n, tokenId: 't', ...k2of3 }],
-          unexpected: [],
-          inputs: [{ index: 0, tokenId: 't', ...k2of3 }],
-          lockedMatches: true,
-          sharesIn: 2n,
-          sharesOut: 1n,
-        },
-        k2of3,
-      ),
-    ).toContain("don't balance");
+  test('unbalanced shares are refused', async () => {
+    const p = await make(plan(k2of3));
+    const tx = proposalTx(p);
+    tx.outputs[1].lockingScript = partnerLockScript({ tokenId: TOKEN, amt: 2001n, holder: pub(ann) }, k2of3);
+    const d = describeProposalMoves({ ...p, txEF: tx.toHexEF() });
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann) })).toContain("don't balance");
   });
 });
 
@@ -369,8 +377,8 @@ describe('every holding stays under the agreed keyset (b-Aware, 0xRen)', () => {
   test('a genuine transfer passes, whatever order the record lists the keys in', async () => {
     const d = describeProposalMoves(await make(plan(k2of3)));
     expect(d.lockedMatches).toBe(true);
-    expect(proposalMoveProblem(d, k2of3)).toBeNull();
-    expect(proposalMoveProblem(d, { m: 2, pubKeys: [...k2of3.pubKeys].reverse() })).toBeNull();
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann) })).toBeNull();
+    expect(proposalMoveProblem(d, { m: 2, pubKeys: [...k2of3.pubKeys].reverse() }, { signer: pub(ann) })).toBeNull();
   });
 
   test('lowering M on the same partners is refused (unanimous → 2 of 3)', async () => {
@@ -417,8 +425,8 @@ describe('every holding stays under the agreed keyset (b-Aware, 0xRen)', () => {
     );
     const d = describeProposalMoves(p);
     expect(proposalMoveProblem(d, k2of3)).toContain('agreed partners');
-    expect(proposalMoveProblem(d, k2of3, next)).toBeNull();
-    expect(proposalMoveProblem(d, k2of3, rekeyed)).toContain('agreed partners');
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann), next })).toBeNull();
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann), next: rekeyed })).toContain('agreed partners');
   });
 
   test('agreedKeyset: the rule over the recorded keys, mine among them, or nothing', () => {
@@ -479,29 +487,33 @@ describe('wallet actions refuse a re-keyed move before any sheet (b-Aware, 0xRen
     return { ctx, calls };
   };
 
-  test('signProposal: genuine transfer signs; re-keyed one never reaches createSignature', async () => {
-    const good = await make(plan(k2of3));
-    const w = wallet(ben);
-    const signed = await signProposal(w.ctx, good, k2of3);
-    expect(signedBy(signed)).toEqual([pub(ben)]);
+  test('signProposal: genuine transfer signs (proposer first, then a partner); re-keyed one is never signed', async () => {
+    const good = await make(plan(k2of3)); // $ann sends 1,000 of her 3,000 to $ben
+    const byAnn = await signProposal(wallet(ann).ctx, good, k2of3);
+    expect(signedBy(byAnn)).toEqual([pub(ann)]);
+    const byBen = await signProposal(wallet(ben).ctx, byAnn, k2of3);
+    expect(signedBy(byBen).sort()).toEqual([pub(ann), pub(ben)].sort());
+    expect(() => finalize(byBen)).not.toThrow();
 
     const bad = await make(plan(k2of3, { keyset: rekeyed }));
     const v = wallet(cat);
     await expect(signProposal(v.ctx, bad, k2of3)).rejects.toThrow('agreed partners');
     await expect(signProposal(v.ctx, good, null)).rejects.toThrow("aren't known");
-    expect(v.calls).toEqual([]);
+    expect(v.calls).not.toContain('createSignature');
   });
 
   test('signProposal refuses a partner whose own key is not in the agreed keyset', async () => {
     const w = wallet(max);
-    await expect(signProposal(w.ctx, await make(plan(k2of3)), k2of3)).rejects.toThrow('not on this partnership lock');
+    const p = await make(plan(k2of3));
+    const byAnn = addSignatures(p, pub(ann), signAs(ann, proposalTx(p), [0]));
+    await expect(signProposal(w.ctx, byAnn, k2of3)).rejects.toThrow('not on this partnership lock');
     expect(w.calls).not.toContain('createSignature');
   });
 
   test('proposeMove: genuine plan is funded and proposed; a re-keyed plan funds nothing', async () => {
     const w = wallet(ann);
     const p = await proposeMove(w.ctx, plan(k2of3), k2of3);
-    expect(proposalMoveProblem(describeProposalMoves(p), k2of3)).toBeNull();
+    expect(proposalMoveProblem(describeProposalMoves(p), k2of3, { signer: pub(ann) })).toBeNull();
     expect(w.calls).toContain('createAction');
 
     const v = wallet(ben);
@@ -517,3 +529,222 @@ describe('wallet actions refuse a re-keyed move before any sheet (b-Aware, 0xRen
     await expect(broadcastProposal(p, k2of3)).rejects.toThrow('Nothing was broadcast'); // ...but we refuse
   });
 });
+
+// Independent review of the keyset fix: parsePartnerLock is a pattern match, so a script that PARSES as the agreed
+// lock can still carry a backdoor. Every input and output must be the exact template, byte for byte.
+describe('holdings must be the exact partner lock template (review: backdoors, amounts)', () => {
+  const benSecret = PrivateKey.fromRandom(); // a key only $ben holds; not a partner key
+  // A proposal shaped like propose()'s, but with whatever output scripts a malicious proposer chooses (fee re-signed).
+  const raw = async (outs: LockingScript[]) => {
+    const good = await make(plan(k2of3));
+    const tx = proposalTx(good);
+    tx.outputs = [];
+    for (const s of outs) tx.addOutput({ lockingScript: s, satoshis: 1 });
+    const fee = { ...good.fee, sig: toHex(signDigest(feeKey, sighash(tx, good.fee.index))) };
+    return { ...good, txEF: tx.toHexEF(), fee };
+  };
+  const lock = (amt: bigint, holder: PrivateKey) =>
+    partnerLockScript({ tokenId: TOKEN, amt, holder: pub(holder) }, k2of3);
+  const withOps = (s: LockingScript, f: (x: Script) => void) => {
+    const x = new Script([...s.chunks]);
+    f(x);
+    return new LockingScript(x.chunks);
+  };
+  const backdoor = (s: LockingScript) =>
+    withOps(s, (x) =>
+      x
+        .writeOpCode(OP.OP_DROP)
+        .writeBin(Utils.toArray(pub(benSecret), 'hex'))
+        .writeOpCode(OP.OP_CHECKSIG),
+    );
+
+  test('a backdoor after OP_CHECKMULTISIG is refused, though it parses as "2,000 → $ann" and really is spendable by $ben alone', async () => {
+    const p = await raw([lock(1000n, ben), backdoor(lock(2000n, ann))]);
+    const d = describeProposalMoves(p);
+    expect(d.moves.map((m) => [m.holder, m.amt, m.m])).toEqual([
+      [pub(ben), 1000n, 2],
+      [pub(ann), 2000n, 2],
+    ]);
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann) })).toContain("aren't standard partner locks");
+    // the danger is real: once moved, benSecret alone spends it (multisig fails, its result is dropped)
+    let q = addSignatures(p, pub(ann), signAs(ann, proposalTx(p), [0]));
+    q = addSignatures(q, pub(ben), signAs(ben, proposalTx(q), [0]));
+    const moved = Transaction.fromHex(finalize(q).rawTx);
+    const spend = new Transaction();
+    spend.addInput({ sourceTransaction: moved, sourceOutputIndex: 1, sequence: 0xffffffff });
+    spend.addOutput({ lockingScript: new P2PKH().lock(benSecret.toAddress()), satoshis: 1 });
+    const sig = signDigest(benSecret, sighash(spend, 0));
+    const ok = new Spend({
+      sourceTXID: moved.id('hex'),
+      sourceOutputIndex: 1,
+      sourceSatoshis: 1,
+      lockingScript: moved.outputs[1].lockingScript,
+      transactionVersion: spend.version,
+      otherInputs: [],
+      outputs: spend.outputs,
+      inputIndex: 0,
+      unlockingScript: new UnlockingScript(
+        new Script().writeBin(sig).writeOpCode(OP.OP_0).writeOpCode(OP.OP_0).writeOpCode(OP.OP_0).chunks,
+      ),
+      inputSequence: 0xffffffff,
+      lockTime: spend.lockTime,
+    }).validate();
+    expect(ok).toBe(true);
+    await expect(broadcastProposal(q, k2of3)).rejects.toThrow('Nothing was broadcast');
+  });
+
+  test('an anyone-can-spend suffix and an OP_IF wrapper are refused', async () => {
+    const suffix = withOps(lock(2000n, ann), (x) => x.writeOpCode(OP.OP_DROP).writeOpCode(OP.OP_1));
+    const real = lock(2000n, ann);
+    const wrapped = new Script(real.chunks.slice(0, 8));
+    wrapped
+      .writeOpCode(OP.OP_IF)
+      .writeBin(Utils.toArray(pub(benSecret), 'hex'))
+      .writeOpCode(OP.OP_CHECKSIG)
+      .writeOpCode(OP.OP_ELSE);
+    wrapped.chunks.push(...real.chunks.slice(8));
+    wrapped.writeOpCode(OP.OP_ENDIF);
+    for (const bad of [suffix, new LockingScript(wrapped.chunks)]) {
+      const d = describeProposalMoves(await raw([lock(1000n, ben), bad]));
+      expect(d.moves[1]).toMatchObject({ holder: pub(ann), amt: 2000n }); // parses as a normal holding
+      expect(proposalMoveProblem(d, k2of3, { signer: pub(ann) })).toContain("aren't standard partner locks");
+    }
+  });
+
+  test('a backdoored INPUT is refused too', async () => {
+    const p = await make(plan(k2of3, { inputs: [{ sourceTx: locked(k2of3, ann, 3000n).sourceTx, vout: 0 }] }));
+    const src = locked(k2of3, ann, 3000n).sourceTx;
+    src.outputs[0].lockingScript = backdoor(src.outputs[0].lockingScript);
+    const tx = proposalTx(p);
+    tx.inputs[0].sourceTransaction = src;
+    tx.inputs[0].sourceTXID = src.id('hex');
+    const d = describeProposalMoves({ ...p, txEF: tx.toHexEF() });
+    expect(d.inputs[0]).toMatchObject({ holder: pub(ann), amt: 3000n });
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann) })).toContain("aren't standard partner locks");
+  });
+
+  test('a non-canonical amount ("0x7d0" reads as 2,000 in JavaScript; indexers may burn it) is refused', async () => {
+    const s = new Script([...lock(2000n, ann).chunks]);
+    const json = JSON.stringify({ p: 'bsv-20', op: 'transfer', id: TOKEN, amt: '0x7d0' });
+    s.chunks[6] = { op: json.length < 76 ? json.length : OP.OP_PUSHDATA1, data: Utils.toArray(json, 'utf8') };
+    expect(parsePartnerLock(s)?.amt).toBe(2000n);
+    const d = describeProposalMoves(await raw([lock(1000n, ben), new LockingScript(s.chunks)]));
+    expect(d.sharesIn).toBe(d.sharesOut);
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann) })).toContain("aren't standard partner locks");
+  });
+
+  test('outputs built from the record (sorted lowercase keys, as bit-sign keyset()) are the canonical bytes', () => {
+    const record = { m: 2, pubKeys: [pub(cat), pub(ann), pub(ben)].map((k) => k.toLowerCase()).sort() };
+    const s = partnerLockScript({ tokenId: TOKEN, amt: 10n, holder: pub(ann) }, record).toHex();
+    expect(s).toBe(partnerLockScript({ tokenId: TOKEN, amt: 10n, holder: pub(ann) }, k2of3).toHex());
+  });
+});
+
+// Review (pre-existing): the card listed outputs only, so spending $ann's 3,000 into "2,900 → $ben, 100 → $ann" read
+// like an ordinary transfer. Conservative rule: a partner's wallet signs only when every partner whose shares go down
+// is the signer (who sees their own loss) or has already signed this exact transaction.
+describe("a partner's shares never move without that partner's signature (review)", () => {
+  const takeAnns = () =>
+    make(
+      plan(k2of3, {
+        outputs: [
+          { tokenId: TOKEN, amt: 2900n, holder: pub(ben) },
+          { tokenId: TOKEN, amt: 100n, holder: pub(ann) },
+        ],
+      }),
+    );
+
+  test('net change per partner is shown, and others refuse until the losing partner signs', async () => {
+    const p = await takeAnns();
+    const d = describeProposalMoves(p);
+    expect(d.net).toEqual([
+      { holder: pub(ann), change: -2900n },
+      { holder: pub(ben), change: 2900n },
+    ]);
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(cat) })).toBe(AWAITING_OWNER);
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ben) })).toBe(AWAITING_OWNER);
+    expect(proposalMoveProblem(d, k2of3)).toBe(AWAITING_OWNER); // default: every loser must have signed
+    expect(proposalMoveProblem(d, k2of3, { signer: pub(ann) })).toBeNull(); // $ann sees "$ann −2,900" and decides
+    const signed = addSignatures(p, pub(ann), signAs(ann, proposalTx(p), [0]));
+    expect(proposalMoveProblem(describeProposalMoves(signed), k2of3, { signer: pub(cat) })).toBeNull();
+  });
+
+  test('a signature that does not verify is not consent', async () => {
+    const p = await takeAnns();
+    const forged = { ...p, sigs: { '0': { [pub(ann)]: signAs(stranger, proposalTx(p), [0])[0] } } };
+    expect(proposalMoveProblem(describeProposalMoves(forged), k2of3, { signer: pub(cat) })).toBe(AWAITING_OWNER);
+  });
+
+  test("$ben + $cat (a majority) cannot co-sign or broadcast a move of $ann's shares without her", async () => {
+    const p = await takeAnns();
+    await expect(signProposal(wallet2(cat), p, k2of3)).rejects.toThrow('not approved');
+    // signed by wallets that skip the check (e.g. an old version): still not broadcast by this one
+    let q = addSignatures(p, pub(ben), signAs(ben, proposalTx(p), [0]));
+    q = addSignatures(q, pub(cat), signAs(cat, proposalTx(q), [0]));
+    expect(() => finalize(q)).not.toThrow();
+    await expect(broadcastProposal(q, k2of3)).rejects.toThrow('Nothing was broadcast');
+  });
+});
+
+describe('proposer: every check before the fee is funded (review)', () => {
+  test('a plan whose outputs disagree with the real input amounts funds nothing', async () => {
+    const calls: string[] = [];
+    const ctx = {
+      wallet: new Proxy(
+        {},
+        {
+          get: (_, k) => async () => {
+            calls.push(String(k));
+            throw new Error('wallet must not be called');
+          },
+        },
+      ),
+    } as unknown as OneSatContext;
+    const bad = plan(k2of3, {
+      outputs: [
+        { tokenId: TOKEN, amt: 1000n, holder: pub(ben) },
+        { tokenId: TOKEN, amt: 2500n, holder: pub(ann) }, // built from a bogus 3,500 record row; the script says 3,000
+      ],
+    });
+    await expect(proposeMove(ctx, bad, k2of3)).rejects.toThrow('Shares must balance');
+    expect(calls).toEqual([]);
+  });
+
+  test("my holdings' amounts come from the scripts, not the record's amt column", () => {
+    const h = locked(k2of3, ann, 3000n);
+    const rows = [
+      { outpoint: `${h.sourceTx.id('hex')}.0`, rawTx: h.sourceTx.toHex(), amt: '3500' }, // bogus amt
+      { outpoint: 'x.0', rawTx: 'not hex', amt: '5' },
+      { outpoint: `${h.sourceTx.id('hex')}.0`, rawTx: locked(k2of3, ben, 9n).sourceTx.toHex(), amt: '9' }, // not mine
+    ];
+    const mine = holdingsFromRecord(rows, pub(ann), TOKEN);
+    expect(mine.map((m) => m.amt)).toEqual([3000n]);
+    expect(holdingsFromRecord(rows, pub(ann), 'b'.repeat(64) + '_0')).toEqual([]);
+  });
+});
+
+describe('more partners than one lock holds (review)', () => {
+  test('agreedKeysetCheck says so plainly', () => {
+    const keys = Array.from({ length: 20 }, () => pub(PrivateKey.fromRandom()));
+    const r = agreedKeysetCheck(
+      { rule: { kind: 'majority', m: 11 }, keyset: { complete: true, m: 11, pubKeys: keys } },
+      keys[0],
+    );
+    expect(r.keyset).toBeNull();
+    expect(r.why).toContain('20 partners');
+    expect(r.why).toContain('at most 16');
+    expect(agreedKeysetCheck({ rule: null, keyset: null }, keys[0]).why).toContain("isn't recorded");
+  });
+});
+
+// A fake wallet for one partner key (createSignature signs the digest), for the consent tests above.
+function wallet2(me: PrivateKey): OneSatContext {
+  return {
+    wallet: {
+      getPublicKey: async () => ({ publicKey: pub(me) }),
+      createSignature: async (a: { hashToDirectlySign: number[] }) => ({
+        signature: ECDSA.sign(new BigNumber(a.hashToDirectlySign), me, true).toDER() as number[],
+      }),
+    },
+  } as unknown as OneSatContext;
+}

@@ -25,7 +25,7 @@
 // Pure: no network, no keys held (signers are passed in). Tests: partnerLock.test.ts.
 import { BSV21 } from '@1sat/templates';
 import { LockingScript, OP, P2PKH, PublicKey, Script, Transaction, UnlockingScript, Utils } from '@bsv/sdk';
-import { proposalTx, sighash } from './multisig';
+import { proposalTx, sighash, signedBy } from './multisig';
 
 // The signing engine lives in multisig.ts (shared with the partnership's shared account); re-exported here so
 // Partnership shares callers keep one import.
@@ -291,18 +291,54 @@ export function findMyHoldings<T extends { lockingScript: Script }>(
   });
 }
 
+/**
+ * My spendable holdings from the record's rows, with amounts read from each row's own locking script (never the
+ * row's amt column, which any partner can post). Rows that don't parse, aren't mine or aren't this token are dropped.
+ */
+export function holdingsFromRecord(
+  rows: { outpoint: string; rawTx: string }[],
+  myKey: string | null,
+  tokenId: string | null,
+): (LockedUtxo & { amt: bigint })[] {
+  if (!myKey || !tokenId) return [];
+  return rows.flatMap((h) => {
+    try {
+      const vout = Number(h.outpoint.split('.')[1]);
+      const sourceTx = Transaction.fromHex(h.rawTx);
+      const lock = parsePartnerLock(sourceTx.outputs[vout].lockingScript);
+      return lock && lock.holder === myKey.toLowerCase() && lock.tokenId === tokenId
+        ? [{ sourceTx, vout, amt: lock.amt }]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 export type ProposalMoves = {
   /** The holdings the transaction really creates, decoded from its outputs (not the proposer's summary). */
-  moves: { holder: string; amt: bigint; tokenId: string; m: number; pubKeys: string[] }[];
+  moves: { holder: string; amt: bigint; tokenId: string; m: number; pubKeys: string[]; script: string }[];
   /** Outputs that are not partner locks. propose() never makes any, so any here is a reason to refuse. */
   unexpected: { index: number; satoshis: number }[];
   /** The partner-locked inputs, each read from its own source script (not from the proposal's `locked` list). */
-  inputs: { index: number; m: number; pubKeys: string[]; tokenId: string }[];
+  inputs: {
+    index: number;
+    holder: string;
+    amt: bigint;
+    tokenId: string;
+    m: number;
+    pubKeys: string[];
+    script: string;
+  }[];
   /**
    * False when the proposal's `locked` list doesn't describe the transaction: a partner-locked input left out, an
    * input listed twice, a listed input that isn't a partner lock, or keys/M that differ from the input's script.
    */
   lockedMatches: boolean;
+  /** Each holder's shares out minus shares in (negative = that partner loses shares), from the scripts' holder tags. */
+  net: { holder: string; change: bigint }[];
+  /** Partner keys with valid signatures on every input they can sign (proof they approved this exact transaction). */
+  approvedBy: string[];
   /** Shares in vs out across the partner-locked inputs and outputs. */
   sharesIn: bigint;
   sharesOut: bigint;
@@ -312,23 +348,22 @@ export type ProposalMoves = {
  * What a proposal's transaction actually does, read from its own inputs and outputs. The approval card shows this,
  * and signing is refused when `proposalMoveProblem` returns a reason: the summary is only the proposer's note.
  */
-export function describeProposalMoves(p: Pick<PartnerProposal, 'txEF' | 'locked'>): ProposalMoves {
+export function describeProposalMoves(
+  p: Pick<PartnerProposal, 'txEF' | 'locked'> & Partial<Pick<PartnerProposal, 'sigs'>>,
+): ProposalMoves {
   const tx = Transaction.fromHexEF(p.txEF);
   const moves: ProposalMoves['moves'] = [];
   const unexpected: ProposalMoves['unexpected'] = [];
   tx.outputs.forEach((o, index) => {
     const parsed = parsePartnerLock(o.lockingScript);
-    if (parsed) moves.push({ ...parsed });
+    if (parsed) moves.push({ ...parsed, script: o.lockingScript.toHex() });
     else unexpected.push({ index, satoshis: o.satoshis ?? 0 });
   });
   const inputs: ProposalMoves['inputs'] = [];
-  let sharesIn = 0n;
   tx.inputs.forEach((i, index) => {
     const src = i.sourceTransaction?.outputs[i.sourceOutputIndex];
     const parsed = src ? parsePartnerLock(src.lockingScript) : null;
-    if (!parsed) return;
-    inputs.push({ index, m: parsed.m, pubKeys: parsed.pubKeys, tokenId: parsed.tokenId });
-    sharesIn += parsed.amt;
+    if (parsed && src) inputs.push({ index, ...parsed, script: src.lockingScript.toHex() });
   });
   const listed = new Set(p.locked.map((l) => l.index));
   const lockedMatches =
@@ -338,8 +373,21 @@ export function describeProposalMoves(p: Pick<PartnerProposal, 'txEF' | 'locked'
       const real = inputs.find((x) => x.index === l.index);
       return !!real && sameKeyset(real, l);
     });
+  const change = new Map<string, bigint>();
+  for (const i of inputs) change.set(i.holder, (change.get(i.holder) ?? 0n) - i.amt);
+  for (const m of moves) change.set(m.holder, (change.get(m.holder) ?? 0n) + m.amt);
+  const net = [...change].map(([holder, c]) => ({ holder, change: c })).filter((x) => x.change !== 0n);
+  let approvedBy: string[] = [];
+  if (lockedMatches && p.sigs) {
+    try {
+      approvedBy = signedBy({ txEF: p.txEF, locked: p.locked, sigs: p.sigs });
+    } catch {
+      approvedBy = [];
+    }
+  }
+  const sharesIn = inputs.reduce((t, i) => t + i.amt, 0n);
   const sharesOut = moves.reduce((t, m) => t + m.amt, 0n);
-  return { moves, unexpected, inputs, lockedMatches, sharesIn, sharesOut };
+  return { moves, unexpected, inputs, lockedMatches, net, approvedBy, sharesIn, sharesOut };
 }
 
 /** Same M and the same partner keys, in any order (scripts may list them in the record's order). */
@@ -352,55 +400,113 @@ export function sameKeyset(a: { m: number; pubKeys: string[] }, b: { m: number; 
   return a.m === b.m && a.pubKeys.length === b.pubKeys.length && norm(a.pubKeys) === norm(b.pubKeys);
 }
 
+/** The canonical form every partner builds from (keys lowercase, sorted), as keysetFor and bit-sign keyset() do. */
+export const canonicalKeyset = (k: Keyset): Keyset => ({
+  m: k.m,
+  pubKeys: k.pubKeys.map((x) => x.toLowerCase()).sort(),
+});
+
+/**
+ * True only when `script` is byte-for-byte the partner lock template for its own holding under `keyset`: the parse
+ * is a pattern match, so anything extra (a backdoor after OP_CHECKMULTISIG, an OP_IF wrapper, an "amt" written as
+ * "0x7d0") reads the same but is not the same script (b-Aware review).
+ */
+export function isExactPartnerLock(
+  script: string,
+  h: { holder: string; amt: bigint; tokenId: string },
+  keyset: Keyset,
+): boolean {
+  const canon = canonicalKeyset(keyset);
+  if (h.amt <= 0n || !canon.pubKeys.includes(h.holder.toLowerCase())) return false;
+  try {
+    return script === partnerLockScript({ tokenId: h.tokenId, amt: h.amt, holder: h.holder }, canon).toHex();
+  } catch {
+    return false;
+  }
+}
+
+export type AgreedKeyset = { keyset: Keyset; why: null } | { keyset: null; why: string };
+
 /**
  * The keyset every Partnership shares holding must sit under: the agreement's rule over the partners' recorded
- * lock keys, with this wallet's own partner key among them. Null (refuse everything) when any part is missing or
- * the recorded M disagrees with the rule.
+ * lock keys, with this wallet's own partner key among them, or the plain reason there isn't one (refuse everything).
  */
-export function agreedKeyset(
+export function agreedKeysetCheck(
   s: { rule: TransferRule | null; keyset: { complete: boolean; m: number; pubKeys: string[] } | null },
   myKey: string | null,
-): Keyset | null {
-  if (!s.rule || !s.keyset?.complete || !myKey) return null;
+): AgreedKeyset {
+  const no = (why: string): AgreedKeyset => ({ keyset: null, why });
+  if (!s.rule || !s.keyset) return no("Your partnership's agreement isn't recorded yet.");
+  if (!s.keyset.complete) return no('Waiting for every partner to add their lock key.');
+  if (!myKey) return no('Add your lock key first.');
+  if (s.keyset.pubKeys.length > MAX_PARTNER_KEYS)
+    return no(
+      `This partnership has ${s.keyset.pubKeys.length} partners; one shares lock holds at most ${MAX_PARTNER_KEYS}, so its shares can't be locked or moved here.`,
+    );
   let k: Keyset;
   try {
     k = keysetFor(s.rule, s.keyset.pubKeys);
-  } catch {
-    return null;
+  } catch (e) {
+    return no(`The recorded partner keys aren't usable: ${e instanceof Error ? e.message : 'invalid'}.`);
   }
-  if (k.m !== s.keyset.m || !k.pubKeys.includes(myKey.toLowerCase())) return null;
-  return k;
+  if (k.m !== s.keyset.m) return no("The recorded number of signatures doesn't match the agreement's rule.");
+  if (!k.pubKeys.includes(myKey.toLowerCase())) return no("Your lock key isn't among the recorded partner keys.");
+  return { keyset: k, why: null };
 }
 
+/** agreedKeysetCheck's keyset, or null (refuse). */
+export const agreedKeyset = (...a: Parameters<typeof agreedKeysetCheck>) => agreedKeysetCheck(...a).keyset;
+
 const REKEYED = "This move locks shares to keys that aren't your partnership's agreed partners. Not signed.";
+const NOT_TEMPLATE = "This move's holdings aren't standard partner locks. Not signed.";
+/** proposalMoveProblem's answer while a partner whose shares a move takes hasn't signed it yet. */
+export const AWAITING_OWNER = 'This move takes shares from a partner who has not approved it yet. Not signed.';
 
 /**
- * Why a partner must not sign this proposal, or null when it only moves balanced holdings of one token from the
- * agreed keyset to the agreed keyset. `expected` is the agreement's keyset (agreedKeyset): every partner-locked input
- * and every output must sit under exactly it, so a move can't quietly drop a partner, add a key or lower M (b-Aware,
- * 0xRen). `next` is only for an admission whose new keyset the wallet has verified; without it outputs stay on
- * `expected`.
+ * Why a partner must not sign (or broadcast) this proposal, or null when it only moves balanced holdings of one
+ * token from the agreed keyset to the agreed keyset, with the consent of every partner who loses shares.
+ *
+ * - `expected` is the agreement's keyset (agreedKeyset): every partner-locked input and every output must be exactly
+ *   the partner lock template under it, byte for byte, so a move can't drop a partner, add a key, lower M, hide a
+ *   backdoor after the multisig or write a non-standard amount (b-Aware, 0xRen + review).
+ * - Consent (conservative): every holder whose shares go down must either be `signer` (the partner about to sign,
+ *   who sees their own loss on the card) or have already signed this exact transaction. A partner's wallet never
+ *   co-signs moving someone else's shares without that someone's signature, even where the rule's M would allow it.
+ *   `signer: null` (the default) requires every loser's signature, as broadcasting does.
+ * - `next` is only for an admission whose new keyset the wallet has verified; without it outputs stay on `expected`.
  */
-export function proposalMoveProblem(d: ProposalMoves, expected: Keyset | null, next?: Keyset): string | null {
-  if (!expected) return "Your partnership's agreed partner keys aren't known yet. Not signed.";
+export function proposalMoveProblem(
+  d: ProposalMoves,
+  expected: Keyset | null,
+  o: { signer: string | null; next?: Keyset } = { signer: null },
+): string | null {
+  if (!expected) return "Your partnership's agreed partner keys aren't known. Not signed.";
   if (d.unexpected.length) return 'This move pays something outside the partnership. Not signed.';
   if (!d.moves.length) return 'This move creates no holdings. Not signed.';
   if (!d.inputs.length || !d.lockedMatches) return "This move's inputs don't match their locks. Not signed.";
   if (d.inputs.some((i) => !sameKeyset(i, expected))) return REKEYED;
-  if (d.moves.some((m) => !sameKeyset(m, next ?? expected))) return REKEYED;
+  if (d.moves.some((m) => !sameKeyset(m, o.next ?? expected))) return REKEYED;
+  if (d.inputs.some((i) => !isExactPartnerLock(i.script, i, expected))) return NOT_TEMPLATE;
+  if (d.moves.some((m) => !isExactPartnerLock(m.script, m, o.next ?? expected))) return NOT_TEMPLATE;
   if (d.sharesIn !== d.sharesOut) return `Shares don't balance (${d.sharesIn} in, ${d.sharesOut} out). Not signed.`;
   if (new Set([...d.inputs, ...d.moves].map((x) => x.tokenId)).size > 1) return 'This move mixes tokens. Not signed.';
+  const me = o.signer?.toLowerCase() ?? null;
+  if (d.net.some((x) => x.change < 0n && x.holder !== me && !d.approvedBy.includes(x.holder))) return AWAITING_OWNER;
   return null;
 }
 
-/** Before the proposer funds a fee: the plan's inputs and outputs must all sit under the agreed keyset. */
+/**
+ * Before the proposer funds a fee: the plan's inputs must be exact partner locks under the agreed keyset and its
+ * outputs must go to that keyset.
+ */
 export function planKeysetProblem(plan: Pick<MovePlan, 'inputs' | 'keyset'>, expected: Keyset | null): string | null {
-  if (!expected) return "Your partnership's agreed partner keys aren't known yet. Nothing was proposed.";
+  if (!expected) return "Your partnership's agreed partner keys aren't known. Nothing was proposed.";
   if (!sameKeyset(plan.keyset, expected))
     return "The new holdings would be locked to keys that aren't your partnership's agreed partners. Nothing was proposed.";
   for (const u of plan.inputs) {
-    const p = parsePartnerLock(outOf(u).lockingScript);
-    if (!p || !sameKeyset(p, expected))
+    const script = outOf(u).lockingScript;
+    const p = parsePartnerLock(script);
+    if (!p || !sameKeyset(p, expected) || !isExactPartnerLock(script.toHex(), p, expected))
       return 'Your locked shares are under an older partner key set. They need re-locking under the current agreement first.';
   }
   return null;

@@ -16,6 +16,8 @@ import {
 import {
   PARTNER_LOCK_PROTOCOL,
   addSignatures,
+  canonicalKeyset,
+  checkPlan,
   feeFor,
   feeKeyId,
   finalize,
@@ -79,7 +81,8 @@ export async function lockUp(
 
 /**
  * Proposer's sheet: put the exact network fee on a one-off seed-derived key, then build + fee-sign the proposal.
- * `expected` is the agreement's keyset (agreedKeyset); nothing is funded unless the plan stays on it.
+ * `expected` is the agreement's keyset (agreedKeyset). Every check runs BEFORE the fee is funded, so a plan that
+ * would be refused (re-keyed, stale inputs, shares that don't balance) never costs the proposer a fee.
  */
 export async function proposeMove(
   ctx: OneSatContext,
@@ -88,13 +91,16 @@ export async function proposeMove(
 ): Promise<PartnerProposal> {
   const planProblem = planKeysetProblem(plan, expected);
   if (planProblem) throw new Error(planProblem);
+  // New holdings are always built under the canonical keyset (sorted keys), the bytes every partner checks.
+  const canon: MovePlan = { ...plan, keyset: canonicalKeyset(expected!) };
+  checkPlan(canon);
+  const sats = feeFor(canon);
   const keyID = feeKeyId(plan.partnershipId, plan.proposalId);
   const { publicKey } = await ctx.wallet.getPublicKey({
     protocolID: PARTNER_LOCK_PROTOCOL,
     keyID,
     counterparty: 'self',
   });
-  const sats = feeFor(plan);
   const r = await ctx.wallet.createAction({
     description: `Partnership shares: fee for "${plan.summary}"`.slice(0, 50),
     outputs: [
@@ -109,7 +115,7 @@ export async function proposeMove(
   });
   const tx = parseTx(r.tx);
   const fee: FeeUtxo = { sourceTx: tx, vout: 0, pubKey: publicKey };
-  return propose(plan, fee, async (digest) => {
+  return propose(canon, fee, async (digest) => {
     const { signature } = await ctx.wallet.createSignature({
       hashToDirectlySign: digest,
       protocolID: PARTNER_LOCK_PROTOCOL,
@@ -130,10 +136,11 @@ export async function signProposal(
   expected: Keyset | null,
 ): Promise<PartnerProposal> {
   // Sign only what the transaction itself does, never on the strength of the proposer's summary (b-Aware report),
-  // and only when every input and output sits under the agreed keyset (b-Aware, 0xRen).
-  const problem = proposalMoveProblem(describeProposalMoves(p), expected);
-  if (problem) throw new Error(problem);
+  // only when every input and output is the exact partner lock under the agreed keyset (b-Aware, 0xRen), and only
+  // when every partner losing shares is me or has already signed it.
   const myKey = await partnerKey(ctx, p.partnershipId);
+  const problem = proposalMoveProblem(describeProposalMoves(p), expected, { signer: myKey });
+  if (problem) throw new Error(problem);
   if (!expected!.pubKeys.includes(myKey.toLowerCase())) throw new Error('Your key is not on this partnership lock');
   const mine = inputsFor(p, myKey);
   if (!mine.length) throw new Error('Your key is not on this partnership lock');
@@ -159,7 +166,7 @@ export async function broadcastProposal(
   p: PartnerProposal,
   expected: Keyset | null,
 ): Promise<{ txid: string; rawTx: string }> {
-  const problem = proposalMoveProblem(describeProposalMoves(p), expected);
+  const problem = proposalMoveProblem(describeProposalMoves(p), expected, { signer: null });
   if (problem) throw new Error(problem.replace('Not signed.', 'Nothing was broadcast.'));
   const { rawTx, txid } = finalize(p);
   await broadcastRaw(rawTx);
