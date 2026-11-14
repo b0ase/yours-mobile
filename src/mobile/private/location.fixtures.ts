@@ -334,6 +334,8 @@ export function mp4(
     tracks?: string[];
     /** A udta comment (©cmt) with this text. */
     comment?: string;
+    /** An Apple timed-metadata track ('mebx') with these key names. */
+    mebxKeys?: string[];
   } = {},
 ): B {
   const ftyp = box('ftyp', cat(ascii('qt  '), be32(0), ascii('qt  isom')));
@@ -366,7 +368,21 @@ export function mp4(
   const gpmd = o.loc === 'gpmd' ? box('trak', box('mdia', box('minf', box('stbl', box('stsd', ascii('gpmd')))))) : [];
   const trak = (entry: string) =>
     box('trak', box('mdia', box('minf', box('stbl', full('stsd', 0, cat(be32(1), box(entry, noise(16))))))));
-  const tracks = (o.tracks ?? []).flatMap(trak);
+  const mebx = (keys: string[]) =>
+    box(
+      'mebx',
+      cat(
+        [0, 0, 0, 0, 0, 0, 0, 1],
+        box(
+          'keys',
+          cat(...keys.map((k, i) => box(String.fromCharCode(0, 0, 0, i + 1), box('keyd', ascii(`mdta${k}`))))),
+        ),
+      ),
+    );
+  const mebxTrak = o.mebxKeys
+    ? box('trak', box('mdia', box('minf', box('stbl', full('stsd', 0, cat(be32(1), mebx(o.mebxKeys)))))))
+    : [];
+  const tracks = [...(o.tracks ?? []).flatMap(trak), ...mebxTrak];
   const comment = o.comment ? box('udta', box('\xA9cmt', cat(be16(o.comment.length), be16(0), ascii(o.comment)))) : [];
   const moov = box('moov', cat(full('mvhd', 0, noise(96)), udta, keys, gpmd, tracks, comment));
   return cat(ftyp, o.noMoov ? [] : moov, box('mdat', o.mdat ?? noise(300)));

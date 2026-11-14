@@ -105,12 +105,44 @@ describe('locationVerdict: real tiny files', () => {
     expect(v(F.pdfWithPhotos(20, { gps: true }), 'application/pdf')).toBe('found');
   });
 
-  test('MP4 / MOV: a subtitle or telemetry track (samples in mdat, e.g. DJI GPS subtitles) may contain location', () => {
-    for (const t of ['tx3g', 'text', 'wvtt', 'sbtt', 'stpp', 'djmd', 'mett', 'metx'])
-      expect([t, v(F.mp4({ tracks: ['avc1', 'mp4a', t] }), 'video/mp4')]).toEqual([t, 'unknown']);
+  test('MP4 / MOV: a binary telemetry track (samples in mdat, unread) may contain location', () => {
+    for (const t of ['djmd', 'dbgi', 'rtmd', 'mett', 'metx'])
+      for (const mime of ['video/mp4', 'audio/mp4', ''])
+        expect([t, mime, v(F.mp4({ tracks: ['avc1', 'mp4a', t] }), mime)]).toEqual([t, mime, 'unknown']);
     expect(v(F.mp4({ tracks: ['avc1', 'camm'] }), 'video/mp4')).toBe('found'); // also a needle
-    expect(v(F.mp4({ tracks: ['avc1', 'mp4a', 'mebx'] }), 'video/quicktime')).toBe('none');
     expect(v(F.mp4({ tracks: ['mp4a'] }), 'audio/mp4')).toBe('none');
+  });
+
+  test('MP4 / M4A: a subtitle or chapter track is searched for location text, not refused outright', () => {
+    const subs = (text: string) => F.mp4({ tracks: ['avc1', 'tx3g'], mdat: [...F.ascii(text), 0, 1, 2] });
+    for (const t of ['tx3g', 'text', 'wvtt', 'sbtt', 'stpp', 'c608'])
+      for (const mime of ['video/mp4', 'audio/mp4', ''])
+        expect([t, mime, v(F.mp4({ tracks: ['mp4a', t] }), mime)]).toEqual([t, mime, 'none']);
+    expect(v(subs('Chapter 1: Intro / Chapter 2: The walk'), 'video/mp4')).toBe('none');
+    // DJI: "[latitude: …] [longitude: …]" per frame; other drones / dashcams "GPS (…)"; or an ISO 6709 string.
+    expect(v(subs('[iso : 100] [latitude: 51.503300] [longitude: -0.127600]'), 'video/mp4')).toBe('found');
+    expect(v(subs('F/2.8, GPS (-0.1276, 51.5033, 15)'), 'audio/mp4')).toBe('found');
+    expect(v(subs('at +51.5033-000.1276/'), '')).toBe('found');
+  });
+
+  test('MOV: an Apple mebx track is fine unless a key is named like a location', () => {
+    const apple = [
+      'com.apple.quicktime.video-orientation',
+      'com.apple.quicktime.detected-face',
+      'com.apple.quicktime.live-photo-info',
+      'com.apple.quicktime.still-image-time',
+      'com.apple.quicktime.scene-illuminance',
+      'com.apple.quicktime.segment-identifier',
+    ];
+    expect(v(F.mp4({ tracks: ['avc1'], mebxKeys: apple }), 'video/quicktime')).toBe('none');
+    for (const k of ['com.example.gps.coordinates', 'com.example.geo', 'com.example.coord'])
+      expect([k, v(F.mp4({ tracks: ['avc1'], mebxKeys: [...apple, k] }), 'video/quicktime')]).toEqual([k, 'unknown']);
+  });
+
+  test('a long photo deck is scanned to the end: GPS in photo 70 (and 200) is found', () => {
+    expect(v(F.pdfWithPhotos(70, { gps: true }), 'application/pdf')).toBe('found');
+    expect(v(F.pdfWithPhotos(200, { gps: true }), 'application/pdf')).toBe('found');
+    expect(v(F.pdfWithPhotos(200), 'application/pdf')).toBe('none');
   });
 
   test('ISO 6709 in degrees + minutes (+ seconds) is found, not only decimal degrees', () => {
@@ -120,7 +152,7 @@ describe('locationVerdict: real tiny files', () => {
   });
 
   test('a file of thousands of EXIF headers is answered quickly ("may contain"), not after seconds', () => {
-    const big = new Uint8Array(2_000_000);
+    const big = new Uint8Array(4_000_000);
     const hdr = [...F.ascii('Exif\0\0MM'), 0, 42, 0, 0, 0, 8];
     for (let i = 0; i + hdr.length < big.length; i += hdr.length) big.set(hdr, i);
     big.set([0xff, 0xd8, 0xff, 0xe0, 0, 16], 0);

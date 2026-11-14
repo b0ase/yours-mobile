@@ -143,18 +143,24 @@ describe('chat room uploads: no location leaves the device', () => {
     expect(posts).toEqual([]);
   });
 
-  test('a photo deck PDF is sent; a DJI-style subtitle-track video is refused', async () => {
+  test('a photo deck PDF is sent; a DJI-style GPS subtitle video is refused; a chaptered m4a is sent', async () => {
     let r = recorder();
     const deck = F.u8(F.pdfWithPhotos(25));
     await r.client.uploadMedia('ROOM', new File([deck], 'deck.pdf', { type: 'application/pdf' }));
     expect(await sentBytes(r.posts[0])).toEqual(deck);
     r = recorder();
-    const dji = F.u8(F.mp4({ tracks: ['avc1', 'tx3g'] }));
+    const dji = F.u8(
+      F.mp4({ tracks: ['avc1', 'tx3g'], mdat: F.ascii('[latitude: 51.503300] [longitude: -0.127600]') }),
+    );
     const err = await r.client
       .uploadMedia('ROOM', new File([dji], 'DJI_0001.mp4', { type: 'video/mp4' }))
       .catch((e) => e);
-    expect((err as Error).message).toBe(shareBlockedMessage('video/mp4', 'unknown'));
+    expect((err as Error).message).toBe(shareBlockedMessage('video/mp4', 'found'));
     expect(r.posts).toEqual([]);
+    r = recorder();
+    const book = F.u8(F.mp4({ tracks: ['mp4a', 'tx3g'], mdat: F.ascii('Chapter 1') }));
+    await r.client.uploadMedia('ROOM', new File([book], 'book.m4a', { type: 'audio/mp4' }));
+    expect(await sentBytes(r.posts[0])).toEqual(book);
   });
 
   test('a clean voice note or file goes as it is', async () => {

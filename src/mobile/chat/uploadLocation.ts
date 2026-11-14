@@ -13,7 +13,7 @@ import { blankBmffLocation, locationVerdict, shareBlockedMessage, stripJpegLocat
  *   - other files with no location found go as they are;
  *   - MOV / MP4 / M4A / HEIC with location have it blanked in place (blankBmffLocation), same length;
  *   - each changed copy is sent only if it then reads as clean;
- *   - audio the detector can't read through, and the app's own MediaRecorder voice notes, go as they are;
+ *   - the app's own MediaRecorder voice notes go as they are (other audio that doesn't parse is searched flat);
  *   - anything else with (possible) location is refused, nothing is sent.
  */
 /**
@@ -34,10 +34,9 @@ export function cleanForUpload(bytes: Uint8Array, mime: string, opts: MediaRecor
   if (v === 'none') return { ok: true, bytes, stripped: false };
   const blanked = blankBmffLocation(bytes);
   if (blanked && locationVerdict(blanked, mime) === 'none') return { ok: true, bytes: blanked, stripped: true };
-  // A voice note from the app's recorder carries no location (MediaRecorder writes none); other audio is refused
-  // only on evidence, not because its container didn't parse.
-  if (opts.mediaRecorderOutput || (v === 'unknown' && /^audio\//i.test(mime.trim())))
-    return { ok: true, bytes, stripped: false };
+  // A voice note from the app's recorder carries no location (MediaRecorder writes none). Other audio whose boxes
+  // don't parse is already searched as a flat file by locationVerdict, so 'unknown' here means a telemetry track.
+  if (opts.mediaRecorderOutput) return { ok: true, bytes, stripped: false };
   return { ok: false, message: shareBlockedMessage(mime, v) };
 }
 

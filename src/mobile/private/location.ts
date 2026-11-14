@@ -132,6 +132,13 @@ const IFD_POINTER_TAGS = new Set([0x8769, 0xa005, 0x014a]);
 /** More than any real file has (IFD0, IFD1, Exif, Interop, a few SubIFDs): past this it is a crafted file. */
 const MAX_IFDS = 32;
 const MAX_IFD_ENTRIES = 8192;
+/**
+ * IFD entries one whole-file scan may read, over all its EXIF blocks (each block costs at least 1). A long photo deck
+ * (hundreds of photos, tens of entries each) is read to the end; a file of crafted EXIF headers with huge IFDs stops
+ * after a few blocks instead of stalling for seconds.
+ */
+const SCAN_IFD_ENTRIES = 100_000;
+type ScanBudget = { left: number };
 
 /**
  * A TIFF structure (EXIF body) starting at `o`: 'found' when ANY IFD in it has a GPS IFD pointer (tag 0x8825).
@@ -139,7 +146,12 @@ const MAX_IFD_ENTRIES = 8192;
  * exiftool decode a GPS pointer wherever it sits, and one in the Exif sub-IFD used to pass (b-Aware #230). An IFD
  * that is pointed at but can't be read is 'unknown'.
  */
-function tiffVerdict(b: Bytes, o: number, end = b.length): LocationVerdict {
+function tiffVerdict(
+  b: Bytes,
+  o: number,
+  end = b.length,
+  budget: ScanBudget = { left: SCAN_IFD_ENTRIES },
+): LocationVerdict {
   try {
     const t = b.subarray(o, Math.min(end, b.length));
     const le = t[0] === 0x49 && t[1] === 0x49;
@@ -155,7 +167,8 @@ function tiffVerdict(b: Bytes, o: number, end = b.length): LocationVerdict {
       seen.add(ifd);
       const n = u16(t, ifd, le);
       need(t, ifd + 2, n * 12 + 4);
-      if ((total += n) > MAX_IFD_ENTRIES) return 'unknown';
+      budget.left -= n + 1;
+      if ((total += n) > MAX_IFD_ENTRIES || budget.left < 0) return 'unknown';
       for (let i = 0; i < n; i++) {
         const e = ifd + 2 + i * 12;
         const tag = u16(t, e, le);
@@ -185,19 +198,19 @@ function ifdOffsets(t: Bytes, e: number, le: boolean): number[] {
 /** An EXIF payload, with or without the "Exif\0\0" prefix. */
 const exifVerdict = (b: Bytes, s: number, e = b.length) => tiffVerdict(b, startsWith(b, s, EXIF_HDR) ? s + 6 : s, e);
 
-/** Real files have a handful of EXIF blocks (main, thumbnail, MPF images); thousands are a stall attempt. */
-const MAX_EXIF_BLOCKS = 64;
-
-/** Every EXIF block anywhere in the file (embedded / MPF images, trailers) plus XMP text anywhere. */
+/**
+ * Every EXIF block anywhere in the file (embedded / MPF images, trailers) plus XMP text anywhere. The blocks share one
+ * IFD-entry budget (SCAN_IFD_ENTRIES); once it is spent the rest is 'unknown'.
+ */
 function wholeFileScan(b: Bytes, from = 0, to = b.length): LocationVerdict {
   let v: LocationVerdict = 'none';
-  let n = 0;
+  const budget: ScanBudget = { left: SCAN_IFD_ENTRIES };
   for (let p = find(b, EXIF_HDR, from, to); p >= 0 && v !== 'found'; p = find(b, EXIF_HDR, p + 6, to)) {
-    if (++n > MAX_EXIF_BLOCKS) {
+    if (--budget.left < 0) {
       v = worst(v, 'unknown');
       break;
     }
-    v = worst(v, tiffVerdict(b, p + 6));
+    v = worst(v, tiffVerdict(b, p + 6, b.length, budget));
   }
   if (v !== 'found' && textHasLocation(b, from, to)) v = 'found';
   return v;
@@ -361,56 +374,75 @@ const MOVIE_FIRST_BOX = new Set(['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip',
 const isBmff = (b: Bytes) => b.length >= 8 && MOVIE_FIRST_BOX.has(String.fromCharCode(b[4], b[5], b[6], b[7]));
 
 /**
- * Sample entries of tracks whose samples (in mdat, never read here) can be text or vendor telemetry: subtitles
- * (DJI drones write "[latitude: …] [longitude: …]" per frame), timed text / metadata, DJI / GoPro / camera-motion
- * data. A movie with one of these may carry location. (Apple's 'mebx' metadata track is not here: every iPhone video
- * has one, and its keys sit in the sample description, which the needle scan reads.)
+ * Tracks whose samples (in mdat, never parsed here) can be location. Text tracks (subtitles, chapters, timed text:
+ * DJI drones write "[latitude: …] [longitude: …]" per frame) are searched as a flat file for location text. Binary
+ * telemetry (DJI, GoPro, camera motion, timed metadata) can't be read at all: such a movie may contain location.
+ * Apple's 'mebx' metadata track (every iPhone video has one) only when a key is named like a location
+ * (mebxHasLocationKey).
  */
-const TEXT_SAMPLE_ENTRIES = new Set([
-  'tx3g',
-  'text',
-  'wvtt',
-  'sbtt',
-  'stpp',
-  'c608',
-  'djmd',
-  'dbgi',
-  'camm',
-  'gpmd',
-  'mett',
-  'metx',
-  'rtmd',
-]);
+const TEXT_SAMPLE_ENTRIES = new Set(['tx3g', 'text', 'wvtt', 'sbtt', 'stpp', 'c608']);
+const TELEMETRY_SAMPLE_ENTRIES = new Set(['djmd', 'dbgi', 'camm', 'gpmd', 'rtmd', 'mett', 'metx']);
+/**
+ * Location in subtitle / timed text: the needles, ISO 6709, or "latitude" / "longitude" / "GPS (". "GPS (" is matched
+ * in capitals only: four case-free letters turn up by chance in megabytes of video data.
+ */
+const TEXT_TRACK_LOCATION_RE = /latitude|longitude/i;
+const TEXT_TRACK_GPS_RE = /GPS\s*\(/;
+/** mebx key names (keyd boxes) that sound like a location. */
+const MEBX_LOCATION_KEY_RE = /keyd[\x20-\x7e]{0,80}?(gps|location|coord|geo)/i;
 
-/** The sample entry types of every track (trak / mdia / minf / stbl / stsd), or null when a track doesn't read. */
-function sampleEntryTypes(b: Bytes, moov: Box): string[] | null {
+/** The sample entries of every track (trak / mdia / minf / stbl / stsd), or null when a track doesn't read. */
+function sampleEntries(b: Bytes, moov: Box): Box[] | null {
   const kids = (x: Box | undefined, at = 0) => (x ? boxes(b, x.data + at, x.end) : null);
   const pick = (list: Box[] | null, type: string) => list?.find((x) => x.type === type);
   const traks = kids(moov);
   if (!traks) return null;
-  const out: string[] = [];
+  const out: Box[] = [];
   for (const trak of traks.filter((x) => x.type === 'trak')) {
     const stbl = pick(kids(pick(kids(pick(kids(trak), 'mdia')), 'minf')), 'stbl');
     const entries = kids(pick(kids(stbl), 'stsd'), 8);
     if (!entries) return null;
-    out.push(...entries.map((x) => x.type));
+    out.push(...entries);
   }
   return out;
 }
 
-function bmff(b: Bytes): LocationVerdict {
+/** Movie tracks: telemetry or a location-named mebx key → 'unknown'; text tracks → a flat search of the file. */
+function trackVerdict(b: Bytes, moov: Box, audio: boolean): LocationVerdict {
+  const entries = sampleEntries(b, moov);
+  if (!entries) return audio ? flatMovieVerdict(b) : 'unknown';
+  if (entries.some((x) => TELEMETRY_SAMPLE_ENTRIES.has(x.type))) return 'unknown';
+  if (entries.some((x) => x.type === 'mebx' && MEBX_LOCATION_KEY_RE.test(latin1(b, x.start, x.end)))) return 'unknown';
+  if (!entries.some((x) => TEXT_SAMPLE_ENTRIES.has(x.type))) return 'none';
+  if (flatMovieVerdict(b) === 'found') return 'found';
+  const text = latin1(b, 0, b.length);
+  return TEXT_TRACK_LOCATION_RE.test(text) || TEXT_TRACK_GPS_RE.test(text) ? 'found' : 'none';
+}
+
+/**
+ * A movie / audio file read as a flat byte string (only the longer, text needles: short atom names turn up by chance
+ * in audio data).
+ */
+const flatMovieVerdict = (b: Bytes): LocationVerdict =>
+  anyNeedle(b, AUDIO_NEEDLES) || ISO6709_RE.test(latin1(b, 0, b.length)) ? 'found' : 'none';
+
+/**
+ * ISO BMFF. `audio`: boxes that don't read through (a recorder's fragmented MP4) are searched as a flat file instead
+ * of refusing the audio outright; a telemetry track or a location-named mebx key still makes it 'unknown'.
+ */
+function bmff(b: Bytes, audio = false): LocationVerdict {
   const top = boxes(b, 0, b.length);
-  if (!top) return 'unknown';
+  if (!top) return audio ? flatMovieVerdict(b) : 'unknown';
   const meta = top.find((x) => x.type === 'meta');
   const moov = top.find((x) => x.type === 'moov');
-  if (!meta && !moov) return 'unknown';
+  if (!meta && !moov) return audio ? flatMovieVerdict(b) : 'unknown';
   let v: LocationVerdict = 'none';
   // Everything but the media payload: udta / meta / keys / ilst / uuid (XMP) / sample descriptions.
   for (const x of top) if (x.type !== 'mdat' && movieHasLocation(b, x.start, x.end)) return 'found';
-  // Text / telemetry tracks keep their samples in mdat: may contain location.
+  // Text / telemetry tracks keep their samples in mdat.
   if (moov) {
-    const entries = sampleEntryTypes(b, moov);
-    if (!entries || entries.some((t) => TEXT_SAMPLE_ENTRIES.has(t))) return 'unknown';
+    v = trackVerdict(b, moov, audio);
+    if (v === 'found') return v;
   }
   if (meta) v = worst(v, heifItems(b, meta));
   // A still image (HEIC / AVIF): any other "Exif\0\0" block or XMP text in the item data too. (Not in meta, where an
@@ -893,13 +925,8 @@ export function locationVerdict(input: Uint8Array | ArrayLike<number>, mime = ''
   else if (magic(b, 0x47, 0x49, 0x46, 0x38)) [v, still] = ['none', true];
   else if (magic(b, 0x49, 0x49, 0x2a, 0x00) || magic(b, 0x4d, 0x4d, 0x00, 0x2a)) [v, still] = [tiffVerdict(b, 0), true];
   else if (magic(b, 0x42, 0x4d) && /bmp/i.test(mime)) [v, still] = ['none', true];
-  else if (isBmff(b)) {
-    v = bmff(b);
-    // Audio whose boxes don't read through (a recorder's fragmented MP4): look for location anywhere instead of
-    // refusing it outright (only the longer, text needles: short atom names turn up by chance in audio data).
-    if (v === 'unknown' && /^audio\//i.test(mime.trim()))
-      v = anyNeedle(b, AUDIO_NEEDLES) || ISO6709_RE.test(latin1(b, 0, b.length)) ? 'found' : 'none';
-  } else if (magic(b, 0x1a, 0x45, 0xdf, 0xa3)) v = anyNeedle(b, MKV_NEEDLES) ? 'found' : 'none';
+  else if (isBmff(b)) v = bmff(b, /^audio\//i.test(mime.trim()));
+  else if (magic(b, 0x1a, 0x45, 0xdf, 0xa3)) v = anyNeedle(b, MKV_NEEDLES) ? 'found' : 'none';
   else if (/svg|xml/i.test(mime)) [v, still] = ['none', true];
   if (v === null) {
     if (visual) return 'unknown';
