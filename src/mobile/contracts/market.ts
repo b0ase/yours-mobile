@@ -7,7 +7,16 @@ import { ONESAT_BASKET } from '@1sat/types';
 import { withFeeOutput } from '../mint/mint';
 import { marketFeeAddress, marketFeeSats } from '../market/fee';
 import { mintJson, prove } from '../strategies/market';
-import { CONTRACT_CONTENT_TYPE, type ContractEnvelope } from './contractNft';
+import type { Fetch } from '../names/names';
+import { isOurDomain, resolvePaymail } from '../names/names';
+import { shortKey } from '../names/pubkeyRecipient';
+import {
+  canonical,
+  CONTRACT_CONTENT_TYPE,
+  contractAuthorKey,
+  signContractEnvelope,
+  type ContractEnvelope,
+} from './contractNft';
 
 export const CONTRACTS_API = 'https://www.bwallet.space/api/contracts';
 export type ContractListing = {
@@ -42,9 +51,14 @@ export const ownedContractOutpoints = async (ctx: OneSatContext) => {
     .map((o) => o.outpoint.replace('.', '_'));
 };
 
-/** Publish: mint the original and list it. */
-export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope) => {
-  const outpoint = await mintJson(ctx, env, CONTRACT_CONTENT_TYPE, MAP(env));
+/**
+ * Publish: sign the envelope as this account (signContractEnvelope: its identity key, `handle` = its bWalletX
+ * paymail, and the reserved contract-signing key; the wallet's own publish, no site involved), mint the original
+ * and list it.
+ */
+export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope, handle?: string) => {
+  const signed = await signContractEnvelope(ctx.wallet, env, handle);
+  const outpoint = await mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed));
   const proof = await prove(ctx, 'publish', outpoint);
   await api({ method: 'POST', body: JSON.stringify({ action: 'publish', outpoint, ...proof }) });
   return outpoint;
@@ -112,8 +126,9 @@ export const copiedFrom = (listing: ContractListing, all: readonly ContractListi
  * payee, in full). The catalogue is asked again (sold out?), and the buy is refused if its price, payee, copies or
  * text differ from what was approved (b-Aware 25 Oct 2026): the catalogue must never change what is paid or minted
  * between showing it and paying. A paid buy also needs: the payee to be the author's own address (as every publish
- * writes it), the terms to be the inscription at the origin (checkAgainstOriginal), and the listing not to be a
- * later copy of another author's contract (copiedFrom).
+ * writes it), the author's signature over the whole envelope (contractAuthorKey; owner, 14 Nov 2026), the terms to
+ * be the inscription at the origin (checkAgainstOriginal), and the listing not to be a later copy of another
+ * author's contract (copiedFrom).
  */
 export const buyContract = async (ctx: OneSatContext, approved: ContractListing, bsvUsd: number) => {
   const c = await getContract(approved.origin);
@@ -125,6 +140,8 @@ export const buyContract = async (ctx: OneSatContext, approved: ContractListing,
   if (env.sale.priceUsd > 0) {
     if (env.sale.payTo !== env.author.address)
       throw new Error("This contract pays someone other than its author's address. Nothing was paid.");
+    if (!(await contractAuthorKey(env)))
+      throw new Error("This contract isn't signed by its author, so it can't be bought. Nothing was paid.");
     await checkAgainstOriginal(approved);
     let all: ContractListing[];
     try {
@@ -147,16 +164,7 @@ export const buyContract = async (ctx: OneSatContext, approved: ContractListing,
 };
 
 /** Key-order-independent deep equality of two envelopes (JSON values only). */
-const canon = (v: unknown): unknown =>
-  Array.isArray(v)
-    ? v.map(canon)
-    : v && typeof v === 'object'
-      ? Object.fromEntries(
-          Object.keys(v as object)
-            .sort()
-            .map((k) => [k, canon((v as Record<string, unknown>)[k])]),
-        )
-      : v;
+const canon = canonical;
 export const sameEnvelope = (a: ContractEnvelope, b: ContractEnvelope) =>
   JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 
@@ -167,4 +175,29 @@ export const claimContract = async (ctx: OneSatContext, outpoint: string) => {
     method: 'POST',
     body: JSON.stringify({ action: 'claim', outpoint, ...proof }),
   });
+};
+
+/**
+ * How a listing's author is shown. Signed (contractAuthorKey): the $name whose signed name binding points at the
+ * signing key (the envelope's signed `handle`, resolved now: its key must be the author's and its binding 'signed'),
+ * else the short key; the typed name never. Unsigned: null (the sheet shows the typed name as the author's own words,
+ * and a paid one can't be bought).
+ */
+export const contractAuthorLabel = async (
+  f: Fetch,
+  env: ContractEnvelope,
+): Promise<{ label: string; named: boolean } | null> => {
+  const key = await contractAuthorKey(env);
+  if (!key) return null;
+  const handle = env.author.handle;
+  const [alias, domain] = typeof handle === 'string' ? handle.toLowerCase().split('@') : [];
+  if (alias && domain && isOurDomain(domain)) {
+    try {
+      const r = await resolvePaymail(f, `${alias}@${domain}`);
+      if (r.pubkey?.toLowerCase() === key && r.nameBinding === 'signed') return { label: `$${alias}`, named: true };
+    } catch {
+      /* unresolvable: the short key */
+    }
+  }
+  return { label: shortKey(key), named: false };
 };

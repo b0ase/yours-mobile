@@ -33,6 +33,8 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bdnsx link'],
   [2, 'bwallet issuer'],
   [2, 'bwallet paymail'],
+  // Contract listing author signature (src/mobile/contracts/contractNft.ts): "I listed this contract, pay me here".
+  [2, 'bwallet contract'],
   [2, 'bwallet agreement'],
   // Company offers (src/mobile/offer/offer.ts): seal, director and subscriber signatures over the document hash.
   [2, 'bcorp offer'],

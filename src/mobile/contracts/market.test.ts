@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import type { OneSatContext } from '@1sat/actions';
-import { CONTRACT_ENVELOPE_FORMAT, type ContractEnvelope } from './contractNft';
+import { PrivateKey, ProtoWallet } from '@bsv/sdk';
+import { CONTRACT_ENVELOPE_FORMAT, signContractEnvelope, type ContractEnvelope } from './contractNft';
 import { buyContract, CONTRACTS_API, ORDFS_CONTENT, type ContractListing } from './market';
 
 /** b-Aware 25 Oct 2026 (fzsusanto): buy pays and mints what the buyer approved, never a re-fetched price or text. */
@@ -71,6 +72,27 @@ describe('buyContract compares the catalogue with the approved listing', () => {
  * b-Aware 25 Oct 2026 (fzsusanto row 115): a catalogue that serves its own payTo from the start (so nothing changes
  * between showing and paying) was still paid. The paid terms must be the author's inscription, read from the chain.
  */
+// Paid listings are signed by their author (owner, 14 Nov 2026): Ann signs hers; the attacker signs the copy.
+const asWallet = (w: ProtoWallet) => ({
+  getPublicKey: () => w.getPublicKey({ identityKey: true }),
+  createSignature: (a: Parameters<ProtoWallet['createSignature']>[0]) => w.createSignature(a),
+});
+const ann = new ProtoWallet(PrivateKey.fromRandom());
+const attacker = new ProtoWallet(PrivateKey.fromRandom());
+const annBase = {
+  format: CONTRACT_ENVELOPE_FORMAT,
+  contract: { format: 'bwalletx.contract/1', name: 'NDA', network: 'mainnet' },
+  description: 'A plain NDA',
+  author: { name: 'Ann', address: '1AuthorAddressxxxxxxxxxxxxxxxxxxxx' },
+  sale: { priceUsd: 1, copies: 10, payTo: '1AuthorAddressxxxxxxxxxxxxxxxxxxxx' },
+} as unknown as ContractEnvelope;
+const signedAuthorEnv = await signContractEnvelope(asWallet(ann), annBase, 'ann@bwallet.space');
+const signedSwapped = await signContractEnvelope(asWallet(attacker), {
+  ...annBase,
+  author: { name: 'Ann', address: '1Attackerxxxxxxxxxxxxxxxxxxxxxxxxx' },
+  sale: { ...annBase.sale, payTo: '1Attackerxxxxxxxxxxxxxxxxxxxxxxxxx' },
+});
+
 describe('buyContract pays only the payee the author inscribed', () => {
   const realFetch = globalThis.fetch;
   afterEach(() => {
@@ -78,19 +100,9 @@ describe('buyContract pays only the payee the author inscribed', () => {
   });
 
   const ORIGIN = `${'ab'.repeat(32)}_0`;
-  const authorEnv = {
-    format: CONTRACT_ENVELOPE_FORMAT,
-    contract: { format: 'bwalletx.contract/1', name: 'NDA', network: 'mainnet' },
-    description: 'A plain NDA',
-    author: { name: 'Ann', address: '1AuthorAddressxxxxxxxxxxxxxxxxxxxx' },
-    sale: { priceUsd: 1, copies: 10, payTo: '1AuthorAddressxxxxxxxxxxxxxxxxxxxx' },
-  } as unknown as ContractEnvelope;
+  const authorEnv = signedAuthorEnv;
   const authorBody = JSON.stringify(authorEnv);
-  const swapped = {
-    ...authorEnv,
-    author: { name: 'Ann', address: '1Attackerxxxxxxxxxxxxxxxxxxxxxxxxx' },
-    sale: { ...authorEnv.sale, payTo: '1Attackerxxxxxxxxxxxxxxxxxxxxxxxxx' },
-  } as ContractEnvelope;
+  const swapped = signedSwapped;
 
   /**
    * Catalogue answers `listing` (the same as shown) and lists `catalogue` (default: just it, or null = the list
@@ -162,10 +174,8 @@ describe('buyContract pays only the payee the author inscribed', () => {
   });
 
   // Review of row 115 (14 Nov 2026): a copy of Ann's contract, inscribed and listed by someone else.
-  const copy = {
-    ...swapped,
-    author: { name: 'Ann', address: '1Attackerxxxxxxxxxxxxxxxxxxxxxxxxx' },
-  } as ContractEnvelope;
+  // Signed by the attacker (their own key and address), with Ann's text and typed name.
+  const copy = swapped;
   const copyBody = JSON.stringify(copy);
   const ORIGIN2 = `${'cd'.repeat(32)}_0`;
   const anns = {
@@ -203,8 +213,41 @@ describe('buyContract pays only the payee the author inscribed', () => {
     expect(err).toContain("Couldn't check this contract against the catalogue");
   });
 
-  test("the sheet shows the author's address in full, not only the name", () => {
+  test("the sheet shows the author's address in full, after the verified name", () => {
     const src = readFileSync(new URL('./ContractsMarket.tsx', import.meta.url), 'utf8');
-    expect(src).toContain('(as they call themselves) · ${open.envelope.author.address}');
+    expect(src).toContain('<Row k="Author" v={`${authorText(open)} · ${open.envelope.author.address}`} />');
+  });
+
+  // Owner, 14 Nov 2026: "paid contract listing need an author's signature".
+  test('a free listing needs no signature (it pays no one)', async () => {
+    const free = { ...annBase, sale: { ...annBase.sale, priceUsd: 0 } } as ContractEnvelope;
+    const body = JSON.stringify(free);
+    const { calls, err } = await run({ ...anns, envelope: free, body }, body);
+    expect(calls.length).toBeGreaterThan(0);
+    expect(err).toBe('wallet reached');
+  });
+
+  test('an unsigned paid listing is refused before anything is read or paid', async () => {
+    const { authorSig: _s, ...unsigned } = annBase as ContractEnvelope;
+    const body = JSON.stringify(unsigned);
+    const { calls, err } = await run({ ...anns, envelope: unsigned as ContractEnvelope, body }, body);
+    expect(calls).toEqual([]);
+    expect(err).toContain("isn't signed by its author");
+  });
+
+  test('a signature that no longer covers the terms (price raised after signing) is refused', async () => {
+    const raised = { ...authorEnv, sale: { ...authorEnv.sale, priceUsd: 900 } };
+    const body = JSON.stringify(raised);
+    const { calls, err } = await run({ ...anns, envelope: raised, body }, body);
+    expect(calls).toEqual([]);
+    expect(err).toContain("isn't signed by its author");
+  });
+
+  test("Ann's signature under the attacker's key claim is refused (the signing key must be author.identityKey)", async () => {
+    const claimed = { ...authorEnv, author: { ...authorEnv.author, identityKey: signedSwapped.author.identityKey } };
+    const body = JSON.stringify(claimed);
+    const { calls, err } = await run({ ...anns, envelope: claimed, body }, body);
+    expect(calls).toEqual([]);
+    expect(err).toContain("isn't signed by its author");
   });
 });
