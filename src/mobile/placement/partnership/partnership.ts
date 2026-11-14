@@ -8,7 +8,7 @@
 // Pure: no network, no keys. Tests: partnership.test.ts.
 import { Hash, Utils } from '@bsv/sdk';
 import type { MessageCharge } from '../../chat/roomSpend';
-import { RULE_WARNING, signaturesNeeded, type TransferRule } from './partnerLock';
+import { LEGACY_RULE_WARNING_MAJORITY, RULE_WARNING, signaturesNeeded, type TransferRule } from './partnerLock';
 
 export const TOTAL_BPS = 10_000;
 export const MAX_PARTNERS = 20;
@@ -141,7 +141,14 @@ export type AgreementInput = {
   supersedes?: number;
 };
 
-export function agreementText(i: AgreementInput): string {
+/**
+ * Which wording an agreement uses: 'current' (14 Nov 2026 on: each partner's shares move only with their own
+ * approval) or 'legacy' (the majority warning before that). New drafts are always written in the current wording;
+ * legacy is only regenerated to check agreements made with it.
+ */
+export type AgreementWording = 'current' | 'legacy';
+
+export function agreementText(i: AgreementInput, wording: AgreementWording = 'current'): string {
   const need = signaturesNeeded(i.rule, i.partners.length);
   const rule =
     i.rule.kind === 'unanimous'
@@ -163,7 +170,7 @@ export function agreementText(i: AgreementInput): string {
     '3. Partnership shares and the token',
     `   Our partnership shares are held as $${i.ticker} tokens in our own wallets, locked so that moving them needs`,
     `   our agreement: ${rule}. Nobody, including bit-sign or bWalletX, holds our keys.`,
-    `   ${RULE_WARNING[i.rule.kind]}`,
+    `   ${wording === 'legacy' && i.rule.kind === 'majority' ? LEGACY_RULE_WARNING_MAJORITY : RULE_WARNING[i.rule.kind]}`,
     '',
     '4. Profits',
     '   Profits the partnership pays out are split between us in proportion to our partnership shares,',
@@ -213,14 +220,33 @@ export function agreementProblem(
   v: Pick<AgreementVersion, 'version' | 'partners' | 'rule' | 'agreementText' | 'agreementSha256'>,
   expectTicker?: string,
 ): string | null {
+  return checkAgreement(v, expectTicker).problem;
+}
+
+/**
+ * The wording a standard agreement uses ('current' or 'legacy', see agreementText), or null when it is not one
+ * (agreementProblem says why). An agreement signed with the older majority wording still checks.
+ */
+export function agreementWording(
+  v: Pick<AgreementVersion, 'version' | 'partners' | 'rule' | 'agreementText' | 'agreementSha256'>,
+  expectTicker?: string,
+): AgreementWording | null {
+  return checkAgreement(v, expectTicker).wording;
+}
+
+function checkAgreement(
+  v: Pick<AgreementVersion, 'version' | 'partners' | 'rule' | 'agreementText' | 'agreementSha256'>,
+  expectTicker?: string,
+): { wording: AgreementWording; problem: null } | { wording: null; problem: string } {
+  const no = (problem: string) => ({ wording: null, problem });
   const [l1 = '', l2 = ''] = v.agreementText.split('\n');
   const h1 = /^PARTNERSHIP AGREEMENT — (.+) \(\$([^)]+)\)$/.exec(l1);
   const h2 = /^Version (\d+)(?:, replacing version (\d+))? · (\d{4}-\d{2}-\d{2})$/.exec(l2);
-  if (!h1 || !h2) return 'This agreement is not in the standard form.';
+  if (!h1 || !h2) return no('This agreement is not in the standard form.');
   if (expectTicker && h1[2].toUpperCase() !== expectTicker.replace(/^\$/, '').toUpperCase())
-    return 'The agreement names a different token.';
-  if (Number(h2[1]) !== v.version) return 'The version in the text does not match the draft.';
-  const again = agreementText({
+    return no('The agreement names a different token.');
+  if (Number(h2[1]) !== v.version) return no('The version in the text does not match the draft.');
+  const input: AgreementInput = {
     roomName: h1[1],
     ticker: h1[2],
     version: v.version,
@@ -228,8 +254,10 @@ export function agreementProblem(
     partners: v.partners,
     rule: v.rule,
     supersedes: h2[2] ? Number(h2[2]) : undefined,
-  });
-  if (again !== v.agreementText) return 'The text differs from the standard agreement for these partners.';
-  if (sha256Hex(v.agreementText) !== v.agreementSha256.toLowerCase()) return 'The recorded fingerprint does not match.';
-  return null;
+  };
+  const wording = (['current', 'legacy'] as const).find((w) => agreementText(input, w) === v.agreementText);
+  if (!wording) return no('The text differs from the standard agreement for these partners.');
+  if (sha256Hex(v.agreementText) !== v.agreementSha256.toLowerCase())
+    return no('The recorded fingerprint does not match.');
+  return { wording, problem: null };
 }

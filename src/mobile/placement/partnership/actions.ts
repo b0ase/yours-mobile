@@ -16,6 +16,8 @@ import {
 import {
   PARTNER_LOCK_PROTOCOL,
   addSignatures,
+  canonicalKeyset,
+  checkPlan,
   feeFor,
   feeKeyId,
   finalize,
@@ -31,8 +33,11 @@ import {
   type MovePlan,
   type PartnerProposal,
   describeProposalMoves,
+  planKeysetProblem,
+  planLoserProblem,
   proposalMoveProblem,
 } from './partnerLock';
+import { wocChainLookups, type SpendState } from '../../../services/seedChange';
 import { guardedSendBsv21 } from '../../../services/tokenSpendGuard';
 
 const hex = (b: number[]) => b.map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -76,15 +81,58 @@ export async function lockUp(
   return { outpoint: `${res.txid}.${vout}`, rawTx: tx.toHex() };
 }
 
-/** Proposer's sheet: put the exact network fee on a one-off seed-derived key, then build + fee-sign the proposal. */
-export async function proposeMove(ctx: OneSatContext, plan: MovePlan): Promise<PartnerProposal> {
+/** The chain reads proposeMove needs (WhatsOnChain by default; tests pass their own). */
+export type ChainCheck = {
+  txKnown: (txid: string) => Promise<'known' | 'unknown' | 'unclear'>;
+  spent: (outpoint: string) => Promise<SpendState>;
+};
+
+/**
+ * Every locked input must really be on chain and unspent before a fee is funded: a record row can carry a
+ * well-formed transaction that was never broadcast, or a holding already moved. Fails closed: anything the chain
+ * can't confirm stops the proposal.
+ */
+export async function inputsOnChainProblem(inputs: MovePlan['inputs'], chain: ChainCheck): Promise<string | null> {
+  for (const u of inputs) {
+    const txid = u.sourceTx.id('hex');
+    const known = await chain.txKnown(txid);
+    if (known === 'unknown') return "One of your locked holdings isn't on chain. Nothing was proposed.";
+    if (known !== 'known')
+      return "Couldn't check your locked holdings on chain just now. Nothing was proposed; try again.";
+    const spend = await chain.spent(`${txid}.${u.vout}`);
+    if (spend.state === 'spent') return 'One of your locked holdings has already moved. Nothing was proposed.';
+    if (spend.state !== 'unspent')
+      return "Couldn't check your locked holdings on chain just now. Nothing was proposed; try again.";
+  }
+  return null;
+}
+
+/**
+ * Proposer's sheet: put the exact network fee on a one-off seed-derived key, then build + fee-sign the proposal.
+ * `expected` is the agreement's keyset (agreedKeyset). Every check runs BEFORE the fee is funded, so a plan that
+ * would be refused (re-keyed, stale or fake inputs, shares that don't balance, more than one partner's shares)
+ * never costs the proposer a fee.
+ */
+export async function proposeMove(
+  ctx: OneSatContext,
+  plan: MovePlan,
+  expected: Keyset | null,
+  chain: ChainCheck = wocChainLookups(),
+): Promise<PartnerProposal> {
+  const planProblem = planKeysetProblem(plan, expected) ?? planLoserProblem(plan);
+  if (planProblem) throw new Error(planProblem);
+  // New holdings are always built under the canonical keyset (sorted keys), the bytes every partner checks.
+  const canon: MovePlan = { ...plan, keyset: canonicalKeyset(expected!) };
+  checkPlan(canon);
+  const sats = feeFor(canon);
+  const chainProblem = await inputsOnChainProblem(plan.inputs, chain);
+  if (chainProblem) throw new Error(chainProblem);
   const keyID = feeKeyId(plan.partnershipId, plan.proposalId);
   const { publicKey } = await ctx.wallet.getPublicKey({
     protocolID: PARTNER_LOCK_PROTOCOL,
     keyID,
     counterparty: 'self',
   });
-  const sats = feeFor(plan);
   const r = await ctx.wallet.createAction({
     description: `Partnership shares: fee for "${plan.summary}"`.slice(0, 50),
     outputs: [
@@ -99,7 +147,7 @@ export async function proposeMove(ctx: OneSatContext, plan: MovePlan): Promise<P
   });
   const tx = parseTx(r.tx);
   const fee: FeeUtxo = { sourceTx: tx, vout: 0, pubKey: publicKey };
-  return propose(plan, fee, async (digest) => {
+  return propose(canon, fee, async (digest) => {
     const { signature } = await ctx.wallet.createSignature({
       hashToDirectlySign: digest,
       protocolID: PARTNER_LOCK_PROTOCOL,
@@ -110,12 +158,22 @@ export async function proposeMove(ctx: OneSatContext, plan: MovePlan): Promise<P
   });
 }
 
-/** "Signature needed" sheet: sign every locked input this partner can sign. Returns the updated proposal. */
-export async function signProposal(ctx: OneSatContext, p: PartnerProposal): Promise<PartnerProposal> {
-  // Sign only what the transaction itself does, never on the strength of the proposer's summary (b-Aware report).
-  const problem = proposalMoveProblem(describeProposalMoves(p));
-  if (problem) throw new Error(problem);
+/**
+ * "Signature needed" sheet: sign every locked input this partner can sign. Returns the updated proposal.
+ * `expected` is the agreement's keyset (agreedKeyset): a move that re-keys the shares is refused before any sheet.
+ */
+export async function signProposal(
+  ctx: OneSatContext,
+  p: PartnerProposal,
+  expected: Keyset | null,
+): Promise<PartnerProposal> {
+  // Sign only what the transaction itself does, never on the strength of the proposer's summary (b-Aware report),
+  // only when every input and output is the exact partner lock under the agreed keyset (b-Aware, 0xRen), and only
+  // when every partner losing shares is me or has already signed it.
   const myKey = await partnerKey(ctx, p.partnershipId);
+  const problem = proposalMoveProblem(describeProposalMoves(p), expected, { signer: myKey });
+  if (problem) throw new Error(problem);
+  if (!expected!.pubKeys.includes(myKey.toLowerCase())) throw new Error('Your key is not on this partnership lock');
   const mine = inputsFor(p, myKey);
   if (!mine.length) throw new Error('Your key is not on this partnership lock');
   const tx = proposalTx(p);
@@ -132,8 +190,16 @@ export async function signProposal(ctx: OneSatContext, p: PartnerProposal): Prom
   return addSignatures(p, myKey, sigs);
 }
 
-/** Once enough partners have signed: finalize (refuses otherwise) and broadcast. Any partner may do this. */
-export async function broadcastProposal(p: PartnerProposal): Promise<{ txid: string; rawTx: string }> {
+/**
+ * Once enough partners have signed: finalize (refuses otherwise) and broadcast. Any partner may do this, but never
+ * for a move off the agreed keyset, even if others signed it.
+ */
+export async function broadcastProposal(
+  p: PartnerProposal,
+  expected: Keyset | null,
+): Promise<{ txid: string; rawTx: string }> {
+  const problem = proposalMoveProblem(describeProposalMoves(p), expected, { signer: null });
+  if (problem) throw new Error(problem.replace('Not signed.', 'Nothing was broadcast.'));
   const { rawTx, txid } = finalize(p);
   await broadcastRaw(rawTx);
   return { txid, rawTx };

@@ -14,6 +14,7 @@ import { RULE_WARNING, defaultRule, type TransferRule } from './partnerLock';
 import {
   admitPartner,
   agreementProblem,
+  agreementWording,
   bpsToPct,
   normHandle,
   pctToBps,
@@ -172,6 +173,8 @@ export function PartnershipAgreement({ api, ticker }: { api: BsharesApi; ticker:
 
   const { active, draft } = rec;
   const draftProblem = draft ? agreementProblem(draft, ticker) : null;
+  // A draft in the older majority wording still checks; say plainly what the wallet actually does.
+  const legacyDraft = !!draft && !draftProblem && agreementWording(draft, ticker) === 'legacy';
   const iSigned = !!draft?.signed.includes(me);
   const mayAmend = !!active?.partners.some((p) => p.handle === me);
   const newBps = pctToBps(joiner.pct);
@@ -244,6 +247,12 @@ export function PartnershipAgreement({ api, ticker }: { api: BsharesApi; ticker:
           )}
           <Note>b is not a lawyer. Read it all; take advice for bigger stakes.</Note>
           {draftProblem && <Note>Can’t sign: {draftProblem}</Note>}
+          {legacyDraft && (
+            <Note>
+              This draft uses the older wording that shares can move without one partner. Your wallet moves each
+              partner’s shares only with that partner’s own approval.
+            </Note>
+          )}
           {!iSigned && (
             <button type="button" disabled={busy || !!draftProblem} onClick={sign} className={btn} style={primary}>
               Sign with my wallet
