@@ -290,19 +290,19 @@ describe("background.ts's sheet-free branch, with the real manager", () => {
     // way. DeferredEncrypts.note runs right between the two, so the decrypt starts there.
     const { real, tracked } = mintDeps();
     let decrypting: Promise<unknown> | undefined;
-    let wallet!: Wallet;
+    const ref = {} as { wallet: Wallet };
     const d = { protocolID: PID, keyID: 'v1', counterparty: 'self', ciphertext: [1, 2, 3, 4] };
     class StartDecryptOnNote extends DeferredEncrypts {
       note(origin: string, pid: readonly [number, string], now: number) {
         super.note(origin, pid, now);
-        if (!decrypting) decrypting = tracked('decrypt', d, () => wallet.decrypt(d, SITE));
+        if (!decrypting) decrypting = tracked('decrypt', d, () => ref.wallet.decrypt(d, SITE));
       }
     }
     real.deferredEncrypts = new StartDecryptOnNote();
     const made = setup({ real });
-    wallet = made.wallet;
+    ref.wallet = made.wallet;
     const e = encryptArgs('v1');
-    await tracked('encrypt', e, () => wallet.encrypt(e, SITE));
+    await tracked('encrypt', e, () => ref.wallet.encrypt(e, SITE));
     await expect(decrypting).rejects.toThrow('Permission denied');
     expect(made.asked.length).toBe(2);
     expect(made.sheets.length).toBe(1);
