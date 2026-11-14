@@ -119,6 +119,7 @@ describe('labelCoveredByIntent', () => {
     originator: SITE,
     protocolID: [1, 'action label bvideox records'],
     counterparty: 'self',
+    usageType: 'generic',
   };
   test("only that action's label, from that site", () => {
     expect(labelCoveredByIntent(label, intent)).toBe(true);
@@ -127,5 +128,23 @@ describe('labelCoveredByIntent', () => {
     expect(labelCoveredByIntent({ ...label, protocolID: [2, 'action label bvideox records'] }, intent)).toBe(false);
     expect(labelCoveredByIntent({ ...label, privileged: true }, intent)).toBe(false);
     expect(labelCoveredByIntent(label, undefined)).toBe(false);
+  });
+  // As the manager raises them during bvideox.com's own createAction (counterparty dropped at level 1).
+  const asRaised = { type: 'protocol', originator: SITE, protocolID: [1, 'action label bvideox records'] };
+  test('during the mint: a level-1 decrypt, an HMAC and a one-signature request under the label name each ask', () => {
+    const decrypt = { ...asRaised, usageType: 'encrypting', requestID: 'proto:bvideox.com:false:1,x::encrypting' };
+    const hmac = { ...asRaised, usageType: 'hmac', requestID: 'proto:bvideox.com:false:1,x::hmac' };
+    const once = { ...asRaised, counterparty: undefined, usageType: 'signing', requestID: 'once:bvideox.com:1,x:a.1' };
+    for (const r of [decrypt, hmac, once]) expect(labelCoveredByIntent(r, intent)).toBe(false);
+    // A one-signature request is never a label, whatever usage it claims.
+    expect(labelCoveredByIntent({ ...once, usageType: 'generic' }, intent)).toBe(false);
+    // The label check itself still goes through.
+    expect(labelCoveredByIntent({ ...asRaised, usageType: 'generic', requestID: 'proto:x::generic' }, intent)).toBe(
+      true,
+    );
+  });
+  test('a key operation under the label name is not a label: decrypt, HMAC, signing each get a sheet', () => {
+    for (const usageType of ['encrypting', 'hmac', 'signing', 'publicKey', 'linkageRevelation', undefined])
+      expect(labelCoveredByIntent({ ...label, usageType }, intent)).toBe(false);
   });
 });

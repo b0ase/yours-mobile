@@ -12,8 +12,8 @@
  *   keyID and its key is this account's identity key) and shows ONE "Seal" sheet BEFORE signing: the document's
  *   fingerprint, who signs, the site, and the network fee cap. Nothing is stored by that sheet.
  * - Allow arms a pass for that site. The pass lets through exactly:
- *     a) the protocol request of THAT createSignature, once, with a one-use grant (stored already expired, so the
- *        next seal-protocol signature asks), only while it is the site's only call on the seal protocol; any other
+ *     a) the protocol request of THAT createSignature, once, with a one-use grant (oneUseGrant: nothing stored, so
+ *        the next seal-protocol signature asks), only while it is the site's only call on the seal protocol; any other
  *        seal-protocol signature the site asks for meanwhile is refused (signing), and
  *     b) the spend of the site's VERY NEXT createAction, within SEAL_PASS_MS of the signature, if and only if that
  *        action is the seal of the record just signed: a single 0-sat OP_RETURN output whose payload's recordHash is

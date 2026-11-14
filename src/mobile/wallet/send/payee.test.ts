@@ -122,10 +122,23 @@ describe('payment to self (P0, 11 Nov 2026: 1¢ to own boase@bwalletx.com)', () 
           onCancel: () => undefined,
         }),
       );
-    const mine = html(true);
+    // framer-motion decides "browser" once, at import: if an earlier test file in this process left a `document`
+    // global, it builds projection nodes and checks `instanceof SVGElement`, which bun doesn't define. Give it one
+    // for this render only, so the result doesn't depend on which files ran first.
+    const g = globalThis as { SVGElement?: unknown };
+    const hadSvg = 'SVGElement' in g;
+    if (!hadSvg) g.SVGElement = class {};
+    let mine: string;
+    let theirs: string;
+    try {
+      mine = html(true);
+      theirs = html(false);
+    } finally {
+      if (!hadSvg) delete g.SVGElement;
+    }
     expect(mine).toContain(SELF_PAY_NOTE);
     expect(mine).not.toContain('First payment to');
     expect(mine).toMatch(/>Send</); // the Send button is there as always
-    expect(html(false)).not.toContain(SELF_PAY_NOTE);
+    expect(theirs).not.toContain(SELF_PAY_NOTE);
   });
 });

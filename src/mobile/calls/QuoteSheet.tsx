@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Clock, Phone } from 'lucide-react';
 import { bareName } from '../names/names';
 import { fmtSats, useBsvUsd, usdToSats } from '../money/money';
+import { payeeLabel } from './payee';
 import { acceptQuote, declineQuote } from './store';
 import {
   amountLabel,
@@ -47,6 +48,10 @@ export const QuoteSheet = ({ s }: { s: Extract<CallState, { phase: 'quote' }> })
           </div>
         )}
         {flat && <div className="text-xs text-[#98A2B3]">Paid once, when they answer.</div>}
+        {/* Who every payment goes to, in full (b-Aware row 114): bound to their key before this sheet shows. */}
+        <div className="text-[11px] text-[#98A2B3] break-all" data-testid="quote-payee">
+          {payeeLabel(s.payTo)}
+        </div>
       </div>
       {!flat && (
         <div className="w-full flex flex-col gap-2">

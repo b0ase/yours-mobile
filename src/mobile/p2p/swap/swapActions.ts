@@ -23,6 +23,7 @@ import { Beef, P2PKH, PublicKey, Transaction, Utils, type WalletProtocol } from 
 import { FeaturePausedError, assertNotPaused } from '../../config/killSwitch';
 import { withBroadcastNow } from '../../../services/bigDelayed';
 import { guardedSendBsv21 } from '../../../services/tokenSpendGuard';
+import { checkedServedFeeAddress } from '../../wallet/send/tokenFee';
 import { checkedContext } from '../checkedWallet';
 import {
   PAYEE_PROTOCOL,
@@ -552,7 +553,8 @@ export async function acceptSwap(
   });
   const amount = BigInt(a.terms.amount);
   const receiveScript = tokenReceiveScript(tokenId, amount, PublicKey.fromString(publicKey).toAddress()).toHex();
-  const feeAddress = info.status?.fee_address ?? null;
+  // The indexer's fee address only if it is the token's own (review of b-Aware row 123): refused before the sheet.
+  const feeAddress = checkedServedFeeAddress(tokenId, info.status?.fee_address);
   const feeSats = feeAddress && (info.status?.fee_per_output ?? 0) > 0 ? info.status!.fee_per_output! : 0;
 
   const ok = await a.ask({

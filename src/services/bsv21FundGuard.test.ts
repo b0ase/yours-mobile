@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { P2PKH } from '@bsv/sdk';
 import { fundOverlayExact, fundingCopy, fundingTotal, transfersCovered, type FundingTemplate } from './bsv21FundGuard';
+import { deriveFeeAddress } from '../mobile/tokens/indexFund';
 
+/** The token the tests fund, and its own fee address script (what an honest indexer's template pays). */
+const ID = `${'ab'.repeat(32)}_0`;
+const OWN = new P2PKH().lock(deriveFeeAddress(ID) as string).toHex();
 const tpl = (...sats: number[]): FundingTemplate => ({
-  outputs: sats.map((s) => ({ lockingScript: '76a9', satoshis: s, outputDescription: 'Overlay funding' })),
+  outputs: sats.map((s) => ({ lockingScript: OWN, satoshis: s, outputDescription: 'Overlay funding' })),
 });
 
 const setup = (templates: FundingTemplate[]) => {
@@ -31,16 +36,35 @@ const setup = (templates: FundingTemplate[]) => {
 describe('fund the indexer only for the confirmed amount', () => {
   test('no amount means no payment', async () => {
     const { ctx, action, paid, calls } = setup([tpl(10_000_000)]);
-    expect((await fundOverlayExact(ctx, 'id_0', undefined, action)).error).toBe('funding-amount-unknown');
-    expect((await fundOverlayExact(ctx, 'id_0', 0, action)).error).toBe('funding-amount-unknown');
+    expect((await fundOverlayExact(ctx, ID, undefined, action)).error).toBe('funding-amount-unknown');
+    expect((await fundOverlayExact(ctx, ID, 0, action)).error).toBe('funding-amount-unknown');
     expect(paid).toEqual([]);
     expect(calls()).toBe(0);
   });
 
   test('a template that changed since the confirm is refused', async () => {
     const { ctx, action, paid } = setup([tpl(10_000_000, 500)]);
-    const r = await fundOverlayExact(ctx, 'id_0', 10_000_000, action);
+    const r = await fundOverlayExact(ctx, ID, 10_000_000, action);
     expect(r).toEqual({ error: 'funding-amount-changed', templateSats: 10_000_500 });
+    expect(paid).toEqual([]);
+  });
+
+  // Re-review of b-Aware row 123: the sheet shows the amount; the address must be the token's own.
+  test("a template output to any address but the token's own fee address is refused, at the confirmed amount", async () => {
+    const elsewhere = new P2PKH().lock('1BoatSLRHtKNngkdXEeobR76b53LETtpyT').toHex();
+    for (const outputs of [
+      [{ lockingScript: elsewhere, satoshis: 10_000_000, outputDescription: 'Overlay funding' }],
+      [
+        { lockingScript: OWN, satoshis: 9_000_000, outputDescription: 'Overlay funding' },
+        { lockingScript: elsewhere, satoshis: 1_000_000, outputDescription: 'Overlay funding' },
+      ],
+    ]) {
+      const { ctx, action, paid } = setup([{ outputs }]);
+      expect(await fundOverlayExact(ctx, ID, 10_000_000, action)).toEqual({ error: 'funding-address-wrong' });
+      expect(paid).toEqual([]);
+    }
+    const { ctx, action, paid } = setup([tpl(10_000_000)]);
+    expect((await fundOverlayExact(ctx, 'not-a-token', 10_000_000, action)).error).toBe('funding-address-wrong');
     expect(paid).toEqual([]);
   });
 
@@ -55,19 +79,19 @@ describe('fund the indexer only for the confirmed amount', () => {
       },
     };
     const action = { execute: async () => ({ txid: 'x' }) };
-    expect((await fundOverlayExact(ctx, 'id_0', 1000, action)).error).toBe('funding-template-unavailable');
+    expect((await fundOverlayExact(ctx, ID, 1000, action)).error).toBe('funding-template-unavailable');
   });
 
   test('the action pays the checked template even if the indexer changes it in between', async () => {
     const { ctx, action, paid } = setup([tpl(10_000_000), tpl(99_000_000)]);
-    const r = await fundOverlayExact(ctx, 'id_0', 10_000_000, action);
+    const r = await fundOverlayExact(ctx, ID, 10_000_000, action);
     expect(r.txid).toBe('tx');
     expect(paid).toEqual([10_000_000]);
   });
 
   test('nothing asked: nothing paid', async () => {
     const { ctx, action, paid } = setup([tpl()]);
-    expect((await fundOverlayExact(ctx, 'id_0', 1000, action)).error).toBe('funding-not-needed');
+    expect((await fundOverlayExact(ctx, ID, 1000, action)).error).toBe('funding-not-needed');
     expect(paid).toEqual([]);
   });
 

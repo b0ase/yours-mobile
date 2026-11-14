@@ -19,6 +19,7 @@
  */
 
 import { parsePayees, payeesAllowed } from './allowanceGuard';
+import { isOneUseRequestID } from './sharedKeySigning';
 
 export const STREAM_GRANTS_KEY = 'bwxStreamGrants';
 
@@ -350,10 +351,22 @@ export interface StreamPass {
   charged?: number;
 }
 
-/** Should this permission-manager request be answered by the pass? Only that site's spend (within max) and its label. */
+/**
+ * Should this permission-manager request be answered by the pass? Only that site's spend (within max) and its label.
+ * A label is a label use only (usageType 'generic', as ensureLabelAccess asks): a decrypt, HMAC or signature under
+ * the same 'action label …' protocol name, or a one-signature 'once:' request, is a key operation and gets its own
+ * sheet.
+ */
 export const passCovers = (
   pass: StreamPass | undefined,
-  req: { type: string; originator?: string; protocolID?: unknown; spending?: { satoshis?: number } },
+  req: {
+    type: string;
+    originator?: string;
+    protocolID?: unknown;
+    usageType?: string;
+    requestID?: string;
+    spending?: { satoshis?: number };
+  },
 ): boolean => {
   if (!pass || !req.originator || req.originator !== pass.originator) return false;
   if (req.type === 'spending') {
@@ -362,7 +375,13 @@ export const passCovers = (
   }
   if (req.type === 'protocol') {
     const pid = req.protocolID as [number, string] | undefined;
-    return Array.isArray(pid) && pid[0] === 1 && pid[1] === `action label ${pass.label}`;
+    return (
+      req.usageType === 'generic' &&
+      !isOneUseRequestID(req.requestID) &&
+      Array.isArray(pid) &&
+      pid[0] === 1 &&
+      pid[1] === `action label ${pass.label}`
+    );
   }
   return false;
 };

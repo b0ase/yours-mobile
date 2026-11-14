@@ -393,8 +393,9 @@ async function payForMessageOnce(
       }),
     });
   }
-  // Capped (H-5, b-Aware 28 Oct 2026): the indexer's per-output fee is read at spend time.
-  const overlay = cappedOverlayFee(details.status?.fee_address, details.status?.fee_per_output, tokenOuts);
+  // Capped (H-5, b-Aware 28 Oct 2026), and only to the token's own fee address (row 123): the indexer's fee is read
+  // at spend time.
+  const overlay = cappedOverlayFee(tokenId, details.status?.fee_address, details.status?.fee_per_output, tokenOuts);
   if (overlay) {
     outputs.push({
       lockingScript: new P2PKH().lock(overlay.address).toHex(),
