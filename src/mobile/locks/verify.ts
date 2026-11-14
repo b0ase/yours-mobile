@@ -103,6 +103,8 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
     const sum = r.schedule.reduce((a, s) => a + (s && whole(s.sats) ? s.sats : NaN), 0);
     if (sum !== r.amountSats) problems.push('The receipt total does not add up.');
   }
+  // A receipt only vouches for locks: one that lists none must not show green next to its own token amount.
+  if (r && locks.length === 0) problems.push('The receipt names no lock in this transaction.');
   const spentN = locks.filter((l) => l.spent).length;
   const status: VerifyStatus =
     locks.length === 0

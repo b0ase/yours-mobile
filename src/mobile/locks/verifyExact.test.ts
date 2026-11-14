@@ -314,3 +314,25 @@ describe('lockAt (the finder) shares the rule', () => {
     for (const vout of [1, 2, 3, 4]) expect(lockAt(tx, vout, address)).toBeNull();
   });
 });
+
+describe('a receipt with no locks', () => {
+  test('is not valid, even when its own schedule is empty', () => {
+    // receiptSvg needs a piece to draw, so the receipt's metadata is written into a bare SVG by hand.
+    const r = {
+      ...buildReceipt({
+        mode: 'date',
+        pieces: [{ height: UNTIL, sats: SATS }],
+        lockAddress: address,
+        identity: { handle: '$test', address },
+      }),
+      schedule: [],
+      amountSats: 0,
+    };
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg"><metadata id="lock-receipt">${JSON.stringify(r).replace(/[&<>]/g, (c) => `&#${c.charCodeAt(0)};`)}</metadata></svg>`;
+    const empty = buildInscriptionScript(new P2PKH().lock(address), new TextEncoder().encode(svg), 'image/svg+xml');
+    const v = checkLockTx(txWith([{ lockingScript: empty, satoshis: 1 }]).toHex(), new Set(), UNTIL - 1);
+    expect(v.status).toBe('No locks');
+    expect(v.receiptValid).toBe(false);
+    expect(v.problems).toContain('The receipt names no lock in this transaction.');
+  });
+});
