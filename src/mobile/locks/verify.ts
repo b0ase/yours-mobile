@@ -3,12 +3,15 @@
  *
  * checkLockTx is pure: given the raw transaction, which of its outputs are spent and the current
  * height, it lists every lock output (decoded from the script itself, so the height and amount are what
- * the chain enforces), compares them with the receipt's claims, and reports the live status.
+ * the chain enforces), compares them with the receipt's claims, and reports the live status. An output
+ * counts as a lock only when its script is exactly the lock (tokenLocks.exactLock); one that merely
+ * contains the lock pattern is reported as a problem and never shown as locked.
  * verifyLockTx does the fetching (WhatsOnChain) and is shared by the app and bwalletx.com/lock/verify.
  */
-import { BSV21, Lock } from '@1sat/templates';
+import { Lock } from '@1sat/templates';
 import { Transaction } from '@bsv/sdk';
 import { describeReceipt, parseReceipt, type Receipt } from './receipt';
+import { exactLock } from './tokenLocks';
 
 export type VerifiedLock = {
   vout: number;
@@ -38,29 +41,28 @@ export function checkLockTx(rawHex: string, spent: Set<number>, height: number):
   const tx = Transaction.fromHex(rawHex);
   const txid = tx.id('hex');
   const locks: VerifiedLock[] = [];
+  const problems: string[] = [];
   let receipt: Receipt | null = null;
   tx.outputs.forEach((o, vout) => {
-    const d = Lock.decode(o.lockingScript);
-    if (d && (o.satoshis ?? 0) > 0) {
-      const t = BSV21.decode(o.lockingScript);
-      const token =
-        t && t.tokenData.op === 'transfer' && t.tokenData.id
-          ? { id: t.tokenData.id, amt: String(t.getAmount()) }
-          : undefined;
-      locks.push({
-        ...(token ? { token } : {}),
-        vout,
-        height: d.until,
-        sats: o.satoshis ?? 0,
-        address: d.address,
-        spent: spent.has(vout),
-        matured: d.until <= height,
-      });
+    if (Lock.isLock(o.lockingScript)) {
+      // Only the exact lock script counts (lockFinder's rule; a token lock may carry its BSV-21 envelope in front).
+      // The lock pattern with anything else around it may be spendable now: never listed, never read as a receipt.
+      const d = exactLock(o.lockingScript);
+      if (!d) problems.push(`Output ${vout} is not a valid lock: it may be spendable now.`);
+      else if ((o.satoshis ?? 0) > 0)
+        locks.push({
+          ...(d.token ? { token: { id: d.token.id, amt: String(d.token.amt) } } : {}),
+          vout,
+          height: d.until,
+          sats: o.satoshis ?? 0,
+          address: d.address,
+          spent: spent.has(vout),
+          matured: d.until <= height,
+        });
       return;
     }
     receipt ??= parseReceipt(o.lockingScript);
   });
-  const problems: string[] = [];
   const r = receipt as Receipt | null;
   if (r) {
     const byVout = new Map(locks.map((l) => [l.vout, l]));
@@ -131,6 +133,7 @@ export async function verifyLockTx(txid: string, fetcher: typeof fetch = fetch):
   const hex = (await hexRes.text()).trim();
   const info = await f(`${WOC}/chain/info`).then((r) => r.json() as Promise<{ blocks: number }>);
   const first = checkLockTx(hex, new Set(), info.blocks);
+  if (first.txid !== txid.toLowerCase()) throw new Error('The transaction does not match its id.');
   const spent = new Set<number>();
   // WhatsOnChain's bulk spent lookup: an entry with spentIn means the output has been spent.
   for (let i = 0; i < first.locks.length; i += 20) {

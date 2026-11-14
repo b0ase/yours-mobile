@@ -72,6 +72,34 @@ export function decodeTokenLock(script: Script): DecodedTokenLock | null {
   return { tokenId: t.tokenData.id, amt: t.getAmount(), address: lock.address, until: lock.until };
 }
 
+export type ExactLock = { address: string; until: number; token?: { id: string; amt: bigint } };
+
+/**
+ * A lock output exactly as this wallet builds one, or null. Either the script is exactly Lock.lock(address, until)
+ * (a BSV lock), or exactly the BSV-21 transfer inscription for the id and amount it declares followed by exactly that
+ * lock (a token lock, as tokenLockScript builds it). Nothing else before, after or inside it.
+ *
+ * Lock.decode alone only finds the lock pattern somewhere in a script, so the pattern followed by more script (or
+ * reached by another path) passes it, though the coins may be spendable at once. Anything not rebuilt byte for byte
+ * from its own decoded values is not a lock here: this fails closed.
+ */
+export function exactLock(script: Script): ExactLock | null {
+  try {
+    const d = Lock.decode(script);
+    if (!d || !(d.until > 0)) return null;
+    const hex = script.toHex();
+    if (hex === Lock.lock(d.address, d.until).toHex()) return { address: d.address, until: d.until };
+    const t = BSV21.decode(script);
+    if (!t || t.tokenData.op !== 'transfer' || !t.tokenData.id) return null;
+    const token = { id: t.tokenData.id, amt: t.getAmount() };
+    // The envelope is rebuilt from what it declares, so only the well-formed transfer inscription can sit in front.
+    if (BSV21.transfer(token.id, token.amt).lock(lockScriptFor(d.address, d.until)).toHex() !== hex) return null;
+    return { address: d.address, until: d.until, token };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A lock can be spent in a block above `until`'s nLockTime: the spend carries nLockTime = until and a
  * non-final sequence, which miners accept once the chain tip has reached `until`.

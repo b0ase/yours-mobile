@@ -28,13 +28,12 @@
  * the bit-sign server), and locks under MIN_FOUND_LOCK_SATS. Token locks have their own finder (tokenLockApi).
  */
 import { listLocks, P1SAT_PROTOCOL, type OneSatContext } from '@1sat/actions';
-import { Lock } from '@1sat/templates';
 import type { Beef, Transaction, WalletInterface } from '@bsv/sdk';
 import { mapPool } from '../../services/storageReconcile';
 import { withTimeout } from '../withTimeout';
 import { foundLockIdTag, lockAddress } from './lockApi';
 import { MIN_PIECE_SATS } from './schedule';
-import { splitOutpoint } from './tokenLocks';
+import { exactLock, splitOutpoint } from './tokenLocks';
 
 export const LOCK_BASKET_NAME = 'lock';
 /** Exactly what lockApi.lockTx, lockToPost and @1sat/actions lockBsv write. */
@@ -113,11 +112,10 @@ async function lockRows(ctx: OneSatContext) {
 export function lockAt(tx: Transaction, vout: number, address: string): { until: number; satoshis: number } | null {
   const out = tx.outputs[vout];
   if (!out?.satoshis || out.satoshis < MIN_FOUND_LOCK_SATS) return null;
-  const d = Lock.decode(out.lockingScript);
-  if (!d || d.address !== address || !(d.until > 0)) return null;
   // Exactly the lock script, nothing around it (no inscription, no token envelope, no other owner).
-  if (Lock.lock(address, d.until).toHex() !== out.lockingScript.toHex()) return null;
-  return { until: d.until, satoshis: out.satoshis };
+  const l = exactLock(out.lockingScript);
+  if (!l || l.token || l.address !== address) return null;
+  return { until: l.until, satoshis: out.satoshis };
 }
 
 /**
