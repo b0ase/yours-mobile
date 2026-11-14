@@ -25,6 +25,7 @@ import {
 import { createDeviceSync } from '../services/deviceSync';
 import * as IS from '../services/inboundSync';
 import { classifySendError } from '../utils/sendErrors';
+import { captureConsole } from '../testing/captureConsole';
 
 const HEIGHT = 971_004;
 const REMOTE = 'https://wallet.1sat.test';
@@ -206,16 +207,32 @@ async function open(
       return connect(srv);
     }
   }
-  const core = await createWalletCore(
-    {
-      privateKey: root.toWif(),
-      chain: 'main',
-      ...(o.remoteActive ? { activeRemote: REMOTE, backups: [] } : { backups: [REMOTE] }),
-      connectionTimeout: o.connectionTimeout ?? 2_000,
-    } as never,
-    local,
-    { Services, StorageClient: FakeStorageClient, StorageProvider, Wallet, WalletStorageManager } as never,
+  const timeout = o.connectionTimeout ?? 2_000;
+  // The factory (@1sat/wallet createWalletCore) races each backup's connect against connectionTimeout. A backup that
+  // misses it (these tests slow it on purpose) or is down is skipped with ONE console.warn and the wallet opens on
+  // this device's store; it is not an error. Assert exactly that warning when the backup is slow or down, and no
+  // console output at all otherwise.
+  const { result: core, logs } = await captureConsole(() =>
+    createWalletCore(
+      {
+        privateKey: root.toWif(),
+        chain: 'main',
+        ...(o.remoteActive ? { activeRemote: REMOTE, backups: [] } : { backups: [REMOTE] }),
+        connectionTimeout: timeout,
+      } as never,
+      local,
+      { Services, StorageClient: FakeStorageClient, StorageProvider, Wallet, WalletStorageManager } as never,
+    ),
   );
+  expect(logs.error).toEqual([]);
+  const backupMissed = !o.remoteActive && (srv.down || srv.connectMs >= timeout);
+  expect(logs.warn).toHaveLength(backupMissed ? 1 : 0);
+  if (backupMissed) {
+    expect(logs.warn[0][0]).toBe(`[wallet-core] backup unreachable, skipped: ${REMOTE}`);
+    expect((logs.warn[0][1] as Error).message).toBe(
+      srv.down ? 'network: wallet.1sat.test did not answer' : `Remote storage connection timeout: ${REMOTE}`,
+    );
+  }
   core.storage.setServices(svc);
   (core.wallet as unknown as { services: unknown }).services = svc;
   expect(forceLegacyActionBatch(core.wallet)).toBe(true);
@@ -542,12 +559,27 @@ describe('the fix: this device stays the active store for its own payments', () 
     expect(s.chain.posts).toEqual([fromPhone.txid, fromExt0.txid]);
     // The phone's open session is not disturbed by that. It pays again with the pre-sign coin check installed over the
     // fix, as initWallet orders them: a coin the extension spent meanwhile is caught before signing and re-picked.
+    // The check's own log (console.warn in the app) is recorded here: one plan caught and released, then the re-picked
+    // plan checked clean, and nothing else.
+    const checks: { m: string; d?: unknown }[] = [];
     expect(
-      installCoinPreflightForWallet(p.storage, s.svc, { identityKey: s.kd.identityKey, fetch: wocFetch(s.chain) }),
+      installCoinPreflightForWallet(p.storage, s.svc, {
+        identityKey: s.kd.identityKey,
+        fetch: wocFetch(s.chain),
+        log: (m, d) => void checks.push({ m, d }),
+      }),
     ).toBe(true);
     const scope = armCoinPreflight(true);
     const again = await pay(p.wallet, 500).finally(() => scope.done());
     expect(again.inputs.filter((i) => [...fromExt0.inputs, ...fromPhone.inputs].includes(i))).toEqual([]);
+    expect(checks.map((c) => c.m.replace(/in \d+ ms/, 'in N ms'))).toEqual([
+      '[coinPreflight] coins spent from another device; releasing this plan before signing',
+      '[coinPreflight] 1 coin(s) checked in N ms: none spent elsewhere',
+    ]);
+    const caught = checks[0].d as { outpoint: string; spender: string; confirmed: boolean }[];
+    expect(caught).toHaveLength(1);
+    expect(fromExt0.inputs).toContain(caught[0].outpoint.replace('_', '.'));
+    expect(caught[0].spender).toBe(fromExt0.txid);
     expect(s.chain.refused).toEqual([]);
     expect(s.chain.posts.at(-1)).toBe(again.txid);
     keep!.stop();

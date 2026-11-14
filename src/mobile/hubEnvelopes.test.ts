@@ -8,12 +8,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { Hub, type LocalBackend } from './hub';
-import {
-  ENVELOPES_KEY_PREFIX,
-  EnvelopeStore,
-  type EnvelopeBackend,
-  type EnvelopeState,
-} from '../services/envelopes';
+import { captureConsole } from '../testing/captureConsole';
+import { ENVELOPES_KEY_PREFIX, EnvelopeStore, type EnvelopeBackend, type EnvelopeState } from '../services/envelopes';
 
 const SITE = 'www.bchatx.com';
 const KEY = `${ENVELOPES_KEY_PREFIX}acct`;
@@ -40,7 +36,15 @@ const browserStorage = (initial: Record<string, string> = {}) => {
 const filled = (sats: number): string =>
   JSON.stringify({
     envelopes: {
-      [SITE]: { originator: SITE, balanceSats: sats, createdAt: 1, updatedAt: 1, filledSats: sats, spentSats: 0, history: [] },
+      [SITE]: {
+        originator: SITE,
+        balanceSats: sats,
+        createdAt: 1,
+        updatedAt: 1,
+        filledSats: sats,
+        spentSats: 0,
+        history: [],
+      },
     },
   } satisfies EnvelopeState);
 
@@ -166,13 +170,24 @@ describe('web wallet: two tabs never spend one envelope balance twice', () => {
     const browser = browserStorage({ [PREFIXED]: filled(100) });
     const a = openTab(browser.backend, true, { badFrame: true });
     const b = openTab(browser.backend, true);
-    await a.store.get(SITE); // tab A's copy loaded
-    expect(await b.store.trySpend(SITE, 10)).toBe(true); // tab B writes: A's next read broadcasts what it saw
-    const settle = <T>(p: Promise<T>) =>
-      Promise.race([p, new Promise<'TIMEOUT'>((r) => setTimeout(() => r('TIMEOUT'), 300))]);
-    expect(await settle(a.store.trySpend(SITE, 10))).toBe(true);
-    expect(await settle(b.store.trySpend(SITE, 10))).toBe(true);
+    // The hub catches the bad frame's throw and warns once per post to it; nothing else is logged.
+    const { logs } = await captureConsole(async () => {
+      await a.store.get(SITE); // tab A's copy loaded
+      expect(await b.store.trySpend(SITE, 10)).toBe(true); // tab B writes: A's next read broadcasts what it saw
+      const settle = <T>(p: Promise<T>) =>
+        Promise.race([p, new Promise<'TIMEOUT'>((r) => setTimeout(() => r('TIMEOUT'), 300))]);
+      expect(await settle(a.store.trySpend(SITE, 10))).toBe(true);
+      expect(await settle(b.store.trySpend(SITE, 10))).toBe(true);
+    });
     expect(storedBalance(browser.items)).toBe(70);
+    expect(logs.error).toEqual([]);
+    // Two of tab A's posts reach the bad frame: the storage-change broadcast A's fresh read makes (it saw B's write)
+    // and the one for A's own spend.
+    expect(logs.warn).toHaveLength(2);
+    for (const w of logs.warn) {
+      expect(w.slice(0, 2)).toEqual(['[hub] endpoint post failed:', 'frame-1']);
+      expect((w[2] as Error).message).toBe('detached frame');
+    }
   });
 
   test('F6: get(null) sees an envelope key another tab created after this tab loaded', async () => {
@@ -185,4 +200,3 @@ describe('web wallet: two tabs never spend one envelope balance twice', () => {
     expect(all[KEY]?.envelopes[SITE]?.balanceSats).toBe(100);
   });
 });
-

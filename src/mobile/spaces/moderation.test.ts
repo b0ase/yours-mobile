@@ -10,6 +10,7 @@ import {
   wantsWakeLock,
 } from './model';
 import { ScreenAwake } from './wakeLock';
+import { captureConsole, msgOf } from '../../testing/captureConsole';
 
 const raw = {
   space: { id: 's1', host_handle: 'bob', status: 'live', transport: 'sfu', started_at: '2026-10-09T20:00:00Z' },
@@ -158,9 +159,14 @@ test('native failure falls back to navigator.wakeLock', async () => {
     },
   };
   const a = new ScreenAwake(nav, native);
-  await a.set(true);
+  const { logs } = await captureConsole(() => a.set(true));
   expect(webRequests).toBe(1);
   expect(a.held).toBe(true);
+  // The native failure is warned once and the web lock taken instead; nothing else is logged.
+  expect(logs.error).toEqual([]);
+  expect(logs.warn).toHaveLength(1);
+  expect(logs.warn[0][0]).toBe('[spaces] native keepAwake failed, trying wakeLock');
+  expect(msgOf(logs.warn[0][1])).toBe('no plugin');
 });
 
 describe('host label', () => {

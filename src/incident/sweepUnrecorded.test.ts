@@ -26,6 +26,7 @@ import { OneSatServices } from '@1sat/client';
 import { recoverMinedFailedActions, recoverySummary } from '../services/recoverFailed';
 import { makeRecoverDeps, runRecoverOnce } from '../services/recoverFailedWiring';
 import { fixUtxoStatus } from '../services/utxoStatus';
+import { captureConsole } from '../testing/captureConsole';
 import { brc29Script, recoverPaymentByTxid, txidRecoverySummary } from '../services/recoverByTxid';
 import { makeTxidRecoverDeps, sweepCandidateTxids } from '../services/recoverByTxidWiring';
 
@@ -217,18 +218,34 @@ async function sweep(post: PostMode, opts: { backupDb?: string; utxo?: Chain['ut
   const coins = legacyCoins(legacy);
   for (const i of coins.inputs) chain.mined.add(i.outpoint.slice(0, 64));
   const ctx = { wallet: w.wallet, services: { getBeefForTxid: async () => Beef.fromBinary(coins.beef.toBinary()) } };
-  const run = sweepBsv.execute(
-    ctx as never,
-    {
-      inputs: coins.inputs,
-      keys: coins.inputs.map(() => legacy),
-    } as never,
-  );
-  const r = (
-    post === 'hang'
-      ? await Promise.race([run, new Promise<{ hung: true }>((ok) => setTimeout(() => ok({ hung: true }), 1500))])
-      : await run
-  ) as { txid?: string; error?: string; hung?: true };
+  // Upstream sweepBsv catches a failed broadcast (the toolbox throws WERR_REVIEW_ACTIONS when the broadcaster says
+  // 'invalid' or has a service error), logs it once with console.error('[sweepBsv]', error) and returns { error }.
+  // Assert exactly that log for those modes and none for the others, so any other error here fails the test.
+  const { result: r, logs } = await captureConsole(async () => {
+    const run = sweepBsv.execute(
+      ctx as never,
+      {
+        inputs: coins.inputs,
+        keys: coins.inputs.map(() => legacy),
+      } as never,
+    );
+    return (
+      post === 'hang'
+        ? await Promise.race([run, new Promise<{ hung: true }>((ok) => setTimeout(() => ok({ hung: true }), 1500))])
+        : await run
+    ) as { txid?: string; error?: string; hung?: true };
+  });
+  expect(logs.warn).toEqual([]);
+  if (post === 'invalid' || post === 'serviceError') {
+    expect(r.error).toMatch(/review/i);
+    expect(logs.error).toHaveLength(1);
+    expect(logs.error[0][0]).toBe('[sweepBsv]');
+    const e = logs.error[0][1] as Error;
+    expect(e.name).toBe('WERR_REVIEW_ACTIONS');
+    expect(e.message).toBe('Undelayed createAction or signAction results require review.');
+  } else {
+    expect(logs.error).toEqual([]);
+  }
   return { r, w, root, dbName, services, chain, inputs: coins.inputs };
 }
 
@@ -315,8 +332,8 @@ describe('reproduced: sweep mined, its output not in the device store; 5.2.21 sa
     expect(recoverySummary(rep)).toBe('Nothing to restore');
     // AFTER: by txid, from the derivation the backup holds.
     const r = await recoverTxid(dev2, services, txid);
-    console.log('[row on backup] before 0, after', await balance(dev2), '|', txidRecoverySummary(r));
     expect(r.result).toBe('restored');
+    expect(txidRecoverySummary(r)).toBe(`Found 586.14198569 BSV in ${txid.slice(0, 8)}…; restored.`);
     expect(r.restoredSats).toBe(REAL_OUTPUT);
     expect(await balance(dev2)).toBe(REAL_OUTPUT);
     expect((await spendableOutputs(dev2)).map((o) => o.outpoint)).toEqual([`${txid}.0`]);
@@ -489,8 +506,8 @@ describe('remote active, copy to this device failing (owner to dkg, 15 Oct 2026)
     const rep = await recover(w, services);
     expect(rep.skipped).toBe('active storage is remote'); // what 5.2.21/5.2.22 did here
     const r = await recoverTxid(w, services, txid);
-    console.log('[remote active] before 0, after', await balance(w), '|', txidRecoverySummary(r));
     expect(r.result).toBe('restored');
+    expect(txidRecoverySummary(r)).toBe(`Found 586.14198569 BSV in ${txid.slice(0, 8)}…; restored.`);
     expect(await balance(w)).toBe(REAL_OUTPUT); // shown from the remote, once, not twice
     expect((await spendableOutputs(w)).map((o) => o.outpoint)).toEqual([`${txid}.0`]);
     const again = await recoverTxid(w, services, txid);

@@ -6,6 +6,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { PAUSED_MESSAGE, resetKillSwitchCache, STATUS_URL } from './killSwitch';
 import { broadcastRaw } from '../pots/potSend';
 import { broadcastPostage } from '../bmail/client';
+import { captureConsole, msgOf } from '../../testing/captureConsole';
 
 const realFetch = globalThis.fetch;
 const sent: string[] = [];
@@ -33,9 +34,16 @@ describe('spending pause at broadcast time', () => {
   test('bMail postage ARC fallback refuses while paused; nothing reaches ARC', async () => {
     const wallet = { createAction: async () => Promise.reject(new Error('wallet down')) };
     const postage = { txid: 'ab'.repeat(32), beef: '00' };
-    await expect(broadcastPostage(wallet as never, postage as never, globalThis.fetch as typeof fetch)).rejects.toThrow(
-      PAUSED_MESSAGE,
+    // The wallet's failure is caught and warned once (then the ARC fallback is tried); the pause then refuses it.
+    const { logs } = await captureConsole(() =>
+      expect(broadcastPostage(wallet as never, postage as never, globalThis.fetch as typeof fetch)).rejects.toThrow(
+        PAUSED_MESSAGE,
+      ),
     );
     expect(sent).toEqual([]);
+    expect(logs.error).toEqual([]);
+    expect(logs.warn).toHaveLength(1);
+    expect(logs.warn[0][0]).toBe('[bMail] wallet postage broadcast failed');
+    expect(msgOf(logs.warn[0][1])).toBe('wallet down');
   });
 });

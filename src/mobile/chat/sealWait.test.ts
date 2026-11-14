@@ -31,6 +31,11 @@ import {
   retryAllowed,
   sealProgress,
 } from './sealScreen';
+import { consoleGate } from '../../testing/captureConsole';
+
+// nativeSeal logs every refusal and failure it handles (console.warn / console.info). Each test declares exactly the
+// lines its scenario causes; any other line, or a missing one, fails that test.
+const gate = consoleGate(['error', 'warn', 'info']);
 
 /** The seal()'s default key: no identity key, document D, block f1. */
 /** The seal output the wallet builds for block f1 of the fixture document (its ref is the manifest's, any id). */
@@ -143,6 +148,7 @@ const seal = (extra: Partial<Parameters<typeof nativeSignAndSeal>[0]> & { log?: 
 
 describe('the coin wait runs on the wall clock, never on a timer that can freeze', () => {
   test('timers never fire, Date.now moves on: the page waking up lets the seal pay', async () => {
+    gate.expectLines('info [nativeSeal] paying without waiting for the coin check: cap');
     const f = frozenClock();
     const log: string[] = [];
     const steps: string[] = [];
@@ -160,6 +166,7 @@ describe('the coin wait runs on the wall clock, never on a timer that can freeze
   });
 
   test('in the foreground the short tick moves on by itself at the cap (about 8 s), not 45 s', async () => {
+    gate.expectLines('info [nativeSeal] paying without waiting for the coin check: cap');
     expect(COIN_WAIT_CAP_MS).toBeLessThanOrEqual(8_000);
     const f = frozenClock();
     const log: string[] = [];
@@ -177,6 +184,7 @@ describe('the coin wait runs on the wall clock, never on a timer that can freeze
   });
 
   test('the real browser clock: setTimeout and setInterval frozen, Date.now moving, a visibilitychange wakes it', async () => {
+    gate.expectLines('info [nativeSeal] paying without waiting for the coin check: cap');
     const g = globalThis as unknown as Record<string, unknown>;
     const saved = { st: g.setTimeout, si: g.setInterval, now: Date.now, doc: g.document };
     let t = 5_000_000;
@@ -220,6 +228,7 @@ describe('the coin wait runs on the wall clock, never on a timer that can freeze
 
 describe('a backup heal or sync holding the storage locks: no coin wait at all', () => {
   test('storage busy → pays at once; the clock never has to move', async () => {
+    gate.expectLines('info [nativeSeal] paying without waiting for the coin check: busy');
     const f = frozenClock();
     const log: string[] = [];
     let asked = 0;
@@ -255,6 +264,7 @@ describe('a wait over 2 s says what it is doing', () => {
   });
 
   test('onSlow fires once the wall clock passes 2 s, then the cap moves on by itself', async () => {
+    gate.expectLines('info [nativeSeal] paying without waiting for the coin check: cap');
     expect(COIN_WAIT_SLOW_MS).toBe(2_000);
     const f = frozenClock();
     const slow: string[] = [];
@@ -593,6 +603,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
   });
 
   test('a definite refusal cancels the nonce, then a clean retry seals once', async () => {
+    gate.expectLines('warn [nativeSeal] pay failed Not enough spendable BSV for this payment.');
     const log: string[] = [];
     const store = memStore();
     const ledger = memLedger();
@@ -634,6 +645,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     ['an unknown error', new Error('something odd')],
   ] as const)
     test(`${name}: no cancel, the record is kept, "may have been paid", no retry`, async () => {
+      gate.expectLines(`warn [nativeSeal] pay failed ${err.message}`);
       const log: string[] = [];
       const store = memStore();
       const docId = `U-${name}`;
@@ -715,6 +727,10 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
   });
 
   test('a storage error (QuotaExceeded) during createAction may come after the broadcast: no cancel, held', async () => {
+    gate.expectLines(
+      'warn [nativeSeal] pay failed QuotaExceededError: The quota has been exceeded.',
+      'warn [nativeSeal] pay failed WERR_STORAGE_REMOTE_FAILING',
+    );
     for (const msg of ['QuotaExceededError: The quota has been exceeded.', 'WERR_STORAGE_REMOTE_FAILING']) {
       const log: string[] = [];
       const store = memStore();
@@ -756,6 +772,17 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
   });
 
   test('a cancel that fails (404, 409, 503, a network error, or never answers) is ignored', async () => {
+    // Five refused payments; of the five failed cancels only the 409 is worth a line (404/503/network/timeout are
+    // silent by design: an older server, or nothing to say).
+    const NOT_PAID = 'warn [nativeSeal] pay failed Not enough spendable BSV for this payment.';
+    gate.expectLines(
+      NOT_PAID,
+      NOT_PAID,
+      'info [nativeSeal] cancel not taken (harmless): 409 commit_in_progress',
+      NOT_PAID,
+      NOT_PAID,
+      NOT_PAID,
+    );
     const answers: (() => Promise<{ ok: boolean; status: number; body: Record<string, unknown> }>)[] = [
       async () => ({ ok: false, status: 404, body: { code: 'not_yours' } }),
       async () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),

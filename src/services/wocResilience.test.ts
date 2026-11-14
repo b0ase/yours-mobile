@@ -8,6 +8,7 @@ import {
   withBackoff,
   type HttpResponse,
 } from './wocResilience';
+import { captureConsole } from '../testing/captureConsole';
 
 const r429: HttpResponse = { status: 429, statusText: 'Too Many Requests', ok: false };
 const r200: HttpResponse = { status: 200, statusText: 'OK', ok: true, data: 'ab' };
@@ -104,7 +105,16 @@ describe('provider fallback', () => {
       },
     };
     addProviderFallback(svc, { sleep: async () => {} });
-    expect(await svc.getRawTx('t')).toBe(orig);
+    const { result, logs } = await captureConsole(() => svc.getRawTx('t'));
+    expect(result).toBe(orig);
+    // The thrown fallback is caught and logged as a warning, once per round (two rounds), never rethrown.
+    expect(logs.error).toEqual([]);
+    expect(logs.warn).toHaveLength(2);
+    for (const w of logs.warn) {
+      expect(w[0]).toBe('[services] getRawTx lookup failed for t:');
+      expect(w[1]).toBeInstanceOf(WocRateLimited);
+      expect((w[1] as Error).message).toBe(RATE_LIMIT_MESSAGE);
+    }
   });
   test('own unconfirmed change: the stored raw tx answers, no network lookup', async () => {
     let net = 0;
@@ -138,7 +148,12 @@ describe('provider fallback', () => {
       fallbackServices: { getRawTx: async () => ({ rawTx: [5] }), getMerklePath: async () => ({}) },
     };
     addProviderFallback(svc, { sleep: async () => {} });
-    expect((await svc.getRawTx('t')).rawTx).toEqual([5]);
+    const { result, logs } = await captureConsole(() => svc.getRawTx('t'));
+    expect(result.rawTx).toEqual([5]);
+    expect(logs.error).toEqual([]);
+    expect(logs.warn).toHaveLength(1);
+    expect(logs.warn[0][0]).toBe('[services] getRawTx lookup failed for t:');
+    expect((logs.warn[0][1] as Error).message).toBe('An internal error has occurred.');
   });
   test('hardenWalletServices finds the WhatsOnChain provider behind OneSatServices', () => {
     const woc = { request: async () => r200, apiKey: '' };

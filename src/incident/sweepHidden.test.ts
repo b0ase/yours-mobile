@@ -24,6 +24,7 @@ import { OneSatServices } from '@1sat/client';
 import { recoverMinedFailedActions, recoverySummary } from '../services/recoverFailed';
 import { makeRecoverDeps, runRecoverOnce } from '../services/recoverFailedWiring';
 import { fixUtxoStatus } from '../services/utxoStatus';
+import { captureConsole } from '../testing/captureConsole';
 
 /** The 9 inputs of 9f66943b… (sats), and the real output. */
 const REAL_INPUTS = [
@@ -216,20 +217,36 @@ async function sweep(post: PostMode, opts: { backupDb?: string; utxo?: Chain['ut
   const coins = legacyCoins(legacy);
   for (const i of coins.inputs) chain.mined.add(i.outpoint.slice(0, 64));
   const ctx = { wallet: w.wallet, services: { getBeefForTxid: async () => Beef.fromBinary(coins.beef.toBinary()) } };
-  const run = sweepBsv.execute(
-    ctx as never,
-    {
-      inputs: coins.inputs,
-      keys: coins.inputs.map(() => legacy),
-    } as never,
-  );
-  const r = (
-    post === 'hang'
-      ? // Wait until the broadcast is actually in flight, not a guessed 1.5s: under load the sweep could reach
-        // postBeef after the caller had flipped chain.post to 'success', finishing in the background mid-test.
-        await Promise.race([run, new Promise<{ hung: true }>((ok) => (chain.onHang = () => ok({ hung: true })))])
-      : await run
-  ) as { txid?: string; error?: string; hung?: true };
+  // Upstream sweepBsv catches a failed broadcast (the toolbox throws WERR_REVIEW_ACTIONS when the broadcaster says
+  // 'invalid' or has a service error), logs it once with console.error('[sweepBsv]', error) and returns { error }.
+  // Assert exactly that log for those modes and none for the others, so any other error here fails the test.
+  const { result: r, logs } = await captureConsole(async () => {
+    const run = sweepBsv.execute(
+      ctx as never,
+      {
+        inputs: coins.inputs,
+        keys: coins.inputs.map(() => legacy),
+      } as never,
+    );
+    return (
+      post === 'hang'
+        ? // Wait until the broadcast is actually in flight, not a guessed 1.5s: under load the sweep could reach
+          // postBeef after the caller had flipped chain.post to 'success', finishing in the background mid-test.
+          await Promise.race([run, new Promise<{ hung: true }>((ok) => (chain.onHang = () => ok({ hung: true })))])
+        : await run
+    ) as { txid?: string; error?: string; hung?: true };
+  });
+  expect(logs.warn).toEqual([]);
+  if (post === 'invalid' || post === 'serviceError') {
+    expect(r.error).toMatch(/review/i);
+    expect(logs.error).toHaveLength(1);
+    expect(logs.error[0][0]).toBe('[sweepBsv]');
+    const e = logs.error[0][1] as Error;
+    expect(e.name).toBe('WERR_REVIEW_ACTIONS');
+    expect(e.message).toBe('Undelayed createAction or signAction results require review.');
+  } else {
+    expect(logs.error).toEqual([]);
+  }
   return { r, w, root, dbName, services, chain, inputs: coins.inputs };
 }
 
@@ -296,7 +313,6 @@ describe('reproduced: mined but not visible, then recovered', () => {
     expect(await balance(w)).toBe(0); // BEFORE
     mine(chain, txid, inputs);
     const rep = await recover(w, services);
-    console.log('[1 invalid] before 0, after', await balance(w), '|', recoverySummary(rep));
     expect(rep.restored).toEqual([txid]);
     expect(recoverySummary(rep)).toMatch(/^Found 586\.14 BSV from \d\d:\d\d sweep; restored$/);
     await expectRecovered(w, txid); // AFTER
@@ -313,7 +329,7 @@ describe('reproduced: mined but not visible, then recovered', () => {
     expect(await balance(w)).toBe(0); // BEFORE
     mine(chain, txid, inputs);
     const rep = await recover(w, services);
-    console.log('[2 unprocessed] before 0, after', await balance(w), '|', recoverySummary(rep));
+    expect(recoverySummary(rep)).toMatch(/^Found 586\.14 BSV from \d\d:\d\d sweep; restored$/);
     expect(rep.restoredDetail?.[0]?.fromStatus).toBe('unprocessed');
     await expectRecovered(w, txid);
   }, 30000);
@@ -331,8 +347,8 @@ describe('reproduced: mined but not visible, then recovered', () => {
     expect(await balance(w)).toBe(0);
     mine(chain, txid, inputs);
     const rep = await recover(w, services);
-    console.log('[3 failed] before 0, after', await balance(w), '|', recoverySummary(rep));
     expect(rep.restored).toEqual([txid]);
+    expect(recoverySummary(rep)).toMatch(/^Found 586\.14 BSV from \d\d:\d\d sweep; restored$/);
     await expectRecovered(w, txid);
   }, 30000);
 
@@ -373,7 +389,6 @@ describe('reproduced: dkg state after 5.2.20 (History shows the sweep, Balance 0
     // 5.2.20 installs the fixed UTXO check. The old candidate list (failed/stuck only) would find nothing here.
     expect(fixUtxoStatus(services)).toBe(true);
     const rep = await recover(w, services);
-    console.log('[dkg 5.2.20 state] before 0, after', await balance(w), '|', recoverySummary(rep));
     expect(rep.restored).toEqual([txid]);
     expect(recoverySummary(rep)).toMatch(/^Found 586\.14 BSV from \d\d:\d\d sweep; restored$/);
     await expectRecovered(w, txid);

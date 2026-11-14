@@ -33,6 +33,11 @@ import {
   sha256Hex,
 } from './sealCheck';
 import { estimateSealFee, sealScriptFee } from './sealFee';
+import { consoleGate } from '../../testing/captureConsole';
+
+// nativeSeal logs every refusal and failure it handles (console.warn / console.info). Each test declares exactly the
+// lines its scenario causes; any other line, or a missing one, fails that test.
+const gate = consoleGate(['error', 'warn', 'info']);
 
 const memStore = () => {
   const m = new Map<string, PendingSeal>();
@@ -212,6 +217,7 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
   // 6 Nov 2026 (bit-sign seal cancel): this text says a broadcast was tried and needs review, so it is NOT proof that
   // nothing went out. No retry and no cancel; the seal is held on this phone instead.
   test('a broadcast that needs review: "may have been paid", held on the phone, no commit, no cancel', async () => {
+    gate.expectLines(`warn [nativeSeal] pay failed ${RAW}`);
     const log: string[] = [];
     const store = memStore();
     const err = await nativeSignAndSeal({
@@ -235,6 +241,9 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
   });
 
   test('the background healed but could not retry safely: same plain message', async () => {
+    gate.expectLines(
+      'warn [nativeSeal] pay failed Some coins were already spent on another device. Refreshed your balance — please try again.',
+    );
     const log: string[] = [];
     const err = await nativeSignAndSeal({
       documentId: 'D',
@@ -254,6 +263,7 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
   });
 
   test("other refusals that prove nothing went out: the wallet's words, the nonce cancelled, a clean retry", async () => {
+    gate.expectLines('warn [nativeSeal] pay failed Not enough spendable BSV for this payment.');
     const log: string[] = [];
     const boom = new Error('Not enough spendable BSV for this payment.');
     const err = await nativeSignAndSeal({
@@ -509,6 +519,7 @@ describe('the broadcast receipt and in-progress (bit-sign fix/seal-receipt-sweep
     ['410 beyond_window', { ok: false, status: 410, body: { code: 'beyond_window' } }],
   ] as const) {
     test(`receipt fails (${name}) → commit still runs and the seal completes`, async () => {
+      gate.expectLines(`warn [nativeSeal] receipt not recorded (commit goes ahead) ${reply.status} ${reply.body.code}`);
       const r = await seal({ receipt: () => reply });
       expect(paths(r.log)).toEqual(['prepare', 'compose', 'pay', 'receipt', 'commit']);
       expect(r.out).toEqual(body);
@@ -516,6 +527,7 @@ describe('the broadcast receipt and in-progress (bit-sign fix/seal-receipt-sweep
   }
 
   test('receipt throws (network) → commit still runs', async () => {
+    gate.expectLines('warn [nativeSeal] receipt failed (commit goes ahead) offline');
     const log: string[] = [];
     const inner = api(log);
     const r = await seal(
@@ -711,22 +723,37 @@ describe('the wallet decides what it signs (chat/sealCheck.ts)', () => {
     expect(r.store.m.size).toBe(0);
   };
 
-  for (const [name, patch] of [
+  for (const [name, patch, why] of [
     [
       'another protocol',
       { signing: { protocolID: [2, 'auth message signature'], keyID: 'N1', counterparty: 'anyone' } },
+      'signing protocol is not the seal protocol',
     ],
-    ['another key id', { signing: { protocolID: [2, 'bitsign seal'], keyID: '1', counterparty: 'anyone' } }],
-    ['another counterparty', { signing: { protocolID: [2, 'bitsign seal'], keyID: 'N1', counterparty: 'self' } }],
-    ['data that is not the record of this document', { recordCanonical: 'rec' }],
+    [
+      'another key id',
+      { signing: { protocolID: [2, 'bitsign seal'], keyID: '1', counterparty: 'anyone' } },
+      "signing key id is not this session's",
+    ],
+    [
+      'another counterparty',
+      { signing: { protocolID: [2, 'bitsign seal'], keyID: 'N1', counterparty: 'self' } },
+      'signing counterparty is not "anyone"',
+    ],
+    ['data that is not the record of this document', { recordCanonical: 'rec' }, 'record is not JSON'],
     [
       'a record of another document',
       { recordCanonical: HONEST.recordCanonical.replace(/"doc":"[0-9a-f]+"/, `"doc":"${'00'.repeat(32)}"`) },
+      'record differs (doc)',
     ],
-    ['an output that pays someone', { lockingScriptHex: `76a914${'00'.repeat(20)}88ac` }],
-    ['another data output', { lockingScriptHex: '006a' }],
+    [
+      'an output that pays someone',
+      { lockingScriptHex: `76a914${'00'.repeat(20)}88ac` },
+      'output is not the seal of this record',
+    ],
+    ['another data output', { lockingScriptHex: '006a' }, 'output is not the seal of this record'],
   ] as const) {
     test(`compose asks for ${name}: refused, nothing signed or paid, the session cancelled`, async () => {
+      gate.expectLines(`warn [nativeSeal] compose refused: ${why}`);
       const r = await run({ compose: honestCompose(patch as Record<string, unknown>) });
       nothingSignedOrPaid(r);
       expect(r.e.message).toBe(SEAL_MISMATCH_MESSAGE);
@@ -734,6 +761,7 @@ describe('the wallet decides what it signs (chat/sealCheck.ts)', () => {
   }
 
   test('prepare names another version of the document: refused before the approval is even asked', async () => {
+    gate.expectLines('warn [nativeSeal] prepare refused: prepare names another version of the document');
     const r = await run({
       prepare: () => ({ ok: true, status: 200, body: { ...preparedFor('N1'), origHash: 'ab'.repeat(32) } }),
     });
@@ -744,6 +772,7 @@ describe('the wallet decides what it signs (chat/sealCheck.ts)', () => {
   });
 
   test('prepare names another wallet: refused before the approval', async () => {
+    gate.expectLines('warn [nativeSeal] prepare refused: prepare names another wallet');
     const r = await run({
       prepare: () => ({ ok: true, status: 200, body: preparedFor('N1', `03${'cd'.repeat(32)}`) }),
     });
@@ -752,6 +781,7 @@ describe('the wallet decides what it signs (chat/sealCheck.ts)', () => {
   });
 
   test("this wallet's identity key unknown: never signed", async () => {
+    gate.expectLines("warn [nativeSeal] prepare refused: this wallet's identity key is unknown");
     const r = await run({}, { identityKey: '' });
     nothingSignedOrPaid(r);
   });
@@ -810,6 +840,7 @@ describe('the fee: the sheet shows what the document costs, and the seal never p
   });
 
   test("a huge reference in the document's own manifest: refused before the sheet, nothing signed or paid", async () => {
+    gate.expectLines('warn [nativeSeal] refused before approval: seal too big {"refChars":500000,"shownFee":50073}');
     const html = SEAL_HTML.replace('"documentRef":"R"', `"documentRef":"${'X'.repeat(500_000)}"`);
     const record = expectedSealRecord(
       { documentId: 'D', documentHtml: html, svg: '<svg/>', fieldIds: ['f1'], identityKey: SEAL_KEY, nonce: 'N1' },
@@ -842,6 +873,7 @@ describe('the fee: the sheet shows what the document costs, and the seal never p
   });
 
   test('a fee rate that would take a seal over SEAL_MAX_SATS: refused before the sheet', async () => {
+    gate.expectLines('warn [nativeSeal] refused before approval: seal too big {"refChars":1,"shownFee":71900}');
     const log: string[] = [];
     let asked = false;
     const e = await nativeSignAndSeal({ ...base(log), satsPerKb: 100_000, approve: async () => (asked = true) }).catch(

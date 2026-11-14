@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { knownOnChain, recoverMinedFailedActions, recoverySummary, type FailedAction } from './recoverFailed';
 import { healStrandedStreamActions } from './streamHeal';
 import { prepareFunding, resetRecoverThrottle } from './fundingPrep';
+import { captureConsole, msgOf } from '../testing/captureConsole';
 
 const T1 = 'c13ecd5bd63283685c8c699305fc98c701cee539d13aa2cf0ff7f9413c08f955';
 const T2 = 'a'.repeat(64);
@@ -62,16 +63,23 @@ describe('restore failed actions that are mined', () => {
   });
 
   test('errors never throw', async () => {
-    const r = await recoverMinedFailedActions({
-      listFailed: async () => {
-        throw new Error('db');
-      },
-      queueUnfail: async () => 0,
-      isMined: async () => true,
-      runUnFail: async () => '',
-      log: () => undefined,
-    });
+    const { result: r, logs } = await captureConsole(() =>
+      recoverMinedFailedActions({
+        listFailed: async () => {
+          throw new Error('db');
+        },
+        queueUnfail: async () => 0,
+        isMined: async () => true,
+        runUnFail: async () => '',
+        log: () => undefined,
+      }),
+    );
     expect(r.error).toBe('db');
+    expect(r.restored).toEqual([]);
+    expect(logs.warn).toEqual([]);
+    expect(logs.error).toHaveLength(1);
+    expect(logs.error[0][0]).toBe('[recover] failed:');
+    expect(msgOf(logs.error[0][1])).toBe('db');
   });
 });
 

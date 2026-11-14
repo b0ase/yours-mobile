@@ -17,6 +17,7 @@ import { getPaused } from '../config/killSwitch';
 import { MODULE_FINISHES, purchaseContext } from '../market/walletOutpoint';
 import { checkedOrdinalPurchaseContext, checkedPurchaseContext, feeFromOptions } from './checkedPurchase';
 import { TradeCheckError, verifyOrdinalPurchaseArgs, type ArgOutput } from './verify';
+import { captureConsole, type Captured } from '../../testing/captureConsole';
 
 const ID = 'd5ffbbfd8310dcb6763c7180b8dbc725b708d0ce990f93cd27d00ff24aa0de02_1';
 const addr = () => PrivateKey.fromRandom().toAddress();
@@ -68,6 +69,22 @@ const fakeCtx = (beef: Beef) => {
   return { ctx, signed };
 };
 
+/**
+ * Upstream buyBsv21 / buyOrdinal catch what the checked createAction throws, log it once with
+ * console.error('[buyBsv21]' | '[buyOrdinal]', error) and return { error }. A refused buy must log exactly that one
+ * TradeCheckError with this reason; a buy that signs must log nothing.
+ */
+const expectRefusalLog = (logs: Captured, tag: string, reason: string) => {
+  expect(logs.warn).toEqual([]);
+  expect(logs.log).toEqual([]);
+  expect(logs.error).toHaveLength(1);
+  expect(logs.error[0][0]).toBe(tag);
+  expect(logs.error[0][1]).toBeInstanceOf(TradeCheckError);
+  expect((logs.error[0][1] as Error).message).toBe(`Stopped before signing: ${reason}`);
+};
+const expectNoLogs = (logs: Captured) => expect([...logs.error, ...logs.warn, ...logs.log]).toEqual([]);
+const quiet = <T>(fn: () => Promise<T>) => captureConsole(fn, ['error', 'warn', 'log']);
+
 beforeAll(async () => {
   // Kill switch: answer "nothing paused" without the network.
   await getPaused(async () => new Response(JSON.stringify({ paused: [] })));
@@ -78,27 +95,33 @@ describe('token listing buy (buyBsv21)', () => {
     const { beef, outpoint } = tokenListing(listingPrice);
     const { ctx, signed } = fakeCtx(beef);
     const checked = await checkedPurchaseContext(ctx, { tokenId: ID, outpoint, amount: 100n, priceSats: shownPrice });
-    const res = await buyBsv21.execute(purchaseContext(checked, outpoint), {
-      tokenId: ID,
-      outpoint,
-      amount: '100',
-      ...MODULE_FINISHES,
-    });
-    return { res, signed };
+    const { result: res, logs } = await quiet(() =>
+      buyBsv21.execute(purchaseContext(checked, outpoint), {
+        tokenId: ID,
+        outpoint,
+        amount: '100',
+        ...MODULE_FINISHES,
+      }),
+    );
+    return { res, signed, logs };
   };
   test('signs when the listing asks the price shown', async () => {
-    const { res, signed } = await run(10_000, 10_000);
+    const { res, signed, logs } = await run(10_000, 10_000);
     expect(res.error).toBeUndefined();
     expect(signed).toHaveLength(1);
+    expectNoLogs(logs);
   });
   test('refuses, before signing, a listing that asks more than shown', async () => {
-    const { res, signed } = await run(25_000, 10_000);
+    const { res, signed, logs } = await run(25_000, 10_000);
     expect(String(res.error)).toContain('asks 25000 sats, not the 10000 shown');
     expect(signed).toHaveLength(0);
+    expectRefusalLog(logs, '[buyBsv21]', 'the listing asks 25000 sats, not the 10000 shown');
   });
   test('refuses a listing that asks less than shown too (the price must be the one approved)', async () => {
-    const { signed } = await run(5_000, 10_000);
+    const { res, signed, logs } = await run(5_000, 10_000);
+    expect(String(res.error)).toContain('asks 5000 sats, not the 10000 shown');
     expect(signed).toHaveLength(0);
+    expectRefusalLog(logs, '[buyBsv21]', 'the listing asks 5000 sats, not the 10000 shown');
   });
   test('a marketplace fee above the one shown is refused', async () => {
     const { beef, outpoint } = tokenListing(10_000);
@@ -110,16 +133,25 @@ describe('token listing buy (buyBsv21)', () => {
       priceSats: 10_000,
       fee: { address: MARKET, sats: 100 },
     });
-    const res = await buyBsv21.execute(purchaseContext(checked, outpoint), {
-      tokenId: ID,
-      outpoint,
-      amount: '100',
-      marketplaceAddress: MARKET,
-      marketplaceRate: 0.05,
-      ...MODULE_FINISHES,
-    });
+    const { result: res, logs } = await quiet(() =>
+      buyBsv21.execute(purchaseContext(checked, outpoint), {
+        tokenId: ID,
+        outpoint,
+        amount: '100',
+        marketplaceAddress: MARKET,
+        marketplaceRate: 0.05,
+        ...MODULE_FINISHES,
+      }),
+    );
     expect(String(res.error)).toContain('marketplace fee is more than shown');
     expect(signed).toHaveLength(0);
+    expect(logs.error).toHaveLength(1);
+    expect(logs.error[0][0]).toBe('[buyBsv21]');
+    expect(logs.error[0][1]).toBeInstanceOf(TradeCheckError);
+    expect((logs.error[0][1] as Error).message).toStartWith(
+      'Stopped before signing: marketplace fee is more than shown',
+    );
+    expect([...logs.warn, ...logs.log]).toEqual([]);
   });
 });
 
@@ -132,36 +164,43 @@ describe('NFT listing buy (buyOrdinal)', () => {
     const { beef, outpoint } = nftListing(listingPrice);
     const { ctx, signed } = fakeCtx(beef);
     const checked = await checkedOrdinalPurchaseContext(ctx, { outpoint, priceSats: shownPrice, fee });
-    const res = await buyOrdinal.execute(purchaseContext(checked, outpoint), {
-      outpoint,
-      contentType: 'video/mp4',
-      ...(fee ? { marketplaceAddress: fee.address, marketplaceRate: 0.01 } : {}),
-      ...MODULE_FINISHES,
-    });
-    return { res, signed };
+    const { result: res, logs } = await quiet(() =>
+      buyOrdinal.execute(purchaseContext(checked, outpoint), {
+        outpoint,
+        contentType: 'video/mp4',
+        ...(fee ? { marketplaceAddress: fee.address, marketplaceRate: 0.01 } : {}),
+        ...MODULE_FINISHES,
+      }),
+    );
+    return { res, signed, logs };
   };
   test('signs when the listing asks the price shown', async () => {
-    const { res, signed } = await run(10_000, 10_000);
+    const { res, signed, logs } = await run(10_000, 10_000);
     expect(res.error).toBeUndefined();
     expect(signed).toHaveLength(1);
+    expectNoLogs(logs);
   });
   test('signs with the marketplace fee the sheet showed', async () => {
-    const { res, signed } = await run(
+    const { res, signed, logs } = await run(
       10_000,
       10_000,
       feeFromOptions({ marketplaceAddress: MARKET, marketplaceRate: 0.01 }, 10_000),
     );
     expect(res.error).toBeUndefined();
     expect(signed).toHaveLength(1);
+    expectNoLogs(logs);
   });
   test('refuses, before signing, a listing that asks more than shown', async () => {
-    const { res, signed } = await run(25_000, 10_000);
+    const { res, signed, logs } = await run(25_000, 10_000);
     expect(String(res.error)).toContain('asks 25000 sats, not the 10000 shown');
     expect(signed).toHaveLength(0);
+    expectRefusalLog(logs, '[buyOrdinal]', 'the listing asks 25000 sats, not the 10000 shown');
   });
   test('no price shown (not for sale) is refused', async () => {
-    const { signed } = await run(10_000, 0);
+    const { res, signed, logs } = await run(10_000, 0);
+    expect(String(res.error)).toContain('no price');
     expect(signed).toHaveLength(0);
+    expectRefusalLog(logs, '[buyOrdinal]', 'no price');
   });
 });
 

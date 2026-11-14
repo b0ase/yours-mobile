@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { DEPOSIT_BASKET } from '@1sat/types';
 import { balanceWithDeposits, depositBasketSats, inFlightChangeSats, sweepWaitingDeposits } from './depositBalance';
+import { captureConsole, msgOf } from '../testing/captureConsole';
 
 const wallet = (funded: number, deposits: number[], opts: { failList?: boolean } = {}) => ({
   balance: async () => funded,
@@ -51,12 +52,24 @@ describe('sweep waiting deposits before createAction', () => {
     expect(calls).toBe(0);
   });
   test('a failed sweep or read never throws', async () => {
-    expect(
-      await sweepWaitingDeposits(wallet(0, [1]), async () => {
-        throw new Error('broadcast');
-      }),
-    ).toBe(0);
-    expect(await sweepWaitingDeposits(wallet(0, [], { failList: true }), async () => ({ swept: 1 }))).toBe(0);
+    // Each failure is caught, logged once as an error, and reported as 0 swept (the action then funds as before).
+    const { logs } = await captureConsole(async () => {
+      expect(
+        await sweepWaitingDeposits(wallet(0, [1]), async () => {
+          throw new Error('broadcast');
+        }),
+      ).toBe(0);
+      let swept = 0;
+      expect(await sweepWaitingDeposits(wallet(0, [], { failList: true }), async () => (swept++, { swept: 1 }))).toBe(
+        0,
+      );
+      expect(swept).toBe(0); // an unreadable basket is not swept blind
+    });
+    expect(logs.warn).toEqual([]);
+    expect(logs.error.map((a) => [a[0], msgOf(a[1])])).toEqual([
+      ['[sweepWaitingDeposits] sweep before createAction failed:', 'broadcast'],
+      ['[sweepWaitingDeposits] sweep before createAction failed:', 'storage busy'],
+    ]);
   });
 });
 

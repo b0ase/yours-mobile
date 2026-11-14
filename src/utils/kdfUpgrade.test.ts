@@ -12,6 +12,11 @@ import {
   pbkdf2Hex,
   saltIterations,
 } from './crypto';
+import { consoleGate } from '../testing/captureConsole';
+
+// upgradeKdf defers (returns false, changes nothing) on any error and warns once with the error's name only (never
+// its message: no key material in logs). The tests that make it fail declare that line; anything else fails.
+const gate = consoleGate(['error', 'warn']);
 
 const PW = 'correct horse battery staple';
 const LEGACY_SALT = '00112233445566778899aabbccddeeff';
@@ -192,6 +197,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
   });
 
   kdfTest('a blob that will not open: nothing is written, the old wallet still opens', async () => {
+    gate.expectLines('warn [ChromeStorageService] password key upgrade deferred: OperationError'); // AES-GCM refused it
     local.accounts['1B'].encryptedKeys = 'v2:' + '00'.repeat(40);
     const svc = await service();
     const snap = structuredClone(local);
@@ -201,6 +207,7 @@ describe('upgradeKdf: 100k wallet moves to 600k after a password unlock', () => 
   });
 
   kdfTest('a failed write keeps the old key in the session (old data still opens)', async () => {
+    gate.expectLines('warn [ChromeStorageService] password key upgrade deferred: Error'); // the 'disk full' write
     const svc = await service();
     failSet = true;
     const snap = structuredClone(local);

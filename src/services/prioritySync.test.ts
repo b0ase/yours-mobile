@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { singleFlight } from './addressResync';
 import { isRetryable, prioritySync, type PrioritySyncDeps, type SyncOutputLike } from './prioritySync';
+import { consoleGate } from '../testing/captureConsole';
+
+// prioritySync warns once per transaction it could not load (and carries on). The tests that make lookups fail
+// declare exactly those warnings; any other error or warning fails the test.
+const gate = consoleGate(['error', 'warn']);
+const notLoaded = (part: 'coins' | 'names', why: string) =>
+  new RegExp(`^warn \\[prioritySync\\] ${part}: [0-9a-f]{64} not loaded: (${why})$`);
 
 const txid = (n: number) => n.toString(16).padStart(64, '0');
 const noSleep = async () => undefined;
@@ -100,11 +107,12 @@ describe('prioritySync', () => {
       await wait(1);
       if (coinIds.has(o.outpoint.slice(0, 64)) && ++got === coinIds.size) oldBalanceMs = performance.now() - b0;
     }
-    console.log(`[timing] before: balance complete after ${oldBalanceMs.toFixed(0)} ms`);
-    console.log(`[timing] after: balance complete after ${coinsMs.toFixed(0)} ms; whole sync ${totalMs.toFixed(0)} ms`);
+    // (Printed before as "[timing] before/after"; asserted instead: ~3000 ms one by one against ~30 ms here.)
+    expect(coinsMs).toBeLessThan(oldBalanceMs / 5);
   }, 60_000);
 
   test('a 429 or timeout on names never blocks the balance', async () => {
+    gate.expectRepeated(200, notLoaded('names', 'Request failed: 429|timeout'));
     const { outs, coinIds } = bigWallet(200, 5);
     let coinsReady = false;
     const { d, balance } = deps(outs, coinIds, {
@@ -156,6 +164,7 @@ describe('prioritySync', () => {
   });
 
   test('retry is not a no-op: a second run redoes exactly what failed', async () => {
+    gate.expectRepeated(50, notLoaded('names', 'names indexer: 503')); // the first run only
     const { outs, coinIds } = bigWallet(50, 5);
     const store = memStore();
     let down = true;
@@ -189,6 +198,7 @@ describe('prioritySync', () => {
   });
 
   test('a run cut short resumes from what it saved', async () => {
+    gate.expectRepeated(64, notLoaded('names', 'service worker stopped')); // the first run: 104 transactions, 40 saved
     const { outs, coinIds } = bigWallet(100, 4);
     const store = memStore();
     let n = 0;
@@ -342,6 +352,7 @@ describe('prioritySync: the cursor moves when names are not loaded here', () => 
   });
 
   test('a failed coin still holds the cursor, and a sync that loads names still waits for its slices', async () => {
+    gate.expectRepeated(2, notLoaded('coins', 'invalid beef'));
     const { outs, coinIds } = bigWallet(50, 2);
     const failing = deps(outs, coinIds, {
       namesPerRun: 0,
