@@ -27,6 +27,7 @@ import {
   ChromeStorageObject,
   CurrentAccountObject,
   DeprecatedStorage,
+  KdfPending,
   UsbSecurity,
 } from './types/chromeStorage.types';
 
@@ -101,6 +102,32 @@ export const withoutGhostsUnder = (
 /** A stored wallet entry is usable only with its addresses (ghosts from dropOrphanPatches' bug are skipped). */
 export const isRealAccount = (a: unknown): boolean =>
   !!(a as { addresses?: { identityAddress?: string } } | null | undefined)?.addresses?.identityAddress;
+
+/** changePassword: the stored keys don't open with the session key and an earlier change left its note. */
+export const UNFINISHED_PASSWORD_CHANGE =
+  "An earlier password change didn't finish, so nothing was changed. Lock bWalletX and unlock with the new password " +
+  "you chose then (if that doesn't open it, your old one). Then try again.";
+/** changePassword: the stored keys don't open with the session key and there is no note. */
+export const KEYS_CHANGED_SINCE_UNLOCK =
+  "Your wallet's keys changed since you unlocked, so nothing was changed. Lock bWalletX, unlock again and try again.";
+
+/** A note's `older` salts; anything not a list of strings (a damaged note) counts as none. */
+const kdfOlder = (note?: KdfPending | null): string[] =>
+  Array.isArray(note?.older) ? note.older.filter((s): s is string => typeof s === 'string') : [];
+
+/**
+ * The recovery note a key swap writes before its accounts + salt write: the salt it leaves, the salt it writes, and
+ * every salt an earlier note still names. A note is left behind by a swap that didn't finish (or whose final clear
+ * failed), and then the stored keys may be under one of its salts (phones write accounts and salt as separate secure
+ * items, and a write can fail without the app dying). Overwriting it with just this swap's pair could erase the only
+ * record of that salt, and a second half-write would then leave keys no password opens (13 Nov 2026 review).
+ */
+export const kdfNote = (prevSalt: string, salt: string, earlier?: KdfPending | null): KdfPending => {
+  const older = [...new Set([earlier?.salt, earlier?.prevSalt, ...kdfOlder(earlier)])].filter(
+    (s): s is string => typeof s === 'string' && s !== '' && s !== prevSalt && s !== salt,
+  );
+  return older.length > 0 ? { prevSalt, salt, older } : { prevSalt, salt };
+};
 
 export class ChromeStorageService {
   storage: Partial<ChromeStorageObject> | undefined;
@@ -629,7 +656,12 @@ export class ChromeStorageService {
     );
     const passKey = await this.getPassKey();
     if (!passKey) throw new Error('Unlock the wallet first');
-    const { accounts, keyRekey, salt: prevSalt } = await this.get(['accounts', 'keyRekey', 'salt']);
+    const {
+      accounts,
+      keyRekey,
+      salt: prevSalt,
+      kdfPending,
+    } = await this.get(['accounts', 'keyRekey', 'salt', 'kdfPending']);
     if (keyRekey) throw new Error('Wallet keys are being re-encrypted; try again in a moment');
     const salt = generateWalletSalt();
     const newKey = await derivePassKey(newPassword, salt, undefined);
@@ -639,8 +671,17 @@ export class ChromeStorageService {
         next[id] = acct;
         continue;
       }
-      const plain = await decrypt(acct.encryptedKeys, passKey); // throws if the session key is stale
-      JSON.parse(plain);
+      let plain: string;
+      try {
+        plain = await decrypt(acct.encryptedKeys, passKey);
+        JSON.parse(plain);
+      } catch {
+        // The stored keys don't open with this session's key: an earlier change wrote them and its salt didn't land
+        // (phones read the key material fresh, hub.ts freshLocalKeys). Nothing is written, so the note that change
+        // left stays for the unlock repair; this copy is refreshed so that unlock sees what is stored.
+        await this.getAndSetStorage().catch(() => undefined);
+        throw new Error(kdfPending ? UNFINISHED_PASSWORD_CHANGE : KEYS_CHANGED_SINCE_UNLOCK);
+      }
       const sealed = await encrypt(plain, newKey);
       // Prove the new blob opens with the new key before anything is written.
       if ((await decrypt(sealed, newKey)) !== plain)
@@ -651,7 +692,9 @@ export class ChromeStorageService {
     // off halfway (an app kill: phones write accounts and salt as separate secure items) leaves keys and salt that
     // don't match; the next unlock (repairInterruptedKdfUpgrade) finds the salt that opens them: the old password
     // with prevSalt, or the new password with salt. Without the note only the 12 words could open the wallet.
-    if (typeof prevSalt === 'string' && prevSalt) await this.set({ kdfPending: { prevSalt, salt } });
+    // The note keeps every salt an earlier unfinished note named (kdfNote): this swap must never be what erases the
+    // only record of the salt the stored keys are under.
+    if (typeof prevSalt === 'string' && prevSalt) await this.set({ kdfPending: kdfNote(prevSalt, salt, kdfPending) });
     await this.set({ accounts: next, salt } as Partial<ChromeStorageObject>);
     await this.setPassKey(newKey);
     await this.set({ kdfPending: null }).catch(() => undefined);
@@ -774,7 +817,7 @@ export class ChromeStorageService {
   ): Promise<boolean> => {
     const { kdfPending } = await this.get(['kdfPending']).catch(() => ({ kdfPending: undefined }));
     if (!kdfPending) return false;
-    for (const candidate of [kdfPending.salt, kdfPending.prevSalt]) {
+    for (const candidate of [kdfPending.salt, kdfPending.prevSalt, ...kdfOlder(kdfPending)]) {
       if (!candidate || candidate === salt) continue;
       if (await this.tryPassword(password, candidate, account, selectedAccount, undefined, undefined)) {
         // Two writes, salt first, the note cleared LAST in its own write: phones store each key as its own secure

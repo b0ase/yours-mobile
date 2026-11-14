@@ -46,6 +46,12 @@ export interface HubOptions {
    * read from a stale copy could be spent twice. Only used when the backend can read single keys (loadKeys).
    */
   freshLocalKeys?: (key: string) => boolean;
+  /**
+   * Every fresh key, when they are a fixed list (phones: the key material only). get(null) and clear then re-read
+   * exactly these instead of listing the whole backend, which on a phone is a Keychain / Keystore read of every item
+   * on each ChromeStorageService write. Without it (web: envelope keys are open-ended) the backend is listed.
+   */
+  freshKeyNames?: readonly string[];
 }
 
 /** Read the persisted session mirror, or drop it when this edition keeps the session in memory. */
@@ -117,9 +123,10 @@ export const nativeLocalBackend: LocalBackend = {
     ]);
   },
   async loadKeys(keys) {
-    const out: Record<string, string | null> = {};
-    for (const key of keys) out[key] = (await YoursNative.secureGet({ key })).value;
-    return out;
+    // Phones: one secure item per key. Web: native.ts's localStorage fallback. A read that fails throws, so the
+    // storage op fails rather than answering from the hub's copy (HubOptions.freshLocalKeys).
+    const values = await Promise.all(keys.map(async (key) => (await YoursNative.secureGet({ key })).value));
+    return Object.fromEntries(keys.map((key, i) => [key, values[i] ?? null]));
   },
 };
 
@@ -138,6 +145,7 @@ export class Hub {
   private persistSession: boolean;
   private persistQueue: Promise<unknown> = Promise.resolve();
   private freshLocalKeys?: (key: string) => boolean;
+  private freshKeyNames?: readonly string[];
   /** storage.local ops that touch a fresh key run one at a time: re-read, apply, persist (see onStorage). */
   private freshQueue: Promise<unknown> = Promise.resolve();
   private storageReady: Promise<void>;
@@ -156,6 +164,7 @@ export class Hub {
   ) {
     this.persistSession = options.persistSession ?? true;
     this.freshLocalKeys = backend.loadKeys ? options.freshLocalKeys : undefined;
+    this.freshKeyNames = this.freshLocalKeys ? options.freshKeyNames : undefined;
     this.session = initialSession(this.persistSession, sessionStorage);
     this.markUnlocked();
     this.storageReady = this.loadLocal();
@@ -399,12 +408,12 @@ export class Hub {
           ? [
               ...new Set([
                 ...fresh,
-                ...Object.keys(await this.backend.load())
-                  .filter((k) => k.startsWith(LOCAL_PREFIX))
-                  .map((k) => k.slice(LOCAL_PREFIX.length))
-                  .filter((k) => this.freshLocalKeys!(k)),
+                ...(this.freshKeyNames ??
+                  Object.keys(await this.backend.load())
+                    .filter((k) => k.startsWith(LOCAL_PREFIX))
+                    .map((k) => k.slice(LOCAL_PREFIX.length))),
               ]),
-            ]
+            ].filter((k) => this.freshLocalKeys!(k))
           : fresh;
         seen = await this.refreshFresh(keys);
       } catch (error) {
