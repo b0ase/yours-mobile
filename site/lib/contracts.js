@@ -109,16 +109,13 @@ const mayFollow = (earlier, later) =>
   earlier.key ? later.key === earlier.key : !!later.key || earlier.env.author.address === later.env.author.address;
 
 /**
- * Chain order of two origins: earlier block first, then earlier in the block (when both positions are known), then
- * the output number in one transaction. Unconfirmed (or unknown) ranks after confirmed; ties fall back to when the
- * catalogue first saw it. Negative = `a` first.
+ * Chain order of two origins: the earlier block first; unconfirmed ranks after confirmed. In one block (or both
+ * unconfirmed) it is the order the catalogue first saw them, never the position in the block: a copier who sees the
+ * original in the mempool can get an earlier position in the same block (re-review of f3ff8a37). Negative = `a` first.
  */
 function chainOrder(a, b) {
-  if (a.pos && b.pos) {
-    if (a.pos.height !== b.pos.height) return a.pos.height - b.pos.height;
-    if (a.txid === b.txid) return a.vout - b.vout;
-    if (a.pos.index !== null && b.pos.index !== null && a.pos.index !== b.pos.index) return a.pos.index - b.pos.index;
-  } else if (a.pos || b.pos) return a.pos ? -1 : 1;
+  if (a.pos && b.pos && a.pos.height !== b.pos.height) return a.pos.height - b.pos.height;
+  if (!a.pos !== !b.pos) return a.pos ? -1 : 1;
   return a.seen - b.seen || (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0);
 }
 
@@ -134,13 +131,17 @@ async function checkRow(origin, env) {
 }
 
 /**
- * The listings the catalogue serves, as a Set of origins, from rows `{ origin, envelope, created_at }`:
+ * The listings the catalogue serves, from rows `{ origin, envelope, created_at }`, as { served, unchecked } (Sets of
+ * origins):
  * - a row that fails envelopeRefusal is left out (older unsigned or badly signed paid listings: fail closed);
  * - of the listings of one contract, the earliest ON CHAIN stays (chainOrder, from `position(origin)`, asked only
  *   when listings of a contract disagree about the author) and a later one that may not follow it (mayFollow) is
- *   left out. So listing first in the catalogue is no way to take over an author's contract.
+ *   left out. So listing first in the catalogue is no way to take over an author's contract;
+ * - `position` throws when it couldn't find out (null = unconfirmed). Then the order isn't known, so NONE of that
+ *   contract's listings is served and all are `unchecked` (re-review of f3ff8a37: a failed lookup for the original
+ *   must never serve the copy). A position the caller already holds doesn't fail, so a proven order stays served.
  */
-async function servedListings(rows, position) {
+async function judgeListings(rows, position) {
   const groups = new Map();
   for (const r of rows) {
     if (!r?.envelope || typeof r.envelope !== 'object' || !r.envelope.author || !r.envelope.sale) continue;
@@ -148,23 +149,35 @@ async function servedListings(rows, position) {
     if (refused) continue;
     const id = contractId(r.envelope);
     if (!groups.has(id)) groups.set(id, []);
-    const [txid, vout] = String(r.origin).split('_');
     const seen = Date.parse(r.created_at);
-    groups.get(id).push({ origin: r.origin, env: r.envelope, key, txid, vout: Number(vout), seen: seen || Infinity });
+    groups.get(id).push({ origin: r.origin, env: r.envelope, key, seen: seen || Infinity });
   }
   const served = new Set();
+  const unchecked = new Set();
   for (const g of groups.values()) {
     const agree = g.every((a) => g.every((b) => a === b || mayFollow(a, b)));
     if (!agree) {
-      for (const l of g) l.pos = await position(l.origin).catch(() => null);
+      let failed = false;
+      for (const l of g) {
+        try {
+          l.pos = (await position(l.origin)) ?? null;
+        } catch {
+          failed = true;
+        }
+      }
+      if (failed) {
+        for (const l of g) unchecked.add(l.origin);
+        continue;
+      }
       g.sort(chainOrder);
     }
     const kept = [];
     for (const l of g) if (kept.every((k) => mayFollow(k, l))) kept.push(l);
     for (const k of kept) served.add(k.origin);
   }
-  return served;
+  return { served, unchecked };
 }
+const servedListings = async (rows, position) => (await judgeListings(rows, position)).served;
 
 module.exports = {
   CONTRACT_TYPE,
@@ -178,6 +191,7 @@ module.exports = {
   contractId,
   contractSigningBytes,
   envelopeRefusal,
+  judgeListings,
   mayFollow,
   parseContractEnvelope,
   servedListings,

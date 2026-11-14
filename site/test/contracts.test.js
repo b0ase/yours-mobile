@@ -58,6 +58,9 @@ let table = [];
 const BASE = Date.now() - 3_600_000;
 let clock = 0;
 const queries = [];
+const urls = [];
+/** txids whose chain lookup fails (the API is down for them). */
+const down = new Set();
 /** PostgREST's `in.("a","b")` list, as the route quotes it. */
 const inList = (v) => [...v.slice(4, -1).matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1].replace(/\\(.)/g, '$1'));
 const fakeDb = async (url, init = {}) => {
@@ -74,6 +77,7 @@ const fakeDb = async (url, init = {}) => {
   }
   const name = q.get('envelope->contract->>name');
   if (name) queries.push(name);
+  if (name) urls.push(u.search);
   const names = name?.startsWith('in.') ? inList(name) : name ? [name.slice(3)] : null;
   const out = table
     .filter((r) => !names || names.includes(r.envelope.contract.name))
@@ -89,7 +93,10 @@ beforeAll(() => {
   K.chain.tx = async (txid) => txs.get(txid) ?? null;
   K.chain.spent = async () => false;
   K.chain.origin = async () => null;
-  K.chain.position = async (txid) => positions.get(txid) ?? null;
+  K.chain.position = async (txid) => {
+    if (down.has(txid)) throw new Error('Chain position unavailable');
+    return positions.get(txid) ?? null;
+  };
   process.env.SUPABASE_URL = 'https://db.test';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-only';
   globalThis.fetch = fakeDb;
@@ -105,6 +112,8 @@ afterAll(() => {
 beforeEach(() => {
   table = [];
   queries.length = 0;
+  urls.length = 0;
+  down.clear();
 });
 
 const inscribed = (body, to) => {
@@ -264,7 +273,7 @@ describe('contract catalogue: paid listings are signed by their author', () => {
     const clone = await signAs(mallory, listing(mallory));
     const [status, out] = await publish(clone);
     expect(status).toBe(409);
-    expect(out.error).toContain('another author');
+    expect(out.error).toContain('Someone listed this text moments before you');
     expect(table).toHaveLength(1);
     expect(table[0].envelope.author.identityKey).toBe(ann.key);
     // The lookup asked only for listings of this contract's name (as PostgREST reads the encoded query).
@@ -312,7 +321,7 @@ describe('contract catalogue: who keeps a contract (review of 2e409da3)', () => 
     expect((await publish(await signAs(ann, listing(ann))))[0]).toBe(200);
     const [status, out] = await publish(listing(ann, 0));
     expect(status).toBe(409);
-    expect(out.error).toContain('another author');
+    expect(out.error).toContain('Someone listed this text moments before you');
     expect(table).toHaveLength(1);
   });
 
@@ -331,10 +340,13 @@ describe('contract catalogue: who keeps a contract (review of 2e409da3)', () => 
     expect((await publish(await signAs(mallory, listing(mallory)), { height: 102, index: 0 }))[0]).toBe(409);
   });
 
-  test('in one block, the earlier position wins', async () => {
-    const anns = mint(await signAs(ann, listing(ann)), { height: 100, index: 2 });
-    expect((await publish(await signAs(mallory, listing(mallory)), { height: 100, index: 9 }))[0]).toBe(200);
-    expect((await publishMinted(anns))[0]).toBe(200);
+  test('in one block, the catalogue saw it first wins, not the position in the block', async () => {
+    // A copier who sees the original in the mempool can get an earlier position in the same block.
+    const [first, , anns] = await publish(await signAs(ann, listing(ann)), { height: 100, index: 9 });
+    expect(first).toBe(200);
+    const [status, out] = await publish(await signAs(mallory, listing(mallory)), { height: 100, index: 2 });
+    expect(status).toBe(409);
+    expect(out.error).toBe('This contract is already listed by another author');
     expect(await served()).toEqual([anns.outpoint]);
   });
 
@@ -369,6 +381,83 @@ describe('contract catalogue: who keeps a contract (review of 2e409da3)', () => 
     const odd = 'a,b) "c" \\d';
     const [, , m] = await publish(listing(ann, 0, { contract: { ...listing(ann).contract, name: odd } }));
     expect(await served()).toEqual([m.outpoint]);
+  });
+});
+
+describe('contract catalogue: when the chain can’t be checked (re-review of f3ff8a37)', () => {
+  const txidOf = (m) => m.outpoint.split('_')[0];
+
+  test('a failed lookup for the original never serves the copy: none of that contract is served', async () => {
+    // Ann earlier on chain, Mallory listed first; both rows are in the catalogue.
+    const anns = mint(await signAs(ann, listing(ann)), { height: 100, index: 5 });
+    const [, , mal] = await publish(await signAs(mallory, listing(mallory)), { height: 101, index: 0 });
+    const annsRow = await signAs(ann, listing(ann));
+    table.push({
+      origin: anns.outpoint,
+      envelope: annsRow,
+      body: '',
+      body_hash: 'x',
+      created_at: new Date().toISOString(),
+    });
+    // An unrelated contract is still served.
+    const [, , other] = await publish(listing(ann, 0, { contract: { ...listing(ann).contract, name: 'Other' } }));
+    down.add(txidOf(anns));
+    expect(await served()).toEqual([other.outpoint]);
+    expect(await getOne(mal.outpoint)).toBe(503);
+    expect(await getOne(anns.outpoint)).toBe(503);
+    expect((await claimOriginal(mal))[0]).toBe(503);
+    // The failure wasn't kept as a position: once the lookup works, the original is served.
+    down.clear();
+    expect((await served()).sort()).toEqual([anns.outpoint, other.outpoint].sort());
+    // And now that the order is proven, a later failure doesn't hide it.
+    down.add(txidOf(anns));
+    down.add(txidOf(mal));
+    expect((await served()).sort()).toEqual([anns.outpoint, other.outpoint].sort());
+  });
+
+  test('publish answers 503 and lists nothing when the chain can’t be checked', async () => {
+    const [, , mal] = await publish(await signAs(mallory, listing(mallory)), { height: 101, index: 0 });
+    const anns = mint(await signAs(ann, listing(ann)), { height: 100, index: 5 });
+    down.add(txidOf(anns));
+    expect(await publishMinted(anns)).toEqual([
+      503,
+      { error: 'Couldn’t check the chain just now. Nothing was listed; try again shortly.' },
+    ]);
+    expect(table).toHaveLength(1);
+    // The same outpoint can be published again once the chain answers.
+    down.clear();
+    expect((await publishMinted(anns))[0]).toBe(200);
+    expect(await served()).toEqual([anns.outpoint]);
+    expect(await getOne(mal.outpoint)).toBe(404);
+  });
+
+  test('the author beaten while unconfirmed is told to try again, and the same outpoint lists once it confirms first', async () => {
+    const [, , mal] = await publish(await signAs(mallory, listing(mallory)));
+    const [status, out, anns] = await publish(await signAs(ann, listing(ann)));
+    expect(status).toBe(409);
+    expect(out.error).toBe(
+      'Someone listed this text moments before you. Try again in a few minutes, once your contract has confirmed.',
+    );
+    positions.set(txidOf(anns), { height: 100, index: 3 });
+    positions.set(txidOf(mal), { height: 101, index: 0 });
+    // "Unconfirmed" is asked again after a minute.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 61_000;
+    try {
+      expect((await publishMinted(anns))[0]).toBe(200);
+      expect(await served()).toEqual([anns.outpoint]);
+      expect(await publishMinted(anns)).toEqual([409, { error: 'Already published' }]);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  test('the list judges a page against older listings, earliest first (so a limit never cuts an original)', async () => {
+    await publish(listing(ann, 0));
+    urls.length = 0;
+    await served();
+    const q = urls.find((u) => decodeURIComponent(u).includes('name=in.('));
+    expect(q).toContain('order=created_at.asc');
   });
 });
 
@@ -420,22 +509,32 @@ describe('where an origin sits on chain (strategyKeys chain.position)', () => {
     expect(pos).toEqual({ height: 975470, index: 3 });
   });
 
-  test('else from JungleBus; unconfirmed or unknown is null', async () => {
+  test('else from JungleBus; unconfirmed is null; "couldn’t check" throws, never null', async () => {
     const txid = 'cd'.repeat(32);
-    const jb = (body) => (u) =>
-      u.includes('junglebus') ? new Response(JSON.stringify(body)) : new Response('', { status: 404 });
-    expect(
-      await withFetch(jb({ id: txid, block_height: 975470, block_index: 1 }), () => saved.chain.position(txid)),
-    ).toEqual({ height: 975470, index: 1 });
-    expect(await withFetch(jb({ id: txid, block_height: 0 }), () => saved.chain.position(txid))).toBeNull();
-    expect(await withFetch(jb({ id: 'ef'.repeat(32), block_height: 9 }), () => saved.chain.position(txid))).toBeNull();
-    expect(
-      await withFetch(
-        () => {
-          throw new Error('offline');
-        },
-        () => saved.chain.position(txid),
-      ),
-    ).toBeNull();
+    const at = (answer) => withFetch(answer, () => saved.chain.position(txid));
+    const none = new Response('', { status: 404 });
+    const jb =
+      (body, beef = () => new Response('', { status: 404 })) =>
+      (u) =>
+        u.includes('junglebus') ? new Response(JSON.stringify(body)) : beef();
+    expect(await at(jb({ id: txid, block_height: 975470, block_index: 1 }))).toEqual({ height: 975470, index: 1 });
+    // Known and not mined: unconfirmed.
+    expect(await at(jb({ id: txid, block_height: 0 }))).toBeNull();
+    // A source that fails, with no block from the other: not "unconfirmed".
+    await expect(at(jb({ id: txid, block_height: 0 }, () => new Response('', { status: 500 })))).rejects.toThrow();
+    await expect(at((u) => (u.includes('junglebus') ? new Response('', { status: 502 }) : none))).rejects.toThrow();
+    await expect(at(jb({ id: 'ef'.repeat(32), block_height: 9 }))).rejects.toThrow();
+    // No source knows it.
+    await expect(at(() => new Response('', { status: 404 }))).rejects.toThrow();
+    await expect(
+      at(() => {
+        throw new Error('offline');
+      }),
+    ).rejects.toThrow();
+    // A block from one source is enough, whatever the other does.
+    expect(await at(jb({ id: txid, block_height: 7 }, () => new Response('', { status: 500 })))).toEqual({
+      height: 7,
+      index: null,
+    });
   });
 });
