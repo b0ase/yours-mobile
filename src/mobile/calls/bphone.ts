@@ -149,7 +149,9 @@ export const saveMyProfile = async (
   );
   const saved = parseProfile(j.profile);
   writeMyProfileCache(identityKey, saved);
-  if (opts.ownerSaved) rememberOwnerCard(identityKey, saved.rate);
+  // The card the owner submitted, never the server's reply: a reply with other terms must not become "what the owner
+  // chose" (review of 85ef98d8). If the server stored something else, the next settings open asks instead.
+  if (opts.ownerSaved) rememberOwnerCard(identityKey, profile.rate);
   peerCache.delete(identityKey);
   return saved;
 };

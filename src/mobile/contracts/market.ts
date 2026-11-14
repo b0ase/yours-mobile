@@ -194,7 +194,10 @@ export const contractAuthorLabel = async (
   if (alias && domain && isOurDomain(domain)) {
     try {
       const r = await resolvePaymail(f, `${alias}@${domain}`);
-      if (r.pubkey?.toLowerCase() === key && r.nameBinding === 'signed') return { label: `$${alias}`, named: true };
+      // A forward is declared by the paymail server, not signed by the name's owner: show the name only when the
+      // handle itself resolves to the key, never through a forward (review of 00176fbe).
+      if (!r.forwardsTo && r.pubkey?.toLowerCase() === key && r.nameBinding === 'signed')
+        return { label: `$${alias}`, named: true };
     } catch {
       /* unresolvable: the short key */
     }

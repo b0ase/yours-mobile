@@ -22,7 +22,7 @@ import {
 
 // contractAuthorLabel resolves the signed handle through names.ts: answer it here, then put the real module back.
 const realNames = { ...(await import('../names/names')) };
-let resolved: { pubkey?: string; nameBinding?: string } | Error = new Error('offline');
+let resolved: { pubkey?: string; nameBinding?: string; forwardsTo?: string } | Error = new Error('offline');
 mock.module('../names/names', () => ({
   ...realNames,
   resolvePaymail: async () => {
@@ -112,6 +112,14 @@ describe('how the author is shown', () => {
     expect(await contractAuthorLabel(f, env)).toEqual({ label: '$ann', named: true });
   });
 
+  test('a handle that only reaches the key through a server-declared forward is not shown as $name', async () => {
+    const key = await keyOf(mallory);
+    // Mallory signs as ann@; the paymail server forwards ann → mallory, so the lookup lands on Mallory's own key.
+    const env = await signContractEnvelope(asWallet(mallory), base, 'ann@bwallet.space');
+    resolved = { pubkey: key, nameBinding: 'signed', forwardsTo: 'mallory' };
+    expect(await contractAuthorLabel(f, env)).toEqual({ label: `${key.slice(0, 6)}…${key.slice(-4)}`, named: false });
+  });
+
   test('handle bound to another key, unsigned binding, a handle off our domains, or offline: the short key', async () => {
     const key = await keyOf(mallory);
     const short = `${key.slice(0, 6)}…${key.slice(-4)}`;
@@ -147,9 +155,12 @@ describe('the wallet signs its own publish', () => {
     expect(src).toContain('accountNamesFor(account?.addresses.identityAddress).paymail || undefined');
     expect(src).toContain('return publishContract(apiContext, env, handle);');
   });
-  test("a paid listing's sheet never shows the typed name for a signed listing, and Buy is off when unsigned", () => {
+  test("a paid listing's sheet never shows the typed name for a signed listing, and Buy is off until verified", () => {
     const src = read('./ContractsMarket.tsx');
     expect(src).toContain('if (a) return a.label;');
-    expect(src).toContain('|| unsignedPaid(open)}');
+    // Not checked yet: never the typed name, and Buy stays off until the signature check says yes.
+    expect(src).toContain("if (a === undefined) return 'checking the author…';");
+    expect(src).toContain('|| paidNotVerified(open)}');
+    expect(src).toContain('c.envelope.sale.priceUsd > 0 && !authors[authorKey(c)]');
   });
 });
