@@ -12,12 +12,14 @@
  *    (signPayee, BRC-43 [2,'bwallet paymail'], a protocol no site can use). A card with no signature, or one that
  *    doesn't verify against the callee's key, is refused. A card saved before this signature existed is re-signed by
  *    the callee's wallet the next time it opens bPhone settings (payoutNeedsSigning), with the wallet's own address:
- *    quietly when its price matches the card this device saved (sameCardTerms), else only after the owner confirms.
+ *    quietly when its price matches the card the owner last saved on this device (planPayoutResign, readOwnerCard),
+ *    else only after the owner confirms.
  * The quote sheet shows the payee in full.
  */
 import { ProtoWallet, Utils, type WalletInterface } from '@bsv/sdk';
 import { isOurDomain } from '../names/names';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage, signRequest } from '../names/signRequest';
+import { readOwnerCard } from './bphone';
 import type { PayeeProof, PayTo, RateAsset, RateCard } from './rateCard';
 
 export const PAYEE_ACTION = 'bphone-payee';
@@ -118,6 +120,22 @@ export const sameCardTerms = (local: RateCard | null | undefined, served: RateCa
   local.amount === served.amount &&
   local.asset.kind === served.asset.kind &&
   (local.asset.kind !== 'bsv21' || (served.asset.kind === 'bsv21' && local.asset.id === served.asset.id));
+
+/**
+ * What bPhone settings do on open with my served profile `served` and my own payout address `own`: nothing (no
+ * MNEE / token card, or it is already signed for `own`), sign quietly (the served card's terms are the card I last
+ * saved on this device, readOwnerCard), or ask me first (anything else, including no saved card here). Re-review of
+ * b-Aware row 114.
+ */
+export const planPayoutResign = async (
+  identityKey: string,
+  served: RateCard | null,
+  own: string | undefined,
+): Promise<'none' | 'quiet' | 'ask'> => {
+  if (!served || served.asset.kind === 'bsv') return 'none';
+  if (!(await payoutNeedsSigning(identityKey.toLowerCase(), served.asset, own))) return 'none';
+  return sameCardTerms(readOwnerCard(identityKey)?.rate, served) ? 'quiet' : 'ask';
+};
 
 /** The payee line on the quote sheet. */
 export const payeeLabel = (payTo: PayTo): string =>

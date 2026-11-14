@@ -108,7 +108,7 @@ describe('the meter and the sheets', () => {
   test("opening bPhone settings re-signs an old card with the wallet's own address, never the served one", () => {
     const settings = readFileSync(new URL('./BPhoneSettings.tsx', import.meta.url), 'utf8');
     expect(settings).toContain('const own = await ownPayout(kind);');
-    expect(settings).toContain('await payoutNeedsSigning(publicKey.toLowerCase(), p.rate.asset, own)');
+    expect(settings).toContain('await planPayoutResign(publicKey, p.rate, own)');
     // signAndSave signs the card's own kind / token for `own` (ownPayout), never the served address.
     expect(settings).toContain('const proof = await signPayee(myKey, rate.asset, own);');
     expect(settings).toContain('asset: { ...rate.asset, address: own, proof }');
@@ -152,19 +152,15 @@ describe('the quiet re-sign signs only the price this device saved', () => {
     expect(sameCardTerms(tok(TOKEN), tok(`${'c'.repeat(64)}_0`))).toBe(false);
   });
 
-  test('settings read the local card before the server copy, and sign a different card only on Yes', () => {
+  test("settings plan from the owner's saved card, and sign a different card only on Yes", () => {
     const src = readFileSync(new URL('./BPhoneSettings.tsx', import.meta.url), 'utf8');
-    const local = src.indexOf('const local = readMyProfileCache(publicKey.toLowerCase())?.rate ?? null;');
-    const load = src.indexOf('const p = await loadMyProfile(f, publicKey.toLowerCase());');
-    expect(local).toBeGreaterThan(0);
-    expect(local).toBeLessThan(load);
-    // The quiet path is behind the terms check; a mismatch only raises the prompt.
-    expect(src).toMatch(
-      /if \(!sameCardTerms\(local, p\.rate\)\) \{\s*if \(live\) setResignAsk\(\{ base: p, own \}\);\s*return;/,
-    );
-    // The prompt's Yes is the only other caller of signAndSave.
+    // Never the profile cache (every loadMyProfile overwrites it with the server's copy).
+    expect(src).not.toContain('readMyProfileCache');
+    expect(src).toContain('const plan = await planPayoutResign(publicKey, p.rate, own);');
+    expect(src).toMatch(/if \(plan === 'ask'\) \{\s*if \(live\) setResignAsk\(\{ base: p, own \}\);\s*return;/);
+    // The prompt's Yes is the only other caller of signAndSave, and it records the owner's card.
     expect(src.match(/await signAndSave\(/g)?.length).toBe(2);
-    expect(src).toContain('const saved = await signAndSave(ask.base, ask.own);');
+    expect(src).toContain('const saved = await signAndSave(ask.base, ask.own, true);');
     expect(src).toContain('onClick={() => void confirmResign()}');
   });
 });

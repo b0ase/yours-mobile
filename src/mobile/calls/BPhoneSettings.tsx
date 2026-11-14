@@ -7,8 +7,8 @@ import type { Holding } from '../chat/tokenRooms';
 import { useAccountNames } from '../names/accountNames';
 import { bareName } from '../names/names';
 import { fmtSats, useBsvUsd, usdToSats } from '../money/money';
-import { actBooking, bphoneEnabled, listBookings, loadMyProfile, readMyProfileCache, saveMyProfile } from './bphone';
-import { payoutNeedsSigning, sameCardTerms, signPayee } from './payee';
+import { actBooking, bphoneEnabled, listBookings, loadMyProfile, saveMyProfile } from './bphone';
+import { planPayoutResign, signPayee } from './payee';
 import { busy as callBusy, shortKey } from './machine';
 import {
   ABOUT_MAX,
@@ -148,8 +148,6 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
     let live = true;
     void (async () => {
       const { publicKey } = await myKey.getPublicKey({ identityKey: true });
-      // The card this device saved, read BEFORE loadMyProfile overwrites the cache with the server's copy.
-      const local = readMyProfileCache(publicKey.toLowerCase())?.rate ?? null;
       const p = await loadMyProfile(f, publicKey.toLowerCase());
       if (!live) return;
       setMe(publicKey.toLowerCase());
@@ -172,13 +170,15 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
       setLoaded(true);
       // A card saved before payout signatures (or one whose address isn't this wallet's own): re-sign it with my own
       // address (my wallet's reserved signing key, no site involved), so callers can keep paying me (row 114). Quietly
-      // only when the server's card has the price this device saved; otherwise I'm asked first (re-review of 114).
+      // only when the server's card is the card I last saved here (readOwnerCard, which no load overwrites);
+      // otherwise I'm asked first (re-review of 114).
       const kind = p.rate?.asset.kind;
       if (p.rate && kind && kind !== 'bsv') {
         try {
           const own = await ownPayout(kind);
-          if (!(await payoutNeedsSigning(publicKey.toLowerCase(), p.rate.asset, own))) return;
-          if (!sameCardTerms(local, p.rate)) {
+          const plan = await planPayoutResign(publicKey, p.rate, own);
+          if (plan === 'none') return;
+          if (plan === 'ask') {
             if (live) setResignAsk({ base: p, own });
             return;
           }
@@ -250,11 +250,16 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
   };
 
   /** Sign `base`'s MNEE / token card for my own payout address `own` and save it (the card's price is kept as is). */
-  const signAndSave = async (base: BPhoneProfile, own: string): Promise<BPhoneProfile> => {
+  const signAndSave = async (base: BPhoneProfile, own: string, ownerSaved = false): Promise<BPhoneProfile> => {
     const rate = base.rate;
     if (!myKey || !rate || rate.asset.kind === 'bsv') throw new Error('Nothing to sign');
     const proof = await signPayee(myKey, rate.asset, own);
-    return saveMyProfile(f, myKey, { ...base, rate: { ...rate, asset: { ...rate.asset, address: own, proof } } });
+    return saveMyProfile(
+      f,
+      myKey,
+      { ...base, rate: { ...rate, asset: { ...rate.asset, address: own, proof } } },
+      { ownerSaved },
+    );
   };
 
   /** The owner confirmed the card shown in the prompt: sign it, as shown. */
@@ -264,7 +269,8 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
     setResignAsk(null);
     setProblem('');
     try {
-      const saved = await signAndSave(ask.base, ask.own);
+      // The owner said Yes to this card: it becomes the card they saved (ownerSaved).
+      const saved = await signAndSave(ask.base, ask.own, true);
       setProfile(saved);
       setNote(saved.rate ? `Signed: ${rateLabel(saved.rate)}` : 'Saved');
     } catch (e) {
@@ -288,7 +294,8 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
         const proof = await signPayee(apiContext.wallet, next.rate.asset, address);
         next.rate = { ...next.rate, asset: { ...next.rate.asset, address, proof } };
       }
-      const saved = await saveMyProfile(f, apiContext.wallet, next);
+      // The owner's own Save: this card is what later quiet re-signs compare against (readOwnerCard).
+      const saved = await saveMyProfile(f, apiContext.wallet, next, { ownerSaved: true });
       setProfile(saved);
       setNote(saved.rate ? `Saved: ${rateLabel(saved.rate)}` : 'Saved: calls are free');
     } catch (e) {
