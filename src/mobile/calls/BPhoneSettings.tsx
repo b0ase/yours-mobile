@@ -7,8 +7,8 @@ import type { Holding } from '../chat/tokenRooms';
 import { useAccountNames } from '../names/accountNames';
 import { bareName } from '../names/names';
 import { fmtSats, useBsvUsd, usdToSats } from '../money/money';
-import { actBooking, bphoneEnabled, listBookings, loadMyProfile, saveMyProfile } from './bphone';
-import { payoutNeedsSigning, signPayee } from './payee';
+import { actBooking, bphoneEnabled, listBookings, loadMyProfile, readMyProfileCache, saveMyProfile } from './bphone';
+import { payoutNeedsSigning, sameCardTerms, signPayee } from './payee';
 import { busy as callBusy, shortKey } from './machine';
 import {
   ABOUT_MAX,
@@ -133,6 +133,8 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState('');
   const [problem, setProblem] = useState('');
+  /** A served card whose payout needs signing but whose price this device didn't save: the owner confirms first. */
+  const [resignAsk, setResignAsk] = useState<{ base: BPhoneProfile; own: string } | null>(null);
   const [bookings, setBookings] = useState<Booking[] | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   /** My identity key (hex), the key bookings are filed under. */
@@ -146,6 +148,8 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
     let live = true;
     void (async () => {
       const { publicKey } = await myKey.getPublicKey({ identityKey: true });
+      // The card this device saved, read BEFORE loadMyProfile overwrites the cache with the server's copy.
+      const local = readMyProfileCache(publicKey.toLowerCase())?.rate ?? null;
       const p = await loadMyProfile(f, publicKey.toLowerCase());
       if (!live) return;
       setMe(publicKey.toLowerCase());
@@ -167,17 +171,18 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
       }
       setLoaded(true);
       // A card saved before payout signatures (or one whose address isn't this wallet's own): re-sign it with my own
-      // address, quietly (my wallet's reserved signing key, no site involved), so callers can keep paying me (row 114).
+      // address (my wallet's reserved signing key, no site involved), so callers can keep paying me (row 114). Quietly
+      // only when the server's card has the price this device saved; otherwise I'm asked first (re-review of 114).
       const kind = p.rate?.asset.kind;
       if (p.rate && kind && kind !== 'bsv') {
         try {
           const own = await ownPayout(kind);
           if (!(await payoutNeedsSigning(publicKey.toLowerCase(), p.rate.asset, own))) return;
-          const proof = await signPayee(myKey, p.rate.asset as Exclude<typeof p.rate.asset, { kind: 'bsv' }>, own);
-          const saved = await saveMyProfile(f, myKey, {
-            ...p,
-            rate: { ...p.rate, asset: { ...p.rate.asset, address: own, proof } as typeof p.rate.asset },
-          });
+          if (!sameCardTerms(local, p.rate)) {
+            if (live) setResignAsk({ base: p, own });
+            return;
+          }
+          const saved = await signAndSave(p, own);
           if (live) setProfile(saved);
         } catch {
           /* offline or paymail off: the next open (or Save) signs it */
@@ -242,6 +247,29 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
     const address = account?.addresses?.ordAddress;
     if (!address) throw new Error('No ordinals address for tokens');
     return address;
+  };
+
+  /** Sign `base`'s MNEE / token card for my own payout address `own` and save it (the card's price is kept as is). */
+  const signAndSave = async (base: BPhoneProfile, own: string): Promise<BPhoneProfile> => {
+    const rate = base.rate;
+    if (!myKey || !rate || rate.asset.kind === 'bsv') throw new Error('Nothing to sign');
+    const proof = await signPayee(myKey, rate.asset, own);
+    return saveMyProfile(f, myKey, { ...base, rate: { ...rate, asset: { ...rate.asset, address: own, proof } } });
+  };
+
+  /** The owner confirmed the card shown in the prompt: sign it, as shown. */
+  const confirmResign = async () => {
+    const ask = resignAsk;
+    if (!ask) return;
+    setResignAsk(null);
+    setProblem('');
+    try {
+      const saved = await signAndSave(ask.base, ask.own);
+      setProfile(saved);
+      setNote(saved.rate ? `Signed: ${rateLabel(saved.rate)}` : 'Saved');
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const save = async () => {
@@ -457,6 +485,37 @@ export const BPhoneSettings = ({ onLeave }: { onLeave?: () => void }) => {
         />
       </section>
 
+      {resignAsk?.base.rate && (
+        <div
+          className="rounded-xl p-3 flex flex-col gap-2 text-xs text-[#c9ccd1]"
+          style={{ border: '1px solid #2b2f36' }}
+          data-testid="bphone-resign-ask"
+        >
+          <div>
+            Callers can't pay you until your wallet signs where you're paid. Your call price on the server is{' '}
+            <b className="text-white">{rateLabel(resignAsk.base.rate)}</b>, paid to{' '}
+            <span className="break-all text-white">{resignAsk.own}</span>. Is that your price?
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded-lg px-3 py-1.5 font-semibold"
+              style={{ background: 'var(--bw-accent)', color: '#1a1300' }}
+              onClick={() => void confirmResign()}
+            >
+              Yes, sign it
+            </button>
+            <button
+              type="button"
+              className="rounded-lg px-3 py-1.5"
+              style={{ border: '1px solid #2b2f36' }}
+              onClick={() => setResignAsk(null)}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
       {problem && <p className="text-xs text-[#ff6b6b]">{problem}</p>}
       {note && <p className="text-xs text-[#2ecc71]">{note}</p>}
       <button

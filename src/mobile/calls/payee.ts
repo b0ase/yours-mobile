@@ -11,7 +11,8 @@
  *  - MNEE and BSV-21 go to an address the callee's own wallet signed with its identity key when it saved the card
  *    (signPayee, BRC-43 [2,'bwallet paymail'], a protocol no site can use). A card with no signature, or one that
  *    doesn't verify against the callee's key, is refused. A card saved before this signature existed is re-signed by
- *    the callee's wallet the next time it opens bPhone settings (payoutNeedsSigning), with the wallet's own address.
+ *    the callee's wallet the next time it opens bPhone settings (payoutNeedsSigning), with the wallet's own address:
+ *    quietly when its price matches the card this device saved (sameCardTerms), else only after the owner confirms.
  * The quote sheet shows the payee in full.
  */
 import { ProtoWallet, Utils, type WalletInterface } from '@bsv/sdk';
@@ -104,6 +105,19 @@ export const payoutNeedsSigning = async (
   asset.kind !== 'bsv' &&
   !!ownAddress &&
   (asset.address !== ownAddress || !(await checkPayeeProof(identityKey, asset)));
+
+/**
+ * Is the card the server returned the same price as the card this device last saved (kind, token id, amount, per)?
+ * The quiet re-sign only signs a card whose terms the owner already set here; anything else (no local copy, or terms
+ * that differ) is shown to the owner first (re-review of row 114: the server copy overwrites the local cache).
+ */
+export const sameCardTerms = (local: RateCard | null | undefined, served: RateCard | null | undefined): boolean =>
+  !!local &&
+  !!served &&
+  local.per === served.per &&
+  local.amount === served.amount &&
+  local.asset.kind === served.asset.kind &&
+  (local.asset.kind !== 'bsv21' || (served.asset.kind === 'bsv21' && local.asset.id === served.asset.id));
 
 /** The payee line on the quote sheet. */
 export const payeeLabel = (payTo: PayTo): string =>
