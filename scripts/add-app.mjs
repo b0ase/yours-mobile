@@ -25,7 +25,7 @@ const flag = (n) => {
 };
 const nameArg = flag('--name');
 const descArg = flag('--desc');
-let [raw, group = 'tools'] = args;
+const [raw, group = 'tools'] = args;
 if (!raw) {
   console.error('usage: pnpm add-app <url> [group] [--name "Name"] [--desc "Tagline"]');
   process.exit(1);

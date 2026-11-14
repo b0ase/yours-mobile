@@ -246,7 +246,7 @@ async function unlockIfNeeded(page: Page): Promise<void> {
   log('[test] unlocking…');
   const hasPw = await page.$('input[type="password"]');
   if (!hasPw) return;
-  await hasPw.click({ clickCount: 3 });
+  await hasPw.click({ count: 3 });
   await hasPw.type(secrets.password, { delay: 8 });
   await page.evaluate(() => {
     const btn = [...document.querySelectorAll('button')].find((b) => /unlock/i.test(b.textContent || ''));
@@ -338,7 +338,6 @@ async function main() {
   try {
     ver = await Promise.race([
       worker.evaluate(() => {
-        // @ts-expect-error chrome
         return chrome.runtime.getManifest().version;
       }),
       new Promise<string>((_, rej) => setTimeout(() => rej(new Error('version timeout')), 5000)),

@@ -40,7 +40,7 @@ page.on('console', (m) => {
   if (/recover|RECOVER|chrome shim|ensureWallet|Received message/i.test(t))
     console.log(`  [console +${((Date.now() - t0) / 1000).toFixed(1)}s] ${t.slice(0, 300)}`);
 });
-page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
+page.on('pageerror', (e) => console.log('  [pageerror]', e instanceof Error ? e.message : String(e)));
 try {
   await page.goto(URL);
   await waitText(page, 'Create New Wallet', 120_000);

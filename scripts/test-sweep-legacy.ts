@@ -136,7 +136,7 @@ async function fundSweepAddress(mnemonic: string, sats: number) {
   tx.addOutput({ lockingScript: new P2PKH().lock(keys.walletAddress), change: true });
 
   console.log('Building funding tx...');
-  const skipped = await addInputsFromUtxos(tx, utxos, walletKey.privKey, services);
+  await addInputsFromUtxos(tx, utxos, walletKey.privKey, services);
 
   if (tx.inputs.length === 0) {
     console.error('No inputs could be added. Aborting.');

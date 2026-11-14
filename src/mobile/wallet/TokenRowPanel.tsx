@@ -10,6 +10,7 @@ import { ArrowDownLeft, ArrowUpRight, Lock, MessageCircle, ShoppingCart, Tag } f
 export type TokenRowAction = { id: string; label: string; icon: ReactNode; onPress: () => void };
 
 /** The actions a row offers, in panel order; absent handlers are left out. */
+// eslint-disable-next-line react-refresh/only-export-components -- a plain helper the row and its test share, kept beside the panel
 export const rowPanelActions = (h: {
   onBuy?: () => void;
   onSell?: () => void;

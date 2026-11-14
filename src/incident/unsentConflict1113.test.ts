@@ -44,7 +44,6 @@ import { markStoreCreatedHere, storeAskFor, storeKindFor } from '../mobile/theme
 
 const HEIGHT = 975_400;
 const COIN = 400_000;
-const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
 
 const services = new Proxy(
   {

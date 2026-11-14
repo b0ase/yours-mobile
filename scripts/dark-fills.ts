@@ -261,9 +261,9 @@ function raised(cls: string): boolean {
 }
 
 if (import.meta.main) {
-  const css = join(import.meta.dir, '../src/themes.css');
+  const css = join(import.meta.dirname, '../src/themes.css');
   const text = readFileSync(css, 'utf8');
-  const src = join(import.meta.dir, '../src');
+  const src = join(import.meta.dirname, '../src');
   const block = renderBlock(darkFills(src), darkClasses(src));
   const i = text.indexOf(BEGIN);
   const next =

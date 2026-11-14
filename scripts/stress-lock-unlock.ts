@@ -37,7 +37,7 @@ async function unlockIfNeeded(page: Page): Promise<void> {
     return;
   }
   console.log('[test] unlocking…');
-  await hasPw.click({ clickCount: 3 });
+  await hasPw.click({ count: 3 });
   await hasPw.type(secrets.password, { delay: 15 });
   await page.evaluate(() => {
     const btn = [...document.querySelectorAll('button')].find((b) => /unlock/i.test(b.textContent || ''));
@@ -87,12 +87,11 @@ async function main() {
     });
   };
 
-  let worker = await getWorker(browser);
+  const worker = await getWorker(browser);
   attachSwLogs(worker);
 
   const extensionId = new URL(worker.url()).hostname;
   const ver = await worker.evaluate(() => {
-    // @ts-expect-error chrome
     return chrome.runtime.getManifest().version;
   });
   console.log('[test] extensionId', extensionId, 'version', ver);

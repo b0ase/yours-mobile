@@ -80,7 +80,6 @@ async function openExtensionUi(browser: Browser, extensionId: string): Promise<P
 async function tryOpenPopup(worker: WebWorker): Promise<void> {
   try {
     await worker.evaluate(async () => {
-      // @ts-expect-error chrome in SW
       if (chrome?.action?.openPopup) await chrome.action.openPopup();
     });
   } catch {
@@ -90,9 +89,7 @@ async function tryOpenPopup(worker: WebWorker): Promise<void> {
 
 async function dumpSwState(worker: WebWorker): Promise<void> {
   const info = await worker.evaluate(async () => {
-    // @ts-expect-error chrome in SW
     const manifest = chrome.runtime.getManifest();
-    // @ts-expect-error chrome in SW
     const storageLocal = await chrome.storage.local.get(null);
     const keys = Object.keys(storageLocal);
     return {
@@ -130,11 +127,11 @@ async function createWallet(page: Page, secrets: Secrets): Promise<Secrets> {
   if (inputs.length < 4) {
     throw new Error(`Expected ≥4 inputs on create form, found ${inputs.length}`);
   }
-  await inputs[0].click({ clickCount: 3 });
+  await inputs[0].click({ count: 3 });
   await inputs[0].type(secrets.accountName, { delay: 15 });
-  await inputs[2].click({ clickCount: 3 });
+  await inputs[2].click({ count: 3 });
   await inputs[2].type(secrets.password, { delay: 15 });
-  await inputs[3].click({ clickCount: 3 });
+  await inputs[3].click({ count: 3 });
   await inputs[3].type(secrets.password, { delay: 15 });
 
   await page.evaluate(() => {
@@ -236,7 +233,6 @@ async function main() {
       // reload tears down the worker; fire-and-forget
       worker
         .evaluate(() => {
-          // @ts-expect-error chrome in SW
           chrome.runtime.reload();
         })
         .catch(() => {});

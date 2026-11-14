@@ -112,7 +112,7 @@
     "release:android-direct": "bash scripts/channel-build.sh android-direct",
     "pin:upstream": "tsx scripts/pin-from-bun-lock.ts && pnpm install",
     "add-app": "node scripts/add-app.mjs",
-    "lint": "eslint src"
+    "lint": "eslint src scripts"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
