@@ -762,12 +762,13 @@ export class ChromeStorageService {
         next[id] = { ...acct, encryptedKeys: sealed };
       }
       // Re-read just before writing: a change made meanwhile (new account, password change) wins, we retry later.
-      const now = await this.get(['salt', 'accounts', 'keyRekey']);
+      const now = await this.get(['salt', 'accounts', 'keyRekey', 'kdfPending']);
       if (now.salt !== salt || now.keyRekey || JSON.stringify(now.accounts ?? {}) !== JSON.stringify(accounts ?? {})) {
         return false;
       }
-      // Recovery note first (one item, one write), then the swap, then clear the note.
-      await this.set({ kdfPending: { prevSalt: salt as string, salt: nextSalt } });
+      // Recovery note first (one item, one write), then the swap, then clear the note. Like changePassword, the note
+      // carries forward every salt an earlier unfinished note named (kdfNote), so this upgrade never erases one.
+      await this.set({ kdfPending: kdfNote(salt as string, nextSalt, now.kdfPending) });
       try {
         await this.set({ accounts: next, salt: nextSalt } as Partial<ChromeStorageObject>);
       } catch (error) {
