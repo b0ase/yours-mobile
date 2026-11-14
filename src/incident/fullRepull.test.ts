@@ -8,13 +8,17 @@
  * with raw bytes, proofs and proof requests, four outputs each, most spent), read through a counting stand-in for the
  * StorageClient. No network.
  *
- * BWX_FULLPASS_BENCH=1 also measures a full pass at 1k / 5k / 20k outputs (rows, bytes, time).
+ * BWX_FULLPASS_BENCH=1 also measures a full pass at 1k / 5k / 20k outputs (rows, bytes, time, and where the time goes:
+ * BWX_FULLPASS_SIZES=2000,5000 picks the sizes). The fake IndexedDB is given a real seek for this file
+ * (src/testing/fastFakeIdb.ts) and the benchmark's backup serves its pages from a snapshot (servePagesFromSnapshot), so
+ * the numbers are this device's own work, which is what runs on a phone.
  */
 import 'fake-indexeddb/auto';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { KeyDeriver, P2PKH, PrivateKey, Random, Transaction, Utils } from '@bsv/sdk';
 import { StorageIdb, StorageProvider, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import * as IS from '../services/inboundSync';
+import { installFastFakeIdb, uninstallFastFakeIdb } from '../testing/fastFakeIdb';
 import { _setTailOffsetCap } from '../services/pullTail';
 import {
   FULL_PASS_EVERY_MS,
@@ -188,6 +192,21 @@ const ENTITIES = [
   'commissions',
   'provenTxReqs',
 ] as const;
+/** The same entities by the names a page request's offsets carry (toolbox makeRequestSyncChunkArgs). */
+const ENTITY_NAMES = [
+  'provenTx',
+  'outputBasket',
+  'outputTag',
+  'txLabel',
+  'transaction',
+  'output',
+  'txLabelMap',
+  'outputTagMap',
+  'certificate',
+  'certificateField',
+  'commission',
+  'provenTxReq',
+] as const;
 /** The size of a page as JSON (byte arrays as numbers) and as the binary wire (byte arrays raw). */
 function sizeOf(chunk: Record<string, unknown>) {
   let bin = 0;
@@ -232,14 +251,68 @@ function backupClient(b: StorageIdb) {
   return { client, stats, o };
 }
 
+/** What getSyncChunk reads a page's rows with (toolbox getSyncChunk's chunkers), each paged by limit and offset. */
+const PAGED_READS = [
+  'getProvenTxsForUser',
+  'findOutputBaskets',
+  'findOutputTags',
+  'findTxLabels',
+  'findTransactions',
+  'findOutputs',
+  'getTxLabelMapsForUser',
+  'getOutputTagMapsForUser',
+  'findCertificates',
+  'findCertificateFields',
+  'findCommissions',
+  'getProvenTxReqsForUser',
+] as const;
+/**
+ * The cost benchmark only: the backup serves its pages as a server with keyed paging does. A StorageIdb reads a page at
+ * offset k by walking a cursor over the k rows before it (toolbox scanCursor), so as a stand-in for wallet.1sat.app its
+ * page reads grow with the square of the wallet and drown what the benchmark is for: this device's own work per pass.
+ * Here each paged read of an entity is answered from one full read of it (per entity and cursor time), sliced, every row
+ * a fresh copy (the inbound check rewrites rows in place). ONLY for a backup nothing writes to while it is on: the
+ * rows are not read again. Returns the undo.
+ */
+function servePagesFromSnapshot(b: StorageIdb) {
+  const target = b as unknown as Record<string, (a: Record<string, unknown>, ...r: unknown[]) => Promise<unknown[]>>;
+  const lists = new Map<string, Promise<unknown[]>>();
+  const undo: (() => void)[] = [];
+  for (const name of PAGED_READS) {
+    const own = Object.prototype.hasOwnProperty.call(target, name);
+    const read = target[name];
+    if (typeof read !== 'function') continue;
+    target[name] = async function (this: unknown, a: Record<string, unknown>, ...rest: unknown[]) {
+      const paged = a?.paged as { limit?: number; offset?: number } | undefined;
+      if (!paged || a.trx || rest.some((r) => r !== undefined)) return read.call(this, a, ...rest);
+      const { paged: _p, ...others } = a;
+      const key = `${name}|${JSON.stringify(others)}`;
+      if (!lists.has(key)) lists.set(key, read.call(this, others));
+      const all = await lists.get(key)!;
+      const from = paged.offset ?? 0;
+      const rows = (paged.limit ?? 0) > 0 ? all.slice(from, from + paged.limit!) : all.slice(from);
+      return rows.map((r) => structuredClone(r));
+    };
+    undo.push(() => {
+      if (own) target[name] = read;
+      else delete target[name];
+    });
+  }
+  return () => undo.forEach((u) => u());
+}
+
 /** This phone (its store active, the inbound check on) and its backup with a synthetic wallet of `outputs` outputs. */
-async function phoneWith(outputs: number) {
+async function phoneWith(outputs: number, onPhone?: (phone: StorageIdb) => void) {
+  // `onPhone`: the benchmark's timers go on the phone's store before its first merge.
   const root = PrivateKey.fromRandom();
   const kd = new KeyDeriver(root);
   const backup = await idb('backup');
   IS._mergeUnchecked(backup);
   const built = await bigWallet(backup, kd.identityKey, outputs);
   const phone = await idb('phone');
+  const tBuilt = Date.now();
+  const cpuBuilt = process.cpuUsage();
+  onPhone?.(phone);
   const more = { n: 0 };
   const logs: string[] = [];
   const verifier: IS.InboundVerifier = {
@@ -257,6 +330,9 @@ async function phoneWith(outputs: number) {
   await sm.setActive(phone.getSettings().storageIdentityKey);
   sm.setServices(services);
   const { client, stats, o } = backupClient(backup);
+  const openMs = Date.now() - tBuilt;
+  const openCpu = process.cpuUsage(cpuBuilt);
+  const openCpuMs = (openCpu.user + openCpu.system) / 1_000;
   const sik = phone.getSettings().storageIdentityKey;
   const backupSik = backup.getSettings().storageIdentityKey;
   /** A device-sync pull, as initWallet runs it: the full pass asked for when due, then the merge in slices. */
@@ -305,6 +381,8 @@ async function phoneWith(outputs: number) {
       .map((r) => `${r.txid}.${r.vout}`)
       .sort();
   return {
+    openMs,
+    openCpuMs,
     kd,
     backup,
     phone,
@@ -329,16 +407,20 @@ async function phoneWith(outputs: number) {
 }
 
 let uninstall = () => undefined as void;
-beforeAll(() => {
+beforeAll(async () => {
+  // Lookups, cursor steps and inserts that seek, as on a real IndexedDB (fake-indexeddb walks from record 0, which
+  // made a pass here cost about the square of the wallet). BWX_PLAIN_FAKE_IDB=1: fake-indexeddb as it ships.
+  if (process.env.BWX_PLAIN_FAKE_IDB !== '1') await installFastFakeIdb();
   uninstall = IS.installInboundSyncGuard(StorageIdb);
 });
 afterEach(() => {
   _setFullPassSlice();
   _setFullPassClock();
 });
-afterAll(() => {
+afterAll(async () => {
   uninstall();
   IS._resetInboundVerifiers();
+  await uninstallFastFakeIdb(); // the next file in this process gets fake-indexeddb as it ships
 });
 
 const DAY = 24 * 3_600_000;
@@ -935,25 +1017,224 @@ describe('review 23: the push re-sends parents within limits, only to a backup; 
   );
 });
 
+describe('what a full pass costs this device per page (cost review, 14 Nov 2026)', () => {
+  test(
+    "a page reads the sync map's text once in the guard and once in the toolbox, however many checks use it",
+    async () => {
+      // The sync state's map holds every backup id this device has merged: its text grows with the wallet, and each
+      // parse of it is work in step with the wallet, on every page of a pass. The guard, the unfiled check and the
+      // inbound check each parsed it (three a page, four with the toolbox's own).
+      const d = await phoneWith(800);
+      const parse = JSON.parse;
+      const perPage: number[] = [];
+      let inPage = false;
+      const phone = d.phone as unknown as { processSyncChunk?: (...a: unknown[]) => Promise<unknown> };
+      try {
+        await d.pullToEnd();
+        _setFullPassSlice(60_000); // the whole pass in one pull
+        expect(await d.pull(Date.now() + FULL_PASS_EVERY_MS + 1)).toBe('started');
+        JSON.parse = function (text: string, ...r: unknown[]) {
+          if (inPage && typeof text === 'string' && text.includes('"idMap"')) perPage[perPage.length - 1]++;
+          return (parse as (...a: unknown[]) => unknown)(text, ...r);
+        } as typeof JSON.parse;
+        const guarded = (Object.getPrototypeOf(d.phone) as typeof phone).processSyncChunk!;
+        phone.processSyncChunk = async function (this: unknown, ...a: unknown[]) {
+          perPage.push(0);
+          inPage = true;
+          try {
+            return await guarded.apply(this, a);
+          } finally {
+            inPage = false;
+          }
+        };
+        const outputs0 = d.stats.items;
+        await d.pullToEnd();
+        expect(d.stats.items - outputs0).toBeGreaterThan(800); // the pass ran: every row came again
+        expect(perPage.length).toBeGreaterThan(3);
+        // Every page but the last: the guard's one parse and the toolbox's. The last also records the pass as done.
+        expect(perPage.slice(0, -1).every((n) => n === 2)).toBe(true);
+        expect(perPage[perPage.length - 1]).toBeLessThanOrEqual(3);
+        expect(await d.count()).toEqual({ outputs: 800, transactions: 200 });
+      } finally {
+        JSON.parse = parse;
+        delete phone.processSyncChunk;
+        d.off();
+      }
+    },
+    T,
+  );
+
+  test(
+    "the cost benchmark's snapshot paging serves the same pages as the backup's own paging",
+    async () => {
+      const d = await phoneWith(600);
+      try {
+        const pages = async () => {
+          const out: string[] = [];
+          const offsets = ENTITY_NAMES.map((name) => ({ name, offset: 0 }));
+          for (let i = 0; i < 200; i++) {
+            const c = (await d.backup.getSyncChunk({
+              identityKey: d.kd.identityKey,
+              fromStorageIdentityKey: d.backupSik,
+              toStorageIdentityKey: d.sik,
+              maxRoughSize: 400_000,
+              maxItems: 300,
+              offsets,
+            } as never)) as unknown as Record<string, unknown[] | undefined>;
+            out.push(JSON.stringify(ENTITIES.map((k) => c[k])));
+            let rows = 0;
+            ENTITIES.forEach((k, at) => {
+              offsets[at].offset += c[k]?.length ?? 0;
+              rows += c[k]?.length ?? 0;
+            });
+            if (!rows) break;
+          }
+          return out;
+        };
+        const real = await pages();
+        const undo = servePagesFromSnapshot(d.backup);
+        let served: string[];
+        try {
+          served = await pages();
+        } finally {
+          undo();
+        }
+        expect(real.length).toBeGreaterThan(5);
+        expect(served).toEqual(real);
+        expect(Object.keys(d.backup).filter((k) => (PAGED_READS as readonly string[]).includes(k))).toEqual([]);
+      } finally {
+        d.off();
+      }
+    },
+    T,
+  );
+});
+
+/**
+ * The cost benchmark's phase table: where one pass spends its time on this device, by storage call (each call's time
+ * counted once, at the outermost call) and for the sync map's text (parsed and written for every page; it grows with the
+ * wallet). Wall-clock sums over awaited calls, so read them as shares, next to the pass's CPU time.
+ */
+function phaseTimers(phone: StorageIdb) {
+  const acc = new Map<string, { ms: number; n: number }>();
+  const add = (k: string, ms: number) => {
+    const e = acc.get(k) ?? { ms: 0, n: 0 };
+    e.ms += ms;
+    e.n++;
+    acc.set(k, e);
+  };
+  const kind = (name: string) =>
+    name === 'findSyncStates'
+      ? 'checkpoint read (findSyncStates)'
+      : name === 'updateSyncState'
+        ? 'checkpoint save (updateSyncState)'
+        : /^(insert|update)/.test(name)
+          ? `device write (${name})`
+          : /^(find|count|get)/.test(name) && !/^get(SyncChunk|Settings|Services)$/.test(name)
+            ? `device read (${name})`
+            : undefined;
+  const target = phone as unknown as Record<string, unknown>;
+  const names = new Set<string>();
+  for (let o: object | null = phone; o && o !== Object.prototype; o = Object.getPrototypeOf(o) as object | null)
+    for (const k of Object.getOwnPropertyNames(o)) names.add(k);
+  const wrapped: string[] = [];
+  let depth = 0;
+  for (const k of names) {
+    const label = kind(k);
+    const f = target[k] as ((...x: unknown[]) => unknown) | undefined;
+    if (!label || typeof f !== 'function' || Object.prototype.hasOwnProperty.call(target, k)) continue;
+    wrapped.push(k);
+    target[k] = function (this: unknown, ...a: unknown[]) {
+      if (depth > 0) return f.apply(this, a);
+      depth++;
+      const t = performance.now();
+      const end = () => {
+        depth--;
+        add(label, performance.now() - t);
+      };
+      let r: unknown;
+      try {
+        r = f.apply(this, a);
+      } catch (e) {
+        end();
+        throw e;
+      }
+      if (r && typeof (r as Promise<unknown>).then === 'function') return (r as Promise<unknown>).finally(end);
+      end();
+      return r;
+    };
+  }
+  const parse = JSON.parse;
+  const stringify = JSON.stringify;
+  const isMap = (text: unknown) => typeof text === 'string' && text.length > 2_000 && text.includes('"idMap"');
+  JSON.parse = function (text: string, ...r: unknown[]) {
+    if (!isMap(text)) return (parse as (...x: unknown[]) => unknown)(text, ...r);
+    const t = performance.now();
+    const v = (parse as (...x: unknown[]) => unknown)(text, ...r);
+    add('sync map text parsed', performance.now() - t);
+    return v;
+  } as typeof JSON.parse;
+  JSON.stringify = function (...a: unknown[]) {
+    const t = performance.now();
+    const v = (stringify as (...x: unknown[]) => unknown)(...a) as string;
+    if (typeof a[1] !== 'function' && isMap(v)) add('sync map text written', performance.now() - t);
+    return v;
+  } as typeof JSON.stringify;
+  return {
+    reset: () => acc.clear(),
+    table: (title: string, ms: number, cpuMs: number) =>
+      [
+        `[full re-pull phases] ${title}: ${Math.round(ms)} ms wall, ${Math.round(cpuMs)} ms CPU`,
+        ...[...acc.entries()]
+          .sort((a, b) => b[1].ms - a[1].ms)
+          .filter(([, e]) => e.ms >= 1)
+          .map(([k, e]) => `  ${String(Math.round(e.ms)).padStart(8)} ms  ${String(e.n).padStart(7)}x  ${k}`),
+      ].join('\n'),
+    off: () => {
+      JSON.parse = parse;
+      JSON.stringify = stringify;
+      for (const k of wrapped) delete target[k];
+    },
+  };
+}
+/** This process's CPU time so far (ms): unlike the wall clock, it doesn't count a machine that slept or was busy. */
+const cpuNow = () => {
+  const u = process.cpuUsage();
+  return (u.user + u.system) / 1_000;
+};
+
 describe.skipIf(process.env.BWX_FULLPASS_BENCH !== '1')('the full re-pull: cost (BWX_FULLPASS_BENCH=1)', () => {
   for (const n of (process.env.BWX_FULLPASS_SIZES ?? '1000,5000,20000').split(',').map(Number))
     test(
       `rows, bytes and time per full pass at ${n} outputs`,
       async () => {
         let t = Date.now();
-        const d = await phoneWith(n);
+        let c = 0;
+        let phases!: ReturnType<typeof phaseTimers>;
+        const d = await phoneWith(n, (phone) => void (phases = phaseTimers(phone)));
         const setup = Date.now() - t;
+        // The store's first merge (the open's, inside phoneWith: every row an insert, in one go) and, with it, this
+        // device's first push back to the backup (the device read as the toolbox pages it: by offset).
+        console.log(phases.table(`${n} outputs, the open (first merge: inserts; first push)`, d.openMs, d.openCpuMs));
+        // Nothing writes to the backup from here on. Its pages come from a snapshot, as from a server with keyed
+        // paging (servePagesFromSnapshot); BWX_FULLPASS_REAL_PAGING=1 keeps the StorageIdb's own paging by offset.
+        const unserve =
+          process.env.BWX_FULLPASS_REAL_PAGING === '1' ? () => undefined : servePagesFromSnapshot(d.backup);
         try {
+          phases.reset();
           t = Date.now();
+          c = cpuNow();
           const s0 = { ...d.stats };
-          // The open's first pass is sliced too (FULL_PASS_SLICE_MS), so past a few thousand outputs one pull no longer
-          // finishes it and the next call resumes it. Drive it as the product does: pull until the pass is done.
+          // The first pull after the open: every row again (all inside the 15-minute overlap), sliced
+          // (FULL_PASS_SLICE_MS). Driven as the product does: pull until the pass is done.
           const firstSlices = await d.pullToEnd(BENCH_MAX_SLICES);
-          const first = { ms: Date.now() - t, ...diff(d.stats, s0), slices: firstSlices };
+          const first = { ms: Date.now() - t, cpu: cpuNow() - c, ...diff(d.stats, s0), slices: firstSlices };
           expect(firstSlices).toBeLessThan(BENCH_MAX_SLICES); // a pass always ends
           await d.admit();
           const s1 = { ...d.stats };
+          phases.reset();
           t = Date.now();
+          c = cpuNow();
           expect(await d.pull(Date.now() + FULL_PASS_EVERY_MS + 1)).toBe('started');
           let slices = 1;
           while ((await d.state()).when == null || passUnderWay(await d.state())) {
@@ -961,12 +1242,15 @@ describe.skipIf(process.env.BWX_FULLPASS_BENCH !== '1')('the full re-pull: cost 
             await d.pull();
             slices++;
           }
-          const again = { ms: Date.now() - t, ...diff(d.stats, s1), slices };
+          const again = { ms: Date.now() - t, cpu: cpuNow() - c, ...diff(d.stats, s1), slices };
+          console.log(phases.table(`${n} outputs, a full re-pull (every row a no-op)`, again.ms, again.cpu));
           expect(await d.count()).toEqual({ outputs: n, transactions: Math.ceil(n / 4) });
           console.log(
-            `[full re-pull cost] ${n} outputs (setup ${setup} ms; the open's first pass: ${first.items} rows, ${mb(first.binBytes)} binary, ${first.ms} ms in ${first.slices} slices | daily re-pull: ${again.items} rows, ${again.pages} pages, ${mb(again.binBytes)} binary / ${mb(again.jsonBytes)} JSON, ${again.ms} ms (${again.readMs} ms of it the backup's own page reads, ${again.ms - again.readMs} ms this device's checks and merge) in ${again.slices} slices`,
+            `[full re-pull cost] ${n} outputs (setup ${setup} ms, of it the open ${d.openMs} ms; the first pull after it: ${first.items} rows, ${mb(first.binBytes)} binary, ${first.ms} ms, ${Math.round(first.cpu)} ms CPU in ${first.slices} slices | full re-pull: ${again.items} rows, ${again.pages} pages, ${mb(again.binBytes)} binary / ${mb(again.jsonBytes)} JSON, ${again.ms} ms, ${Math.round(again.cpu)} ms CPU (${again.readMs} ms of it the backup's own page reads, ${again.ms - again.readMs} ms this device's checks and merge) in ${again.slices} slices`,
           );
         } finally {
+          unserve();
+          phases.off();
           d.off();
         }
       },
