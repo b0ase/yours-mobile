@@ -83,7 +83,7 @@
     "preview": "vite preview",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "bun test src site/test relay/e2e && node --test relay/relay.node-test.mjs",
     "verify:build": "tsx scripts/verify-build.ts",
     "package": "tsx scripts/package.ts",

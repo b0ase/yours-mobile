@@ -21,6 +21,5 @@
     "types": ["chrome", "vite/client"]
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/testing/**"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "exclude": ["src/**/*.test.ts", "src/testing/**"]
 }
