@@ -39,7 +39,7 @@ describe('locationVerdict: real tiny files', () => {
     expect(v(cut, 'image/jpeg')).toBe('unknown');
   });
 
-  test('EXIF: a GPS pointer outside IFD0 is found (Exif IFD, Interop IFD, IFD1, SubIFDs; b-Aware #230)', () => {
+  test('EXIF: a GPS pointer outside IFD0 is found (Exif IFD, Interop IFD, IFD1, SubIFDs; b-Aware report 230)', () => {
     for (const where of ['exif', 'interop', 'ifd1', 'subifds'] as const) {
       expect([where, v(F.jpeg({ tiff: F.tiffGpsIn(where) }), 'image/jpeg')]).toEqual([where, 'found']);
       expect([where, v(F.tiffGpsIn(where), 'image/tiff')]).toEqual([where, 'found']);

@@ -78,7 +78,7 @@ const GPS_IFD: Ent[] = [
 ];
 const EXIF_VERSION: Ent = [0x9000, 7, 4, 0x30323332];
 
-/** A GPS IFD pointer outside IFD0 (b-Aware #230): in the Exif IFD, the Interop IFD, IFD1 or one of the SubIFDs. */
+/** A GPS IFD pointer outside IFD0 (b-Aware report 230): in the Exif IFD, the Interop IFD, IFD1 or one of the SubIFDs. */
 export const tiffGpsIn = (where: 'exif' | 'interop' | 'ifd1' | 'subifds', orientation = 1): B =>
   where === 'exif'
     ? tiffIfds([

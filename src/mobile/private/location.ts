@@ -143,7 +143,7 @@ type ScanBudget = { left: number };
 /**
  * A TIFF structure (EXIF body) starting at `o`: 'found' when ANY IFD in it has a GPS IFD pointer (tag 0x8825).
  * Every IFD is walked (IFD0 → IFD1 chain, Exif, Interoperability, SubIFDs, their next-IFD links): readers such as
- * exiftool decode a GPS pointer wherever it sits, and one in the Exif sub-IFD used to pass (b-Aware #230). An IFD
+ * exiftool decode a GPS pointer wherever it sits, and one in the Exif sub-IFD used to pass (b-Aware report 230). An IFD
  * that is pointed at but can't be read is 'unknown'.
  */
 function tiffVerdict(
