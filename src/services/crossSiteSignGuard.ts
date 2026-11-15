@@ -19,9 +19,11 @@
  * calling site, not a reading of the data.
  */
 
+import { normalizeOriginator } from '@1sat/wallet';
 import { bareHost, scanSignData } from './signDataScan';
 import { ownBackendRefusal } from './ownBackendKeys';
 import { PendingSighashes } from './pendingSighash';
+import { pinnedProtocol } from './pinnedProtocols';
 
 // The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
 export { bareHost, boundHosts, normaliseKey } from './signDataScan';
@@ -97,27 +99,38 @@ export const BLIND_HASH_SITES: ReadonlySet<string> = new Set([
 export const blindHashAllowed = (caller: string) => BLIND_HASH_SITES.has(caller);
 
 /**
- * The posting key ([1,'sigma'], the BAP key that AIP-signs feed posts) signs Bitcoin Signed Messages, and a BSM digest
- * is sha256(sha256(prefix ‖ message)). createSignature signs sha256(data), so `data` = the 32-byte inner hash gives
- * exactly a BSM signature over a message the wallet never saw: the same blind signature as hashToDirectlySign, by
- * the other door (review of the feed-author binding, 15 Nov 2026: a site holding the standing posting grant could
- * sign a feed-author claim that hands the user's posting address to another name). So exactly 32 bytes of `data`
- * under that protocol counts as a blind hash, under the same rule. Nothing legitimate sends it: @1sat/actions and
- * @1sat/templates sign posts, SIGMA seals and BAP messages through hashToDirectlySign only, and a real post is never
- * 32 bytes of digest.
+ * createSignature signs sha256(data), so exactly 32 bytes of `data` is a hash the wallet can't read, by the other
+ * door: `data` = sha256(preimage) gives a transaction signature over ANY transaction with any sighash flags (review of
+ * the pending-sighash fix, 15 Nov 2026: a site holding one protocol grant unlocked a coin under that protocol with no
+ * action and no pay sheet), and `data` = the inner hash of a Bitcoin Signed Message gives a BSM signature by the
+ * posting key ([1,'sigma']) over a message the wallet never saw (review of the feed-author binding, 15 Nov 2026). So
+ * for an outside site 32 bytes of `data` counts as a blind hash under EVERY protocol, under the same rule as
+ * hashToDirectlySign: our chat sites, or the sighash of the site's own pending action (pendingSighash.ts; PushDrop's
+ * unlock signs that way). 31 or 33 bytes, and a real message of 32 characters' worth more or less, sign as before.
  */
-const BSM_INNER_HASH_LENGTH = 32;
-const isPostingProtocol = (args: object) => {
-  const p = (args as { protocolID?: unknown }).protocolID;
-  return Array.isArray(p) && p[0] === 1 && typeof p[1] === 'string' && p[1].trim().toLowerCase() === 'sigma';
-};
+const DIGEST_LENGTH = 32;
 /** The call asks for a signature over a digest the wallet cannot read (see above). */
 export const isBlindHashRequest = (args: object, method: string = 'createSignature'): boolean => {
   if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return true;
-  // Only a signature can be replayed as a BSM signature; an HMAC over 32 bytes is no such thing.
+  // Only a signature can be replayed as a transaction or BSM signature; an HMAC over 32 bytes is no such thing.
   if (method !== 'createSignature') return false;
   const data = (args as { data?: unknown }).data;
-  return Array.isArray(data) && data.length === BSM_INNER_HASH_LENGTH && isPostingProtocol(args);
+  return Array.isArray(data) && data.length === DIGEST_LENGTH;
+};
+
+/**
+ * The one other 32-byte `data` a site signs: the hash of a record under a protocol pinned to that site
+ * (pinnedProtocols.ts), asked from that site, with a record-signing key. bjobsx.com signs a published profile over
+ * sha256(json) (keyID 'public profile') and each minted record (keyID 'public <id>'); bvideox.com, bcalx.com and
+ * bdrivex.com sign their records the same way; bmintx.com seals an archive batch (keyID 'seal <id>'). No other site
+ * can use a pinned protocol at all. The keyID rule keeps the exception off keys that hold coins: the one such key
+ * under a pinned protocol is bMintX's pot (keyID 'pot <account>'), and its hash stays refused.
+ */
+const RECORD_KEY_ID = /^(?:public|seal) /;
+const isPinnedRecordHash = (args: object, originator: string) => {
+  const { hashToDirectlySign, protocolID, keyID } = args as Record<string, unknown>;
+  if (hashToDirectlySign !== undefined || typeof keyID !== 'string' || !RECORD_KEY_ID.test(keyID)) return false;
+  return pinnedProtocol(protocolID)?.origins.includes(normalizeOriginator(originator)) === true;
 };
 
 /**
@@ -180,8 +193,10 @@ export const crossSiteSignRefusal = (
   // A bare hash can't be read, so it can't be checked: an outside caller must send the data itself. Our own
   // chat sites are the exception: bChatX AIP-signs every post over a BSM digest, which `data` can't stand in for
   // (owner, 25 Oct 2026: posting broke after the blind-sign refusal).
-  // The same goes for a 32-byte `data` under the posting protocol: a BSM digest by another door (isBlindHashRequest).
-  if (isBlindHashRequest(args, method) && !blindHashAllowed(caller)) return BLIND_SIGN_REFUSAL;
+  // The same goes for 32 bytes of `data`: a digest by another door (isBlindHashRequest), but for a site's record hash
+  // under its own pinned protocol.
+  if (isBlindHashRequest(args, method) && !blindHashAllowed(caller) && !isPinnedRecordHash(args as object, originator))
+    return BLIND_SIGN_REFUSAL;
   // Text or not (b-Aware triage 13 Nov 2026), every site the data names must be the caller's: one matching field must
   // not launder another, and bytes that aren't valid text are read leniently rather than waved through.
   const { hosts, lenient, exhausted } = namedHosts(data, args as object);
@@ -227,8 +242,8 @@ type ActionCall = (args: unknown, originator?: string) => Promise<unknown>;
 
 /**
  * Wrap the manager's signing methods so an outside originator's cross-site message is refused before any prompt.
- * One bare hash is let through: the sighash of an input the same site must unlock in its own pending action, asked
- * with that input's key (pendingSighash.ts). The guard watches createAction / signAction / abortAction for that only;
+ * One bare hash is let through, as hashToDirectlySign or as 32 bytes of `data`: the sighash of an input the same site
+ * must unlock in its own pending action, asked with that input's key (pendingSighash.ts). The guard watches createAction / signAction / abortAction for that only;
  * it changes nothing about them.
  */
 export function guardCrossSiteSigning<T extends object>(manager: T, adminOriginator: string, now?: () => number): T {

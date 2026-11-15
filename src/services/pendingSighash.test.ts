@@ -20,6 +20,7 @@ import {
   PrivateKey,
   ProtoWallet,
   PublicKey,
+  PushDrop,
   Signature,
   Spend,
   Transaction,
@@ -39,6 +40,7 @@ import {
   callerSighashes,
   lockKeyHash,
 } from './pendingSighash';
+import { PINNED_REFUSAL } from './pinnedProtocols';
 import {
   LEVEL0_SIGN_REFUSAL,
   P_MODULE_PROTOCOL_REFUSAL,
@@ -708,14 +710,25 @@ describe('only with the key the input is locked to', () => {
     }
   });
 
-  test('a script whose key the wallet cannot read is refused: P2PK, bare multisig, a P2PKH with a tail, a lock', async () => {
+  test('a script whose key the wallet cannot read is refused: bare multisig, a P2PKH with a tail, a lock', async () => {
     const w = setup();
     const publicKey = await w.keyOf(AMMO_PROTOCOL, 'k');
     const pub = Utils.toArray(publicKey, 'hex');
     const pkh = Hash.hash160(pub);
     const p2pkhChunks = p2pkh(publicKey).chunks;
     const scripts = [
-      new LockingScript([{ op: pub.length, data: pub }, { op: OP.OP_CHECKSIG }]),
+      // A key and OP_CHECKSIG with anything but PushDrop's own pushes-then-drops around it.
+      new LockingScript([{ op: pub.length, data: pub }, { op: OP.OP_CHECKSIG }, { op: OP.OP_DROP }]),
+      new LockingScript([{ op: pub.length, data: pub }, { op: OP.OP_CHECKSIG }, { op: 1, data: [7] }]),
+      new LockingScript([{ op: pub.length, data: pub }, { op: OP.OP_CHECKSIG }, { op: OP.OP_NOT }]),
+      new LockingScript([
+        { op: 1, data: [7] },
+        { op: OP.OP_2DROP },
+        { op: pub.length, data: pub },
+        { op: OP.OP_CHECKSIG },
+      ]),
+      new LockingScript([{ op: pub.length, data: pub }, { op: OP.OP_CHECKSIGVERIFY }]),
+      new LockingScript([{ op: 65, data: [4, ...new Array(64).fill(1)] }, { op: OP.OP_CHECKSIG }]),
       new LockingScript([{ op: OP.OP_1 }, { op: pub.length, data: pub }, { op: OP.OP_1 }, { op: OP.OP_CHECKMULTISIG }]),
       new LockingScript([...p2pkhChunks, { op: OP.OP_RETURN }, { op: 3, data: [1, 2, 3] }]),
       new LockingScript([{ op: OP.OP_1 }, { op: OP.OP_DROP }, ...p2pkhChunks]),
@@ -740,6 +753,197 @@ describe('only with the key the input is locked to', () => {
         BLIND_SIGN_REFUSAL,
       );
     }
+  });
+});
+
+describe('32 bytes of data is a hash too (the data door, review 15 Nov 2026)', () => {
+  const NONE_ACP =
+    TransactionSignature.SIGHASH_NONE | TransactionSignature.SIGHASH_FORKID | TransactionSignature.SIGHASH_ANYONECANPAY;
+  const dataSign = (w: ReturnType<typeof setup>, site: string, data: unknown, key: Record<string, unknown>) =>
+    w.wallet.createSignature({ data, counterparty: 'self', ...key }, site);
+
+  test('R1: data = sha256(preimage) of a transaction the wallet never saw is refused, whatever the flags', async () => {
+    const w = setup();
+    const key = await w.keyOf(CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    const prev = coin(p2pkh(key), 1_000_000);
+    // Built by the site alone: no createAction, no pay sheet.
+    const tx = new Transaction(1, [], [], 0);
+    tx.addInput({
+      sourceTransaction: prev.tx,
+      sourceTXID: prev.tx.id('hex'),
+      sourceOutputIndex: 0,
+      unlockingScript: new UnlockingScript(),
+      sequence: 0xffffffff,
+    });
+    tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 999_000 });
+    const asked = w.sheets.length;
+    for (const scope of [ALL_FORKID, NONE_ACP]) {
+      const preimage = TransactionSignature.format({
+        sourceTXID: prev.tx.id('hex'),
+        sourceOutputIndex: 0,
+        sourceSatoshis: 1_000_000,
+        transactionVersion: 1,
+        otherInputs: [],
+        inputIndex: 0,
+        outputs: tx.outputs,
+        inputSequence: 0xffffffff,
+        subscript: prev.tx.outputs[0].lockingScript,
+        lockTime: 0,
+        scope,
+      });
+      for (const site of [EVIL, WRITER])
+        await expect(dataSign(w, site, Hash.sha256(preimage), chainKeyArgs())).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    }
+    // Refused before any sheet.
+    expect(w.sheets.length).toBe(asked);
+  });
+
+  test('the sighash of the site’s own pending input signs as data too; nothing else of 32 bytes does', async () => {
+    const w = setup();
+    const { tx, signable, chainKey } = await writerSave(w);
+    const input = tx.inputs[0];
+    const preimage = (scope: number, t = tx) =>
+      TransactionSignature.format({
+        sourceTXID: input.sourceTXID!,
+        sourceOutputIndex: 0,
+        sourceSatoshis: 1,
+        transactionVersion: t.version,
+        otherInputs: t.inputs.slice(1),
+        inputIndex: 0,
+        outputs: t.outputs,
+        inputSequence: 0xffffffff,
+        subscript: input.sourceTransaction!.outputs[0].lockingScript,
+        lockTime: t.lockTime,
+        scope,
+      });
+    const refused = [
+      Hash.sha256(preimage(NONE_ACP)),
+      // The digest itself as data would be signed over its hash: not the sighash.
+      sighash(tx, 0),
+      Hash.sha256(Hash.sha256([1, 2, 3])),
+      new Array(32).fill(0),
+    ];
+    for (const data of refused)
+      await expect(dataSign(w, WRITER, data, chainKeyArgs())).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    const data = Hash.sha256(preimage(ALL_FORKID));
+    await expect(dataSign(w, EVIL, data, chainKeyArgs())).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    await expect(dataSign(w, WRITER, data, chainKeyArgs('doc-2'))).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    await expect(
+      w.wallet.createSignature(
+        { data, hashToDirectlySign: sighash(tx, 0), counterparty: 'self', ...chainKeyArgs() },
+        WRITER,
+      ),
+    ).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    const { signature } = await dataSign(w, WRITER, data, chainKeyArgs());
+    const sig = [...signature, ALL_FORKID];
+    const pub = Utils.toArray(chainKey, 'hex');
+    const unlockingScript = new UnlockingScript([
+      { op: sig.length, data: sig },
+      { op: pub.length, data: pub },
+    ]).toHex();
+    await w.as(WRITER).signAction({ reference: signable.reference, spends: { 0: { unlockingScript } } });
+    expect(unlocks(w.sent[0], 0)).toBe(true);
+    await expect(dataSign(w, WRITER, data, chainKeyArgs())).rejects.toThrow(BLIND_SIGN_REFUSAL);
+  });
+
+  test('@bsv/sdk PushDrop.unlock (data = sha256(preimage)) spends the site’s own token through its pending action', async () => {
+    const w = setup();
+    const site = w.as(BLASTER);
+    for (const lockPosition of ['before', 'after'] as const) {
+      const fields = [Utils.toArray('a token of the site', 'utf8'), [1, 2, 3]];
+      const lock = await new PushDrop(site).lock(fields, AMMO_PROTOCOL, 'token-1', 'self', true, true, lockPosition);
+      expect(lockKeyHash(lock)).toBe(
+        Utils.toHex(Hash.hash160(Utils.toArray(await w.keyOf(AMMO_PROTOCOL, 'token-1'), 'hex'))),
+      );
+      const token = coin(lock, 1);
+      const create = () =>
+        site.createAction({
+          description: 'Update the site token',
+          inputBEEF: beefOf(token),
+          inputs: [{ outpoint: token.outpoint, unlockingScriptLength: 74, inputDescription: 'the old token' }],
+          outputs: [payTo(300)],
+        });
+      // Any other scope, or another key: refused.
+      const a = await create();
+      const ta = Transaction.fromAtomicBEEF(a.signableTransaction!.tx);
+      await expect(new PushDrop(site).unlock(AMMO_PROTOCOL, 'token-1', 'self', 'none').sign(ta, 0)).rejects.toThrow(
+        BLIND_SIGN_REFUSAL,
+      );
+      await expect(
+        new PushDrop(site).unlock(AMMO_PROTOCOL, 'token-1', 'self', 'all', true).sign(ta, 0),
+      ).rejects.toThrow(BLIND_SIGN_REFUSAL);
+      await expect(new PushDrop(site).unlock(AMMO_PROTOCOL, 'token-2', 'self').sign(ta, 0)).rejects.toThrow(
+        BLIND_SIGN_REFUSAL,
+      );
+      await expect(new PushDrop(w.as(EVIL)).unlock(AMMO_PROTOCOL, 'token-1', 'self').sign(ta, 0)).rejects.toThrow(
+        BLIND_SIGN_REFUSAL,
+      );
+      const unlock = await new PushDrop(site).unlock(AMMO_PROTOCOL, 'token-1', 'self').sign(ta, 0);
+      const done = await site.signAction({
+        reference: a.signableTransaction!.reference,
+        spends: { 0: { unlockingScript: unlock.toHex() } },
+      });
+      const sent = w.sent[w.sent.length - 1];
+      expect(done.txid).toBe(sent.id('hex'));
+      expect(unlocks(sent, 0)).toBe(true);
+    }
+  });
+
+  test('a pinned protocol signs its record hashes from its own site only, and never with a key that holds coins', async () => {
+    const w = setup();
+    const BJOBSX = [2, 'bjobsx records'];
+    const json = Utils.toArray('{"v":1,"app":"bjobsx","type":"profile"}', 'utf8');
+    // bjobsx.com mint/records.js: the published profile, and a minted record.
+    const profile = { data: Hash.sha256(json), protocolID: BJOBSX, keyID: 'public profile', counterparty: 'anyone' };
+    const record = { data: Hash.sha256(json), protocolID: BJOBSX, keyID: 'public 5f3a9c', counterparty: 'self' };
+    for (const call of [profile, record]) {
+      for (const home of ['bjobsx.com', 'www.bjobsx.com'])
+        await expect(w.wallet.createSignature(call, home)).resolves.toBeDefined();
+      for (const other of [EVIL, 'jobs.bjobsx.com', 'bjobsx.com.evil.example', 'bvideox.com'])
+        await expect(w.wallet.createSignature(call, other)).rejects.toThrow(PINNED_REFUSAL);
+      await expect(w.wallet.createSignature(call, `bjobsx.com.c${'0a'.repeat(22)}.paired.invalid`)).rejects.toThrow();
+    }
+    // The same site, a key that is not a record-signing key (bMintX's pot is 'pot <account>'), or a bare hash.
+    for (const keyID of ['pot 123', 'publicprofile', 'k', ' public profile', 'Public profile'])
+      await expect(w.wallet.createSignature({ ...record, keyID }, 'bjobsx.com')).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    await expect(
+      w.wallet.createSignature({ ...record, data: undefined, hashToDirectlySign: record.data }, 'bjobsx.com'),
+    ).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    await expect(
+      w.wallet.createSignature(
+        { data: record.data, protocolID: [2, 'bmintx archive'], keyID: 'pot 123', counterparty: 'self' },
+        'bmintx.com',
+      ),
+    ).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    await expect(
+      w.wallet.createSignature(
+        { data: record.data, protocolID: [2, 'bmintx archive'], keyID: 'seal 9c41', counterparty: 'self' },
+        'bmintx.com',
+      ),
+    ).resolves.toBeDefined();
+    // A protocol that is not pinned has no such exception, whatever the key is called.
+    await expect(
+      dataSign(w, WRITER, record.data, { protocolID: [2, 'writer records'], keyID: 'public 1' }),
+    ).rejects.toThrow(BLIND_SIGN_REFUSAL);
+  });
+
+  test('31 and 33 bytes sign as before; so do the wallet’s own 32 bytes and a 32-byte HMAC', async () => {
+    const w = setup();
+    const key = { protocolID: [1, 'site notes'], keyID: 'k' };
+    for (const n of [1, 31, 33, 64])
+      await expect(dataSign(w, WRITER, new Array(n).fill(7), key)).resolves.toBeDefined();
+    await expect(dataSign(w, WRITER, new Array(32).fill(7), key)).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    await expect(dataSign(w, WRITER, Utils.toArray('a'.repeat(32), 'utf8'), key)).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    await expect(dataSign(w, ADMIN, new Array(32).fill(7), key)).resolves.toBeDefined();
+    await expect(dataSign(w, ADMIN, new Array(32).fill(7), { protocolID: ONESAT, keyID: 'k' })).resolves.toBeDefined();
+    await expect(w.wallet.createHmac({ data: new Array(32).fill(7), ...key }, WRITER)).resolves.toBeDefined();
+    // Known cost: PushDrop.lock signs its fields, so a site token whose fields come to exactly 32 bytes is refused.
+    await expect(
+      new PushDrop(w.as(BLASTER)).lock([new Array(32).fill(9)], AMMO_PROTOCOL, 't', 'self', true),
+    ).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    await expect(
+      new PushDrop(w.as(BLASTER)).lock([new Array(31).fill(9)], AMMO_PROTOCOL, 't', 'self', true),
+    ).resolves.toBeDefined();
   });
 });
 

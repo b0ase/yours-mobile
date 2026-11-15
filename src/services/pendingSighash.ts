@@ -3,7 +3,8 @@
  * failed with "Sites cannot ask for a signature over a hash the wallet cannot read").
  *
  * The standard BRC-100 way to spend an input locked to a key the site names: createAction → signableTransaction, then
- * createSignature({ hashToDirectlySign: sha256d(BIP143 preimage) }) per input, then signAction({ spends }). The
+ * createSignature({ hashToDirectlySign: sha256d(BIP143 preimage) }) per input (or `data`: sha256(preimage), which
+ * createSignature hashes once more: @bsv/sdk's PushDrop.unlock), then signAction({ spends }). The
  * cross-site guard refuses every bare hash from an outside site, because it can't read one. This is the one hash it
  * CAN read: the wallet recomputes it from its own copy of the transaction and never looks at the page's preimage.
  *
@@ -15,8 +16,9 @@
  *    site's envelope). An action that only moves app-locked coins shows no sheet, so its hashes stay refused;
  *  - the hash is SIGHASH_ALL|FORKID of one input the site named and must unlock itself (never an input the wallet
  *    funds and signs), over the wallet's transaction, with that input's real source satoshis and locking script;
- *  - that input's locking script is P2PKH, alone or after one inscription envelope (ordinals, BSV-21), and its key
- *    hash is the hash of the very key asked for (protocolID, keyID, counterparty). Any other script shape is refused:
+ *  - that input's locking script is P2PKH, alone or after one inscription envelope (ordinals, BSV-21), or a key and
+ *    OP_CHECKSIG with PushDrop's dropped fields before or after (BRC-48 tokens), and its key is the very key asked
+ *    for (protocolID, keyID, counterparty). Any other script shape is refused:
  *    the wallet can't tell which key it needs, and a signature by an unrelated key over a real sighash is a blind
  *    signature by that key;
  *  - the protocol is one a site may sign with at all (reservedProtocols.ts: reserved, level-0 and BRC-29 keys stay
@@ -51,13 +53,44 @@ const isPush = (c: Chunk) =>
   c.op === OP.OP_1NEGATE ||
   (c.op >= OP.OP_1 && c.op <= OP.OP_16);
 
+/** A compressed public key push. */
+const isKeyPush = (c: Chunk | undefined) =>
+  c?.op === 33 && c.data?.length === 33 && (c.data[0] === 2 || c.data[0] === 3);
+
+/** PushDrop's fields: pushes, then OP_2DROP / OP_DROP taking exactly those off again (none at all is fine). */
+const pushesAndDrops = (chunks: Chunk[]) => {
+  let i = 0;
+  while (i < chunks.length && isPush(chunks[i])) i++;
+  let left = i;
+  for (; i < chunks.length; i++) {
+    if (chunks[i].op === OP.OP_2DROP) left -= 2;
+    else if (chunks[i].op === OP.OP_DROP) left -= 1;
+    else return false;
+    if (left < 0) return false;
+  }
+  return left === 0;
+};
+
+/** <key> OP_CHECKSIG with PushDrop fields before or after it (@bsv/sdk PushDrop.lock, either lockPosition), or alone. */
+const pushDropKey = (chunks: Chunk[]): number[] | null => {
+  if (isKeyPush(chunks[0]) && chunks[1]?.op === OP.OP_CHECKSIG && pushesAndDrops(chunks.slice(2)))
+    return chunks[0].data!;
+  const n = chunks.length;
+  if (isKeyPush(chunks[n - 2]) && chunks[n - 1]?.op === OP.OP_CHECKSIG && pushesAndDrops(chunks.slice(0, -2)))
+    return chunks[n - 2].data!;
+  return null;
+};
+
 /**
- * The key hash (hex) a locking script pays to, when the script is P2PKH alone or P2PKH after exactly one inscription
- * envelope (OP_0 OP_IF <pushes> OP_ENDIF: never executed, so the script IS that P2PKH). Null for every other shape.
- * Read from the parsed chunks, never by matching bytes at the end, so a P2PKH-looking tail inside a push is not one.
+ * The hash (hex) of the one key a locking script needs a signature from, when the script is: P2PKH alone; P2PKH after
+ * exactly one inscription envelope (OP_0 OP_IF <pushes> OP_ENDIF: never executed, so the script IS that P2PKH); or a
+ * key and OP_CHECKSIG with PushDrop's fields. Null for every other shape. Read from the parsed chunks, never by
+ * matching bytes at the end, so a P2PKH-looking tail inside a push is not one.
  */
 export const lockKeyHash = (script: Script): string | null => {
   const chunks = script.chunks as Chunk[];
+  const key = pushDropKey(chunks);
+  if (key) return Utils.toHex(Hash.hash160(key));
   if (chunks.length < 5) return null;
   const [dup, hash160, pkh, equalverify, checksig] = chunks.slice(-5);
   if (
@@ -232,12 +265,16 @@ export class PendingSighashes {
   async request(originator: string, args: unknown, derive: DeriveSigningKey): Promise<object | null> {
     if (!originator || !args || typeof args !== 'object') return null;
     const a: SignArgs = { ...(args as SignArgs) };
-    if (a.data !== undefined || a.privileged) return null;
+    if (a.privileged || (a.data !== undefined && a.hashToDirectlySign !== undefined)) return null;
     if (typeof a.keyID !== 'string' || (a.counterparty !== undefined && typeof a.counterparty !== 'string'))
       return null;
-    const digest = digestHex(a.hashToDirectlySign);
-    if (digest === null) return null;
-    a.hashToDirectlySign = Utils.toArray(digest, 'hex');
+    // Either door: the digest itself, or 32 bytes of `data`, which createSignature hashes once more into the digest.
+    const asData = a.hashToDirectlySign === undefined;
+    const bytes = digestHex(asData ? a.data : a.hashToDirectlySign);
+    if (bytes === null) return null;
+    const digest = asData ? Utils.toHex(Hash.sha256(Utils.toArray(bytes, 'hex'))) : bytes;
+    if (asData) a.data = Utils.toArray(bytes, 'hex');
+    else a.hashToDirectlySign = Utils.toArray(bytes, 'hex');
     if (Array.isArray(a.protocolID)) a.protocolID = [...a.protocolID];
     if (excludedProtocol(a.protocolID) || reservedProtocolRefusal('createSignature', a) !== null) return null;
     const now = this.now();
