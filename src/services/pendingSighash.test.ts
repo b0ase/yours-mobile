@@ -1093,41 +1093,164 @@ describe('only a site that already holds the key’s protocol (review 15 Nov 202
       originator: EVIL,
       satoshis: 1_000_000,
       reason: line,
-      lineItems: [{ type: 'input', satoshis: 1_000_000, description: line }],
+      lineItems: [
+        {
+          type: 'input',
+          satoshis: 1_000_000,
+          description: 'A coin of yours worth 1000000 sats, held under "bitcoin writer chain"',
+        },
+      ],
     });
-    // Once per input per action: the same request again shows nothing more.
+    // Once per action: the same request again shows nothing more.
     await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).resolves.toBeDefined();
     expect(w.paySheets).toHaveLength(2);
   });
 
-  test('M1: No on that sheet refuses the signature; the action can still be aborted, and asking again asks again', async () => {
+  test('M1: No on that sheet refuses every signature of the action, which can still be aborted', async () => {
     let deny = true;
     const w = setup({ denyPay: (sheet) => deny && sheet.satoshis === 1_000_000 });
     const writerKey = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
     await w.siteKey(EVIL, CHAIN_PROTOCOL, 'anything-else');
     const c = coin(p2pkh(writerKey), 1_000_000);
-    const action = await w.as(EVIL).createAction({
-      description: 'Claim your free gift',
-      inputBEEF: beefOf(c),
-      inputs: [{ outpoint: c.outpoint, unlockingScriptLength: 108, inputDescription: 'a gift coin' }],
-      outputs: [payTo(1_000_000 - FEE + 1)],
-    });
+    const create = () =>
+      w.as(EVIL).createAction({
+        description: 'Claim your free gift',
+        inputBEEF: beefOf(c),
+        inputs: [{ outpoint: c.outpoint, unlockingScriptLength: 108, inputDescription: 'a gift coin' }],
+        outputs: [payTo(1_000_000 - FEE + 1)],
+      });
+    const action = await create();
     const tx = Transaction.fromAtomicBEEF(action.signableTransaction!.tx);
     const signed: unknown[] = [];
     const base = w.proto.createSignature.bind(w.proto);
     w.proto.createSignature = async (a) => (signed.push(a), base(a));
     await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).rejects.toThrow('User denied');
-    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).rejects.toThrow('User denied');
-    expect(signed).toEqual([]);
-    expect(w.paySheets.filter((p) => p.satoshis === 1_000_000)).toHaveLength(2);
-    // Yes the third time signs; then the action is aborted and its hash is refused again.
+    // The No stands for the whole action: no second sheet, even if the user would now say yes.
     deny = false;
-    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).resolves.toBeDefined();
-    expect(signed).toHaveLength(1);
+    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).rejects.toThrow(COIN_SPEND_DENIED);
+    expect(signed).toEqual([]);
+    expect(w.paySheets.filter((p) => p.satoshis === 1_000_000)).toHaveLength(1);
     await expect(w.as(EVIL).abortAction({ reference: action.signableTransaction!.reference })).resolves.toEqual({
       aborted: true,
     });
     await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    // A new action is a new question.
+    const again = await create();
+    const tx2 = Transaction.fromAtomicBEEF(again.signableTransaction!.tx);
+    await expect(blindSign(w, EVIL, sighash(tx2, 0), chainKeyArgs())).resolves.toBeDefined();
+    expect(signed).toHaveLength(1);
+  });
+
+  test('one sheet per action: three named coins raise exactly one extra sheet, for their total', async () => {
+    const w = setup();
+    const coins = [await tokenCoin(w, 'ammo-1'), await tokenCoin(w, 'ammo-2')];
+    // The third is under another protocol of the site, and worth more.
+    const otherKey = await w.siteKey(BLASTER, [1, 'tokenblaster front'], 'f');
+    const front = {
+      ...coin(p2pkh(otherKey), 5_000),
+      protocolID: [1, 'tokenblaster front'] as WalletProtocol,
+      keyID: 'f',
+    };
+    const created = await w.as(BLASTER).createAction({
+      description: 'Load 1,000 $AMMO into your gun',
+      inputBEEF: beefOf(...coins, front),
+      inputs: [...coins, front].map((c) => ({
+        outpoint: c.outpoint,
+        unlockingScriptLength: 108,
+        inputDescription: 'a coin',
+      })),
+      outputs: [payTo(6_000)],
+      options: { randomizeOutputs: false, signAndProcess: false },
+    });
+    const tx = Transaction.fromAtomicBEEF(created.signableTransaction!.tx);
+    const before = w.paySheets.length;
+    expect(w.paySheets.map((p) => p.satoshis)).toEqual([6_000 + FEE - 5_002]);
+    const spends = await tokenSpends(
+      w.as(BLASTER),
+      tx,
+      [...coins, front].map((c, index) => ({ index, protocolID: c.protocolID, keyID: c.keyID })),
+    );
+    await w.as(BLASTER).signAction({ reference: created.signableTransaction!.reference, spends });
+    expect([0, 1, 2].every((i) => unlocks(w.sent[0], i))).toBe(true);
+    // Exactly one more sheet, at the first signature: the three coins' total, a line each. Only the coin being
+    // signed for is known by its protocol then.
+    expect(w.paySheets.slice(before)).toEqual([
+      {
+        originator: BLASTER,
+        satoshis: 5_002,
+        reason: 'www.tokenblaster.lol is spending 3 coins of yours worth 5002 sats in all',
+        lineItems: [
+          { type: 'input', satoshis: 1, description: 'A coin of yours worth 1 sats, held under "tokenblaster ammo"' },
+          { type: 'input', satoshis: 1, description: 'A coin worth 1 sats this site will unlock' },
+          { type: 'input', satoshis: 5_000, description: 'A coin worth 5000 sats this site will unlock' },
+        ],
+      },
+    ]);
+  });
+
+  test('a protocol pinned to the calling site needs no extra sheet; from another site it is refused as before', async () => {
+    const w = setup();
+    const BJOBSX: WalletProtocol = [2, 'bjobsx records'];
+    const HOME = 'bjobsx.com';
+    const key = await w.siteKey(HOME, BJOBSX, 'chain 1');
+    const c = coin(p2pkh(key), 50_000);
+    const create = (site: string) =>
+      w.as(site).createAction({
+        description: 'Update your profile record',
+        inputBEEF: beefOf(c),
+        inputs: [{ outpoint: c.outpoint, unlockingScriptLength: 108, inputDescription: 'the record coin' }],
+        outputs: [payTo(50_100)],
+      });
+    const created = await create(HOME);
+    const tx = Transaction.fromAtomicBEEF(created.signableTransaction!.tx);
+    const spends = await tokenSpends(w.as(HOME), tx, [{ index: 0, protocolID: BJOBSX, keyID: 'chain 1' }]);
+    await w.as(HOME).signAction({ reference: created.signableTransaction!.reference, spends });
+    expect(unlocks(w.sent[0], 0)).toBe(true);
+    // The user saw the protocol sheet (once, for the key) and the action's own pay sheet. Nothing else.
+    expect(w.sheets.map((s) => [s.type, s.satoshis])).toEqual([
+      ['protocol', undefined],
+      ['spending', 100 + FEE],
+    ]);
+    const other = await create(EVIL);
+    const otherTx = Transaction.fromAtomicBEEF(other.signableTransaction!.tx);
+    await expect(blindSign(w, EVIL, sighash(otherTx, 0), { protocolID: BJOBSX, keyID: 'chain 1' })).rejects.toThrow(
+      PINNED_REFUSAL,
+    );
+  });
+
+  test('pinned and other coins in one action: the sheet covers only the others', async () => {
+    const w = setup();
+    const BJOBSX: WalletProtocol = [2, 'bjobsx records'];
+    const OTHER: WalletProtocol = [1, 'bjobsx tips'];
+    const HOME = 'bjobsx.com';
+    const pinned = coin(p2pkh(await w.siteKey(HOME, BJOBSX, 'chain 1')), 50_000);
+    const tips = coin(p2pkh(await w.siteKey(HOME, OTHER, 'jar')), 700);
+    const created = await w.as(HOME).createAction({
+      description: 'Update your profile record',
+      inputBEEF: beefOf(pinned, tips),
+      inputs: [pinned, tips].map((c) => ({
+        outpoint: c.outpoint,
+        unlockingScriptLength: 108,
+        inputDescription: 'a coin',
+      })),
+      outputs: [payTo(51_000)],
+      options: { randomizeOutputs: false },
+    });
+    const tx = Transaction.fromAtomicBEEF(created.signableTransaction!.tx);
+    const before = w.paySheets.length;
+    await expect(blindSign(w, HOME, sighash(tx, 0), { protocolID: BJOBSX, keyID: 'chain 1' })).resolves.toBeDefined();
+    expect(w.paySheets.length).toBe(before);
+    await expect(blindSign(w, HOME, sighash(tx, 1), { protocolID: OTHER, keyID: 'jar' })).resolves.toBeDefined();
+    expect(w.paySheets.slice(before)).toEqual([
+      {
+        originator: HOME,
+        satoshis: 700,
+        reason: 'bjobsx.com is spending a coin of yours worth 700 sats, held under "bjobsx tips"',
+        lineItems: [
+          { type: 'input', satoshis: 700, description: 'A coin of yours worth 700 sats, held under "bjobsx tips"' },
+        ],
+      },
+    ]);
   });
 
   test('M1: a manager with no way to ask, or one that answers anything but yes, signs nothing', async () => {

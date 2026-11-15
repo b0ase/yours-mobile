@@ -33,8 +33,10 @@
  *
  * One thing more before the signature (final check, 15 Nov 2026): by then the wallet has shown the coin is locked to
  * a key of the USER's, so its value is the user's money leaving through this action, and the pay sheet never counted
- * it (it shows outputs + fee LESS the inputs the site named). The guard asks the user about that value, once per
- * input per action, on the wallet's own spending sheet (crossSiteSignGuard.ts); No refuses the signature.
+ * it (it shows outputs + fee LESS the inputs the site named). The guard asks the user about that value on the
+ * wallet's own spending sheet, ONE sheet per action for all the coins the site can sign for in it
+ * (crossSiteSignGuard.ts); No refuses every signature of that action. A protocol pinned to the calling site needs
+ * no such sheet: no other site can use it.
  *
  * Kept in memory, per wallet instance (guardCrossSiteSigning makes one): a lock or an account switch drops the wallet
  * and this with it. A restarted service worker has none, so the hash is refused; the toolbox can't finish that
@@ -146,9 +148,28 @@ export type PendingCoin = {
   keyHash?: string;
   /** A digest with other sighash flags, or of an input whose script the wallet can't read: never signed. */
   why?: 'scope' | 'script';
-  /** The user's answer about this coin leaving, asked once per input per action (crossSiteSignGuard.ts). */
-  approval?: Promise<void>;
+  /** Where the user's sheet says it is held, once a request has shown which protocol's key locks it. */
+  held?: string;
+  /** Shown to be under a protocol pinned to the calling site: left out of the action's sheet. */
+  exempt?: boolean;
 };
+
+/** One pending action of a site: its coins by digest, and the user's one answer about their value leaving. */
+export type PendingAction = {
+  originator: string;
+  expires: number;
+  /** The pay check ran on it (it takes more from the wallet than the site's inputs bring). */
+  paid: boolean;
+  coins: Map<string, PendingCoin>;
+  /** The sheet for the action's coins, asked once (crossSiteSignGuard.ts). */
+  approval?: Promise<void>;
+  /** The user said no (or could not be asked): nothing more of this action is signed. */
+  denied?: boolean;
+};
+
+/** The coins of an action a site can get a signature for: one per input, as recorded at createAction. */
+export const signableCoins = (action: PendingAction): PendingCoin[] =>
+  [...action.coins.values()].filter((c) => c.keyHash !== undefined && !c.why);
 
 const S = TransactionSignature;
 /** The other flags a signer could ask for. Their digests are kept only to tell the site which rule refused it. */
@@ -302,9 +323,12 @@ export type SigningKeyChecks = {
  * request()'s answer: the request to sign (a copy read once: what was checked is what is signed) with the coin it
  * spends and its action; why a hash of the site's own pending action is not signed; or null (not such a hash).
  */
-export type SighashAnswer = { sign: object; coin: PendingCoin; reference: string } | { refusal: SighashRefusal } | null;
+export type SighashAnswer =
+  | { sign: object; coin: PendingCoin; action: PendingAction; reference: string }
+  | { refusal: SighashRefusal }
+  | null;
 
-type Pending = { originator: string; expires: number; paid: boolean; coins: Map<string, PendingCoin> };
+type Pending = PendingAction;
 
 /** The pending actions of one wallet instance and the sighashes each allows. */
 export class PendingSighashes {
@@ -393,7 +417,7 @@ export class PendingSighashes {
       const publicKey = await checks.derive(key);
       if (typeof publicKey !== 'string' || !/^0[23][0-9a-f]{64}$/i.test(publicKey)) return null;
       if (Utils.toHex(Hash.hash160(Utils.toArray(publicKey, 'hex'))) !== coin.keyHash) return null;
-      return { sign: a, coin, reference: signable.reference };
+      return { sign: a, coin, action: signable.p, reference: signable.reference };
     } catch {
       return null;
     }

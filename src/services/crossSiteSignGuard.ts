@@ -22,7 +22,13 @@
 import { normalizeOriginator } from '@1sat/wallet';
 import { bareHost, scanSignData } from './signDataScan';
 import { ownBackendRefusal } from './ownBackendKeys';
-import { PendingSighashes, type PendingCoin, type SighashRefusal } from './pendingSighash';
+import {
+  PendingSighashes,
+  signableCoins,
+  type PendingAction,
+  type PendingCoin,
+  type SighashRefusal,
+} from './pendingSighash';
 import { pinnedProtocol } from './pinnedProtocols';
 
 // The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
@@ -301,23 +307,58 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
     }
   };
   // The coin a site is about to get a signature for is locked to a key of the user's: its value is theirs, and the
-  // pay sheet did not count it (it shows the outputs and fee LESS the inputs the site named). The user is asked about
-  // that value on the wallet's own spending sheet, with every guard on it (the sheet for this amount, or the site's
-  // envelope), once per input per action. No, or no way to ask, refuses the signature; the action stays abortable.
-  const askAboutCoin = async (originator: string, coin: PendingCoin, protocolID: unknown) => {
-    if (coin.satoshis === 0) return;
+  // pay sheet did not count it (it shows the outputs and fee LESS the inputs the site named). The user is asked on the
+  // wallet's own spending sheet, with every guard on it (the sheet for this amount, or the site's envelope): ONE sheet
+  // per action (owner's rule: never a run of popups), at the first hash accepted, for every coin the site can get a
+  // signature for in that action, as the wallet recorded them at createAction (a site can't add to or take from that
+  // list, and an input not on it is never signed). A coin on the sheet whose key check later fails is simply not
+  // signed: the user approved more than left, never less. No, or no way to ask, refuses every signature of the action;
+  // it stays abortable.
+  const askAboutCoins = async (originator: string, action: PendingAction) => {
+    const coins = signableCoins(action).filter((c) => !c.exempt && c.satoshis > 0);
+    const total = coins.reduce((n, c) => n + c.satoshis, 0);
+    if (total === 0) return;
     const ensure = m.ensureSpendingAuthorization;
     if (typeof ensure !== 'function') throw new Error(COIN_SPEND_UNASKABLE);
-    const name = Array.isArray(protocolID) ? String(protocolID[1]) : '';
-    const held = pinnedProtocol(protocolID)?.label ?? `"${name}"`;
-    const description = `${bareHost(originator) ?? originator} is spending a coin of yours worth ${coin.satoshis} sats, held under ${held}`;
+    const site = bareHost(originator) ?? originator;
+    const lineItems = coins.map((c) => ({
+      type: 'input',
+      satoshis: c.satoshis,
+      description: c.held
+        ? `A coin of yours worth ${c.satoshis} sats, held under ${c.held}`
+        : `A coin worth ${c.satoshis} sats this site will unlock`,
+    }));
+    const only = coins.length === 1 ? coins[0] : undefined;
+    const reason = only
+      ? `${site} is spending a coin of yours worth ${only.satoshis} sats${only.held ? `, held under ${only.held}` : ''}`
+      : `${site} is spending ${coins.length} coins of yours worth ${total} sats in all`;
     const ok = await (ensure as (a: unknown) => Promise<unknown>).call(manager, {
       originator,
-      satoshis: coin.satoshis,
-      lineItems: [{ type: 'input', satoshis: coin.satoshis, description }],
-      reason: description,
+      satoshis: total,
+      lineItems,
+      reason,
     });
     if (ok !== true) throw new Error(COIN_SPEND_DENIED);
+  };
+  /** The user's one answer for this action, before `coin` (asked for under `protocolID`) is signed for. */
+  const coinsApproved = async (originator: string, action: PendingAction, coin: PendingCoin, protocolID: unknown) => {
+    if (action.denied) throw new Error(COIN_SPEND_DENIED);
+    const pin = pinnedProtocol(protocolID);
+    // A protocol pinned to this site (the sighash check let no other site get here with it): that site alone can
+    // use these keys, and the user saw the action's pay sheet. Its coins are left off any sheet raised later for the
+    // action's other coins; one raised EARLIER, before the wallet knew, counted them (more shown, never less).
+    if (pin) {
+      coin.exempt = true;
+      return;
+    }
+    coin.held = `"${Array.isArray(protocolID) ? String(protocolID[1]) : ''}"`;
+    action.approval ??= askAboutCoins(originator, action);
+    try {
+      await action.approval;
+    } catch (e) {
+      action.denied = true;
+      throw e;
+    }
   };
   const createAction = m.createAction;
   if (typeof createAction === 'function')
@@ -378,15 +419,8 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
           throw new Error(asData ? DATA_HASH_REFUSAL : refusal);
         }
         if (ownSighash) {
-          const { coin, reference, sign } = ownSighash;
-          coin.approval ??= askAboutCoin(originator!, coin, (sign as { protocolID?: unknown }).protocolID);
-          try {
-            await coin.approval;
-          } catch (e) {
-            // Asked again next time: a No is for this request, and the action can still be aborted.
-            coin.approval = undefined;
-            throw e;
-          }
+          const { coin, action, reference, sign } = ownSighash;
+          await coinsApproved(originator!, action, coin, (sign as { protocolID?: unknown }).protocolID);
           // Signed or aborted while the sheet was up: nothing to sign any more.
           if (pending.owner(reference) !== originator) throw new Error(BLIND_SIGN_REFUSAL);
           // Signed from the copy that was checked, not from an object the caller still holds.
