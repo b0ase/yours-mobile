@@ -33,8 +33,9 @@ import {
 import {
   RELAY_CONFIRM_MS,
   RELAY_KEEP_MS,
+  WAITING_MAX,
   addReceived,
-  isWaiting,
+  inLine,
   isTrustedSender,
   loadMail,
   loadRelaySeen,
@@ -836,7 +837,12 @@ const recheckQueue = (received: Received[], now: number, trusted: (from: string)
     .sort((a, z) => Number(trusted(z[0].from)) - Number(trusted(a[0].from)) || order(a[0], z[0]));
   const out: Received[] = [];
   for (let turn = 0; turn < RECHECK_PER_SENDER; turn++) for (const l of lines) if (l[turn]) out.push(l[turn]);
-  return out.slice(0, RECHECK_MAX);
+  // Never-tried letters and letters tried without an answer share the places, turn about: a stream of new letters
+  // cannot keep a tried one waiting for ever, nor the other way round.
+  const [fresh, tried] = [out.filter((r) => !r.recheck?.last), out.filter((r) => !!r.recheck?.last)];
+  const mixed: Received[] = [];
+  for (let i = 0; i < Math.max(fresh.length, tried.length); i++) mixed.push(...[fresh[i], tried[i]].filter(Boolean));
+  return mixed.slice(0, RECHECK_MAX);
 };
 
 /** A stamp found paid while not yet in a block is watched until it is (settleConfirmations). */
@@ -958,7 +964,8 @@ export const recheckPostage = async (
 
 /**
  * Letters paid by a stamp that was not in a block yet (`settling`): one lookup each, at most every RECHECK_EVERY_MS
- * and RECHECK_MAX a refresh, until the stamp has a confirmation. If the network no longer has the transaction (it was
+ * and RECHECK_MAX a refresh, until the stamp has a confirmation (or 30 days have passed by this device's clock and
+ * the newest block's, with the network still holding it). If the network no longer has the transaction (it was
  * replaced by another spend of the same coins, or dropped), and a second look at least RECHECK_EVERY_MS later says
  * the same, the letter is unpaid again and goes back to "not checked yet": the ordinary check then hands the stamp to
  * the network once more and settles it (paid again if it is taken, unpaid for good if it is refused). The wallet's own
@@ -970,11 +977,18 @@ const settleConfirmations = async (wallet: WalletInterface, me: string, now: num
     .received.filter((r) => r.settling && r.env.postage && waited(r.settling.last, now))
     .sort((a, z) => (a.settling?.last ?? 0) - (z.settling?.last ?? 0))
     .slice(0, RECHECK_MAX);
+  // Watching ends without a confirmation only after RELAY_KEEP_MS by this device's clock and by the newest block's,
+  // and never on a look that found the network without the stamp.
+  const aged = (since: number, t: number | undefined) => t !== undefined && t - since >= RELAY_KEEP_MS;
+  const chainNow = due.some((r) => aged(r.settling?.since ?? now, now))
+    ? await chainTime(wallet).catch(() => undefined)
+    : undefined;
   for (const r of due) {
-    const said: StampStatus =
-      !status || now - (r.settling?.since ?? now) >= RELAY_KEEP_MS
-        ? 'confirmed'
-        : await status((r.env.postage as Postage).txid).catch((): StampStatus => 'unclear');
+    const since = r.settling?.since ?? now;
+    let said: StampStatus = status
+      ? await status((r.env.postage as Postage).txid).catch((): StampStatus => 'unclear')
+      : 'confirmed';
+    if (said !== 'missing' && aged(since, now) && aged(since, chainNow)) said = 'confirmed';
     if (!(await sameAccount(wallet, me))) return;
     updateMail(me, (s) => ({
       ...s,
@@ -1035,8 +1049,9 @@ export const recheckLetter = async (
 
 /** At most this many new letters are taken in by one fetch; the rest wait for the next. */
 export const TAKE_MAX = 200;
-/** At most this many stamped letters from strangers wait, stored, for their first network check (see fetchMail). */
-export const WAITING_MAX = 100;
+export { WAITING_MAX };
+/** One sender holds at most this many places in the line. */
+export const LINE_PER_SENDER = 10;
 
 /**
  * When a message arrived, for the 30 days: the later of the relay's own time for it (`created_at`, set by the server,
@@ -1118,8 +1133,8 @@ export const fetchMail = async (
     now?: number;
     /** The time of the newest block (syncMail: chainTime), asked for only when a first sight is recorded. */
     chainNow?: () => Promise<number>;
-    /** How many more stamped letters from strangers may join the line for a first network check (WAITING_MAX). */
-    room?: number;
+    /** The line (store.ts WAITING_MAX): the senders of the letters in it now, one entry a letter. */
+    line?: string[];
   },
   relay: MailRelay,
 ): Promise<{ items: Received[]; ack: string[]; aged: Map<string, number>; seen: RelaySeen }> => {
@@ -1163,11 +1178,22 @@ export const fetchMail = async (
   }
   const rank = (env: Envelope) => (ctx.blocked?.(env.from) ? 3 : ctx.trusted?.(env.from) ? 0 : env.postage ? 1 : 2);
   // Stamped letters from senders the user has no dealings with are taken only while there is room in the line for a
-  // first network check (ctx.room): the rest stay on the relay, untouched, and are taken by later fetches. A stamp
+  // first network check (ctx.line): the rest stay on the relay, untouched, and are taken by later fetches. A stamp
   // costs nothing to make up, and a letter waiting for its check is never dropped (store.ts trimReceived), so the
   // line is what is kept short.
-  const lined = (c: { env: Envelope }) => ctx.room !== undefined && !!c.env.postage && rank(c.env) === 1;
-  const allowed = new Set(pickNew(cands.filter(lined), rank, Math.max(0, ctx.room ?? 0)));
+  const lined = (c: { env: Envelope }) => ctx.line !== undefined && !!c.env.postage && rank(c.env) === 1;
+  const inLineBy = new Map<string, number>();
+  for (const from of ctx.line ?? []) inLineBy.set(from, (inLineBy.get(from) ?? 0) + 1);
+  let room = Math.max(0, WAITING_MAX - (ctx.line?.length ?? 0));
+  const allowed = new Set<unknown>();
+  // Senders in turn (pickNew), and at most LINE_PER_SENDER places for one sender.
+  for (const c of pickNew(cands.filter(lined), rank, cands.length + 1)) {
+    const has = inLineBy.get(c.env.from) ?? 0;
+    if (room <= 0 || has >= LINE_PER_SENDER) continue;
+    inLineBy.set(c.env.from, has + 1);
+    allowed.add(c);
+    room--;
+  }
   const takeable = cands.filter((c) => !lined(c) || allowed.has(c));
   for (const { m, key, env } of pickNew(takeable, rank, TAKE_MAX)) {
     seen.set(key, { first: await sighted(), due: 0 });
@@ -1296,7 +1322,7 @@ export const syncMail = async (
       blocked: (from) => (s.blocked ?? []).includes(from),
       now,
       chainNow: () => chainTime(wallet),
-      room: Math.max(0, WAITING_MAX - s.received.filter((r) => isWaiting(r) && !isTrustedSender(s, r.from)).length),
+      line: s.received.filter((r) => inLine(s, r)).map((r) => r.from),
     },
     relay,
   );

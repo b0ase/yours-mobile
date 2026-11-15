@@ -128,38 +128,52 @@ export const RECEIVED_MAX = 1000;
 /** This many of the newest letters from senders the user has no dealings with are kept as any other mail is. */
 export const STRANGERS_KEPT = 200;
 /**
- * A stamped letter still waiting for its first check: by the wallet alone, or, once the wallet found the stamp pays
- * this account, by the network. Its coin may be on its way.
+ * The line: at most this many stamped letters from senders the user has no dealings with wait, stored, for an answer
+ * about their stamp (client.ts fetchMail takes no more from the relay while the line is full).
  */
-export const isWaiting = (r: Received): boolean => !!r.recheck && r.recheck.last === 0 && r.recheck.doubt === undefined;
+export const WAITING_MAX = 100;
 /**
- * Keep the store within RECEIVED_MAX without losing the user's own mail to a flood. What goes first, oldest first:
- *  1. unread, unpaid letters from senders the user has no dealings with (not a contact, not trusted), neither pinned
- *     nor archived, beyond the newest STRANGERS_KEPT of them: what a flood is made of;
+ * A stamped letter no check has answered for yet: not looked at, or looked at while the wallet or the network could
+ * not answer (an outage). Its coin may be real.
+ */
+export const isWaiting = (r: Received): boolean =>
+  !!r.recheck && r.recheck.tries === 0 && r.recheck.doubt === undefined;
+const dealtWith = (s: MailState, from: string) => s.contacts.includes(from) || (s.trusted ?? []).includes(from);
+/** A letter in the line (WAITING_MAX): waiting, from a sender the user has no dealings with. */
+export const inLine = (s: MailState, r: Received): boolean => isWaiting(r) && !dealtWith(s, r.from);
+/**
+ * Keep the store within RECEIVED_MAX without losing the user's own mail to a flood.
+ *
+ * The line is kept apart: its oldest WAITING_MAX letters are stored on top of RECEIVED_MAX, so a letter waiting for
+ * its stamp to be checked is never dropped and never pushes anything out. Letters in the line beyond that (there are
+ * none while fetchMail holds the line) go first of all, newest first, so the oldest waiting keep their place.
+ *
+ * Then, of everything else, what goes first, oldest first:
+ *  1. unread, unpaid letters from senders the user has no dealings with, neither pinned nor archived, beyond the
+ *     newest STRANGERS_KEPT of them: what a flood is made of;
  *  2. deleted letters (the Bin, erased tombstones);
- *  3. letters whose stamp a check has already answered for and found wanting (not on the network, not paid to this
- *     account) but not yet for good;
- *  4. everything else: a full store still shows new mail and drops its oldest;
- *  5. last of all, a letter whose stamp is still waiting for its first check (isWaiting): never before anything
- *     else, because its coin may be real and nothing has looked yet. There are few of these: client.ts fetchMail
- *     takes strangers' stamped letters in only while fewer than WAITING_MAX wait.
+ *  3. letters whose stamp a check has already answered for and found wanting, but not yet for good;
+ *  4. everything else: a full store still shows new mail and drops its oldest.
  * A dropped letter cannot come back as new: the relay ledger still knows its relay message (loadRelaySeen).
  */
 export const trimReceived = (s: MailState): Received[] => {
-  let over = s.received.length - RECEIVED_MAX;
-  if (over <= 0) return s.received;
+  const line = s.received.filter((r) => inLine(s, r));
+  // received is newest first: the oldest WAITING_MAX of the line keep their place.
+  const kept = new Set(line.slice(-WAITING_MAX));
+  const drop = new Set<Received>(line.filter((r) => !kept.has(r)));
+  let over = s.received.length - kept.size - drop.size - RECEIVED_MAX;
+  if (over <= 0 && !drop.size) return s.received;
   let strangers = 0;
   const rank = new Map<Received, number>();
   for (const r of s.received) {
+    if (kept.has(r) || drop.has(r)) continue;
     const mine = r.read || r.pinned || r.archived || r.verifiedSats > 0 || r.replyCredit;
-    if (isWaiting(r)) rank.set(r, 4);
-    else if (r.recheck) rank.set(r, r.recheck.doubt !== undefined || r.recheck.tries > 0 ? 2 : 3);
+    if (r.recheck) rank.set(r, isWaiting(r) ? 3 : 2);
     else if (r.deleted) rank.set(r, 1);
-    else if (mine || s.contacts.includes(r.from) || (s.trusted ?? []).includes(r.from)) rank.set(r, 3);
+    else if (mine || dealtWith(s, r.from)) rank.set(r, 3);
     else rank.set(r, ++strangers > STRANGERS_KEPT ? 0 : 3);
   }
-  const drop = new Set<Received>();
-  for (const level of [0, 1, 2, 3, 4])
+  for (const level of [0, 1, 2, 3])
     for (let i = s.received.length - 1; i >= 0 && over > 0; i--)
       if (rank.get(s.received[i]) === level) {
         drop.add(s.received[i]);

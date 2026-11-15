@@ -10,6 +10,7 @@ import {
   STAMP_HELD,
   STAMP_NO_RECORD,
   STAMP_USED,
+  LINE_PER_SENDER,
   TAKE_MAX,
   WAITING_MAX,
   peekGapMs,
@@ -33,6 +34,7 @@ import {
   RELAY_CONFIRM_MS,
   RELAY_KEEP_MS,
   RELAY_SEEN_MAX,
+  STRANGERS_KEPT,
   isQuarantined,
   loadMail,
   loadRelaySeen,
@@ -752,7 +754,7 @@ describe('bMail postage that could not be checked on arrival', () => {
     expect(old.every((m) => m.verifiedSats === 0 && m.verifyNote === 'Postage is not paid to you')).toBe(true);
   });
 
-  test('a never-tried letter goes before tried ones, and contacts before strangers', async () => {
+  test('contacts go first; never-tried letters and tried ones take turns', async () => {
     const r = fakeRelay();
     const a = device();
     onDevice(a);
@@ -780,7 +782,10 @@ describe('bMail postage that could not be checked on arrival', () => {
     const watch: StampNet = { ...slow, seen: async (txid) => (tried.push(txid), net.seen(txid)) };
     onDevice(a);
     await syncMail(a.wallet, ME, r.relay, T0 + RECHECK_EVERY_MS + 1000, watch);
-    expect(tried.slice(0, 2)).toEqual([friend.postage?.txid, stranger.postage?.txid] as string[]);
+    // The contact first; then never-tried and tried letters turn about, so the stranger's new letter is third at most.
+    const turns = [...new Set(tried)];
+    expect(turns[0]).toBe(friend.postage?.txid as string);
+    expect(turns.slice(1, 3)).toContain(stranger.postage?.txid as string);
     expect(
       mail(a)
         .filter((m) => m.verifiedSats > 0)
@@ -892,12 +897,17 @@ describe('bMail: what counts as a paid stamp', () => {
     expect(a.coins.size).toBe(1);
   });
 
-  test('one stamp, forty letters: all but the first are settled unstamped in the same refresh', async () => {
+  test('one stamp, forty letters: one is paid and every other is settled unstamped as it is taken', async () => {
     const r = fakeRelay();
     const one = await stamp(700);
     for (let i = 0; i < 40; i++) r.post(letter({ postage: one }));
     const a = device();
     await sync(a, r.relay);
+    // One sender holds ten places in the line a refresh; the rest are taken by the next refreshes.
+    expect(mail(a).length).toBe(LINE_PER_SENDER);
+    expect(mail(a).filter((m) => m.verifiedSats === 700).length).toBe(1);
+    expect(mail(a).filter((m) => m.verifyNote === STAMP_USED && !m.recheck).length).toBe(LINE_PER_SENDER - 1);
+    for (let k = 1; k <= 3; k++) await sync(a, r.relay, T0 + k * 60_000);
     expect(mail(a).filter((m) => m.verifiedSats === 700).length).toBe(1);
     expect(mail(a).filter((m) => m.verifyNote === STAMP_USED && !m.recheck).length).toBe(39);
     expect(a.calls.internalize).toBe(1);
@@ -1586,6 +1596,85 @@ describe('bMail: flood, clock and load', () => {
     expect(a.coins.has(hp.txid)).toBe(true);
     expect(refreshes).toBeLessThan(40);
   }, 120_000);
+
+  test("a lookup outage and a trickle of made-up stamps: the user's own mail stays, and the waiting paid letter is paid after it", async () => {
+    const r = fakeRelay();
+    const a = device();
+    onDevice(a);
+    const own: Received[] = Array.from({ length: RECEIVED_MAX }, () => {
+      const env = letter();
+      return { id: env.id, from: ALICE, at: T0, verifiedSats: 0, read: true, stampRecorded: true, env };
+    });
+    saveMail(ME, { ...loadMail(ME), received: own });
+    const key = () => PrivateKey.fromRandom().toPublicKey().toString();
+    const hp = await stamp(700);
+    const honest = letter({ from: key(), postage: hp });
+    r.post(honest);
+    // The lookups cannot tell (an outage, or rate-limited) for 50 refreshes; 20 made-up stamps arrive before each.
+    chain.down = true;
+    await sync(a, r.relay);
+    for (let i = 1; i <= 50; i++) {
+      for (let k = 0; k < 20; k++) r.post(letter({ from: key(), postage: await stamp(100, { sent: false }) }));
+      await sync(a, r.relay, T0 + i * RECHECK_EVERY_MS);
+    }
+    const got = mail(a);
+    expect(got.filter((m) => m.read).length).toBe(RECEIVED_MAX);
+    expect(got.some((m) => m.id === honest.id)).toBe(true);
+    // Tried without an answer is still waiting: the line holds 100, the rest stay on the relay.
+    expect(got.length).toBe(RECEIVED_MAX + WAITING_MAX);
+    chain.down = false;
+    for (let i = 51; i < 60 && !mail(a).find((m) => m.id === honest.id)?.verifiedSats; i++)
+      await sync(a, r.relay, T0 + i * RECHECK_EVERY_MS);
+    expect(mail(a).find((m) => m.id === honest.id)?.verifiedSats).toBe(700);
+    expect(a.coins.has(hp.txid)).toBe(true);
+  }, 300_000);
+
+  test("a flood of 1,000 unstamped letters against a store full of the user's own mail does not flush it", async () => {
+    const r = fakeRelay();
+    const a = device();
+    onDevice(a);
+    const own: Received[] = Array.from({ length: RECEIVED_MAX }, () => {
+      const env = letter();
+      return { id: env.id, from: ALICE, at: T0, verifiedSats: 0, read: true, env };
+    });
+    saveMail(ME, { ...loadMail(ME), received: own });
+    for (let i = 0; i < 1000; i++) r.post(letter({ from: EVE }));
+    for (let k = 0; k < 6; k++) await sync(a, r.relay, T0 + k * 60_000);
+    // Strangers' unread mail holds at most its newest 200 places; everything else is still the user's own.
+    expect(mail(a).length).toBe(RECEIVED_MAX);
+    expect(mail(a).filter((m) => m.read).length).toBe(RECEIVED_MAX - STRANGERS_KEPT);
+    expect(mail(a).some((m) => m.id === own[0].id)).toBe(true);
+  });
+
+  test('watching a stamp for its confirmation does not end on a clock that jumps: a replaced stamp is still found out', async () => {
+    const r = fakeRelay();
+    const p = await stamp(700);
+    chain.mempool.add(p.txid);
+    r.post(letter({ postage: p }));
+    const a = device();
+    await sync(a, r.relay);
+    chain.has.delete(p.txid);
+    chain.mempool.delete(p.txid);
+    chain.refuses.add(p.txid);
+    // The device clock is 31 days ahead for one refresh, before the second look.
+    await sync(a, r.relay, T0 + 31 * DAY, T0);
+    expect(mail(a)[0].settling).toBeDefined();
+    await sync(a, r.relay, T0 + RECHECK_EVERY_MS);
+    await sync(a, r.relay, T0 + 3 * RECHECK_EVERY_MS);
+    expect(mail(a)[0].verifiedSats).toBe(0);
+    // Still in the mempool after 30 days by both clocks: watching ends, the letter stays paid.
+    const r2 = fakeRelay();
+    const q = await stamp(700);
+    chain.mempool.add(q.txid);
+    r2.post(letter({ postage: q }));
+    const b = device();
+    await sync(b, r2.relay);
+    await sync(b, r2.relay, T0 + 31 * DAY, T0 + DAY);
+    expect(mail(b)[0].settling).toBeDefined();
+    await sync(b, r2.relay, T0 + 32 * DAY);
+    expect(mail(b)[0].settling).toBeUndefined();
+    expect(mail(b)[0].verifiedSats).toBe(700);
+  });
 
   test('the notifier peeks a large box less often', () => {
     expect([0, 20, 21, 200, 201, 5000].map(peekGapMs)).toEqual([0, 0, 300_000, 300_000, 900_000, 900_000]);
