@@ -21,6 +21,12 @@ import {
   feedAuthorMessage,
   BLOCKED_RETRY_MS,
   isAuthoredPost,
+  linkAuthorAtUnlock,
+  NAME_NEEDED_MESSAGE,
+  NameNeededError,
+  needsNameToPost,
+  postNameGate,
+  UNLOCK_RECHECK_MS,
   NEEDS_NAME_RETRY_MS,
   postFeedAuthorBinding,
   resetAuthorBindingSession,
@@ -1162,6 +1168,10 @@ describe('only posts and replies make an account one that posts', () => {
     } as unknown as Storage;
     let requests = 0;
     globalThis.fetch = (async () => (requests++, new Response('{"ok":true}'))) as unknown as typeof fetch;
+    // This is about the flag, not the name rule (round 4): keep the rule out of it, whatever other test files
+    // have switched names to in this process.
+    const gateWas = postNameGate.enabled;
+    postNameGate.enabled = () => false;
     try {
       const a = account();
       a.state.posts = 0;
@@ -1186,6 +1196,7 @@ describe('only posts and replies make an account one that posts', () => {
       // No paymail outside a build, so nothing is sent in either case: the flag is what this pins.
       expect(requests).toBe(0);
     } finally {
+      postNameGate.enabled = gateWas;
       globalThis.localStorage = realStorage;
     }
   });
@@ -1292,5 +1303,246 @@ describe('"linked to another name" has a way out', () => {
     } finally {
       globalThis.localStorage = realStorage;
     }
+  });
+});
+
+// ── round 4 (owner, 15 Nov 2026: link at unlock; a post needs a $name) ──────
+
+describe('linked at unlock and on account switch', () => {
+  /** One app-wide wallet context that follows the account in use. */
+  const app = (first: ReturnType<typeof account>) => {
+    const s = { current: first };
+    const wallet = {
+      getPublicKey: (a: never) => s.current.wallet.getPublicKey(a),
+      createSignature: (a: never) => s.current.wallet.createSignature(a),
+      listOutputs: (a: never) => s.current.wallet.listOutputs(a),
+    };
+    return { s, ctx: { wallet } as unknown as OneSatContext };
+  };
+
+  test('unlock with an account that has posted: one claim', async () => {
+    const a = account();
+    const h = harness();
+    expect(linkAuthorAtUnlock(a.ctx, a.identityAddress, h.deps)).toBeUndefined(); // returns at once
+    await settle();
+    expect(h.sent.length).toBe(1);
+    expect(h.sent[0].identityKey).toBe(a.identityKey);
+    expect(h.store.get(a.identityAddress)?.status).toBe('ok');
+    expect(h.timers.length).toBe(0);
+  });
+
+  test('unlock with an account that never posted: nothing', async () => {
+    const a = account();
+    a.state.posts = 0;
+    a.state.likes = 3;
+    const h = harness();
+    linkAuthorAtUnlock(a.ctx, a.identityAddress, h.deps);
+    await settle();
+    expect(a.counts.createSignature).toBe(0);
+    expect(h.sent.length).toBe(0);
+    expect(h.timers.length).toBe(0);
+  });
+
+  test('unlock with an account already linked, an agent account, or one with no name: nothing', async () => {
+    const a = account();
+    const h = harness();
+    await ensureFeedAuthorBinding(a.ctx, {}, h.deps);
+    linkAuthorAtUnlock(a.ctx, a.identityAddress, h.deps);
+    linkAuthorAtUnlock(a.ctx, a.identityAddress, h.deps);
+    await settle();
+    expect(h.sent.length).toBe(1);
+    const agent = account();
+    h.agents.add(agent.identityAddress);
+    linkAuthorAtUnlock(agent.ctx, agent.identityAddress, h.deps);
+    const nameless = account();
+    const h2 = harness('');
+    linkAuthorAtUnlock(nameless.ctx, nameless.identityAddress, h2.deps);
+    await settle();
+    expect(h.sent.length).toBe(1);
+    expect(h2.sent.length).toBe(0);
+    expect(agent.counts.createSignature + nameless.counts.createSignature).toBe(0);
+  });
+
+  test('a switch checks the new account only, even while the wallet is still the old account’s', async () => {
+    const [a, b] = [account(), account()];
+    const w = app(a);
+    const h = harness();
+    linkAuthorAtUnlock(w.ctx, a.identityAddress, h.deps);
+    await settle();
+    expect(h.sent.map((s) => s.identityKey)).toEqual([a.identityKey]);
+    // The account in use is now B, but the wallet context has not followed yet.
+    const aSigned = a.counts.createSignature;
+    linkAuthorAtUnlock(w.ctx, b.identityAddress, h.deps);
+    await settle();
+    expect(h.sent.length).toBe(1);
+    expect(a.counts.createSignature).toBe(aSigned); // nothing more signed as A
+    expect(h.timers.map((t) => t.ms)).toEqual([UNLOCK_RECHECK_MS[0]]);
+    // The context catches up; the recheck links B, and only B.
+    w.s.current = b;
+    h.timers[0].fn();
+    await settle();
+    expect(h.sent.map((s) => s.identityKey)).toEqual([a.identityKey, b.identityKey]);
+    expect(h.store.get(b.identityAddress)?.status).toBe('ok');
+    expect(h.timers.length).toBe(1);
+  });
+
+  test('a context that never follows: a few rechecks, then it stops; a lock drops them', async () => {
+    const [a, b] = [account(), account()];
+    const h = harness();
+    linkAuthorAtUnlock(a.ctx, b.identityAddress, h.deps);
+    await settle();
+    for (let i = 0; i < UNLOCK_RECHECK_MS.length; i++) {
+      h.timers[i].fn();
+      await settle();
+    }
+    expect(h.timers.map((t) => t.ms)).toEqual(UNLOCK_RECHECK_MS);
+    expect(h.sent.length).toBe(0);
+    const h2 = harness();
+    linkAuthorAtUnlock(a.ctx, b.identityAddress, h2.deps);
+    await settle();
+    resetAuthorBindingSession(); // what a lock does
+    h2.timers[0].fn();
+    await settle();
+    expect(h2.timers.length).toBe(1);
+  });
+
+  test('never throws into unlock: a wallet that fails, a scheduler that fails', async () => {
+    const h = harness();
+    const dead = { wallet: { getPublicKey: () => Promise.reject(new Error('locked')) } } as unknown as OneSatContext;
+    expect(() => linkAuthorAtUnlock(dead, '1x', h.deps)).not.toThrow();
+    const sync = {
+      wallet: {
+        getPublicKey: () => {
+          throw new Error('boom');
+        },
+      },
+    } as unknown as OneSatContext;
+    expect(() => linkAuthorAtUnlock(sync, '1x', h.deps)).not.toThrow();
+    await settle();
+    expect(h.sent.length).toBe(0);
+  });
+
+  test('NotifyEngine (mounted on every platform) runs it once unlocked and on account change, never while locked', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../notify/NotifyEngine.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    expect(src).toContain(
+      'useEffect(() => { if (isLocked || !apiContext?.wallet || !identityAddress) return; linkAuthorAtUnlock(apiContext, identityAddress); }, [apiContext, isLocked, identityAddress]);',
+    );
+    // The extension, web, iOS and Android builds all mount NotifyEngine through the same App patch.
+    const mobile = readFileSync(new URL('../../../vite.config.mobile.ts', import.meta.url), 'utf8');
+    expect(mobile).toContain('<Suspense fallback={null}><NotifyEngine /></Suspense>');
+    expect(readFileSync(new URL('../../../vite.config.ts', import.meta.url), 'utf8')).toContain(
+      "import { MOBILE_DEFINES, MOBILE_SWAPS, mobileText } from './vite.config.mobile';",
+    );
+    // The Feed-open hook stays.
+    const feed = readFileSync(new URL('./FeedPage.tsx', import.meta.url), 'utf8');
+    expect(feed).toContain('if (!identity.loading) void ensureFeedAuthorBinding(apiContext);');
+  });
+});
+
+describe('a post or a reply needs a $name', () => {
+  const real = { ...postNameGate };
+  const realFetch = globalThis.fetch;
+  let paymail = '';
+  beforeEach(() => {
+    paymail = '';
+    postNameGate.enabled = () => true;
+    postNameGate.paymailFor = () => paymail;
+    postNameGate.bare = (p) => p.replace(/@(bwalletx\.com|bmailx\.com|bwallet\.space)$/i, '');
+    globalThis.fetch = (async () => new Response('{}')) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    Object.assign(postNameGate, real);
+    globalThis.fetch = realFetch;
+  });
+  const script = () => new Script().writeOpCode(0).writeOpCode(0x6a).writeBin(Utils.toArray('hello'));
+  const POST = ['app:bWallet', 'type:post'];
+  const REPLY = ['app:bWallet', 'type:post', 'context:tx', `contextValue:${'ab'.repeat(32)}`];
+
+  test('the test is the binding’s own: a paymail on one of our domains', () => {
+    expect(needsNameToPost('')).toBe(true);
+    expect(needsNameToPost('someone@handcash.io')).toBe(true);
+    expect(needsNameToPost('peytonmoon69@bwalletx.com')).toBe(false);
+    expect(needsNameToPost('peytonmoon69@bmailx.com')).toBe(false);
+    expect(needsNameToPost('john.gmail@bwallet.space')).toBe(false);
+    // A build with names switched off has nowhere to claim one, so it gates nothing.
+    postNameGate.enabled = () => false;
+    expect(needsNameToPost('')).toBe(false);
+  });
+
+  test('no name: a post and a reply are refused before anything is signed or built', async () => {
+    const a = account();
+    for (const tags of [POST, REPLY]) {
+      const err = await publish(a.ctx, script(), 'Feed post', tags).catch((e) => e);
+      expect(err).toBeInstanceOf(NameNeededError);
+      expect(err.message).toBe(NAME_NEEDED_MESSAGE);
+    }
+    expect(NAME_NEEDED_MESSAGE).toMatch(/\$name/);
+    expect(NAME_NEEDED_MESSAGE).toMatch(/Nothing was posted or paid/);
+    expect(a.state.actions).toBe(0); // no transaction
+    expect(a.counts.createSignature).toBe(0); // not even the post's signature
+    expect(a.counts.listOutputs).toBe(0);
+  });
+
+  test('no name: a like, follow, branch, hide and tip still go out', async () => {
+    const a = account();
+    for (const type of ['like', 'follow', 'repost', 'hide', 'tip'])
+      expect(await publish(a.ctx, script(), 'Feed action', ['app:bWallet', `type:${type}`, 'tx:ab'])).toBe(
+        'ab'.repeat(32),
+      );
+    expect(a.state.actions).toBe(5);
+    await settle();
+  });
+
+  test('with a name: posting works as before, whatever state the link is in', async () => {
+    const a = account();
+    paymail = 'peytonmoon69@bwalletx.com';
+    // Whatever the link's server would say (down, refused, another name's), the gate lets a named account post.
+    // (That the link itself can't stop a post is pinned above, in 'a post is never stopped by the binding'.)
+    for (const answer of [
+      () => Promise.reject(new TypeError('Failed to fetch')),
+      async () => new Response('{"code":"identity_signature_failed"}', { status: 401 }),
+      async () => new Response('{"code":"address_linked_to_another_name"}', { status: 409 }),
+    ]) {
+      globalThis.fetch = answer as unknown as typeof fetch;
+      resetAuthorBindingSession();
+      expect(await publish(a.ctx, script(), 'Feed post', POST)).toBe('ab'.repeat(32));
+      await settle();
+    }
+    expect(a.state.actions).toBe(3);
+  });
+
+  test('publish checks the name first, before the signature and the transaction', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./feedApi.ts', import.meta.url), 'utf8');
+    const body = src.slice(src.indexOf('export async function publish('));
+    const gate = body.indexOf('await assertNameForPost(ctx, tags);');
+    expect(gate).toBeGreaterThan(0);
+    expect(gate).toBeLessThan(body.indexOf('signWithIdentity('));
+    expect(gate).toBeLessThan(body.indexOf('executeTrackedAction('));
+  });
+
+  test('the composer shows a line and a way to the name flow in place of Post; the tip sheet drops its reply', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./FeedPage.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    expect(src).toContain('const needsName = needsNameToPost(paymail);');
+    // In place of the Post button, not beside it.
+    expect(src).toMatch(
+      /\{needsName \? \( <div data-post-needs-name> .*?Get your \$name <\/button> <\/div> \) : \( <button onClick=\{\(\) => void send\(\)\}/,
+    );
+    expect(src).toContain(
+      "{replyTo ? 'Choose your $name to reply.' : 'Choose your $name to post.'} It’s how people find you.",
+    );
+    // The existing claim flow, and the same theme tokens as the Post button it replaces.
+    expect(src).toContain('{naming && <HandleFlow onClose={() => setNaming(false)} />}');
+    expect(src).toMatch(
+      /<button onClick=\{\(\) => setNaming\(true\)\} className="mt-2 w-full rounded-2xl py-3 text-sm font-bold" style=\{\{ background: GOLD, color: '#1a1300' \}\}/,
+    );
+    // send() can't be reached round the button (Enter, a stale handler).
+    expect(src).toContain("setError(''); if (needsName) return setNaming(true);");
+    // A reply sent with a tip is a post of the tipper's own: not offered without a name; the tip is.
+    expect(src).toContain('return needsNameToPost(myPaymail) ? { ...d, reply: { available: false, on: false } } : d;');
+    // No crypto talk in the new copy.
+    expect(src.match(/data-post-needs-name>.*?<\/div>/)?.[0] ?? '').not.toMatch(/chain|BSV|BAP|key|sign/i);
   });
 });

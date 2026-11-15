@@ -3,7 +3,7 @@ import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
 import type { AuthorDeps } from './authorFeed';
-import { aipAddressOf, ensureFeedAuthorBinding, isAuthoredPost } from './authorBinding';
+import { aipAddressOf, assertNameForPost, ensureFeedAuthorBinding, isAuthoredPost } from './authorBinding';
 import { FWETCH_API, parseFwetchFeed, parseFwetchItem, verifyFwetchTx } from './fwetch';
 import {
   parseOverlayAny,
@@ -486,6 +486,8 @@ export async function publish(
   /** Wallet action labels (local only), e.g. 'bchat reveal'. */
   labels?: string[],
 ): Promise<string> {
+  // A post or a reply needs a $name (authorBinding.ts): refused here, before anything is signed, built or paid.
+  await assertNameForPost(ctx, tags);
   const signed = await signWithIdentity(() => applyBapAip(ctx, script));
   if (!signed) throw new PostCancelledError();
   const res = await executeTrackedAction(ctx.wallet, {

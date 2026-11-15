@@ -136,3 +136,13 @@ describe('pinLevelFromVersion (sites and SDK)', () => {
     expect(Number('bwalletx-5.2.40+p2'.match(DUAL)?.[1])).toBe(2);
   });
 });
+
+describe('bJobsX sheet text', () => {
+  test('says both things the key does: locks the private records, signs the public profile on publish', () => {
+    const d = knownProtocol([2, 'bjobsx records'])?.description ?? '';
+    expect(d).toBe(
+      'bJobsX wants to lock your profile records with your own keys before they go on chain, and to sign your public profile when you publish it. Only your 12 words can open them; nothing is made public unless you choose.',
+    );
+    expect(knownProtocol([2, 'bjobsx records'])?.label).toBe('Your work records (bJobsX)');
+  });
+});

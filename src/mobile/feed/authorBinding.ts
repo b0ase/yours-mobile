@@ -24,6 +24,7 @@ import { PublicKey, Utils } from '@bsv/sdk';
 import { isAgentAccount } from '../agents/agentAccounts';
 import { IS_EXTENSION } from '../extension';
 import { getPaymail } from '../names/accountName';
+import { paymailEnabled } from '../names/paymail';
 import { bareName } from '../names/names';
 import { onSessionReset } from '../../utils/sessionCaches';
 import {
@@ -67,6 +68,37 @@ export const feedAuthorAlias = (paymail: string, bare: (p: string) => string = b
   const alias = bare(paymail.trim()).toLowerCase();
   return /^[a-z0-9][a-z0-9._-]{0,63}$/.test(alias) ? alias : null;
 };
+
+/**
+ * A post or a reply needs a bWalletX name (owner, 15 Nov 2026): the name is what the post's avatar links to. The
+ * test is the binding's own (feedAuthorAlias). It is about HAVING a name, never about the link: with a name, posting
+ * works whether the link is done, pending, refused or the server is down. A build with names switched off has no
+ * way to claim one, so it gates nothing. Likes, follows, branches, hides and tips are never gated.
+ */
+export const postNameGate = {
+  enabled: (): boolean => paymailEnabled(),
+  paymailFor: (identityAddress: string): string => getPaymail(identityAddress),
+  bare: (paymail: string): string => bareName(paymail),
+};
+/** This account can't post or reply until it has a name. */
+export const needsNameToPost = (paymail: string): boolean =>
+  postNameGate.enabled() && feedAuthorAlias(paymail, postNameGate.bare) === null;
+
+export const NAME_NEEDED_MESSAGE = 'Choose your $name before you post. Nothing was posted or paid.';
+export class NameNeededError extends Error {
+  constructor() {
+    super(NAME_NEEDED_MESSAGE);
+    this.name = 'NameNeededError';
+  }
+}
+
+/** feedApi.publish calls this first: a post or reply from an account with no name stops here, before anything is signed or built. */
+export async function assertNameForPost(ctx: OneSatContext, tags: readonly string[]): Promise<void> {
+  if (!tags.includes('type:post') || !postNameGate.enabled()) return;
+  const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
+  if (needsNameToPost(postNameGate.paymailFor(PublicKey.fromString(publicKey).toAddress())))
+    throw new NameNeededError();
+}
 
 /** The posting address on an AIP-signed script (the push before the signature), for the cheap "already sent" check. */
 export const aipAddressOf = (signed: { chunks: { data?: number[] }[] }): string | null => {
@@ -254,6 +286,8 @@ export type EnsureOptions = {
   postingAddress?: string | null;
   /** A scheduled retry, for this account only: if the wallet has moved to another account, nothing is done. */
   retryFor?: string;
+  /** An unlock / account-switch check for this account only (linkAuthorAtUnlock): the same rules as Feed open. */
+  onlyFor?: string;
 };
 
 /**
@@ -273,6 +307,7 @@ export async function ensureFeedAuthorBinding(
     // The app has one wallet context, and it follows the account in use: a retry scheduled for account A must not
     // sign and send for account B after a switch.
     if (opts.retryFor !== undefined && opts.retryFor !== identityAddress) return 'unavailable';
+    if (opts.onlyFor !== undefined && opts.onlyFor !== identityAddress) return 'unavailable';
     if (d.isAgentOrPot(identityAddress)) return 'excluded';
     if (opts.posted) d.markPosted(identityAddress);
     const alias = feedAuthorAlias(d.paymailFor(identityAddress), d.bare);
@@ -352,5 +387,35 @@ export async function ensureFeedAuthorBinding(
     }
   } catch {
     return 'unavailable';
+  }
+}
+
+/** Right after a switch the wallet context can still be the previous account's: look again after these waits. */
+export const UNLOCK_RECHECK_MS = [2_000, 8_000, 30_000];
+
+/**
+ * The Feed-open check, run when the wallet unlocks and when the account in use changes (notify/NotifyEngine.tsx,
+ * mounted on every platform). Same rules: only an account that has written a post or reply, never an agent account or
+ * a pot, the same records and spacing. Fire-and-forget: returns at once, never throws, asks nothing. It checks
+ * `identityAddress` only: while the wallet context is still another account's it waits and looks again, and never
+ * signs for the account it wasn't asked about.
+ */
+export function linkAuthorAtUnlock(ctx: OneSatContext, identityAddress: string, deps: Partial<AuthorBindingDeps> = {}) {
+  const schedule = deps.schedule ?? defaultDeps.schedule;
+  const started = epoch;
+  const attempt = (n: number) => {
+    void ensureFeedAuthorBinding(ctx, { onlyFor: identityAddress }, deps)
+      .then((r) => {
+        if (r !== 'unavailable' || n >= UNLOCK_RECHECK_MS.length) return;
+        schedule(() => {
+          if (started === epoch) attempt(n + 1);
+        }, UNLOCK_RECHECK_MS[n]);
+      })
+      .catch(() => undefined);
+  };
+  try {
+    attempt(0);
+  } catch {
+    /* never into unlock */
   }
 }

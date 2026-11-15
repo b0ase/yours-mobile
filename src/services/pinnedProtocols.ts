@@ -47,11 +47,12 @@ export const PINNED_PROTOCOLS: readonly PinnedProtocol[] = [
   },
   {
     // bjobsx.com (24 Oct 2026): imported LinkedIn profile sections, encrypted with these keys (counterparty self).
+    // It also signs the profile the user publishes on chain (keyID 'public profile', counterparty 'anyone').
     protocolID: [2, 'bjobsx records'],
     origins: ['bjobsx.com', 'www.bjobsx.com'],
     label: 'Your work records (bJobsX)',
     description:
-      'bJobsX wants to lock your profile records with your own keys before they go on chain. Only your 12 words can open them; nothing is made public unless you choose.',
+      'bJobsX wants to lock your profile records with your own keys before they go on chain, and to sign your public profile when you publish it. Only your 12 words can open them; nothing is made public unless you choose.',
     // bjobsx.com mint: description `bJobsX: 3 private profile records`.
     mint: { verb: 'Mint', noun: 'profile record', countFrom: /(\d+) private profile records?/i },
   },

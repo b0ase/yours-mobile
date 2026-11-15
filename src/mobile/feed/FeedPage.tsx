@@ -111,7 +111,9 @@ import {
   PostCancelledError,
   setIdentitySetupHandler,
 } from './feedApi';
-import { ensureFeedAuthorBinding } from './authorBinding';
+import { ensureFeedAuthorBinding, needsNameToPost } from './authorBinding';
+import { HandleFlow } from '../names/HandleFlow';
+import { useAccountNames } from '../names/accountNames';
 import {
   BLOCKS_PER_DAY,
   formatLocked,
@@ -894,6 +896,16 @@ const Composer = ({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  // A post or a reply needs a $name (authorBinding.ts needsNameToPost): without one, the Post button is the way to
+  // get one. publish() refuses too, so this is the friendly half of the rule, not the rule.
+  const { paymail } = useAccountNames(
+    chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
+    '',
+    '',
+    false,
+  );
+  const needsName = needsNameToPost(paymail);
+  const [naming, setNaming] = useState(false);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   useEffect(() => () => itemsRef.current.forEach((i) => URL.revokeObjectURL(i.preview)), []);
@@ -978,6 +990,7 @@ const Composer = ({
 
   const send = async () => {
     setError('');
+    if (needsName) return setNaming(true);
     if (invalid) return setError(invalid);
     if (safety().check({ texts: [text, ...items.map((i) => i.name)] }).blocked)
       return setError("This can't be posted from bWallet.");
@@ -1114,14 +1127,30 @@ const Composer = ({
           <ErrorActions message={String(error)} />
         </div>
       )}
-      <button
-        onClick={() => void send()}
-        disabled={!!busy || !!invalid}
-        className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
-        style={{ background: GOLD, color: '#1a1300' }}
-      >
-        {busy || (replyTo ? 'Reply' : quote ? 'Quote' : link ? 'Post to thread' : 'Post')}
-      </button>
+      {needsName ? (
+        <div data-post-needs-name>
+          <p className="text-xs mt-3" style={{ color: MUTED }}>
+            {replyTo ? 'Choose your $name to reply.' : 'Choose your $name to post.'} It’s how people find you.
+          </p>
+          <button
+            onClick={() => setNaming(true)}
+            className="mt-2 w-full rounded-2xl py-3 text-sm font-bold"
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
+            Get your $name
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => void send()}
+          disabled={!!busy || !!invalid}
+          className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
+          {busy || (replyTo ? 'Reply' : quote ? 'Quote' : link ? 'Post to thread' : 'Post')}
+        </button>
+      )}
+      {naming && <HandleFlow onClose={() => setNaming(false)} />}
     </Sheet>
   );
 };
@@ -1161,7 +1190,7 @@ const TipSheet = ({
   onClose: () => void;
   onLiked: (p: FeedPost) => void;
 }) => {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const rate = useBsvUsd();
   const presets = tipPresets(rate);
@@ -1175,7 +1204,17 @@ const TipSheet = ({
   const likeSats = loadPrefs().paidLikeSats;
   // Optional message with the tip, and where it goes (tipMessage.ts).
   const [message, setMessage] = useState('');
-  const [dests, setDests] = useState(() => tipDestinations(post));
+  // A reply under the post is a post of your own, so it needs a $name (authorBinding.ts); the tip itself does not.
+  const { paymail: myPaymail } = useAccountNames(
+    chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
+    '',
+    '',
+    false,
+  );
+  const [dests, setDests] = useState(() => {
+    const d = tipDestinations(post);
+    return needsNameToPost(myPaymail) ? { ...d, reply: { available: false, on: false } } : d;
+  });
   const msgError = validateTipMessage(message);
   const sendingMessage = willSendMessage(message, dests);
   /** Deliver the message after the tip landed. Returns what failed (the tip itself already went). */
