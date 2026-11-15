@@ -23,8 +23,8 @@ import { AIP } from '@1sat/templates';
 import { PublicKey, Utils } from '@bsv/sdk';
 import { isAgentAccount } from '../agents/agentAccounts';
 import { IS_EXTENSION } from '../extension';
-import { getPaymail } from '../names/accountName';
-import { paymailEnabled } from '../names/paymail';
+import { getPaymail, setPaymail } from '../names/accountName';
+import { lookupPaymailState, paymailEnabled, type PaymailLookup } from '../names/paymail';
 import { bareName } from '../names/names';
 import { onSessionReset } from '../../utils/sessionCaches';
 import {
@@ -74,13 +74,20 @@ export const feedAuthorAlias = (paymail: string, bare: (p: string) => string = b
  * test is the binding's own (feedAuthorAlias). It is about HAVING a name, never about the link: with a name, posting
  * works whether the link is done, pending, refused or the server is down. A build with names switched off has no
  * way to claim one, so it gates nothing. Likes, follows, branches, hides and tips are never gated.
+ *
+ * ⚠ It exists to stop unnamed accounts, not to block named ones. The cached name is trusted when there is one; with
+ * none cached the server is asked once, and only its definite "no name" refuses. "Couldn't tell" lets the post go.
  */
 export const postNameGate = {
   enabled: (): boolean => paymailEnabled(),
   paymailFor: (identityAddress: string): string => getPaymail(identityAddress),
   bare: (paymail: string): string => bareName(paymail),
+  /** The server's answer for an identity key (names/paymail.ts lookupPaymailState). */
+  lookup: (identityKey: string): Promise<PaymailLookup> => lookupPaymailState((u, i) => fetch(u, i), identityKey),
+  /** Put a name the server just gave back in the cache. */
+  remember: (identityAddress: string, paymail: string): void => setPaymail(identityAddress, paymail),
 };
-/** This account can't post or reply until it has a name. */
+/** This account has no name in the cache (the composer's quick test; publish asks the server before refusing). */
 export const needsNameToPost = (paymail: string): boolean =>
   postNameGate.enabled() && feedAuthorAlias(paymail, postNameGate.bare) === null;
 
@@ -92,12 +99,34 @@ export class NameNeededError extends Error {
   }
 }
 
-/** feedApi.publish calls this first: a post or reply from an account with no name stops here, before anything is signed or built. */
-export async function assertNameForPost(ctx: OneSatContext, tags: readonly string[]): Promise<void> {
-  if (!tags.includes('type:post') || !postNameGate.enabled()) return;
-  const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
-  if (needsNameToPost(postNameGate.paymailFor(PublicKey.fromString(publicKey).toAddress())))
-    throw new NameNeededError();
+/** Proof that the name check passed for a post about to be made. Only assertNameToPost makes one. */
+export type NameChecked = { readonly nameChecked: true };
+const passes = new WeakSet<object>();
+export const isNameChecked = (t: unknown): t is NameChecked => typeof t === 'object' && t !== null && passes.has(t);
+
+/**
+ * Refuse (NameNeededError) when the account `ctx` signs as has no bWalletX name; otherwise a pass to hand to
+ * publish(). Call it BEFORE anything is paid (inscribing media, a reveal): publish() given the pass does not check
+ * again, so a name that goes missing in between can never stop a post whose media is already paid for.
+ */
+export async function assertNameToPost(ctx: OneSatContext): Promise<NameChecked> {
+  const pass: NameChecked = { nameChecked: true };
+  passes.add(pass);
+  if (!postNameGate.enabled()) return pass;
+  const identityKey = (await ctx.wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();
+  const identityAddress = PublicKey.fromString(identityKey).toAddress();
+  if (!needsNameToPost(postNameGate.paymailFor(identityAddress))) return pass;
+  const live = await postNameGate.lookup(identityKey).catch((): PaymailLookup => ({ state: 'unknown' }));
+  if (live.state === 'none') throw new NameNeededError();
+  if (live.state === 'name' && feedAuthorAlias(live.paymail, postNameGate.bare) !== null)
+    postNameGate.remember(identityAddress, live.paymail);
+  return pass;
+}
+
+/** feedApi.publish: a post or reply ('type:post') is checked here unless its caller already holds a pass. */
+export async function assertNameForPost(ctx: OneSatContext, tags: readonly string[], pass?: unknown): Promise<void> {
+  if (!tags.includes('type:post') || isNameChecked(pass)) return;
+  await assertNameToPost(ctx);
 }
 
 /** The posting address on an AIP-signed script (the push before the signature), for the cheap "already sent" check. */

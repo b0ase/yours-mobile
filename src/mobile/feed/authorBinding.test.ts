@@ -21,6 +21,8 @@ import {
   feedAuthorMessage,
   BLOCKED_RETRY_MS,
   isAuthoredPost,
+  assertNameToPost,
+  isNameChecked,
   linkAuthorAtUnlock,
   NAME_NEEDED_MESSAGE,
   NameNeededError,
@@ -42,7 +44,10 @@ import {
   writeAuthorBinding,
   type AuthorBindingRecord,
 } from './authorBindingState';
-import { publish } from './feedApi';
+import { lookupPaymailStateAt } from '../names/paymail';
+import { revealMedia } from '../private/privateMint';
+import { replyByName, tipDestinations } from './tipMessage';
+import { postAfterPaidSteps, publish } from './feedApi';
 
 // ── the server's checks (bit-sign), copied ───────────────────────────────────
 
@@ -1449,6 +1454,9 @@ describe('a post or a reply needs a $name', () => {
     postNameGate.enabled = () => true;
     postNameGate.paymailFor = () => paymail;
     postNameGate.bare = (p) => p.replace(/@(bwalletx\.com|bmailx\.com|bwallet\.space)$/i, '');
+    // The server's definite "no name" unless a test says otherwise (round 5: an empty cache asks the server once).
+    postNameGate.lookup = async () => ({ state: 'none' });
+    postNameGate.remember = (_id, p) => void (paymail = p);
     globalThis.fetch = (async () => new Response('{}')) as unknown as typeof fetch;
   });
   afterEach(() => {
@@ -1516,7 +1524,7 @@ describe('a post or a reply needs a $name', () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('./feedApi.ts', import.meta.url), 'utf8');
     const body = src.slice(src.indexOf('export async function publish('));
-    const gate = body.indexOf('await assertNameForPost(ctx, tags);');
+    const gate = body.indexOf('await assertNameForPost(ctx, tags, nameChecked);');
     expect(gate).toBeGreaterThan(0);
     expect(gate).toBeLessThan(body.indexOf('signWithIdentity('));
     expect(gate).toBeLessThan(body.indexOf('executeTrackedAction('));
@@ -1528,7 +1536,7 @@ describe('a post or a reply needs a $name', () => {
     expect(src).toContain('const needsName = needsNameToPost(paymail);');
     // In place of the Post button, not beside it.
     expect(src).toMatch(
-      /\{needsName \? \( <div data-post-needs-name> .*?Get your \$name <\/button> <\/div> \) : \( <button onClick=\{\(\) => void send\(\)\}/,
+      /\) : noName \? \( <div data-post-needs-name> .*?Get your \$name <\/button> <\/div> \) : \( <button onClick=\{\(\) => void send\(\)\}/,
     );
     expect(src).toContain(
       "{replyTo ? 'Choose your $name to reply.' : 'Choose your $name to post.'} It’s how people find you.",
@@ -1539,10 +1547,204 @@ describe('a post or a reply needs a $name', () => {
       /<button onClick=\{\(\) => setNaming\(true\)\} className="mt-2 w-full rounded-2xl py-3 text-sm font-bold" style=\{\{ background: GOLD, color: '#1a1300' \}\}/,
     );
     // send() can't be reached round the button (Enter, a stale handler).
-    expect(src).toContain("setError(''); if (needsName) return setNaming(true);");
+    expect(src).toContain("setError(''); if (noName) return;");
     // A reply sent with a tip is a post of the tipper's own: not offered without a name; the tip is.
-    expect(src).toContain('return needsNameToPost(myPaymail) ? { ...d, reply: { available: false, on: false } } : d;');
+    expect(src).toContain('const tipNeedsName = needsNameToPost(myPaymail);');
     // No crypto talk in the new copy.
     expect(src.match(/data-post-needs-name>.*?<\/div>/)?.[0] ?? '').not.toMatch(/chain|BSV|BAP|key|sign/i);
+  });
+});
+
+// ── round 5 (review of the name rule, 15 Nov 2026) ──────────────────────────
+
+describe('the name rule stops unnamed accounts, never named ones', () => {
+  const real = { ...postNameGate };
+  const realFetch = globalThis.fetch;
+  let cached = '';
+  /** What the paymail server answers to the lookup. */
+  let server: () => Response | Promise<Response> = () => new Response('{"error":"not-found"}', { status: 404 });
+  let lookups = 0;
+  beforeEach(() => {
+    cached = '';
+    lookups = 0;
+    server = () => new Response('{"error":"not-found"}', { status: 404 });
+    postNameGate.enabled = () => true;
+    postNameGate.paymailFor = () => cached;
+    postNameGate.bare = (p) => p.replace(/@(bwalletx\.com|bmailx\.com|bwallet\.space)$/i, '');
+    // The real lookup reader (names/paymail.ts), over a stubbed network.
+    postNameGate.lookup = (key) =>
+      lookupPaymailStateAt(async () => (lookups++, server()), `https://pay.test/api/paymail/lookup?key=${key}`);
+    postNameGate.remember = (_id, p) => void (cached = p);
+    globalThis.fetch = (async () => new Response('{}')) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    Object.assign(postNameGate, real);
+    globalThis.fetch = realFetch;
+  });
+  const script = () => new Script().writeOpCode(0).writeOpCode(0x6a).writeBin(Utils.toArray('hello'));
+  const POST = ['app:bWallet', 'type:post'];
+  const named = () => new Response('{"paymail":"peytonmoon69@bwalletx.com","alias":"peytonmoon69"}', { status: 200 });
+
+  test('a cached name: no lookup, the post goes out', async () => {
+    const a = account();
+    cached = 'peytonmoon69@bwalletx.com';
+    expect(await publish(a.ctx, script(), 'Feed post', POST)).toBe('ab'.repeat(32));
+    expect(lookups).toBe(0);
+    await settle();
+  });
+
+  test('empty cache, the server has the name: the post is allowed and the cache is restored', async () => {
+    const a = account();
+    server = named;
+    expect(await publish(a.ctx, script(), 'Feed post', POST)).toBe('ab'.repeat(32));
+    expect(lookups).toBe(1);
+    expect(cached).toBe('peytonmoon69@bwalletx.com');
+    await settle();
+  });
+
+  test('empty cache, the server’s definite no-name (404 not-found): refused, nothing signed or built', async () => {
+    const a = account();
+    await expect(publish(a.ctx, script(), 'Feed post', POST)).rejects.toBeInstanceOf(NameNeededError);
+    expect(lookups).toBe(1);
+    expect(a.state.actions).toBe(0);
+    expect(a.counts.createSignature).toBe(0);
+  });
+
+  test('empty cache, the server can’t say (503, 429, 500, a stray 404, bad JSON, no network): the post is allowed', async () => {
+    const a = account();
+    const cannotSay: (() => Response | Promise<Response>)[] = [
+      () => new Response('{"error":"paymail-not-configured"}', { status: 503 }),
+      () => new Response('{"error":"rate-limited"}', { status: 429 }),
+      () => new Response('{"error":"server-error"}', { status: 500 }),
+      () => new Response('<html>Not Found</html>', { status: 404 }),
+      () => new Response('not json', { status: 200 }),
+      () => Promise.reject(new TypeError('Failed to fetch')),
+    ];
+    for (const answer of cannotSay) {
+      server = answer;
+      expect(await publish(a.ctx, script(), 'Feed post', POST)).toBe('ab'.repeat(32));
+      expect(cached).toBe(''); // nothing invented
+    }
+    expect(a.state.actions).toBe(cannotSay.length);
+    await settle();
+  });
+
+  describe('paid media before the post (the composer’s flow)', () => {
+    /** The composer's inscribe step, recording what it was asked to pay for. */
+    const inscriber = () => {
+      const paid: string[] = [];
+      return { paid, run: async () => (paid.push('video'), [{ outpoint: `${'cd'.repeat(32)}_0`, mime: 'video/mp4' }]) };
+    };
+
+    test('an unnamed account: the media is never inscribed and nothing is posted', async () => {
+      const a = account();
+      const ins = inscriber();
+      let posted = 0;
+      const err = await postAfterPaidSteps(a.ctx, ins.run, async () => (posted++, 'x')).catch((e) => e);
+      expect(err).toBeInstanceOf(NameNeededError);
+      expect(ins.paid).toEqual([]);
+      expect(posted).toBe(0);
+      expect(a.state.actions).toBe(0);
+    });
+
+    test('the name goes missing after the media is paid for: the post still goes out', async () => {
+      const a = account();
+      cached = 'peytonmoon69@bwalletx.com';
+      const ins = inscriber();
+      const txid = await postAfterPaidSteps(
+        a.ctx,
+        async () => {
+          const refs = await ins.run();
+          cached = ''; // a failed sync, a switch, a release: by now the cache says "no name"...
+          server = () => new Response('{"error":"not-found"}', { status: 404 }); // ...and so does the server
+          return refs;
+        },
+        (_refs, pass) => publish(a.ctx, script(), 'Feed post', POST, undefined, undefined, pass),
+      );
+      expect(txid).toBe('ab'.repeat(32));
+      expect(ins.paid).toEqual(['video']);
+      expect(a.state.actions).toBe(1);
+      expect(lookups).toBe(0); // checked once, before paying; not again
+      await settle();
+    });
+
+    test('the check uses the wallet that will sign: a context on an unnamed account is refused before paying', async () => {
+      const b = account();
+      const ins = inscriber();
+      await expect(postAfterPaidSteps(b.ctx, ins.run, async () => 'x')).rejects.toBeInstanceOf(NameNeededError);
+      expect(ins.paid).toEqual([]);
+    });
+
+    test('only a real pass skips publish’s own check', async () => {
+      const a = account();
+      const fake = { nameChecked: true } as never;
+      expect(isNameChecked(fake)).toBe(false);
+      await expect(publish(a.ctx, script(), 'Feed post', POST, undefined, undefined, fake)).rejects.toBeInstanceOf(
+        NameNeededError,
+      );
+      cached = 'peytonmoon69@bwalletx.com';
+      expect(isNameChecked(await assertNameToPost(a.ctx))).toBe(true);
+    });
+  });
+
+  describe('a private-mint reveal is a public post', () => {
+    const item = () => ({
+      outpoint: `${'ef'.repeat(32)}:0`,
+      kid: 'k',
+      header: { mime: 'audio/mpeg', name: 'a.mp3', bytes: 3 },
+      file: new Uint8Array([1, 2, 3]),
+    });
+
+    test('an unnamed account: refused before the inscription is paid for', async () => {
+      const a = account();
+      const err = await revealMedia(a.ctx, item() as never).catch((e) => e);
+      expect(err).toBeInstanceOf(NameNeededError);
+      expect(a.state.actions).toBe(0); // no inscription, no post
+      expect(a.counts.createSignature).toBe(0);
+    });
+
+    test('a named account gets past the name check to the inscription', async () => {
+      const a = account();
+      cached = 'peytonmoon69@bwalletx.com';
+      const err = await revealMedia(a.ctx, item() as never).catch((e) => e);
+      expect(err).not.toBeInstanceOf(NameNeededError);
+      expect(lookups).toBe(0);
+    });
+
+    test('reveals still don’t count as "posted" for linking', () => {
+      expect(isAuthoredPost([`reveal:${'ef'.repeat(32)}:0`])).toBe(false);
+    });
+  });
+});
+
+describe('tip sheet: "Under their post" follows the name', () => {
+  const post = { txid: 'ab'.repeat(32), author: { paymail: 'someone@bwalletx.com' } };
+  const base = tipDestinations(post, () => true);
+
+  test('off without a name, back once the name is known, other choices kept', () => {
+    expect(base.reply).toEqual({ available: true, on: true });
+    const unnamed = replyByName(base, base, true);
+    expect(unnamed.reply).toEqual({ available: false, on: false });
+    expect(unnamed.bmail).toEqual(base.bmail);
+    const chosen = { ...unnamed, bmail: { available: true, on: false } };
+    const namedNow = replyByName(chosen, base, false);
+    expect(namedNow.reply).toEqual({ available: true, on: true });
+    expect(namedNow.bmail).toEqual({ available: true, on: false });
+    const off = { ...base, reply: { available: true, on: false } };
+    expect(replyByName(off, base, false).reply).toEqual({ available: true, on: false });
+    const none = { ...base, reply: { available: false, on: false } };
+    expect(replyByName(none, none, false).reply).toEqual({ available: false, on: false });
+  });
+
+  test('the sheet recomputes it when the name state changes; an unnamed agent or pot gets a plain line, no button', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./FeedPage.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    expect(src).toContain(
+      'useEffect(() => { setDests((d) => replyByName(d, tipDestinations(post), tipNeedsName)); }, [tipNeedsName, post]);',
+    );
+    const line = src.match(/\{noName && agentOrPot \? \((.*?)\) : noName \? \(/)?.[1] ?? '';
+    expect(line).toContain('Agent accounts and pots without a $name can’t post to the Feed.');
+    expect(line).not.toContain('<button');
+    expect(src).toContain('const agentOrPot = isAgentAccount(composerIdentity);');
   });
 });

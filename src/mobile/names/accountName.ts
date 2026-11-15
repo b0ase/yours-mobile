@@ -3,7 +3,7 @@ import { loadBapIdentity } from '../../utils/bapIdentityCache';
 import { PublicKey, type WalletOutput } from '@bsv/sdk';
 import { getMyName, setMyName } from './myName';
 import { opnsNameOf } from './opnsName';
-import { bindMyNames, collectPaymailInbox, lookupPaymail, paymailEnabled } from './paymail';
+import { bindMyNames, collectPaymailInbox, lookupPaymailState, paymailEnabled, type PaymailLookup } from './paymail';
 import { syncBchatHandle } from './bchatHandle';
 import { authorNameSigned } from '../feed/authorBindingState';
 import { requestBalanceRefresh } from '../../hooks/balanceRefresh';
@@ -41,7 +41,13 @@ const write = (k: string, v: string) => {
     /* storage unavailable */
   }
 };
-const changed = () => window.dispatchEvent(new Event(EVENT));
+const changed = () => {
+  try {
+    window.dispatchEvent(new Event(EVENT));
+  } catch {
+    /* no window (tests) */
+  }
+};
 
 export type OwnedName = { name: string; id: string; published: boolean };
 
@@ -157,6 +163,28 @@ export const ctxIdentityAddress = async (ctx: OneSatContext): Promise<string | n
 };
 
 /**
+ * Bring the cached paymail name in line with the server. The cache is cleared ONLY on the server's definite "no
+ * name" (paymail.ts PaymailLookup): a 429, a 5xx or no network used to wipe a named account's name here, and the Feed
+ * then refused its posts (review, 15 Nov 2026). "Couldn't tell" leaves the cache as it is and throws, so the sync
+ * reports that it could not check. Returns the name, or '' for a definite none.
+ */
+export const syncPaymailCache = async (
+  f: (u: string, i?: RequestInit) => Promise<Response>,
+  identityAddress: string,
+  identityKey: string,
+  lookup: (
+    f: (u: string, i?: RequestInit) => Promise<Response>,
+    key: string,
+  ) => Promise<PaymailLookup> = lookupPaymailState,
+): Promise<string> => {
+  const r = await lookup(f, identityKey);
+  if (r.state === 'unknown') throw new Error('Could not check the name just now');
+  const p = r.state === 'name' ? r.paymail : '';
+  if (p !== read(K.paymail(identityAddress))) setPaymail(identityAddress, p);
+  return p;
+};
+
+/**
  * Refresh profile name, OpNS names and paymail for the current account; collect paymail inbox.
  * Resolves true only when every lookup answered (false: skipped or something failed), so callers can
  * tell "has no name" from "couldn't check yet".
@@ -198,8 +226,7 @@ export const syncAccountNames = async (
     (async () => {
       if (!paymailEnabled()) return;
       const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
-      const p = await lookupPaymail(f, publicKey);
-      if ((p ?? '') !== read(K.paymail(identityAddress))) setPaymail(identityAddress, p ?? '');
+      const p = await syncPaymailCache(f, identityAddress, publicKey);
       if (p) {
         // One identity: a bChat session still on its `yours-*` default takes the paymail name.
         void syncBchatHandle(ctx, p);

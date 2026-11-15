@@ -52,6 +52,15 @@ export function tipDestinations(
   };
 }
 
+/**
+ * "Under their post" is a post of the tipper's own, so it needs a $name (authorBinding.ts): off while the account has
+ * none, and back to what the post allows (`base`) once the name is known. The other destinations are left as chosen.
+ */
+export const replyByName = (d: TipDests, base: TipDests, needsName: boolean): TipDests => ({
+  ...d,
+  reply: needsName ? { available: false, on: false } : d.reply.available ? d.reply : base.reply,
+});
+
 /** Flip one destination (unavailable ones never turn on). */
 export const toggleDest = (d: TipDests, k: TipDest): TipDests =>
   d[k].available ? { ...d, [k]: { ...d[k], on: !d[k].on } } : d;

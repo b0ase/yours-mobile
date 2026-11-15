@@ -1,5 +1,6 @@
 import { executeTrackedAction, inscribe, type OneSatContext } from '@1sat/actions';
 import { Hash, PublicKey, Script, Transaction, Utils, type CreateActionArgs, type WalletInterface } from '@bsv/sdk';
+import { assertNameToPost } from '../feed/authorBinding';
 import { publish } from '../feed/feedApi';
 import { fileToBase64, withFeeOutput } from '../mint/mint';
 import { LocationBlockedError, locationVerdict, type LocationVerdict } from './location';
@@ -245,6 +246,9 @@ export async function revealMedia(
   // Checked here, before anything is built or sent, so no caller can get round it.
   const verdict = locationVerdict(item.file, mime);
   if (verdict !== 'none') throw new LocationBlockedError(verdict, mime);
+  // A reveal is a public post: it needs a $name like any other (feed/authorBinding.ts). Checked here, before the
+  // inscription below is paid for; never after.
+  await assertNameToPost(ctx);
   const file = Array.from(item.file);
   if (revealsInline(mime, bytes)) {
     const postTxid = await publish(

@@ -3,7 +3,14 @@ import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
 import type { AuthorDeps } from './authorFeed';
-import { aipAddressOf, assertNameForPost, ensureFeedAuthorBinding, isAuthoredPost } from './authorBinding';
+import {
+  aipAddressOf,
+  assertNameForPost,
+  assertNameToPost,
+  ensureFeedAuthorBinding,
+  isAuthoredPost,
+  type NameChecked,
+} from './authorBinding';
 import { FWETCH_API, parseFwetchFeed, parseFwetchItem, verifyFwetchTx } from './fwetch';
 import {
   parseOverlayAny,
@@ -485,9 +492,12 @@ export async function publish(
   },
   /** Wallet action labels (local only), e.g. 'bchat reveal'. */
   labels?: string[],
+  /** The caller already passed the name check for this post (postAfterPaidSteps): it is not made again. */
+  nameChecked?: NameChecked,
 ): Promise<string> {
-  // A post or a reply needs a $name (authorBinding.ts): refused here, before anything is signed, built or paid.
-  await assertNameForPost(ctx, tags);
+  // A post or a reply needs a $name (authorBinding.ts): refused here, before anything is signed, built or paid,
+  // unless the caller checked before paying for the post's media.
+  await assertNameForPost(ctx, tags, nameChecked);
   const signed = await signWithIdentity(() => applyBapAip(ctx, script));
   if (!signed) throw new PostCancelledError();
   const res = await executeTrackedAction(ctx.wallet, {
@@ -533,6 +543,20 @@ export async function publish(
   // never awaited: it cannot delay or fail a post, and an account already linked costs one identity-key lookup.
   void linkAuthor(ctx, signed, isAuthoredPost(tags));
   return res.txid;
+}
+
+/**
+ * A post with paid steps before it (media inscribed as ordinals): the name is checked FIRST, with the context that
+ * will sign, and the pass goes to publish(). So an unnamed account pays for nothing, and a name that goes missing
+ * after the media is paid for cannot stop the post ("Nothing was posted or paid" stays true).
+ */
+export async function postAfterPaidSteps<T>(
+  ctx: OneSatContext,
+  paidSteps: () => Promise<T>,
+  post: (prepared: T, nameChecked: NameChecked) => Promise<string>,
+): Promise<string> {
+  const nameChecked = await assertNameToPost(ctx);
+  return post(await paidSteps(), nameChecked);
 }
 
 /** Nothing in here can reach publish(): reading the post's address and the binding are both inside the try. */

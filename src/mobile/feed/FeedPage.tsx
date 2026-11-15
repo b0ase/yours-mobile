@@ -108,10 +108,12 @@ import {
   fetchThread,
   lockToPost,
   publish,
+  postAfterPaidSteps,
   PostCancelledError,
   setIdentitySetupHandler,
 } from './feedApi';
-import { ensureFeedAuthorBinding, needsNameToPost } from './authorBinding';
+import { assertNameToPost, ensureFeedAuthorBinding, NameNeededError, needsNameToPost } from './authorBinding';
+import { isAgentAccount } from '../agents/agentAccounts';
 import { HandleFlow } from '../names/HandleFlow';
 import { useAccountNames } from '../names/accountNames';
 import {
@@ -181,6 +183,7 @@ import {
   destSummary,
   TIP_MESSAGE_MAX,
   tipDestinations,
+  replyByName,
   tipMailBody,
   toggleDest,
   validateTipMessage,
@@ -898,13 +901,25 @@ const Composer = ({
   const fileRef = useRef<HTMLInputElement>(null);
   // A post or a reply needs a $name (authorBinding.ts needsNameToPost): without one, the Post button is the way to
   // get one. publish() refuses too, so this is the friendly half of the rule, not the rule.
-  const { paymail } = useAccountNames(
-    chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
-    '',
-    '',
-    false,
-  );
+  const composerIdentity = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
+  const { paymail } = useAccountNames(composerIdentity, '', '', false);
   const needsName = needsNameToPost(paymail);
+  // No name cached is not yet "no name": the server is asked (assertNameToPost), and only its definite answer takes
+  // the Post button away. A name it finds goes back in the cache; "couldn't tell" leaves posting open.
+  const [noName, setNoName] = useState(false);
+  useEffect(() => {
+    if (!needsName) return setNoName(false);
+    let live = true;
+    assertNameToPost(apiContext).then(
+      () => live && setNoName(false),
+      (e) => live && setNoName(e instanceof NameNeededError),
+    );
+    return () => {
+      live = false;
+    };
+  }, [needsName, apiContext]);
+  // An agent account or a pot is never linked to a name (authorBinding.ts), so it isn't steered to claim one.
+  const agentOrPot = isAgentAccount(composerIdentity);
   const [naming, setNaming] = useState(false);
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -990,40 +1005,55 @@ const Composer = ({
 
   const send = async () => {
     setError('');
-    if (needsName) return setNaming(true);
+    if (noName) return;
     if (invalid) return setError(invalid);
     if (safety().check({ texts: [text, ...items.map((i) => i.name)] }).blocked)
       return setError("This can't be posted from bWallet.");
     try {
-      // 1. Large video / audio → 1Sat ordinals (one wallet approval each), through the Mint inscribe path.
-      const refs: { outpoint: string; mime: string }[] = [];
-      for (const [n, i] of inscribed.entries()) {
-        setBusy(`Inscribing ${i.kind} ${n + 1}/${inscribed.length}…`);
-        const res = await inscribe.execute(apiContext, {
-          base64Content: fileToBase64(await i.file!.arrayBuffer()),
-          contentType: i.mime,
-          map: { app: FEED_APP, type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
-        });
-        if (!res.txid || res.error) throw new Error(res.error || 'Inscribing the media failed');
-        refs.push({ outpoint: `${res.txid}_0`, mime: i.mime });
-      }
-      // 2. The post: text, inline parts, and the ordinals by outpoint.
-      setBusy('Posting…');
       const tags = [
         'app:bWallet',
         'type:post',
         ...(input.quote ? [`quote:${input.quote}`] : []),
         ...(input.replyTo ? [`context:tx`, `contextValue:${input.replyTo}`] : []),
       ];
-      const txid = await publish(
+      // The name is checked first, with the wallet that will sign, before any media is paid for; publish() gets
+      // the pass and does not check again (feedApi.postAfterPaidSteps).
+      const txid = await postAfterPaidSteps(
         apiContext,
-        buildPostScript({ ...input, refs }),
-        replyTo ? 'Feed reply' : quote ? 'Feed quote' : 'Feed post',
-        tags,
+        async () => {
+          // 1. Large video / audio → 1Sat ordinals (one wallet approval each), through the Mint inscribe path.
+          const refs: { outpoint: string; mime: string }[] = [];
+          for (const [n, i] of inscribed.entries()) {
+            setBusy(`Inscribing ${i.kind} ${n + 1}/${inscribed.length}…`);
+            const res = await inscribe.execute(apiContext, {
+              base64Content: fileToBase64(await i.file!.arrayBuffer()),
+              contentType: i.mime,
+              map: { app: FEED_APP, type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
+            });
+            if (!res.txid || res.error) throw new Error(res.error || 'Inscribing the media failed');
+            refs.push({ outpoint: `${res.txid}_0`, mime: i.mime });
+          }
+          return refs;
+        },
+        (refs, nameChecked) => {
+          // 2. The post: text, inline parts, and the ordinals by outpoint.
+          setBusy('Posting…');
+          return publish(
+            apiContext,
+            buildPostScript({ ...input, refs }),
+            replyTo ? 'Feed reply' : quote ? 'Feed quote' : 'Feed post',
+            tags,
+            undefined,
+            undefined,
+            nameChecked,
+          );
+        },
       );
       onPosted(txid);
     } catch (e) {
       if (e instanceof PostCancelledError) return;
+      // Nothing was signed or paid: show the way to a name in place of an error.
+      if (e instanceof NameNeededError) return setNoName(true);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy('');
@@ -1127,7 +1157,11 @@ const Composer = ({
           <ErrorActions message={String(error)} />
         </div>
       )}
-      {needsName ? (
+      {noName && agentOrPot ? (
+        <p data-post-agent-no-name className="text-xs mt-3" style={{ color: MUTED }}>
+          Agent accounts and pots without a $name can’t post to the Feed.
+        </p>
+      ) : noName ? (
         <div data-post-needs-name>
           <p className="text-xs mt-3" style={{ color: MUTED }}>
             {replyTo ? 'Choose your $name to reply.' : 'Choose your $name to post.'} It’s how people find you.
@@ -1211,10 +1245,12 @@ const TipSheet = ({
     '',
     false,
   );
-  const [dests, setDests] = useState(() => {
-    const d = tipDestinations(post);
-    return needsNameToPost(myPaymail) ? { ...d, reply: { available: false, on: false } } : d;
-  });
+  const tipNeedsName = needsNameToPost(myPaymail);
+  const [dests, setDests] = useState(() => replyByName(tipDestinations(post), tipDestinations(post), tipNeedsName));
+  // The name can arrive after the sheet opens (the name sync, a claim): "Under their post" follows it.
+  useEffect(() => {
+    setDests((d) => replyByName(d, tipDestinations(post), tipNeedsName));
+  }, [tipNeedsName, post]);
   const msgError = validateTipMessage(message);
   const sendingMessage = willSendMessage(message, dests);
   /** Deliver the message after the tip landed. Returns what failed (the tip itself already went). */

@@ -108,6 +108,31 @@ export const deletePaymail = async (
   return { alias: typeof j.alias === 'string' ? j.alias : null };
 };
 
+/**
+ * What the server says about an identity key's name. 'none' is ONLY the server's definite answer: the lookup handler's
+ * 404 {"error":"not-found"} (site/lib/paymail.js `lookup`: no alias row for the key). Everything else that isn't a
+ * name (429 rate-limited, 5xx, a 404 that isn't that body, bad JSON, no network, a timeout) is 'unknown': the wallet
+ * couldn't tell, and must not treat a named account as unnamed because our server was slow.
+ */
+export type PaymailLookup = { state: 'name'; paymail: string } | { state: 'none' } | { state: 'unknown' };
+
+/** The lookup at `url` (…/lookup?key=<identity key>). Never throws. */
+export const lookupPaymailStateAt = async (f: Fetch, url: string): Promise<PaymailLookup> => {
+  try {
+    const r = await f(url);
+    const j = (await r.json().catch(() => null)) as { paymail?: unknown; error?: unknown } | null;
+    if (r.ok)
+      return typeof j?.paymail === 'string' && j.paymail ? { state: 'name', paymail: j.paymail } : { state: 'unknown' };
+    return r.status === 404 && j?.error === 'not-found' ? { state: 'none' } : { state: 'unknown' };
+  } catch {
+    return { state: 'unknown' };
+  }
+};
+
+/** The name registered for this identity key, "definitely none", or "couldn't tell" (also when paymail is off). */
+export const lookupPaymailState = async (f: Fetch, identityKey: string): Promise<PaymailLookup> =>
+  paymailEnabled() ? lookupPaymailStateAt(f, `${api('lookup')}?key=${identityKey}`) : { state: 'unknown' };
+
 /** The paymail already registered for this identity key (public lookup), or undefined. */
 export const lookupPaymail = async (f: Fetch, identityKey: string): Promise<string | undefined> => {
   if (!paymailEnabled()) return undefined;
