@@ -23,7 +23,13 @@
  *    signature by that key;
  *  - the protocol is one a site may sign with at all (reservedProtocols.ts: reserved, level-0 and BRC-29 keys stay
  *    refused, here as well as in the guard outside this one), is not a permission module's ("p …") and is not the
- *    posting key's.
+ *    posting key's; a protocol pinned to a site (pinnedProtocols.ts) only from that site;
+ *  - the site ALREADY holds the user's grant for that protocol and counterparty (review 15 Nov 2026). Checked
+ *    without asking, and before the hash is looked up or any key derived: a site with no grant gets the same answer
+ *    whether it guessed a coin's key or not, and no sheet opens for a coin it merely named. A site spending its own
+ *    coins got the grant when it asked for the key to lock them. This does not bind a coin to the site that made it:
+ *    BRC-42 keys don't depend on the site, so a site the user gives another app's (unpinned) protocol to can spend
+ *    that app's coins, here as anywhere else in BRC-100. Pinning the protocol is what stops that.
  *
  * Kept in memory, per wallet instance (guardCrossSiteSigning makes one): a lock or an account switch drops the wallet
  * and this with it. A restarted service worker has none, so the hash is refused; the toolbox can't finish that
@@ -32,12 +38,16 @@
  */
 import { Hash, OP, Transaction, TransactionSignature, Utils, type Script } from '@bsv/sdk';
 import { canonicalOutpoint } from './canonicalOutpoint';
+import { normalizeOriginator } from '@1sat/wallet';
+import { pinnedProtocolRefusal } from './pinnedProtocols';
 import { reservedProtocolRefusal } from './reservedProtocols';
 
 /** How long after createAction its sighashes are accepted. A sign follows a create at once; a sheet may sit between. */
 export const PENDING_SIGHASH_TTL_MS = 5 * 60 * 1000;
 /** Most pending actions remembered (all sites together); the oldest goes first. A site's loop can't grow the map. */
 export const MAX_PENDING_ACTIONS = 64;
+/** Most remembered for one originator; its own oldest goes first, so one site's loop can't push out another's. */
+export const MAX_PENDING_PER_SITE = 8;
 
 const SIGHASH_ALL_FORKID = TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHASH_FORKID;
 /** The toolbox's "whatever is left" output amount (verifyRequestedOutputsPresent): not an amount the wallet can add up. */
@@ -222,12 +232,16 @@ const excludedProtocol = (protocolID: unknown) => {
   return name.startsWith('p ') || (protocolID[0] === 1 && name === 'sigma');
 };
 
-/** The public key (hex) createSignature would sign with for these arguments. */
-export type DeriveSigningKey = (key: {
-  protocolID: unknown;
-  keyID: unknown;
-  counterparty: unknown;
-}) => Promise<string | undefined>;
+type SigningKey = { protocolID: unknown; keyID: unknown; counterparty: unknown };
+/** What the store asks the wallet about a key, as the wallet itself (nothing here goes back to the site). */
+export type SigningKeyChecks = {
+  /** Does this originator already hold the protocol grant createSignature would need? Never prompts. */
+  granted: (key: SigningKey) => Promise<boolean>;
+  /** The public key (hex) createSignature would sign with. */
+  derive: (key: SigningKey) => Promise<string | undefined>;
+};
+/** request()'s answer for a site that has a pending action but no grant for the protocol it asks to sign with. */
+export const UNGRANTED = 'ungranted';
 
 type Pending = { originator: string; expires: number; digests: Map<string, string> };
 
@@ -244,7 +258,15 @@ export class PendingSighashes {
     this.pending.delete(reference);
     const digests = callerSighashes(args as CreateArgs, signable?.tx);
     if (!digests) return;
-    this.pending.set(reference, { originator, expires: this.now() + PENDING_SIGHASH_TTL_MS, digests });
+    const now = this.now();
+    this.pending.set(reference, { originator, expires: now + PENDING_SIGHASH_TTL_MS, digests });
+    // Expired ones first, then this site's own oldest, and only then the oldest of all.
+    const mine: string[] = [];
+    for (const [ref, p] of this.pending) {
+      if (p.expires <= now) this.pending.delete(ref);
+      else if (p.originator === originator) mine.push(ref);
+    }
+    for (const ref of mine.slice(0, Math.max(0, mine.length - MAX_PENDING_PER_SITE))) this.pending.delete(ref);
     while (this.pending.size > MAX_PENDING_ACTIONS) this.pending.delete(this.pending.keys().next().value as string);
   }
 
@@ -258,11 +280,31 @@ export class PendingSighashes {
     return typeof reference === 'string' ? this.pending.get(reference)?.originator : undefined;
   }
 
+  /** The key hash this originator's live pending actions want for a digest (expired actions are dropped here). */
+  private wanted(originator: string, digest?: string): { any: boolean; keyHash?: string } {
+    const now = this.now();
+    let any = false;
+    let keyHash: string | undefined;
+    for (const [reference, p] of this.pending) {
+      if (p.expires <= now) this.pending.delete(reference);
+      else if (p.originator === originator) {
+        any = true;
+        if (digest !== undefined) keyHash ??= p.digests.get(digest);
+      }
+    }
+    return { any, keyHash };
+  }
+
   /**
    * Is this createSignature a sighash of one of this originator's pending actions, asked with the input's own key?
-   * Answers the request to sign, as a copy read once (what was checked is what is signed), or null.
+   * Answers the request to sign, as a copy read once (what was checked is what is signed); UNGRANTED when the site
+   * has something pending but not the protocol's grant; or null.
    */
-  async request(originator: string, args: unknown, derive: DeriveSigningKey): Promise<object | null> {
+  async request(
+    originator: string,
+    args: unknown,
+    checks: SigningKeyChecks,
+  ): Promise<object | typeof UNGRANTED | null> {
     if (!originator || !args || typeof args !== 'object') return null;
     const a: SignArgs = { ...(args as SignArgs) };
     if (a.privileged || (a.data !== undefined && a.hashToDirectlySign !== undefined)) return null;
@@ -277,20 +319,18 @@ export class PendingSighashes {
     else a.hashToDirectlySign = Utils.toArray(bytes, 'hex');
     if (Array.isArray(a.protocolID)) a.protocolID = [...a.protocolID];
     if (excludedProtocol(a.protocolID) || reservedProtocolRefusal('createSignature', a) !== null) return null;
-    const now = this.now();
-    let keyHash: string | undefined;
-    for (const [reference, p] of this.pending) {
-      if (p.expires <= now) this.pending.delete(reference);
-      else if (p.originator === originator) keyHash ??= p.digests.get(digest);
-    }
-    if (keyHash === undefined) return null;
+    if (pinnedProtocolRefusal('createSignature', a, normalizeOriginator(originator)) !== null) return null;
+    if (!this.wanted(originator).any) return null;
+    // createSignature's own default: no counterparty means 'anyone'.
+    const key = { protocolID: a.protocolID, keyID: a.keyID, counterparty: a.counterparty ?? 'anyone' };
     try {
-      // createSignature's own default: no counterparty means 'anyone'.
-      const publicKey = await derive({
-        protocolID: a.protocolID,
-        keyID: a.keyID,
-        counterparty: a.counterparty ?? 'anyone',
-      });
+      // The grant first: nothing below (the lookup, the derivation) runs for a site that doesn't hold it, so a right
+      // and a wrong guess of a coin's key are the same refusal.
+      if ((await checks.granted(key)) !== true) return UNGRANTED;
+      // Looked up after the wait: the action may have been signed or aborted meanwhile.
+      const { keyHash } = this.wanted(originator, digest);
+      if (keyHash === undefined) return null;
+      const publicKey = await checks.derive(key);
       if (typeof publicKey !== 'string' || !/^0[23][0-9a-f]{64}$/i.test(publicKey)) return null;
       return Utils.toHex(Hash.hash160(Utils.toArray(publicKey, 'hex'))) === keyHash ? a : null;
     } catch {

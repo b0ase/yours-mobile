@@ -22,7 +22,7 @@
 import { normalizeOriginator } from '@1sat/wallet';
 import { bareHost, scanSignData } from './signDataScan';
 import { ownBackendRefusal } from './ownBackendKeys';
-import { PendingSighashes } from './pendingSighash';
+import { PendingSighashes, UNGRANTED } from './pendingSighash';
 import { pinnedProtocol } from './pinnedProtocols';
 
 // The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
@@ -75,6 +75,8 @@ const TOO_MUCH = `${UNCHECKABLE_REFUSAL} (too much encoded data to read)`;
 
 export const CROSS_SITE_REFUSAL = 'This message is for a different site than the one asking you to sign it';
 export const BLIND_SIGN_REFUSAL = 'Sites cannot ask for a signature over a hash the wallet cannot read';
+/** For a site with a pending transaction of its own that asks to sign with a protocol it was never granted. */
+export const UNGRANTED_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. To sign an input of your own pending transaction, ask for this protocol's permission first (getPublicKey with the same protocolID and counterparty), then sign`;
 
 /**
  * Our own sites that sign BSM digests (AIP posts, boost sighashes, escrow arbiter digests) through hashToDirectlySign.
@@ -258,6 +260,18 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
       | undefined;
     return r?.publicKey;
   };
+  // Does the site already hold the grant createSignature would need? The manager's own check, told not to ask
+  // (seekPermission: false throws when there is none). Read off the instance at call time, with every guard on it.
+  const holdsGrant = async (originator: string, key: { protocolID: unknown; counterparty: unknown }) => {
+    const ensure = m.ensureProtocolPermission;
+    if (typeof ensure !== 'function') return false;
+    try {
+      const args = { originator, privileged: false, ...key, seekPermission: false, usageType: 'signing' };
+      return (await (ensure as (a: unknown) => Promise<unknown>).call(manager, args)) === true;
+    } catch {
+      return false;
+    }
+  };
   const createAction = m.createAction;
   if (typeof createAction === 'function')
     m.createAction = async (args: unknown, originator?: string) => {
@@ -304,8 +318,12 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
         // The one readable hash (pendingSighash.ts). Every other refusal, and every other hash, stands.
         const ownSighash =
           refusal === BLIND_SIGN_REFUSAL && method === 'createSignature' && !!originator && namesProvenSite(originator)
-            ? await pending.request(originator, args, signingKey)
+            ? await pending.request(originator, args, {
+                granted: (key) => holdsGrant(originator, key),
+                derive: signingKey,
+              })
             : null;
+        if (ownSighash === UNGRANTED) throw new Error(UNGRANTED_SIGHASH_REFUSAL);
         if (refusal && !ownSighash) throw new Error(refusal);
         // Signed from the copy that was checked, not from an object the caller still holds.
         if (ownSighash) args = ownSighash;

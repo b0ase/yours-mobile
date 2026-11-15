@@ -31,12 +31,21 @@ import {
   type WalletProtocol,
 } from '@bsv/sdk';
 import { ONESAT, bsv21, tokenSpends } from '../mobile/market/launchpad/tokens';
-import { BLIND_SIGN_REFUSAL, bareHost, guardCrossSiteSigning, setProvenPairingCheck } from './crossSiteSignGuard';
+import {
+  BLIND_SIGN_REFUSAL,
+  UNGRANTED_SIGHASH_REFUSAL,
+  bareHost,
+  guardCrossSiteSigning,
+  setProvenPairingCheck,
+} from './crossSiteSignGuard';
 import { guardEverySpendAsks } from './everySpendAsks';
 import {
   MAX_PENDING_ACTIONS,
+  MAX_PENDING_PER_SITE,
   PENDING_SIGHASH_TTL_MS,
   PendingSighashes,
+  type SigningKeyChecks,
+  UNGRANTED,
   callerSighashes,
   lockKeyHash,
 } from './pendingSighash';
@@ -104,6 +113,8 @@ const setup = (opts: { approve?: boolean; now?: () => number; signFails?: boolea
   const fundKey = PrivateKey.fromRandom();
   const sheets: Sheet[] = [];
   const sent: Transaction[] = [];
+  // Grants outlive a service worker (IndexedDB in the wallet): one store for every build().
+  const store = new InMemoryPermissionStore();
   const build = () => {
     const live = new Map<string, Transaction>();
     let refs = 0;
@@ -180,16 +191,31 @@ const setup = (opts: { approve?: boolean; now?: () => number; signFails?: boolea
         return { aborted: live.delete(a.reference) };
       },
     };
-    const mgr = new LocalWalletPermissionsManager(base as never, ADMIN, {}, {
-      store: new InMemoryPermissionStore(),
-    } as never);
+    const mgr = new LocalWalletPermissionsManager(base as never, ADMIN, {}, { store } as never);
     (mgr as unknown as Record<string, unknown>).requestPermissionFlow = async (r: {
       type: string;
       originator: string;
       spending?: { satoshis: number };
+      protocolID?: [number, string];
+      counterparty?: string;
+      privileged?: boolean;
     }) => {
       sheets.push({ type: r.type, originator: r.originator, satoshis: r.spending?.satoshis });
       if (opts.approve === false) throw new Error('User denied');
+      // Allow on a protocol sheet stores the grant, as the wallet's own sheet does (grantPermission).
+      if (r.type === 'protocol' && r.protocolID)
+        await store.putGrant({
+          key: {
+            type: 'protocol',
+            originator: normalizeOriginator(r.originator),
+            privileged: !!r.privileged,
+            protocolLevel: r.protocolID[0],
+            protocolName: r.protocolID[1],
+            counterparty: r.protocolID[0] === 1 ? '' : (r.counterparty ?? 'self'),
+          },
+          expiry: 0,
+          grantedAt: Date.now(),
+        } as never);
       return true;
     };
     guardEverySpendAsks(mgr, { adminOriginator: ADMIN, normalize: normalizeOriginator });
@@ -215,6 +241,12 @@ const setup = (opts: { approve?: boolean; now?: () => number; signFails?: boolea
     sent,
     as,
     keyOf,
+    /**
+     * A site asks for one of its keys, as a page does before it locks a coin to it (Bitcoin Writer's chainPublicKey,
+     * TokenBlaster's freshAddress): the protocol sheet shows, and Allow leaves the site holding the grant.
+     */
+    siteKey: async (site: string, protocolID: WalletProtocol, keyID: string, counterparty = 'self') =>
+      (await live.getPublicKey({ protocolID, keyID, counterparty, forSelf: true }, site)).publicKey as string,
   };
 };
 
@@ -308,7 +340,7 @@ async function signChainInput(wallet: WalletInterface, signableTx: number[], key
 
 /** A Bitcoin Writer save: spend the previous chain coin, write the next one, pay the service. */
 const writerSave = async (w: ReturnType<typeof setup>, site = WRITER, keyId = 'doc-1') => {
-  const chainKey = await w.keyOf(CHAIN_PROTOCOL, chainKeyID(keyId));
+  const chainKey = await w.siteKey(site, CHAIN_PROTOCOL, chainKeyID(keyId));
   const prev = coin(p2pkh(chainKey));
   const created = await w.as(site).createAction({
     description: 'Save your document on chain',
@@ -326,7 +358,9 @@ const writerSave = async (w: ReturnType<typeof setup>, site = WRITER, keyId = 'd
 };
 
 /** A token coin under a site's own key: BSV-21 inscription + P2PKH, the script TokenBlaster's coins have. */
-const tokenCoin = async (w: ReturnType<typeof setup>, keyID: string, protocolID = AMMO_PROTOCOL) => {
+const tokenCoin = async (w: ReturnType<typeof setup>, keyID: string, protocolID = AMMO_PROTOCOL, site = BLASTER) => {
+  // The site asks for the key first (refused for a reserved protocol; the coin is locked to that key all the same).
+  await w.siteKey(site, protocolID, keyID).catch(() => undefined);
   const publicKey = await w.keyOf(protocolID, keyID);
   return {
     ...coin(bsv21(TOKEN, 500n, PublicKey.fromString(publicKey).toAddress())),
@@ -609,7 +643,7 @@ describe('only the exact digest of an input the site must unlock', () => {
 
   test('an input the site already unlocked in createAction has no sighash to ask for', async () => {
     const w = setup();
-    const chainKey = await w.keyOf(CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    const chainKey = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
     const prev = coin(p2pkh(chainKey));
     const created = await w.as(WRITER).createAction({
       description: 'Save your document on chain',
@@ -647,7 +681,7 @@ describe('only with the key the input is locked to', () => {
 
   test('a coin locked to a key derived with no counterparty ("anyone") signs with exactly that request', async () => {
     const w = setup();
-    const anyoneKey = await w.keyOf(AMMO_PROTOCOL, 'k', 'anyone');
+    const anyoneKey = await w.siteKey(BLASTER, AMMO_PROTOCOL, 'k', 'anyone');
     const c = coin(p2pkh(anyoneKey), 5);
     const created = await w.as(BLASTER).createAction({
       description: 'Spend an app coin',
@@ -712,7 +746,7 @@ describe('only with the key the input is locked to', () => {
 
   test('a script whose key the wallet cannot read is refused: bare multisig, a P2PKH with a tail, a lock', async () => {
     const w = setup();
-    const publicKey = await w.keyOf(AMMO_PROTOCOL, 'k');
+    const publicKey = await w.siteKey(BLASTER, AMMO_PROTOCOL, 'k');
     const pub = Utils.toArray(publicKey, 'hex');
     const pkh = Hash.hash160(pub);
     const p2pkhChunks = p2pkh(publicKey).chunks;
@@ -764,7 +798,9 @@ describe('32 bytes of data is a hash too (the data door, review 15 Nov 2026)', (
 
   test('R1: data = sha256(preimage) of a transaction the wallet never saw is refused, whatever the flags', async () => {
     const w = setup();
-    const key = await w.keyOf(CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    // Both sites hold the protocol's grant: before the fix that was all it took.
+    const key = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    await w.siteKey(EVIL, CHAIN_PROTOCOL, chainKeyID('doc-1'));
     const prev = coin(p2pkh(key), 1_000_000);
     // Built by the site alone: no createAction, no pay sheet.
     const tx = new Transaction(1, [], [], 0);
@@ -947,10 +983,90 @@ describe('32 bytes of data is a hash too (the data door, review 15 Nov 2026)', (
   });
 });
 
+describe('only a site that already holds the key’s protocol (review 15 Nov 2026)', () => {
+  /** R2: a site names a coin of ANOTHER app as its input and pays 1 sat on top, so the pay sheet says "1 sat". */
+  const nameCoin = async (w: ReturnType<typeof setup>, site: string, c: ReturnType<typeof coin>) => {
+    const created = await w.as(site).createAction({
+      description: 'Claim your free gift',
+      inputBEEF: beefOf(c),
+      inputs: [{ outpoint: c.outpoint, unlockingScriptLength: 108, inputDescription: 'a gift coin' }],
+      outputs: [payTo(1_000_000 - FEE + 1)],
+      options: { randomizeOutputs: false },
+    });
+    return Transaction.fromAtomicBEEF(created.signableTransaction!.tx);
+  };
+
+  test('R2: no grant, no signature and no sheet: the site is told to ask for the protocol first', async () => {
+    const w = setup();
+    const writerKey = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    const tx = await nameCoin(w, EVIL, coin(p2pkh(writerKey), 1_000_000));
+    // What the user saw: one pay sheet, for the 1 sat over what the named coin brings.
+    expect(w.sheets.filter((s) => s.originator === EVIL)).toEqual([
+      { type: 'spending', originator: EVIL, satoshis: 1 },
+    ]);
+    const asked = w.sheets.length;
+    for (const hash of [sighash(tx, 0), Hash.hash256([1])])
+      await expect(blindSign(w, EVIL, hash, chainKeyArgs())).rejects.toThrow(UNGRANTED_SIGHASH_REFUSAL);
+    // Right key or wrong key (R3): the same words, and no sheet either way.
+    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs('doc-2'))).rejects.toThrow(UNGRANTED_SIGHASH_REFUSAL);
+    expect(w.sheets.length).toBe(asked);
+    // The grant is per site: Writer holding it gives evil nothing, and evil's action gives Writer nothing.
+    await expect(blindSign(w, WRITER, sighash(tx, 0), chainKeyArgs())).rejects.toThrow(BLIND_SIGN_REFUSAL);
+  });
+
+  test('a level-2 grant is for its counterparty only', async () => {
+    const w = setup();
+    const { tx } = await writerSave(w);
+    await expect(blindSign(w, WRITER, sighash(tx, 0), { ...chainKeyArgs(), counterparty: 'anyone' })).rejects.toThrow(
+      UNGRANTED_SIGHASH_REFUSAL,
+    );
+    await expect(blindSign(w, WRITER, sighash(tx, 0), chainKeyArgs())).resolves.toBeDefined();
+  });
+
+  test('a coin under a protocol pinned to another site cannot be had at all, grant or no grant', async () => {
+    const w = setup();
+    const BJOBSX: WalletProtocol = [2, 'bjobsx records'];
+    const tx = await nameCoin(w, EVIL, coin(p2pkh(await w.keyOf(BJOBSX, 'public profile')), 1_000_000));
+    await expect(blindSign(w, EVIL, sighash(tx, 0), { protocolID: BJOBSX, keyID: 'public profile' })).rejects.toThrow(
+      PINNED_REFUSAL,
+    );
+    // The same answer from the sighash check alone, without the guard outside it and with a grant it could not hold.
+    const p = new PendingSighashes();
+    const key = PrivateKey.fromRandom();
+    const c = coin(new P2PKH().lock(key.toAddress()), 10);
+    const t = new Transaction();
+    t.addInput({ sourceTransaction: c.tx, sourceOutputIndex: 0, unlockingScript: new UnlockingScript() });
+    const funding = coin(new P2PKH().lock(PrivateKey.fromRandom().toAddress()), 1_000);
+    t.addInput({ sourceTransaction: funding.tx, sourceOutputIndex: 0, unlockingScript: new UnlockingScript() });
+    t.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 900 });
+    const checks = { granted: async () => true, derive: async () => key.toPublicKey().toString() };
+    const sign = { hashToDirectlySign: sighash(t, 0), protocolID: BJOBSX, keyID: 'k', counterparty: 'self' };
+    const create = { inputs: [{ outpoint: c.outpoint }], outputs: [{ satoshis: 900 }] };
+    for (const site of [EVIL, 'bjobsx.com']) p.record(site, create, { reference: `r-${site}`, tx: atomic(t) });
+    expect(await p.request(EVIL, sign, checks)).toBeNull();
+    expect(await p.request('bjobsx.com', sign, checks)).toMatchObject({ keyID: 'k' });
+  });
+
+  test('KNOWN LIMIT: a site the user grants another app’s unpinned protocol to can spend that app’s coins', async () => {
+    const w = setup();
+    const writerKey = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    // The user says Allow to "evil.example wants to use 'bitcoin writer chain'": BRC-42 keys are not per site.
+    await w.siteKey(EVIL, CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    expect(w.sheets.filter((s) => s.originator === EVIL)).toEqual([{ type: 'protocol', originator: EVIL }]);
+    const tx = await nameCoin(w, EVIL, coin(p2pkh(writerKey), 1_000_000));
+    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).resolves.toBeDefined();
+    // What the user was shown in all: that protocol sheet and a pay sheet for 1 sat.
+    expect(w.sheets.filter((s) => s.originator === EVIL).map((s) => [s.type, s.satoshis])).toEqual([
+      ['protocol', undefined],
+      ['spending', 1],
+    ]);
+  });
+});
+
 describe('only after the user (or the site’s envelope) approved the payment', () => {
   test('an action that takes nothing from the wallet shows no pay sheet, so its sighash stays refused', async () => {
     const w = setup();
-    const key = await w.keyOf(AMMO_PROTOCOL, 'pot');
+    const key = await w.siteKey(BLASTER, AMMO_PROTOCOL, 'pot');
     const pot = coin(p2pkh(key), 50_000);
     const created = await w.as(BLASTER).createAction({
       description: 'Move the app coin out',
@@ -986,7 +1102,7 @@ describe('who is asking', () => {
     await expect(
       w.wallet.createSignature({ hashToDirectlySign: Hash.hash256([9]), protocolID: ONESAT, keyID: 'k' }, ADMIN),
     ).resolves.toBeDefined();
-    const chainKey = await w.keyOf(CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    const chainKey = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
     const prev = coin(p2pkh(chainKey));
     const created = await w.wallet.createAction(
       {
@@ -1109,6 +1225,7 @@ describe('callerSighashes and PendingSighashes', () => {
     const m = guardCrossSiteSigning(
       {
         getPublicKey: async () => ({ publicKey: key.toPublicKey().toString() }),
+        ensureProtocolPermission: async () => true,
         createSignature: async () => ({ signature: [1] }),
         createAction: async () => ({ signableTransaction: { reference: 'r', tx: atomic(tx) } }),
       },
@@ -1130,6 +1247,7 @@ describe('callerSighashes and PendingSighashes', () => {
     const m = guardCrossSiteSigning(
       {
         getPublicKey: async () => ({ publicKey: key.toPublicKey().toString() }),
+        ensureProtocolPermission: async () => true,
         createSignature: async (a: unknown) => (signedWith.push(a), { signature: [1] }),
         createAction: async () => ({ signableTransaction: { reference: 'r', tx: atomic(tx) } }),
       },
@@ -1157,31 +1275,76 @@ describe('callerSighashes and PendingSighashes', () => {
     expect(signedWith.length).toBeLessThanOrEqual(1);
   });
 
-  test('the oldest pending action goes when there are too many', async () => {
+  test('caps: a site’s own oldest goes first, and no site’s loop pushes out another’s (R5)', async () => {
     const p = new PendingSighashes();
     const derive = async () => key.toPublicKey().toString();
+    const answer = (site: string, sign: object, checks: Partial<SigningKeyChecks> = {}) =>
+      p.request(site, sign, { granted: async () => true, derive, ...checks });
+    const signFor = (tx: Transaction) => ({ hashToDirectlySign: sighash(tx, 0), protocolID: [1, 'app'], keyID: 'k' });
+    const ask = async (tx: Transaction, site = 'a.example') => {
+      const r = await answer(site, signFor(tx));
+      return r !== null && r !== UNGRANTED;
+    };
+    const victim = build(899);
+    p.record('victim.example', args(899), { reference: 'victim', tx: atomic(victim) });
     const txs: Transaction[] = [];
-    for (let i = 0; i <= MAX_PENDING_ACTIONS; i++) {
-      const tx = build(900 - i);
+    for (let i = 0; i < MAX_PENDING_ACTIONS + 5; i++) {
+      const tx = build(800 - i);
       txs.push(tx);
-      p.record('a.example', args(900 - i), { reference: `r${i}`, tx: atomic(tx) });
+      p.record('a.example', args(800 - i), { reference: `r${i}`, tx: atomic(tx) });
     }
+    // One site holds at most its 8 newest; the other site's record is untouched.
+    expect(p.size).toBe(MAX_PENDING_PER_SITE + 1);
+    expect(await ask(victim, 'victim.example')).toBe(true);
+    expect(await ask(txs[txs.length - MAX_PENDING_PER_SITE - 1])).toBe(false);
+    expect(await ask(txs[txs.length - MAX_PENDING_PER_SITE])).toBe(true);
+    expect(await ask(txs[txs.length - 1])).toBe(true);
+    // Many sites together still stop at the overall cap (the oldest of all goes then).
+    for (let i = 0; i < MAX_PENDING_ACTIONS; i++)
+      p.record(`s${i}.example`, args(700 - i), { reference: `s${i}`, tx: atomic(build(700 - i)) });
     expect(p.size).toBe(MAX_PENDING_ACTIONS);
-    const allows = async (sign: object, d: () => Promise<string | undefined> = derive) =>
-      (await p.request('a.example', sign, d)) !== null;
-    const ask = (tx: Transaction) => allows({ hashToDirectlySign: sighash(tx, 0), protocolID: [1, 'app'], keyID: 'k' });
-    expect(await ask(txs[0])).toBe(false);
-    expect(await ask(txs[1])).toBe(true);
     // A reference recorded again replaces what it allowed.
-    p.record('a.example', args(), { reference: 'r1', tx: atomic(build()) });
-    expect(await ask(txs[1])).toBe(false);
+    const last = txs[txs.length - 1];
+    p.record('a.example', args(), { reference: `r${txs.length - 1}`, tx: atomic(build()) });
+    expect(await ask(last)).toBe(false);
+  });
+
+  test('the grant comes first: without it nothing is looked up or derived, hit or miss (R3)', async () => {
+    const p = new PendingSighashes();
+    const tx = build();
+    p.record('a.example', args(), { reference: 'r', tx: atomic(tx) });
+    let derived = 0;
+    const derive = async () => (derived++, key.toPublicKey().toString());
+    const hit = { hashToDirectlySign: sighash(tx, 0), protocolID: [1, 'app'], keyID: 'k' };
+    const miss = { ...hit, hashToDirectlySign: Hash.hash256([1]) };
+    const asked: unknown[] = [];
+    const none = { granted: async (k: unknown) => (asked.push(k), false), derive };
+    expect(await p.request('a.example', hit, none)).toBe(UNGRANTED);
+    expect(await p.request('a.example', miss, none)).toBe(UNGRANTED);
+    expect(
+      await p.request('a.example', hit, { granted: async () => Promise.reject(new Error('x')), derive }),
+    ).toBeNull();
+    expect(derived).toBe(0);
+    // The grant is asked for exactly the key createSignature would use (no counterparty means 'anyone').
+    expect(asked[0]).toEqual({ protocolID: [1, 'app'], keyID: 'k', counterparty: 'anyone' });
+    // A site with nothing pending is not told about grants at all.
+    expect(await p.request('b.example', hit, none)).toBeNull();
+    // With the grant: a miss is the plain refusal and still derives nothing; a hit derives once and signs.
+    const yes = { granted: async () => true, derive };
+    expect(await p.request('a.example', miss, yes)).toBeNull();
+    expect(derived).toBe(0);
+    expect(await p.request('a.example', hit, yes)).toMatchObject({ keyID: 'k' });
+    expect(derived).toBe(1);
     // A key lookup that fails, or answers something that is not a key, allows nothing.
-    const sign = { hashToDirectlySign: sighash(txs[2], 0), protocolID: [1, 'app'], keyID: 'k' };
-    expect(await allows(sign, async () => undefined)).toBe(false);
-    expect(await allows(sign, async () => 'not a key')).toBe(false);
-    expect(await allows(sign, async () => Promise.reject(new Error('locked')))).toBe(false);
-    expect(await allows({ ...sign, keyID: { toString: () => 'k' } })).toBe(false);
-    expect(await allows({ ...sign, counterparty: { toString: () => 'self' } })).toBe(false);
-    expect(await allows(sign)).toBe(true);
+    expect(await p.request('a.example', hit, { ...yes, derive: async () => undefined })).toBeNull();
+    expect(await p.request('a.example', hit, { ...yes, derive: async () => 'not a key' })).toBeNull();
+    expect(
+      await p.request('a.example', hit, { ...yes, derive: async () => Promise.reject(new Error('locked')) }),
+    ).toBeNull();
+    expect(await p.request('a.example', { ...hit, keyID: { toString: () => 'k' } }, yes)).toBeNull();
+    expect(await p.request('a.example', { ...hit, counterparty: { toString: () => 'self' } }, yes)).toBeNull();
+    // Signed or aborted while the grant was being checked: nothing to sign any more.
+    const slow = { granted: async () => (p.settle('r'), true), derive };
+    expect(await p.request('a.example', hit, slow)).toBeNull();
   });
 });
