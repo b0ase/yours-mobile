@@ -9,7 +9,10 @@ import { useCallback, useEffect, useState } from 'react';
 import type { OneSatContext } from '@1sat/actions';
 import type { BchatClient } from './api';
 import {
+  assertCommissionsCreateEnabled,
   cardAction,
+  COMMISSIONS_CREATE_ENABLED,
+  COMMISSIONS_PAUSED,
   deadlineText,
   parseRewardAmount,
   sha256Hex,
@@ -273,20 +276,48 @@ export function CommissionCard({
   );
 }
 
-/** The /commission composer: what, reward, deadline, optional film link and rating. Drafting locks nothing. */
-export function CommissionComposer({
-  ticker,
-  client,
-  initial,
-  onClose,
-  onPosted,
-}: {
+type ComposerProps = {
   ticker: string;
   client: BchatClient;
   initial: { assignee: string | null; draft: string };
   onClose: () => void;
   onPosted: () => void;
-}) {
+  /** New commissions are paused (chat/commissions.ts COMMISSIONS_CREATE_ENABLED): the form is not shown at all. */
+  createEnabled?: boolean;
+};
+
+/**
+ * What /commission opens. While new commissions are paused (escrow ruling §6) that is one calm line and a Close:
+ * no form, nothing to submit, whatever the room says about its arbiter key.
+ */
+export function CommissionComposer(props: ComposerProps) {
+  if (props.createEnabled ?? COMMISSIONS_CREATE_ENABLED) return <CommissionForm {...props} createEnabled />;
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-end justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={props.onClose}
+    >
+      <div
+        data-commissions-paused
+        className="w-full max-w-lg rounded-t-2xl p-4 space-y-3"
+        style={{ background: '#111', border: `1px solid ${LINE}` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="font-semibold text-white">Commissions</div>
+        <div className="text-[13px]" style={{ color: MUTED }}>
+          {COMMISSIONS_PAUSED}
+        </div>
+        <div className="flex justify-end">
+          <Btn onClick={props.onClose}>Close</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The /commission form: what, reward, deadline, optional film link and rating. Drafting locks nothing. */
+function CommissionForm({ ticker, client, initial, onClose, onPosted, createEnabled }: ComposerProps) {
   const [info, setInfo] = useState<{
     token: { decimals: number } | null;
     rating: 'all_ages' | 'adult';
@@ -309,6 +340,11 @@ export function CommissionComposer({
 
   const submit = async () => {
     setErr(null);
+    try {
+      assertCommissionsCreateEnabled(createEnabled ?? COMMISSIONS_CREATE_ENABLED);
+    } catch (e) {
+      return setErr(errText(e));
+    }
     const raw = info?.token ? parseRewardAmount(amount, info.token.decimals) : null;
     if (!raw) return setErr('Give the reward as a number of tokens, e.g. 10M.');
     const d = Number(days);

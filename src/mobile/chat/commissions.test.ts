@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import type { OneSatContext } from '@1sat/actions';
+import { fundEscrow } from '../locks/tokenEscrowApi';
 import {
+  assertCommissionsCreateEnabled,
   cardAction,
   commissionCardNo,
+  COMMISSIONS_CREATE_ENABLED,
+  COMMISSIONS_PAUSED,
+  COMMISSIONS_PAUSED_ERROR,
   deadlineText,
   parseCommissionCommand,
   parseRewardAmount,
@@ -86,13 +92,36 @@ describe('commission card', () => {
     expect(parseRewardAmount('abc', 0)).toBeNull();
   });
   test('poster funds a draft; others wait', () => {
-    expect(cardAction(base({ status: 'draft' }), 'ann', 0, now).kind).toBe('fund');
-    expect(cardAction(base({ status: 'draft' }), 'ben', 0, now).kind).toBe('wait');
+    // New commissions are paused (COMMISSIONS_CREATE_ENABLED): these two tests turn creating on to cover it.
+    expect(cardAction(base({ status: 'draft' }), 'ann', 0, now, true).kind).toBe('fund');
+    expect(cardAction(base({ status: 'draft' }), 'ben', 0, now, true).kind).toBe('wait');
   });
   test('directed draft: the assignee signs first', () => {
     const d = base({ status: 'draft', assignee: 'ben' });
-    expect(cardAction(d, 'ben', 0, now).kind).toBe('deliverer-key');
-    expect(cardAction(d, 'ann', 0, now).kind).toBe('wait');
+    expect(cardAction(d, 'ben', 0, now, true).kind).toBe('deliverer-key');
+    expect(cardAction(d, 'ann', 0, now, true).kind).toBe('wait');
+  });
+  test('paused: a draft offers nobody a way to lock the reward', () => {
+    expect(COMMISSIONS_CREATE_ENABLED).toBe(false);
+    const paused = { kind: 'wait', label: COMMISSIONS_PAUSED } as const;
+    expect(cardAction(base({ status: 'draft' }), 'ann', 0, now)).toEqual(paused);
+    expect(cardAction(base({ status: 'draft' }), 'ben', 0, now)).toEqual(paused);
+    expect(cardAction(base({ status: 'draft', assignee: 'ben' }), 'ben', 0, now)).toEqual(paused);
+  });
+  test('paused: creating is refused, and the lock is refused before the wallet is touched', async () => {
+    expect(() => assertCommissionsCreateEnabled()).toThrow(COMMISSIONS_PAUSED_ERROR);
+    expect(() => assertCommissionsCreateEnabled(true)).not.toThrow();
+    // Any use of the wallet context would throw a different error: the refusal has to come first.
+    const untouched = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('wallet touched');
+        },
+      },
+    ) as OneSatContext;
+    const args = {} as Parameters<typeof fundEscrow>[1];
+    await expect(fundEscrow(untouched, args)).rejects.toThrow(COMMISSIONS_PAUSED_ERROR);
   });
   test('open: entrants enter once, poster accepts', () => {
     expect(cardAction(base(), 'ben', 0, now).kind).toBe('enter');
