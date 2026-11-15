@@ -64,17 +64,8 @@
         ],
       },
     ],
-    // Store edition (bWallet): browse-only Market, no trading, everything else lives on bWalletX.
+    // Store edition (bWallet): no Market, no trading; everything else lives on bWalletX.
     store: [
-      {
-        label: 'Market',
-        href: '/market',
-        pages: ['/market', '/market/strategies'],
-        sub: [
-          { label: 'Market', href: '/market' },
-          { label: 'Strategies', href: '/market/strategies' },
-        ],
-      },
       { label: 'bWalletX features', href: X + '/features' },
       { label: 'Rooms &amp; tokens', href: X + '/friends' },
       { label: 'Get bWalletX &rarr;', href: X },
