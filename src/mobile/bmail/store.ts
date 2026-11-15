@@ -11,6 +11,11 @@ export type Received = MailMeta & {
   /** Relay message id (to clear it from the relay once this device erased the letter). */
   relayId?: string;
   verifyNote?: string;
+  /**
+   * The postage could not be checked yet (wallet or chain lookup unavailable): first and last try, unix ms. The letter
+   * counts as unstamped meanwhile; client.ts recheckPostage tries again and settles it (paid, or unpaid for good).
+   */
+  recheck?: { first: number; last: number };
   read?: boolean;
   /** Decrypted on open; kept locally so it opens instantly next time. */
   opened?: Sealed;

@@ -39,6 +39,7 @@ import {
   type Sent,
 } from './store';
 import { replyCreditOk } from './route';
+import { isPermanentInternalizeError } from '../../services/internalizeBackoff';
 import {
   LetterTooLargeError,
   TOO_LARGE_CONFIRMING,
@@ -322,17 +323,30 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs, deps: SendD
 /**
  * Check the postage: the BEEF's tx has the claimed txid, and its output pays ≥ claimed sats to the BRC-29 key
  * only I can derive from the sender's key. Then internalize it (the wallet validates and keeps the coins).
- * Returns verified sats (0 when anything fails).
+ * Returns verified sats (0 when anything fails). `pending`: the check itself could not be made (the wallet could not
+ * derive the key, or could not take the payment in for a reason that may pass: chain lookup down, storage busy), so
+ * the stamp is neither good nor bad yet. Definite: no usable BEEF, wrong txid, output too small or not to me, or the
+ * wallet holds the transaction as failed/invalid.
  */
 export const verifyPostage = async (
   wallet: WalletInterface,
   env: Envelope,
   internalize = true,
-): Promise<{ sats: number; note?: string }> => {
+): Promise<{ sats: number; note?: string; pending?: boolean }> => {
   const p = env.postage;
   if (!p) return { sats: 0 };
+  const later = (e: unknown) => ({
+    sats: 0,
+    note: `Postage not checked yet: ${e instanceof Error ? e.message : String(e)}`.slice(0, 160),
+    pending: true,
+  });
+  let tx: Transaction;
   try {
-    const tx = Transaction.fromAtomicBEEF(Utils.toArray(p.beef, 'hex'));
+    tx = Transaction.fromAtomicBEEF(Utils.toArray(p.beef, 'hex'));
+  } catch (e) {
+    return { sats: 0, note: e instanceof Error ? e.message.slice(0, 160) : 'Bad postage' };
+  }
+  try {
     if (tx.id('hex') !== p.txid) return { sats: 0, note: 'Postage txid does not match' };
     const out = tx.outputs[p.outputIndex];
     if (!out || (out.satoshis ?? 0) < p.sats) return { sats: 0, note: 'Postage output is smaller than claimed' };
@@ -370,12 +384,50 @@ export const verifyPostage = async (
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       // Taken in already (an earlier fetch, or another device of this wallet): the wallet merges it without counting it
-      // twice, and a wallet that says so instead is fine too. Anything else means the payment is not good.
-      if (!/already|duplicate|exists/i.test(m)) return { sats: 0, note: `Postage not accepted: ${m}`.slice(0, 160) };
+      // twice, and a wallet that says so instead is fine too. A transaction the wallet holds as failed/invalid is not
+      // good. Anything else (chain lookup down, storage busy) says nothing about the payment: check again later.
+      if (isPermanentInternalizeError(e)) return { sats: 0, note: `Postage not accepted: ${m}`.slice(0, 160) };
+      if (!/already|duplicate|exists/i.test(m)) return later(e);
     }
     return { sats: out.satoshis ?? 0 };
   } catch (e) {
-    return { sats: 0, note: e instanceof Error ? e.message.slice(0, 160) : 'Bad postage' };
+    // The wallet could not derive the key (locked, busy): nothing was learnt about the stamp.
+    return later(e);
+  }
+};
+
+/** A stamp that could not be checked is tried again at most this often, for RELAY_KEEP_MS from the first try. */
+export const RECHECK_EVERY_MS = 10 * 60 * 1000;
+/** At most this many letters are re-checked in one refresh (longest-waiting first). */
+export const RECHECK_MAX = 20;
+
+/**
+ * Stored letters whose postage could not be checked when they arrived (`recheck`): check again from the stored
+ * envelope (the relay ledger plays no part) and settle each one. Paid: verifiedSats is set, once, so it routes and
+ * shows as any paid letter; a repeat internalize merges. Definitely bad, or still unchecked after RELAY_KEEP_MS:
+ * unpaid for good. Still unknown: tried again on a later refresh.
+ */
+export const recheckPostage = async (wallet: WalletInterface, me: string, now = Date.now()): Promise<void> => {
+  const due = loadMail(me)
+    .received.filter((r) => r.recheck && now - r.recheck.last >= RECHECK_EVERY_MS)
+    .sort((a, z) => (a.recheck?.last ?? 0) - (z.recheck?.last ?? 0))
+    .slice(0, RECHECK_MAX);
+  for (const r of due) {
+    const first = Math.min(r.recheck?.first ?? now, now);
+    const v: { sats: number; note?: string; pending?: boolean } =
+      now - first >= RELAY_KEEP_MS
+        ? { sats: 0, note: 'Postage could not be checked' }
+        : await verifyPostage(wallet, r.env);
+    updateMail(me, (s) => ({
+      ...s,
+      received: s.received.map((x) => {
+        if (x.id !== r.id || !x.recheck) return x;
+        const { recheck: _r, ...rest } = x;
+        return v.pending
+          ? { ...x, verifyNote: v.note, recheck: { first, last: now } }
+          : { ...rest, verifiedSats: v.sats, verifyNote: v.note };
+      }),
+    }));
   }
 };
 
@@ -437,14 +489,15 @@ export const fetchMail = async (
       env,
       relayId: m.messageId,
       verifyNote: v.note,
+      ...(v.pending ? { recheck: { first: now, last: now } } : {}),
     });
   }
   return { items, ack, seen };
 };
 
 /**
- * One refresh on this device: fetch, store what is new, remember what the relay listed, then clear from the relay
- * only what fetchMail found due.
+ * One refresh on this device: settle stamps left unchecked, fetch, store what is new, remember what the relay listed,
+ * then clear from the relay only what fetchMail found due.
  */
 export const syncMail = async (
   wallet: WalletInterface,
@@ -452,6 +505,7 @@ export const syncMail = async (
   relay: MailRelay = relayOf(wallet),
   now = Date.now(),
 ): Promise<void> => {
+  await recheckPostage(wallet, me, now);
   const s = loadMail(me);
   const { items, ack, seen } = await fetchMail(
     wallet,

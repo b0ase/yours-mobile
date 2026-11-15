@@ -185,7 +185,11 @@ const chipsFor = (r: Received, rate: number, friend: boolean): { kind: StampKind
       text: `${pri ? 'Priority' : 'Penny post'} ${money(r.verifiedSats, rate)}`,
     });
   } else if (friend) out.push({ kind: 'free' });
-  else out.push({ kind: 'none', text: r.verifyNote ? 'Stamp not valid' : 'Unstamped' });
+  else
+    out.push({
+      kind: 'none',
+      text: r.recheck ? 'Stamp not checked yet' : r.verifyNote ? 'Stamp not valid' : 'Unstamped',
+    });
   if (r.env.replyPaidSats && !r.replyCredit) out.push({ kind: 'reply' });
   return out;
 };

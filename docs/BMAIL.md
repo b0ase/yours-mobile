@@ -274,6 +274,8 @@ Built in 5.1.90 (`test/5.1.90`, commit 64b97a9).
 
 **Several devices (phone, extension, web).** A letter is not cleared from the relay when one device stores it, so every device on the same account fetches it. Each device keeps a short list of the relay ids it has dealt with and skips them on later fetches (nothing is decrypted, verified or taken in twice). A device clears a message from the relay only when (a) 30 days have passed since that device first saw it (its own clock; the sender's date is not used), or (b) it erased the letter after 30 days in the Bin. Mail the wallet refuses (not bMail, wrong sender or recipient) also waits 30 days, so a newer wallet on another device can still read it. Read marks, Archive, Bin and Quarantine stay per device.
 
+**A stamp that could not be checked.** If the wallet or the chain lookup is unavailable when a letter arrives, the letter is kept as "Stamp not checked yet" (it counts as unstamped meanwhile). The wallet checks again from the stored letter, at most every 10 minutes and 20 letters per refresh, for up to 30 days, then settles it: paid (it moves as a paid letter would) or unpaid for good. A stamp that is plainly bad (wrong txid, too small, not paid to you, or held by the wallet as failed) is unpaid at once.
+
 **Gaps (not enforced yet):**
 
 - Quarantine works per token id, because @1sat/actions `sendBsv21` picks token UTXOs by token id and can't leave out single outputs. If someone airdrops more of a token you already hold, those outputs aren't quarantined and can be spent with yours. Fixing this needs an exclude-outpoints option in `sendBsv21` (or a separate toolbox basket/tag).
