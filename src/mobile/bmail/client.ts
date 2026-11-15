@@ -36,6 +36,7 @@ import {
   WAITING_MAX,
   addReceived,
   inLine,
+  isBlockedSender,
   isTrustedSender,
   loadMail,
   loadRelaySeen,
@@ -941,8 +942,10 @@ export const recheckPostage = async (
   }
   const s0 = loadMail(me);
   const trusted = (from: string) => isTrustedSender(s0, from);
+  // A blocked sender's stamps are not checked at all: no wallet call, no network lookup.
+  const blocked = (from: string) => isBlockedSender(s0, from);
   const unread = s0.received
-    .filter((r) => r.recheck && !r.recheck.mine && waited(r.recheck.doubt, now))
+    .filter((r) => r.recheck && !r.recheck.mine && waited(r.recheck.doubt, now) && !blocked(r.from))
     .sort((a, z) => Number(trusted(z.from)) - Number(trusted(a.from)));
   // The wallet may have switched account since the refresh began: its keys and this mail are then not one account's.
   if (!(await sameAccount(wallet, me))) return;
@@ -951,7 +954,11 @@ export const recheckPostage = async (
     if (!(await sameAccount(wallet, me))) return;
     settle(r.id, v, { local: true });
   }
-  for (const r of recheckQueue(loadMail(me).received, now, trusted)) {
+  for (const r of recheckQueue(
+    loadMail(me).received.filter((x) => !blocked(x.from)),
+    now,
+    trusted,
+  )) {
     if (!(await sameAccount(wallet, me))) return;
     const used = usedStamps(loadMail(me));
     if (r.env.postage && (used.get(stampOutpoint(r.env.postage)) ?? r.id) !== r.id) continue;
@@ -1319,7 +1326,7 @@ export const syncMail = async (
       seen: loadRelaySeen(me),
       erased: new Set(s.received.flatMap((r) => (r.erased && r.relayId ? [r.relayId] : []))),
       trusted: (from) => isTrustedSender(s, from),
-      blocked: (from) => (s.blocked ?? []).includes(from),
+      blocked: (from) => isBlockedSender(s, from),
       now,
       chainNow: () => chainTime(wallet),
       line: s.received.filter((r) => inLine(s, r)).map((r) => r.from),

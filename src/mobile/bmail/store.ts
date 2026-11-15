@@ -139,8 +139,15 @@ export const WAITING_MAX = 100;
 export const isWaiting = (r: Received): boolean =>
   !!r.recheck && r.recheck.tries === 0 && r.recheck.doubt === undefined;
 const dealtWith = (s: MailState, from: string) => s.contacts.includes(from) || (s.trusted ?? []).includes(from);
-/** A letter in the line (WAITING_MAX): waiting, from a sender the user has no dealings with. */
-export const inLine = (s: MailState, r: Received): boolean => isWaiting(r) && !dealtWith(s, r.from);
+/** A letter in the line (WAITING_MAX): waiting, from a sender the user has no dealings with and has not blocked. */
+export const inLine = (s: MailState, r: Received): boolean =>
+  isWaiting(r) && !dealtWith(s, r.from) && !isBlockedSender(s, r.from);
+/**
+ * A sender the user blocked: their mail is stored for Quarantine, and that is all. It waits for nothing: its stamps
+ * are not checked (client.ts recheckPostage; unblocking the sender starts the checks) and it holds no place in the
+ * line.
+ */
+export const isBlockedSender = (s: MailState, from: string): boolean => (s.blocked ?? []).includes(from);
 /**
  * Keep the store within RECEIVED_MAX without losing the user's own mail to a flood.
  *
@@ -168,7 +175,9 @@ export const trimReceived = (s: MailState): Received[] => {
   for (const r of s.received) {
     if (kept.has(r) || drop.has(r)) continue;
     const mine = r.read || r.pinned || r.archived || r.verifiedSats > 0 || r.replyCredit;
-    if (r.recheck) rank.set(r, isWaiting(r) ? 3 : 2);
+    // A blocked sender's unopened mail counts with the strangers' flood, stamped or not.
+    if (isBlockedSender(s, r.from) && !mine && !r.deleted) rank.set(r, ++strangers > STRANGERS_KEPT ? 0 : 3);
+    else if (r.recheck) rank.set(r, isWaiting(r) ? 3 : 2);
     else if (r.deleted) rank.set(r, 1);
     else if (mine || dealtWith(s, r.from)) rank.set(r, 3);
     else rank.set(r, ++strangers > STRANGERS_KEPT ? 0 : 3);

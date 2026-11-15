@@ -1676,6 +1676,43 @@ describe('bMail: flood, clock and load', () => {
     expect(mail(b)[0].verifiedSats).toBe(700);
   });
 
+  test("a blocked sender's stamped letters hold no place in the line and cost no lookups: a stranger's paid letter stays stored and is paid, whichever is listed first", async () => {
+    for (const honestFirst of [true, false]) {
+      const r = fakeRelay();
+      const a = device();
+      onDevice(a);
+      updateMail(ME, (s) => ({ ...s, blocked: [EVE] }));
+      const hp = await stamp(700);
+      const honest = letter({ from: PrivateKey.fromRandom().toPublicKey().toString(), postage: hp });
+      if (honestFirst) r.post(honest);
+      const theirs = new Set<string>();
+      for (let k = 0; k < 150; k++) {
+        const p = await stamp(100, { sent: false });
+        theirs.add(p.txid);
+        r.post(letter({ from: EVE, postage: p }));
+      }
+      if (!honestFirst) r.post(honest);
+      const asked: string[] = [];
+      const watch: StampNet = { ...net, seen: async (txid) => (asked.push(txid), net.seen(txid)) };
+      // The lookups cannot tell at first: the honest letter waits, stored, on every refresh.
+      chain.down = true;
+      for (let i = 0; i < 4; i++) {
+        onDevice(a);
+        await syncMail(a.wallet, ME, r.relay, T0 + i * 1000, watch);
+        expect(mail(a).some((m) => m.id === honest.id)).toBe(true);
+      }
+      chain.down = false;
+      onDevice(a);
+      await syncMail(a.wallet, ME, r.relay, T0 + RECHECK_EVERY_MS, watch);
+      expect(mail(a).find((m) => m.id === honest.id)?.verifiedSats).toBe(700);
+      // The blocked sender's mail is stored for Quarantine, unchecked: no wallet key derived for it, no lookup.
+      const quarantined = mail(a).filter((m) => m.from === EVE);
+      expect(quarantined.length).toBe(150);
+      expect(quarantined.every((m) => isQuarantined(m, [EVE]) && m.recheck?.last === 0 && !m.recheck.mine)).toBe(true);
+      expect(asked.some((t) => theirs.has(t))).toBe(false);
+    }
+  });
+
   test('the notifier peeks a large box less often', () => {
     expect([0, 20, 21, 200, 201, 5000].map(peekGapMs)).toEqual([0, 0, 300_000, 300_000, 900_000, 900_000]);
   });
