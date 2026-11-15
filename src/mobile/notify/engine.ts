@@ -37,9 +37,9 @@ import { ONESAT, search, type SearchRow } from '../market/indexer';
 import { rememberedTicketIds } from '../wallet/walletTickets';
 import { loadPrefs } from '../settings/prefs';
 import type { WalletInterface } from '@bsv/sdk';
-import { myKey, openMail, peekMail } from '../bmail/client';
+import { myKey, openMail, peekGapMs, peekMail } from '../bmail/client';
 import { route } from '../bmail/route';
-import { loadMail, loadRelaySeen, loadStamps, savePending } from '../bmail/store';
+import { loadMail, loadRelaySeen, savePending, usedStamps } from '../bmail/store';
 import { fetchPeerBPhone } from '../calls/bphone';
 import { getFriends, isFriend as isCallFriend } from '../calls/friends';
 import { shortKey } from '../calls/machine';
@@ -469,15 +469,24 @@ const bmailLabel = async (key: string): Promise<string> => {
   return p?.name || shortKey(key);
 };
 
+/** Per account: no bMail peek before this time (a large box is peeked less often: peekGapMs). */
+const bmailPeekAfter = new Map<string, number>();
+
 async function bmail(m: Me, st: PollState, out: NotifyItem[]) {
   const wallet = m.ctx?.wallet as unknown as WalletInterface | undefined;
   if (!wallet) return;
   const me = await myKey(wallet);
+  if (now() < (bmailPeekAfter.get(me) ?? 0)) return;
   const mail = loadMail(me);
   const known = new Set(mail.received.map((r) => r.id));
   const priceSats = usdToSats(mail.priceUsd, cachedExchangeRate()) ?? 0;
   const isFriend = (k: string) => isCallFriend(k) || mail.contacts.includes(k);
-  const peek = await peekMail(wallet, me, { known, seen: loadRelaySeen(me), stamps: loadStamps(me) });
+  const peek = await peekMail(wallet, me, {
+    known,
+    seen: loadRelaySeen(me),
+    stamps: usedStamps(mail),
+    onListed: (count) => void bmailPeekAfter.set(me, now() + peekGapMs(count)),
+  });
   const inbox = peek.filter(({ env, sats }) => {
     const replyCredit =
       !!env.usesReplyCredit &&

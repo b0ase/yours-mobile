@@ -7,7 +7,16 @@ import 'fake-indexeddb/auto';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { Beef, P2PKH, PrivateKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import { teardownSim, World } from '../../testing/twoDeviceSim/world';
-import { RECHECK_EVERY_MS, RECHECK_TRIES, STAMP_USED, syncMail, type MailRelay, type RelayMessage } from './client';
+import {
+  RECHECK_EVERY_MS,
+  RECHECK_TRIES,
+  STAMP_HELD,
+  STAMP_NO_RECORD,
+  STAMP_USED,
+  syncMail,
+  type MailRelay,
+  type RelayMessage,
+} from './client';
 import { BRC29_PROTOCOL, encodeEnvelope, stampPrefix, type Envelope, type Postage } from './envelope';
 import { route } from './route';
 import { loadMail } from './store';
@@ -217,7 +226,7 @@ describe('bMail stamps on the real wallet', () => {
   );
 
   test(
-    'never sent and already double-spent: unpaid at once, nothing in the wallet',
+    'never sent and already double-spent: unpaid once a second look agrees, nothing in the wallet',
     async () => {
       const w = await world(25);
       const s = await stamp(w, 5000);
@@ -227,13 +236,15 @@ describe('bMail stamps on the real wallet', () => {
       const t0 = Date.now();
       let got = await sync(w, w.A, r, t0);
       expect(got[0].verifiedSats).toBe(0);
-      expect(got[0].recheck).toBeUndefined();
-      expect(got[0].verifyNote).toContain('refused');
+      // One refusal is not believed (the lookups said "not there" before and after it): a second look is due.
+      expect(got[0].recheck?.doubt).toBeDefined();
       expect(box(got[0])).toBe('requests');
       expect(await shown(w, w.A)).toBe(0);
       expect(await w.statusOf('A', s.txid)).toEqual(await w.statusOf('A', 'f'.repeat(64)));
       got = await sync(w, w.A, r, t0 + RECHECK_EVERY_MS);
       expect(got[0].verifiedSats).toBe(0);
+      expect(got[0].recheck).toBeUndefined();
+      expect(got[0].verifyNote).toContain('refused');
       expect(await shown(w, w.A)).toBe(0);
       expect(onChain(w)).toBe(0);
     },
@@ -251,11 +262,14 @@ describe('bMail stamps on the real wallet', () => {
       const t0 = Date.now();
       let got = await sync(w, w.A, r, t0);
       expect(got[0].verifiedSats).toBe(0);
-      expect(got[0].recheck?.tries).toBe(1);
+      expect(got[0].recheck).toMatchObject({ tries: 0, mine: true });
       expect(got[0].verifyNote).toContain('not checked yet');
       expect(await shown(w, w.A)).toBe(0);
       expect((await s.doubleSpend()).ok).toBe(true);
       got = await sync(w, w.A, r, t0 + RECHECK_EVERY_MS);
+      expect(got[0].verifiedSats).toBe(0);
+      expect(got[0].recheck?.doubt).toBeDefined();
+      got = await sync(w, w.A, r, t0 + 2 * RECHECK_EVERY_MS);
       expect(got[0].verifiedSats).toBe(0);
       expect(got[0].recheck).toBeUndefined();
       expect(box(got[0])).toBe('requests');
@@ -270,7 +284,7 @@ describe('bMail stamps on the real wallet', () => {
   );
 
   test(
-    'never sent and the network never answers: not checked, then unpaid for good after the last try; no balance',
+    'never sent and the broadcaster gives no answer for hours: not checked, no balance; paid once it answers',
     async () => {
       const w = await world(27);
       const s = await stamp(w, 5000);
@@ -278,18 +292,17 @@ describe('bMail stamps on the real wallet', () => {
       r.post(letter(w, s.postage));
       const t0 = Date.now();
       let got: Awaited<ReturnType<typeof sync>> = [];
-      for (let i = 0; i < RECHECK_TRIES; i++) {
+      for (let i = 0; i <= RECHECK_TRIES; i++) {
         w.fault('broadcast', '500', 1);
         got = await sync(w, w.A, r, t0 + i * RECHECK_EVERY_MS);
         expect(await shown(w, w.A)).toBe(0);
         expect(got[0].verifiedSats).toBe(0);
       }
-      expect(got[0].recheck).toBeUndefined();
-      expect(got[0].verifyNote).toBe('Postage could not be checked');
-      // The network is back: the letter stays settled, nothing is taken in.
-      got = await sync(w, w.A, r, t0 + (RECHECK_TRIES + 1) * RECHECK_EVERY_MS);
-      expect(got[0].verifiedSats).toBe(0);
-      expect(await shown(w, w.A)).toBe(0);
+      // No answer is not a try: the stamp is still waiting, not given up on.
+      expect(got[0].recheck).toMatchObject({ tries: 0 });
+      got = await sync(w, w.A, r, t0 + (RECHECK_TRIES + 2) * RECHECK_EVERY_MS);
+      expect(got[0].verifiedSats).toBe(5000);
+      expect(await shown(w, w.A)).toBe(5000);
     },
     T,
   );
@@ -306,7 +319,7 @@ describe('bMail stamps on the real wallet', () => {
       w.fault('broadcast', '500', 2);
       const t0 = Date.now();
       let got = await sync(w, w.A, r, t0);
-      expect(got[0].recheck?.tries).toBe(1);
+      expect(got[0].recheck).toMatchObject({ tries: 0, mine: true });
       expect(await shown(w, w.A)).toBe(0);
       w.chain.clearFaults();
       got = await sync(w, w.A, r, t0 + RECHECK_EVERY_MS);
@@ -319,7 +332,7 @@ describe('bMail stamps on the real wallet', () => {
   );
 
   test(
-    'device A took the stamp and spent it; device B, not synced yet, fetches the letter: paid, and no coin added',
+    "device A took the stamp and spent it; device B: not paid until it has synced A's record, and never a coin",
     async () => {
       const w = await world(29);
       const s = await stamp(w, 50_000, { mined: true });
@@ -329,18 +342,90 @@ describe('bMail stamps on the real wallet', () => {
       await w.send('A', 20_000); // spends the stamp (A's only coin); the change comes back to A
       const truth = onChain(w);
       expect(await shown(w, w.A)).toBe(truth);
-      const b = await sync(w, w.B, r);
-      // The account was paid, so the letter is a paid letter; B holds no coin for it and shows nothing it cannot spend.
-      expect(b[0].verifiedSats).toBe(50_000);
+      const t0 = Date.now();
+      let b = await sync(w, w.B, r, t0);
+      // B's wallet has no record of the stamp yet: spent alone is never paid. B holds no coin for it either.
+      expect(b[0].verifiedSats).toBe(0);
+      expect(b[0].verifyNote).toBe(STAMP_NO_RECORD);
       expect(await shown(w, w.B)).toBe(0);
       expect(await w.statusOf('B', s.txid)).toEqual(await w.statusOf('B', 'f'.repeat(64)));
-      // One ordinary device sync each (A pushes, B pulls and admits what it pulled): both equal the chain.
+      // One ordinary device sync each (A pushes, B pulls and admits what it pulled): the record is on B.
       await w.sync('A');
       await w.sync('B');
       await w.admit(w.B);
+      b = await sync(w, w.B, r, t0 + RECHECK_EVERY_MS);
+      expect(b[0].verifiedSats).toBe(50_000);
       expect(await shown(w, w.B)).toBe(truth);
       expect(await shown(w, w.A)).toBe(truth);
       await w.settleAndCheck();
+    },
+    T,
+  );
+
+  test(
+    'a spent stamp shown again on a new letter pays for nothing: on the device that took it in, and on the other',
+    async () => {
+      const w = await world(30);
+      const s = await stamp(w, 50_000, { mined: true });
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      await sync(w, w.A, r);
+      await w.send('A', 20_000);
+      const truth = onChain(w);
+      // The sender shows the same stamp on a new letter. Device B never stored the first one.
+      const r2 = fakeRelay();
+      r2.post(letter(w, s.postage));
+      const t0 = Date.now();
+      let b = await sync(w, w.B, r2, t0);
+      expect(b[0].verifiedSats).toBe(0);
+      expect(await shown(w, w.B)).toBe(0);
+      await w.sync('A');
+      await w.sync('B');
+      await w.admit(w.B);
+      // With the account's record synced: the stamp was taken in for the other letter.
+      b = await sync(w, w.B, r2, t0 + RECHECK_EVERY_MS);
+      expect(b[0].verifiedSats).toBe(0);
+      expect(b[0].verifyNote).toBe(STAMP_USED);
+      expect(b[0].recheck).toBeUndefined();
+      expect(await shown(w, w.B)).toBe(truth);
+      // Device A, which stored the first letter, with its bMail data gone (the record is the wallet's, not the app's).
+      stores.delete(`${w.A.name}-${me(w)}`);
+      const a = await sync(w, w.A, r2);
+      expect(a[0].verifiedSats).toBe(0);
+      expect(a[0].verifyNote).toBe(STAMP_USED);
+      expect(await shown(w, w.A)).toBe(truth);
+    },
+    T,
+  );
+
+  test(
+    'a coin taken in before the record was kept (no labels), still unspent: it pays for no later letter',
+    async () => {
+      const w = await world(31);
+      const s = await stamp(w, 5000, { mined: true });
+      // As a released wallet took a stamp in: no labels.
+      await (w.A.wallet as unknown as WalletInterface).internalizeAction({
+        tx: Utils.toArray(s.postage.beef, 'hex'),
+        outputs: [
+          {
+            outputIndex: 0,
+            protocol: 'wallet payment',
+            paymentRemittance: {
+              derivationPrefix: s.postage.derivationPrefix,
+              derivationSuffix: s.postage.derivationSuffix,
+              senderIdentityKey: SENDER,
+            },
+          },
+        ],
+        description: 'bMail postage received',
+      });
+      expect(await shown(w, w.A)).toBe(5000);
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      const got = await sync(w, w.A, r);
+      expect(got[0].verifiedSats).toBe(0);
+      expect(got[0].verifyNote).toBe(STAMP_HELD);
+      expect(await shown(w, w.A)).toBe(5000);
     },
     T,
   );

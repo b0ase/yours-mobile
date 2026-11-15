@@ -7,11 +7,16 @@ import {
   RECHECK_PER_SENDER,
   RECHECK_TRIES,
   ACK_MAX,
+  STAMP_HELD,
+  STAMP_NO_RECORD,
   STAMP_USED,
   TAKE_MAX,
+  peekGapMs,
   peekMail,
+  recheckLetter,
   relayOf,
   syncMail,
+  usedLabel,
   type MailRelay,
   type RelayMessage,
   type StampNet,
@@ -28,13 +33,13 @@ import {
   isQuarantined,
   loadMail,
   loadRelaySeen,
-  loadStamps,
   purgeBin,
   saveMail,
   relayKey,
   saveRelaySeen,
   setFlags,
   updateMail,
+  usedStamps,
   type Received,
   type RelaySeen,
 } from './store';
@@ -83,15 +88,15 @@ const net: StampNet = {
   },
 };
 
-/** A stamp of `sats` to the account: a signed payment with a mined parent, as Atomic BEEF. */
-const stamp = async (sats: number, o: { sent?: boolean } = {}): Promise<Postage> => {
+/** A stamp of `sats` to the account (or to the key `to`): a signed payment with a mined parent, as Atomic BEEF. */
+const stamp = async (sats: number, o: { sent?: boolean; to?: PrivateKey } = {}): Promise<Postage> => {
   const k = PrivateKey.fromRandom();
   const parent = new Transaction();
   parent.addOutput({ lockingScript: new P2PKH().lock(k.toAddress()), satoshis: sats + 100 });
   parent.merklePath = tscToMerklePath(parent.id('hex'), 0, [], 900_000);
   const tx = new Transaction();
   tx.addInput({ sourceTransaction: parent, sourceOutputIndex: 0, unlockingScriptTemplate: new P2PKH().unlock(k) });
-  tx.addOutput({ lockingScript: new P2PKH().lock(STAMP.toPublicKey().toHash()), satoshis: sats });
+  tx.addOutput({ lockingScript: new P2PKH().lock((o.to ?? STAMP).toPublicKey().toHash()), satoshis: sats });
   await tx.sign();
   if (o.sent !== false) chain.has.add(tx.id('hex'));
   return {
@@ -144,18 +149,22 @@ const fakeRelay = () => {
   };
 };
 
-/** The account's wallet storage, as far as postage goes: the stamps taken in (shared once the devices have synced). */
-type Coins = Set<string>;
+/**
+ * The account's wallet storage, as far as postage goes: the txids of the stamps taken in, and the labels the wallet
+ * keeps on each (the account's record of what a stamp paid for). Two devices given the same Coins have synced.
+ */
+class Coins extends Set<string> {
+  labels = new Map<string, Set<string>>();
+}
 type Repeat = 'merge' | 'busy';
 
 /**
- * A device: its own localStorage and its own wallet. `repeat` is what the wallet does when the stamp is already in
- * its storage: 'merge' (the toolbox: accepted, counted once), 'busy' (the toolbox's "undergoing active changes" once,
- * then a merge).
+ * A device: its own localStorage and its own wallet. `repeat`: 'busy' is the toolbox's "undergoing active changes"
+ * on the first take (device sync wrote the same payment meanwhile), then a merge; 'merge' has no such moment.
  */
-const device = (coins: Coins = new Set(), repeat: Repeat = 'merge') => {
+const device = (coins: Coins = new Coins(), repeat: Repeat = 'merge') => {
   const mem = new Map<string, string>();
-  const calls = { derive: 0, internalize: 0, decrypt: 0 };
+  const calls = { derive: 0, internalize: 0, decrypt: 0, record: 0 };
   let full = false;
   let down = false;
   let busy = repeat === 'busy';
@@ -174,20 +183,39 @@ const device = (coins: Coins = new Set(), repeat: Repeat = 'merge') => {
       calls.derive++;
       return { publicKey: STAMP.toPublicKey().toString() };
     },
-    internalizeAction: async (a: { tx: number[] }) => {
+    internalizeAction: async (a: { tx: number[]; labels?: string[] }) => {
       calls.internalize++;
       if (down) throw new Error('Failed to fetch');
       const txid = Transaction.fromAtomicBEEF(a.tx).id('hex');
-      if (coins.has(txid)) {
-        if (busy) {
-          busy = false;
-          throw new Error(
-            'The tx parameter must be target transaction of internalizeAction is undergoing active changes.',
-          );
-        }
+      const labels = coins.labels.get(txid) ?? new Set<string>();
+      for (const l of a.labels ?? []) labels.add(l.trim().toLowerCase());
+      if (busy) {
+        // Device sync writes this same payment (taken in on the account's other device) while the call runs.
+        busy = false;
+        coins.add(txid);
+        coins.labels.set(txid, labels);
+        throw new Error(
+          'The tx parameter must be target transaction of internalizeAction is undergoing active changes.',
+        );
       }
+      const isMerge = coins.has(txid);
       coins.add(txid);
-      return { accepted: true };
+      coins.labels.set(txid, labels);
+      return { accepted: true, isMerge, satoshis: isMerge ? 0 : 1 };
+    },
+    // The record: the transactions carrying a label, with all their labels (as the toolbox lists them).
+    listActions: async (a: { labels: string[] }) => {
+      calls.record++;
+      if (down) throw new Error('Failed to fetch');
+      const actions = [...coins.labels]
+        .filter(([, labels]) => a.labels.some((l) => labels.has(l)))
+        .map(([txid, labels]) => ({ txid, status: 'completed', labels: [...labels] }));
+      return { totalActions: actions.length, actions };
+    },
+    // The wallet's own spendable coins: the stamps taken in and not spent since.
+    listOutputs: async () => {
+      const outputs = [...coins].filter((t) => !chain.spent.has(`${t}_0`)).map((t) => ({ outpoint: `${t}.0` }));
+      return { totalOutputs: outputs.length, outputs };
     },
     decrypt: async () => {
       calls.decrypt++;
@@ -211,6 +239,12 @@ const device = (coins: Coins = new Set(), repeat: Repeat = 'merge') => {
   };
 };
 type Device = ReturnType<typeof device>;
+/** The account's record, as a device has it after syncing: the stamp was taken in for `use` on another device. */
+const recorded = (coins: Coins, p: Postage, use: string) => {
+  coins.add(p.txid);
+  const labels = coins.labels.get(p.txid) ?? new Set<string>();
+  coins.labels.set(p.txid, labels.add(`bmail stamp ${p.txid}.${p.outputIndex}`).add(usedLabel(use)));
+};
 
 const onDevice = (d: Device) => void ((globalThis as { localStorage?: unknown }).localStorage = d.ls);
 /** One refresh at `now` by the device's clock; `chainAt`: the newest block's time (the true time unless given). */
@@ -259,11 +293,12 @@ describe('bMail on several devices', () => {
     r.post(letter({ postage: await stamp(500) }));
     const a = device();
     await sync(a, r.relay);
-    expect(a.calls).toEqual({ derive: 1, internalize: 1, decrypt: 0 });
+    // The key is derived twice (the wallet's own look, then the full check) and the account's record read twice.
+    expect(a.calls).toEqual({ derive: 2, internalize: 1, decrypt: 0, record: 2 });
     await sync(a, r.relay, T0 + DAY);
     await sync(a, r.relay, T0 + 2 * DAY);
     expect(mail(a).length).toBe(1);
-    expect(a.calls).toEqual({ derive: 1, internalize: 1, decrypt: 0 });
+    expect(a.calls).toEqual({ derive: 2, internalize: 1, decrypt: 0, record: 2 });
     expect(r.acks).toEqual([]);
   });
 
@@ -291,9 +326,10 @@ describe('bMail on several devices', () => {
     for (const repeat of ['merge', 'busy'] as const) {
       const r = fakeRelay();
       r.post(letter({ postage: await stamp(700) }));
-      // Synced devices: B's wallet storage already holds the stamp A took in.
-      const coins: Coins = new Set();
-      const [a, b] = [device(coins), device(coins, repeat)];
+      // 'merge': synced devices, B's wallet already has A's record of the stamp for this letter, so B takes nothing
+      // in. 'busy': the devices sync while B is taking the stamp in; its second try merges.
+      const coins = new Coins();
+      const [a, b] = [device(coins), device(repeat === 'busy' ? new Coins() : coins, repeat)];
       await sync(a, r.relay);
       await sync(b, r.relay);
       const got = mail(b);
@@ -302,10 +338,10 @@ describe('bMail on several devices', () => {
       expect(shownSats(got[0])).toBe(700);
       expect(got[0].verifyNote).toBeUndefined();
       expect(mail(a)[0].verifiedSats).toBe(700);
-      expect(coins.size).toBe(1);
-      expect(b.calls.internalize).toBe(repeat === 'busy' ? 2 : 1);
+      expect(b.coins.size).toBe(1);
+      expect(b.calls.internalize).toBe(repeat === 'busy' ? 2 : 0);
       await sync(b, r.relay, T0 + DAY);
-      expect(b.calls.internalize).toBe(repeat === 'busy' ? 2 : 1);
+      expect(b.calls.internalize).toBe(repeat === 'busy' ? 2 : 0);
     }
   });
 
@@ -425,7 +461,7 @@ describe('bMail on several devices', () => {
     await sync(a, r.relay);
     await sync(a, r.relay, T0 + DAY);
     expect(mail(a)).toEqual([]);
-    expect(a.calls).toEqual({ derive: 0, internalize: 0, decrypt: 0 });
+    expect(a.calls).toEqual({ derive: 0, internalize: 0, decrypt: 0, record: 0 });
     expect(r.acks).toEqual([]);
     onDevice(a);
     expect([...loadRelaySeen(ME).keys()]).toEqual(junk.map(relayKey));
@@ -504,30 +540,32 @@ describe('bMail postage that could not be checked on arrival', () => {
   test('chain lookup down, then up: kept as unchecked, then paid once with the right amount, in the Inbox', async () => {
     const r = fakeRelay();
     r.post(letter({ postage: await stamp(700) }));
-    const coins: Coins = new Set();
+    const coins = new Coins();
     const [a, b] = [device(coins), device(coins)];
     a.setDown(true);
     await sync(a, r.relay);
     expect(mail(a)[0].verifiedSats).toBe(0);
-    expect(mail(a)[0].recheck).toEqual({ first: T0, last: T0, tries: 1 });
+    // The wallet found the stamp pays this account; the full check got no answer, which is not a try.
+    expect(mail(a)[0].recheck).toEqual({ first: T0, last: T0, tries: 0, mine: true });
     expect(mail(a)[0].verifyNote).toContain('not checked yet');
     expect(box(a)).toBe('requests');
     a.setDown(false);
     // Not before its time: the relay still lists the letter, the ledger skips it, and nothing is tried.
     await sync(a, r.relay, T0 + RECHECK_EVERY_MS - 1);
-    expect(a.calls.internalize).toBe(1);
+    expect(a.calls.record).toBe(1);
     await sync(a, r.relay, T0 + RECHECK_EVERY_MS);
     expect(mail(a).length).toBe(1);
     expect(mail(a)[0].verifiedSats).toBe(700);
     expect(mail(a)[0].recheck).toBeUndefined();
     expect(mail(a)[0].verifyNote).toBeUndefined();
     expect(box(a)).toBe('inbox');
-    expect(a.calls.internalize).toBe(2);
+    expect(a.calls.internalize).toBe(1);
     await sync(a, r.relay, T0 + DAY);
-    expect(a.calls.internalize).toBe(2);
-    // The other device takes the same stamp: still one coin, paid on both.
+    expect(a.calls.internalize).toBe(1);
+    // The other device (synced) finds the account's record for this letter: paid there too, one coin.
     await sync(b, r.relay, T0 + DAY);
     expect(mail(b)[0].verifiedSats).toBe(700);
+    expect(b.calls.internalize).toBe(0);
     expect(coins.size).toBe(1);
   });
 
@@ -562,15 +600,22 @@ describe('bMail postage that could not be checked on arrival', () => {
     a.setDown(true);
     await sync(a, r.relay);
     for (let t = 60_000; t <= 60 * 60_000; t += 60_000) await sync(a, r.relay, T0 + t);
-    expect(a.calls.internalize).toBe(1 + 6);
+    expect(a.calls.record).toBe(1 + 6);
     await sync(a, r.relay, T0 + RELAY_KEEP_MS);
-    const calls = a.calls.internalize;
+    const calls = a.calls.record;
     expect(mail(a)[0].recheck).toBeUndefined();
     expect(mail(a)[0].verifiedSats).toBe(0);
     expect(mail(a)[0].verifyNote).toBe('Postage could not be checked');
     a.setDown(false);
     await sync(a, r.relay, T0 + RELAY_KEEP_MS + DAY);
-    expect(a.calls.internalize).toBe(calls);
+    expect(a.calls.record).toBe(calls);
+    // Given up for want of an answer, not refused: opening the letter checks it again, and it is paid after all.
+    onDevice(a);
+    await recheckLetter(a.wallet, ME, mail(a)[0].id, T0 + RELAY_KEEP_MS + 2 * DAY, net);
+    expect(mail(a)[0].verifiedSats).toBe(700);
+    expect(mail(a)[0].stampOpen).toBeUndefined();
+    expect(mail(a)[0].verifyNote).toBeUndefined();
+    expect(a.coins.size).toBe(1);
   });
 
   test('20 letters a refresh, 5 of one sender, senders in turn: one sender cannot hold up another', async () => {
@@ -580,9 +625,9 @@ describe('bMail postage that could not be checked on arrival', () => {
     const b = device();
     b.setDown(true);
     await sync(b, r.relay);
-    expect(b.calls.internalize).toBe(RECHECK_MAX);
+    expect(b.calls.record).toBe(RECHECK_MAX);
     await sync(b, r.relay, T0 + 1000);
-    expect(b.calls.internalize).toBe(RECHECK_MAX + 5);
+    expect(b.calls.record).toBe(RECHECK_MAX + 5);
     b.setDown(false);
     await sync(b, r.relay, T0 + DAY);
     await sync(b, r.relay, T0 + 2 * DAY);
@@ -611,9 +656,9 @@ describe('bMail postage that could not be checked on arrival', () => {
     const got = mail(c).find((m) => m.id === honest.id);
     expect(got?.verifiedSats).toBe(700);
     expect(got?.recheck).toBeUndefined();
-    // The flood is worked off 5 letters a refresh (two refreshes so far), 12 tries each at most, then unpaid for good.
+    // The flood is worked off 5 letters a refresh (two refreshes so far).
     expect(c.calls.internalize).toBe(1);
-    expect(mail(c).filter((m) => m.from === EVE && (m.recheck?.tries ?? 0) > 0).length).toBe(2 * RECHECK_PER_SENDER);
+    expect(mail(c).filter((m) => m.from === EVE && (m.recheck?.last ?? 0) > 0).length).toBe(2 * RECHECK_PER_SENDER);
   });
 
   test('a wallet that cannot derive the key yet (locked) leaves the stamp unchecked, not bad', async () => {
@@ -634,20 +679,132 @@ describe('bMail postage that could not be checked on arrival', () => {
     expect(a.calls.internalize).toBe(1);
   });
 
-  test('a stamp is given up after 12 tries', async () => {
+  test('a two-hour outage of the lookups is not twelve tries: the stamp is paid when the network is back', async () => {
     const r = fakeRelay();
     r.post(letter({ postage: await stamp(700) }));
     const a = device();
     chain.down = true;
-    for (let i = 0; i < RECHECK_TRIES - 1; i++) await sync(a, r.relay, T0 + i * RECHECK_EVERY_MS);
-    expect(mail(a)[0].recheck?.tries).toBe(RECHECK_TRIES - 1);
-    await sync(a, r.relay, T0 + RECHECK_TRIES * RECHECK_EVERY_MS);
-    expect(mail(a)[0].recheck).toBeUndefined();
-    expect(mail(a)[0].verifiedSats).toBe(0);
+    for (let i = 0; i <= RECHECK_TRIES + 2; i++) await sync(a, r.relay, T0 + i * RECHECK_EVERY_MS);
+    // Tries the network could not be reached for do not count towards giving up.
+    expect(mail(a)[0].recheck?.tries).toBe(0);
+    expect(mail(a)[0].recheck?.last).toBe(T0 + (RECHECK_TRIES + 2) * RECHECK_EVERY_MS);
     chain.down = false;
     await sync(a, r.relay, T0 + DAY);
+    expect(mail(a)[0].verifiedSats).toBe(700);
+    expect(a.calls.internalize).toBe(1);
+  });
+
+  test('twenty letters a day from throwaway keys, each with a made-up stamp, do not hold up a paid letter', async () => {
+    const r = fakeRelay();
+    const a = device();
+    // Any transaction that parses, paying someone else: free to make, by the thousand.
+    const junk = await stamp(100, { to: PrivateKey.fromRandom() });
+    const keys = Array.from({ length: RECHECK_MAX }, () => PrivateKey.fromRandom().toPublicKey().toString());
+    const flood = () => keys.forEach((from) => r.post(letter({ from, postage: junk })));
+    flood();
+    const honest = letter({ postage: await stamp(700) });
+    r.post(honest);
+    await sync(a, r.relay);
+    const by = (id: string) => mail(a).find((m) => m.id === id);
+    expect(by(honest.id)?.verifiedSats).toBe(700);
+    // A stamp that does not pay this account is settled by the wallet alone: the network was asked about one stamp.
+    expect(chain.calls.seen).toBe(1);
+    for (let day = 1; day <= 3; day++) {
+      flood();
+      await sync(a, r.relay, T0 + day * DAY);
+    }
+    expect(chain.calls.seen).toBe(1);
+    const old = mail(a).filter((m) => m.id !== honest.id && m.at === T0 && !m.recheck);
+    expect(old.length).toBeGreaterThanOrEqual(RECHECK_MAX);
+    expect(old.every((m) => m.verifiedSats === 0 && m.verifyNote === 'Postage is not paid to you')).toBe(true);
+  });
+
+  test('a never-tried letter goes before tried ones, and contacts before strangers', async () => {
+    const r = fakeRelay();
+    const a = device();
+    onDevice(a);
+    updateMail(ME, (s) => ({ ...s, contacts: [EVE] }));
+    // 30 senders whose stamps the network gives no answer for (tried once, still waiting).
+    const stuck = new Set<string>();
+    for (let i = 0; i < RECHECK_MAX + 10; i++) {
+      const p = await stamp(100, { sent: false });
+      stuck.add(p.txid);
+      r.post(letter({ from: PrivateKey.fromRandom().toPublicKey().toString(), postage: p }));
+    }
+    const slow: StampNet = {
+      ...net,
+      broadcast: async (beef) => (stuck.has(txidOf(beef)) ? 'unclear' : net.broadcast(beef)),
+    };
+    for (const t of [0, 1000]) await (onDevice(a), syncMail(a.wallet, ME, r.relay, T0 + t, slow));
+    // Ten minutes on, all 30 are due again; a stranger's and a contact's new letters arrive behind them.
+    const [stranger, friend] = [
+      letter({ postage: await stamp(300) }),
+      letter({ from: EVE, postage: await stamp(500) }),
+    ];
+    r.post(stranger);
+    r.post(friend);
+    const tried: string[] = [];
+    const watch: StampNet = { ...slow, seen: async (txid) => (tried.push(txid), net.seen(txid)) };
+    onDevice(a);
+    await syncMail(a.wallet, ME, r.relay, T0 + RECHECK_EVERY_MS + 1000, watch);
+    expect(tried.slice(0, 2)).toEqual([friend.postage?.txid, stranger.postage?.txid] as string[]);
+    expect(
+      mail(a)
+        .filter((m) => m.verifiedSats > 0)
+        .map((m) => m.id)
+        .sort(),
+    ).toEqual([stranger.id, friend.id].sort());
+  });
+
+  test('the wallet on another account for the one call that reads the stamp: nothing is settled, then it is paid', async () => {
+    const r = fakeRelay();
+    r.post(letter({ postage: await stamp(700) }));
+    const a = device();
+    // Account A → B → A within one check: the key is derived with B's keys, and every "which account?" says A.
+    const w = a.wallet as unknown as { getPublicKey: (x: { identityKey?: boolean }) => Promise<unknown> };
+    const real = w.getPublicKey;
+    let onB = true;
+    w.getPublicKey = async (x) =>
+      x.identityKey || !onB ? real(x) : { publicKey: PrivateKey.fromRandom().toPublicKey().toString() };
+    await sync(a, r.relay);
     expect(mail(a)[0].verifiedSats).toBe(0);
-    expect(a.calls.internalize).toBe(0);
+    expect(mail(a)[0].recheck?.doubt).toBe(T0);
+    expect(mail(a)[0].verifyNote).toBe('Postage not checked yet');
+    onB = false;
+    await sync(a, r.relay, T0 + 60_000);
+    expect(mail(a)[0].recheck).toBeDefined();
+    await sync(a, r.relay, T0 + RECHECK_EVERY_MS);
+    expect(mail(a)[0].verifiedSats).toBe(700);
+    expect(a.coins.size).toBe(1);
+  });
+
+  test('a stamp that does not pay this account is unpaid for good once a second look agrees', async () => {
+    const r = fakeRelay();
+    r.post(letter({ postage: await stamp(700, { to: PrivateKey.fromRandom() }) }));
+    const a = device();
+    await sync(a, r.relay);
+    expect(mail(a)[0].recheck?.doubt).toBe(T0);
+    await sync(a, r.relay, T0 + RECHECK_EVERY_MS);
+    expect(mail(a)[0].recheck).toBeUndefined();
+    expect(mail(a)[0].stampOpen).toBeUndefined();
+    expect(mail(a)[0].verifyNote).toBe('Postage is not paid to you');
+    expect(chain.calls).toEqual({ seen: 0, broadcast: 0, spender: 0 });
+  });
+
+  test('a clock 31 days ahead for one refresh gives up on nothing: the newest block says otherwise', async () => {
+    const r = fakeRelay();
+    r.post(letter({ postage: await stamp(700) }));
+    const a = device();
+    chain.down = true;
+    await sync(a, r.relay);
+    await sync(a, r.relay, T0 + 31 * DAY, T0 + 60_000);
+    expect(mail(a)[0].recheck).toBeDefined();
+    // Nor when the wallet cannot tell the newest block's time.
+    await sync(a, r.relay, T0 + 32 * DAY, null);
+    expect(mail(a)[0].recheck).toBeDefined();
+    chain.down = false;
+    await sync(a, r.relay, T0 + DAY);
+    expect(mail(a)[0].verifiedSats).toBe(700);
   });
 
   test('"must be valid AtomicBEEF": headers that disagree settle it at once; no headers, it is tried again', async () => {
@@ -676,12 +833,13 @@ describe('bMail postage that could not be checked on arrival', () => {
     // The wallet cannot read headers either (its chain lookup is down): unknown, tried again, bounded.
     const b = device();
     refuse(b);
-    await sync(b, r.relay);
-    expect(mail(b)[0].recheck?.tries).toBe(1);
-    for (let d = 1; d <= 29; d++) await sync(b, r.relay, T0 + d * DAY);
-    expect(mail(b)[0].recheck).toBeUndefined();
+    await sync(b, r.relay, T0, null);
+    expect(mail(b)[0].recheck?.last).toBe(T0);
+    // No answer is not a try, and a wallet that cannot read block times gives up on nothing by age either.
+    for (let d = 1; d <= 40; d++) await sync(b, r.relay, T0 + d * DAY, null);
+    expect(mail(b)[0].recheck?.tries).toBe(0);
     expect(mail(b)[0].verifiedSats).toBe(0);
-    expect(b.calls.internalize).toBe(RECHECK_TRIES);
+    expect(b.calls.internalize).toBe(41);
   });
 });
 
@@ -731,9 +889,11 @@ describe('bMail: what counts as a paid stamp', () => {
     for (const c of copies) {
       expect(by(c.id)?.verifiedSats).toBe(0);
       expect(by(c.id)?.recheck).toBeUndefined();
+      expect(by(c.id)?.verifyNote).toBe(STAMP_USED);
     }
-    expect(by(copies[0].id)?.verifyNote).toBe('Postage is not paid to you');
     expect(a.coins.size).toBe(1);
+    // Eve's copies never reached the network or the wallet's coins: only the real letter's stamp was looked up.
+    expect(chain.calls.seen).toBe(1);
   });
 
   test('a stamp that is not checked yet reserves nothing: the letter found paid first keeps it', async () => {
@@ -766,7 +926,9 @@ describe('bMail: what counts as a paid stamp', () => {
     const a = device();
     onDevice(a);
     const peekSats = async () =>
-      (await peekMail(a.wallet, ME, { seen: loadRelaySeen(ME), stamps: loadStamps(ME) }, r.relay)).map((p) => p.sats);
+      (await peekMail(a.wallet, ME, { seen: loadRelaySeen(ME), stamps: usedStamps(loadMail(ME)) }, r.relay)).map(
+        (p) => p.sats,
+      );
     expect(await peekSats()).toEqual([700, 0, 0]);
     await sync(a, r.relay);
     r.post(letter({ postage: one }));
@@ -824,7 +986,7 @@ describe('bMail: what counts as a paid stamp', () => {
     expect(by(plain.id)?.verifiedSats).toBe(300);
   });
 
-  test('never sent: this wallet hands it to the network first; refused means unpaid and nothing taken in', async () => {
+  test('never sent: this wallet hands it to the network first; refused twice means unpaid, nothing taken in', async () => {
     const r = fakeRelay();
     const [fine, spentElsewhere] = [await stamp(700, { sent: false }), await stamp(900, { sent: false })];
     chain.refuses.add(spentElsewhere.txid);
@@ -833,13 +995,51 @@ describe('bMail: what counts as a paid stamp', () => {
     const a = device();
     await sync(a, r.relay);
     expect(mail(a).map((m) => m.verifiedSats)).toEqual([0, 700]);
+    // One refusal is not believed: the stamp waits for a second look.
+    expect(mail(a)[0].recheck?.doubt).toBe(T0);
+    expect(chain.calls.broadcast).toBe(2);
+    await sync(a, r.relay, T0 + RECHECK_EVERY_MS - 1);
+    expect(chain.calls.broadcast).toBe(2);
+    await sync(a, r.relay, T0 + RECHECK_EVERY_MS);
     expect(mail(a)[0].verifyNote).toContain('refused');
     expect(mail(a)[0].recheck).toBeUndefined();
-    expect(chain.calls.broadcast).toBe(2);
+    expect(mail(a)[0].stampOpen).toBeUndefined();
+    expect(chain.calls.broadcast).toBe(3);
     expect([...a.coins]).toEqual([fine.txid]);
     await sync(a, r.relay, T0 + DAY);
-    expect(chain.calls.broadcast).toBe(2);
+    expect(chain.calls.broadcast).toBe(3);
     expect(a.calls.internalize).toBe(1);
+  });
+
+  test('a refusal counts only if the network still does not have the stamp: sent by someone meanwhile, it is paid', async () => {
+    const r = fakeRelay();
+    const p = await stamp(700, { sent: false });
+    r.post(letter({ postage: p }));
+    const a = device();
+    // The broadcaster refuses it (it has it already, from the sender), and the lookups now show it.
+    const raced: StampNet = { ...net, broadcast: async () => (chain.has.add(p.txid), 'refused') };
+    onDevice(a);
+    await syncMail(a.wallet, ME, r.relay, T0, raced);
+    expect(mail(a)[0].verifiedSats).toBe(700);
+    expect(a.coins.size).toBe(1);
+  });
+
+  test('a refusal while a lookup cannot tell is never final: a mined stamp is paid when the lookup is back', async () => {
+    const r = fakeRelay();
+    const p = await stamp(700);
+    r.post(letter({ postage: p }));
+    const a = device();
+    // WhatsOnChain is rate-limited (it cannot tell); ARC refuses a transaction that was mined long ago.
+    let lookup: 'unclear' | 'seen' = 'unclear';
+    const limited: StampNet = { ...net, seen: async () => lookup, broadcast: async () => 'refused' };
+    onDevice(a);
+    for (let i = 0; i < 4; i++) await syncMail(a.wallet, ME, r.relay, T0 + i * RECHECK_EVERY_MS, limited);
+    expect(mail(a)[0].recheck).toMatchObject({ tries: 0 });
+    expect(mail(a)[0].recheck?.doubt).toBeUndefined();
+    lookup = 'seen';
+    onDevice(a);
+    await syncMail(a.wallet, ME, r.relay, T0 + DAY, limited);
+    expect(mail(a)[0].verifiedSats).toBe(700);
   });
 
   test('a BEEF that leaves out the coins the stamp spends is unpaid at once: no network, no wallet', async () => {
@@ -866,24 +1066,102 @@ describe('bMail: what counts as a paid stamp', () => {
     await sync(a, r.relay);
     expect(a.calls.internalize).toBe(0);
     expect(mail(a)[0].verifiedSats).toBe(0);
-    expect(mail(a)[0].recheck?.tries).toBe(1);
+    expect(mail(a)[0].recheck).toMatchObject({ last: T0, tries: 0 });
     chain.down = false;
     await sync(a, r.relay, T0 + RECHECK_EVERY_MS);
     expect(mail(a)[0].verifiedSats).toBe(700);
     expect(a.calls.internalize).toBe(1);
   });
 
-  test('already spent by another device of the account: a paid letter, and no coin added on this device', async () => {
+  test("spent already: paid only by the account's own record for this letter, and no coin added here", async () => {
     const r = fakeRelay();
     const p = await stamp(700);
+    const env = letter({ postage: p });
+    r.post(env);
+    // Device A took the stamp in for this letter and spent the coin. Device B has not synced with A yet.
     chain.spent.set(`${p.txid}_0`, 'ab'.repeat(32));
-    r.post(letter({ postage: p }));
     const b = device();
     await sync(b, r.relay);
+    expect(mail(b)[0].verifiedSats).toBe(0);
+    expect(mail(b)[0].verifyNote).toBe(STAMP_NO_RECORD);
+    expect(mail(b)[0].recheck).toMatchObject({ tries: 1 });
+    // The devices sync: B's wallet now has A's record.
+    recorded(b.coins, p, `letter ${env.id}`);
+    await sync(b, r.relay, T0 + RECHECK_EVERY_MS);
     expect(mail(b)[0].verifiedSats).toBe(700);
     expect(mail(b)[0].verifyNote).toBeUndefined();
     expect(b.calls.internalize).toBe(0);
-    expect(b.coins.size).toBe(0);
+  });
+
+  test('a spent stamp from an old letter pays for no new letter, on any device, with or without the record', async () => {
+    const p = await stamp(5000);
+    const first = letter({ postage: p });
+    chain.spent.set(`${p.txid}_0`, 'f'.repeat(64));
+    const again = letter({ postage: p });
+    // A device that has synced the account's record (the stamp was taken in for the first letter): used.
+    const r = fakeRelay();
+    r.post(again);
+    const synced = device();
+    recorded(synced.coins, p, `letter ${first.id}`);
+    await sync(synced, r.relay);
+    expect(mail(synced)[0].verifiedSats).toBe(0);
+    expect(mail(synced)[0].verifyNote).toBe(STAMP_USED);
+    expect(mail(synced)[0].recheck).toBeUndefined();
+    // A device with no record at all (new phone, cleared data, not synced): never paid on the spot, and given up on
+    // after RECHECK_TRIES answers; whichever of two such letters is listed first makes no difference.
+    const r2 = fakeRelay();
+    r2.post(again);
+    r2.post(letter({ postage: p }));
+    const fresh = device();
+    for (let i = 0; i < RECHECK_TRIES; i++) {
+      await sync(fresh, r2.relay, T0 + i * RECHECK_EVERY_MS);
+      expect(mail(fresh).map((m) => m.verifiedSats)).toEqual([0, 0]);
+    }
+    expect(mail(fresh).every((m) => !m.recheck && m.verifyNote === 'Postage could not be checked')).toBe(true);
+    expect(fresh.calls.internalize).toBe(0);
+    expect(fresh.coins.size).toBe(0);
+    // Opening such a letter checks again, to the same end, at most every ten minutes.
+    const checks = fresh.calls.record;
+    onDevice(fresh);
+    for (const t of [DAY, DAY + 1000]) await recheckLetter(fresh.wallet, ME, again.id, T0 + t, net);
+    expect(fresh.calls.record).toBe(checks + 1);
+    expect(mail(fresh).every((m) => m.verifiedSats === 0)).toBe(true);
+  });
+
+  test('a coin the wallet held before the letter, with no record of what it paid for, pays for no letter', async () => {
+    const r = fakeRelay();
+    const p = await stamp(700);
+    r.post(letter({ postage: p }));
+    const a = device();
+    // Taken in by a wallet from before the record was kept (or for something else), and still unspent.
+    a.coins.add(p.txid);
+    await sync(a, r.relay);
+    expect(mail(a)[0].verifiedSats).toBe(0);
+    expect(mail(a)[0].verifyNote).toBe(STAMP_HELD);
+    expect(mail(a)[0].recheck).toBeUndefined();
+    expect(a.calls.internalize).toBe(0);
+  });
+
+  test('two letters showing one stamp, checked on two devices that had not synced: the same one wins on both', async () => {
+    const p = await stamp(700);
+    const [x, y] = [letter({ postage: p }), letter({ postage: p })];
+    const coins = new Coins();
+    // Each device took the stamp in for a different letter; then they synced: the record holds both uses.
+    recorded(coins, p, `letter ${y.id}`);
+    recorded(coins, p, `letter ${x.id}`);
+    for (const order of [
+      [x, y],
+      [y, x],
+    ]) {
+      const r = fakeRelay();
+      for (const e of order) r.post(e);
+      const d = device(coins);
+      await sync(d, r.relay);
+      const by = (id: string) => mail(d).find((m) => m.id === id);
+      expect(by(x.id)?.verifiedSats).toBe(700);
+      expect(by(y.id)?.verifiedSats).toBe(0);
+      expect(by(y.id)?.verifyNote).toBe(STAMP_USED);
+    }
   });
 
   test('no wallet error text reads as paid: "Key already exists" leaves the stamp unchecked', async () => {
@@ -895,7 +1173,7 @@ describe('bMail: what counts as a paid stamp', () => {
     };
     await sync(a, r.relay);
     expect(mail(a)[0].verifiedSats).toBe(0);
-    expect(mail(a)[0].recheck?.tries).toBe(1);
+    expect(mail(a)[0].recheck).toMatchObject({ last: T0, tries: 0 });
   });
 });
 
@@ -1005,6 +1283,45 @@ describe('bMail: flood, clock and load', () => {
     await sync(a, r.relay, T0 + DAY);
     expect(mail(a)[0].id).toBe(fresh.id);
     expect(await peek(a, r.relay)).toEqual([]);
+  });
+
+  test("a clock 40 days behind at first sight, and no time from the relay: the block's time is used, nothing clears early", async () => {
+    const r = fakeRelay();
+    r.post(letter());
+    const [a, b] = [device(), device()];
+    await sync(a, r.relay, T0 - 40 * DAY, T0); // stale clock at first sight; the chain knows better
+    await sync(a, r.relay, T0 - 40 * DAY + 60_000, T0); // still stale a minute later
+    await sync(a, r.relay, T0 + 120_000); // corrected
+    await sync(a, r.relay, T0 + DAY + 180_000);
+    await sync(a, r.relay, T0 + 3 * DAY);
+    expect(r.acks).toEqual([]);
+    await sync(b, r.relay, T0 + 3 * DAY);
+    expect(mail(b).length).toBe(1);
+  });
+
+  test("a store full of the user's own mail keeps a new stamped letter until its stamp is checked, and it is paid", async () => {
+    const a = device();
+    onDevice(a);
+    const own: Received[] = Array.from({ length: RECEIVED_MAX }, () => {
+      const env = letter();
+      return { id: env.id, from: ALICE, at: T0, verifiedSats: 0, read: true, env };
+    });
+    saveMail(ME, { ...loadMail(ME), received: own });
+    const r = fakeRelay();
+    const p = await stamp(900);
+    const [paid, plain] = [letter({ from: EVE, postage: p }), letter({ from: EVE })];
+    r.post(paid);
+    r.post(plain);
+    await sync(a, r.relay);
+    const by = (id: string) => mail(a).find((m) => m.id === id);
+    expect(mail(a).length).toBe(RECEIVED_MAX);
+    expect(by(plain.id)).toBeDefined();
+    expect(by(paid.id)?.verifiedSats).toBe(900);
+    expect(a.coins.has(p.txid)).toBe(true);
+  });
+
+  test('the notifier peeks a large box less often', () => {
+    expect([0, 20, 21, 200, 201, 5000].map(peekGapMs)).toEqual([0, 0, 300_000, 300_000, 900_000, 900_000]);
   });
 
   test('a flood of 4,000 letters: no churn, a real new letter is taken, a binned letter stays binned', async () => {

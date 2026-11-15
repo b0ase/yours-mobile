@@ -16,7 +16,22 @@ export type Received = MailMeta & {
    * The postage could not be checked yet (wallet or chain lookup unavailable): first and last try, unix ms. The letter
    * counts as unstamped meanwhile; client.ts recheckPostage tries again and settles it (paid, or unpaid for good).
    */
-  recheck?: { first: number; last: number; tries: number };
+  recheck?: {
+    first: number;
+    /** The last check against the network (0: none yet). */
+    last: number;
+    /** Checks the wallet and the network answered without settling it. */
+    tries: number;
+    /** The wallet has found that the stamp pays this account (no network asked yet). */
+    mine?: true;
+    /** When a check first said "unpaid" on an answer that one look does not settle (client.ts StampCheck.confirm). */
+    doubt?: number;
+  };
+  /**
+   * The stamp was given up on without a refusal (no answer in time): unix ms of the last look. The letter is unpaid,
+   * and checked again when it is opened (client.ts recheckLetter).
+   */
+  stampOpen?: number;
   read?: boolean;
   /** Decrypted on open; kept locally so it opens instantly next time. */
   opened?: Sealed;
@@ -103,25 +118,29 @@ export const subscribeMail = (l: () => void) => {
 
 /** At most this many received letters are stored. */
 export const RECEIVED_MAX = 1000;
-/** This many of the newest letters from senders the user has no dealings with are kept as any other mail is. */
+/** This many of the newest letters from senders the user has no dealings with are kept as any other mail is, */
 export const STRANGERS_KEPT = 200;
+/** and this many of the newest letters whose stamp is still being checked. */
+export const UNCHECKED_KEPT = 200;
 /**
  * Keep the store within RECEIVED_MAX without losing the user's own mail to a flood. What goes first, oldest first:
  *  1. unread, unpaid letters from senders the user has no dealings with (not a contact, not trusted), neither pinned
  *     nor archived, beyond the newest STRANGERS_KEPT of them: what a flood is made of;
  *  2. deleted letters (the Bin, erased tombstones);
- *  3. letters whose stamp is not checked yet (dropping one would leave its coin out of the wallet);
- *  4. everything else, a stranger's new letter included: a full store still shows new mail and drops its oldest.
+ *  3. letters whose stamp is not checked yet, beyond the newest UNCHECKED_KEPT of them (a flood of made-up stamps);
+ *  4. everything else: a full store still shows new mail and drops its oldest. A letter whose stamp is being
+ *     checked is here (money on its way is not dropped before unpaid mail), and so is a stranger's new letter.
  * A dropped letter cannot come back as new: the relay ledger still knows its relay message (loadRelaySeen).
  */
 export const trimReceived = (s: MailState): Received[] => {
   let over = s.received.length - RECEIVED_MAX;
   if (over <= 0) return s.received;
   let strangers = 0;
+  let unchecked = 0;
   const rank = new Map<Received, number>();
   for (const r of s.received) {
     const mine = r.read || r.pinned || r.archived || r.verifiedSats > 0 || r.replyCredit;
-    if (r.recheck) rank.set(r, 2);
+    if (r.recheck) rank.set(r, ++unchecked > UNCHECKED_KEPT ? 2 : 3);
     else if (r.deleted) rank.set(r, 1);
     else if (mine || s.contacts.includes(r.from) || (s.trusted ?? []).includes(r.from)) rank.set(r, 3);
     else rank.set(r, ++strangers > STRANGERS_KEPT ? 0 : 3);
@@ -330,33 +349,17 @@ export const saveRelaySeen = (me: string, seen: RelaySeen, st: Store | null = ls
   }
 };
 
-/** At most this many used stamps are remembered (the newest are kept). */
-export const STAMPS_MAX = 5000;
 /**
- * Stamps already used: stamp outpoint ("txid.vout") → the id of the first letter that carried it. A stamp pays for
- * one letter; any other letter showing the same stamp is unstamped. Kept apart from the relay ledger and the mail
- * store, so it outlives a letter being cleared from the relay or dropped from a full store.
+ * Stamps that paid for a letter stored on this device: stamp outpoint ("txid.vout") → that letter's id. A shortcut
+ * only (a later letter showing the same stamp is unstamped without asking anyone): the record that counts is the
+ * account's, in the wallet (client.ts stampRecord).
  */
-const stampsKey = (me: string) => `bw-bmail-stamps:${me}`;
-export const loadStamps = (me: string, st: Store | null = ls()): Map<string, string> => {
-  try {
-    const j = JSON.parse(st?.getItem(stampsKey(me)) ?? '[]') as unknown;
-    const rows = Array.isArray(j) ? j : [];
-    return new Map(
-      rows.filter(
-        (x): x is [string, string] => Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'string',
-      ),
-    );
-  } catch {
-    return new Map();
-  }
-};
-export const saveStamps = (me: string, stamps: Map<string, string>, st: Store | null = ls()) => {
-  try {
-    st?.setItem(stampsKey(me), JSON.stringify([...stamps].slice(-STAMPS_MAX)));
-  } catch {
-    /* ignore */
-  }
+export const usedStamps = (s: MailState): Map<string, string> => {
+  const used = new Map<string, string>();
+  for (const r of [...s.received].reverse())
+    if (r.env.postage && r.verifiedSats > 0 && !used.has(stampOutpoint(r.env.postage)))
+      used.set(stampOutpoint(r.env.postage), r.id);
+  return used;
 };
 /** The outpoint a letter's stamp claims. */
 export const stampOutpoint = (p: { txid: string; outputIndex: number }) => `${p.txid}.${p.outputIndex}`;

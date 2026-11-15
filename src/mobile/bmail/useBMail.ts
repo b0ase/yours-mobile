@@ -5,7 +5,7 @@ import { walletReady } from '../../utils/walletReady';
 import { isFriend as isCallFriend } from '../calls/friends';
 import { loadMyProfile, saveMyProfile } from '../calls/bphone';
 import { usdToSats, useBsvUsd } from '../money/money';
-import { myKey, openMail, sendMail, syncMail, type SendArgs } from './client';
+import { myKey, openMail, recheckLetter, sendMail, syncMail, type SendArgs } from './client';
 import { split } from './route';
 import { cachedExchangeRate } from '../../utils/wallet';
 import {
@@ -153,6 +153,8 @@ export const useBMail = () => {
   const open = useCallback(
     async (r: Received) => {
       const sealed = r.opened ?? (await openMail(wallet, r.env));
+      // A stamp that was given up on for want of an answer gets another check now (in the background).
+      if (r.stampOpen !== undefined) void recheckLetter(wallet, me, r.id).catch(() => undefined);
       updateMail(me, (s) => ({
         ...s,
         received: s.received.map((x) => (x.id === r.id ? { ...x, opened: sealed, read: true } : x)),

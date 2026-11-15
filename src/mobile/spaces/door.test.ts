@@ -3,7 +3,8 @@ import { P2PKH, PrivateKey, Transaction, Utils, type WalletInterface } from '@bs
 import * as bmailClient from '../bmail/client';
 import type { StampNet } from '../bmail/client';
 import { tscToMerklePath } from '../bmail/delivery';
-import { loadStamps, saveStamps, stampOutpoint } from '../bmail/store';
+import { encodeEnvelope, type Envelope } from '../bmail/envelope';
+import { loadMail } from '../bmail/store';
 import { keepGlobals } from '../../testing/stubGlobals';
 
 // bun runs every test file in one process: put back the globals this file swaps so they can't leak into the next.
@@ -45,8 +46,9 @@ mock.module('../bmail/client', () => ({
   bmailHost: () => 'https://box.test',
   verifyPostage: async (...a: Parameters<typeof bmailClient.verifyPostage>) => {
     if (realCheck) return realClient.verifyPostage(...a);
-    if (a[2] ?? true) internalized++;
-    return { sats: paidSats };
+    if (!(a[2] ?? true)) return { sats: paidSats };
+    internalized++;
+    return { sats: paidSats, fresh: true };
   },
 }));
 // Put both modules back when this file is done: bMail's own tests fetch through the real verifyPostage.
@@ -204,7 +206,7 @@ describe('runDoor', () => {
   });
 });
 
-describe('runDoor: the payment and the network (the real postage check)', () => {
+describe('runDoor: the payment, the network and the account record (the real postage check)', () => {
   /** The key the host's wallet derives for the payment. */
   const PAID = PrivateKey.fromRandom();
   const payment = async (sats = 20_000) => {
@@ -225,23 +227,15 @@ describe('runDoor: the payment and the network (the real postage check)', () => 
       derivationSuffix: 's',
     };
   };
-  const host = () => {
-    const coins: string[] = [];
-    const wallet = {
-      getPublicKey: async () => ({ publicKey: PAID.toPublicKey().toString() }),
-      internalizeAction: async (a: { tx: number[] }) => {
-        coins.push(Transaction.fromAtomicBEEF(a.tx).id('hex'));
-        return { accepted: true };
-      },
-    } as unknown as WalletInterface;
-    return { wallet, coins };
-  };
-  /** The network: which transactions it has, which it refuses when handed them, and whether it answers. */
+  /** The network: which transactions it has, which it refuses when handed them, what is spent, whether it answers. */
   const network = (o: { has?: string[]; refuses?: string[]; down?: boolean } = {}) => {
     const has = new Set(o.has ?? []);
-    const state = { down: !!o.down, broadcasts: 0 };
+    const state = { down: !!o.down, broadcasts: 0, spent: new Set<string>(), gate: null as Promise<void> | null };
     const net: StampNet = {
-      seen: async (txid) => !state.down && has.has(txid),
+      seen: async (txid) => {
+        if (state.gate) await state.gate;
+        return state.down ? 'unclear' : has.has(txid) ? 'seen' : 'missing';
+      },
       broadcast: async (beefHex) => {
         state.broadcasts++;
         if (state.down) return 'unclear';
@@ -250,78 +244,241 @@ describe('runDoor: the payment and the network (the real postage check)', () => 
         has.add(txid);
         return 'seen';
       },
-      spender: async () => {
+      spender: async (outpoint) => {
         if (state.down) throw new Error('woc 500');
-        return null;
+        return state.spent.has(outpoint) ? 'f'.repeat(64) : null;
       },
     };
     return { net, state };
   };
-  const open = (wallet: WalletInterface, net: StampNet, tickets: string[] = []) =>
-    runDoor(wallet, {
+  /**
+   * The host's account: the payments its wallet took in and the labels it keeps on each (the record of what a
+   * payment paid for). Two host devices given the same account have synced.
+   */
+  type Account = Map<string, Set<string>>;
+  const host = (account: Account = new Map(), spent: Set<string> = new Set()) => {
+    const mem = new Map<string, string>();
+    let locked = 0;
+    const wallet = {
+      getPublicKey: async (a: { identityKey?: boolean }) => {
+        if (!a.identityKey && locked-- > 0) throw new Error('Wallet is locked');
+        return { publicKey: a.identityKey ? HOST : PAID.toPublicKey().toString() };
+      },
+      internalizeAction: async (a: { tx: number[]; labels?: string[] }) => {
+        const txid = Transaction.fromAtomicBEEF(a.tx).id('hex');
+        const isMerge = account.has(txid);
+        const labels = account.get(txid) ?? new Set<string>();
+        for (const l of a.labels ?? []) labels.add(l.trim().toLowerCase());
+        account.set(txid, labels);
+        return { accepted: true, isMerge, satoshis: isMerge ? 0 : 1 };
+      },
+      listActions: async (a: { labels: string[] }) => ({
+        actions: [...account]
+          .filter(([, labels]) => a.labels.some((l) => labels.has(l)))
+          .map(([txid, labels]) => ({ txid, status: 'completed', labels: [...labels] })),
+      }),
+      listOutputs: async () => {
+        const outputs = [...account.keys()].filter((t) => !spent.has(`${t}_0`)).map((t) => ({ outpoint: `${t}.0` }));
+        return { totalOutputs: outputs.length, outputs };
+      },
+    } as unknown as WalletInterface;
+    const use = () =>
+      void ((globalThis as { localStorage?: unknown }).localStorage = {
+        getItem: (k: string) => mem.get(k) ?? null,
+        setItem: (k: string, v: string) => void mem.set(k, v),
+        removeItem: (k: string) => void mem.delete(k),
+      });
+    return { wallet, account, use, lock: (n: number) => void (locked = n) };
+  };
+  type Host = ReturnType<typeof host>;
+  let tickets: string[] = [];
+  const open = (h: Host, net: StampNet, now = NOW) => {
+    h.use();
+    return runDoor(h.wallet, {
       hostKey: HOST,
       ticker: 'PENNY1',
       priceSats: 20_000,
-      now: () => NOW,
+      now: () => now,
       net,
-      sendTicket: async () => {
-        tickets.push('x');
+      sendTicket: async ({ payer }) => {
+        tickets.push(payer);
         return 'd'.repeat(64);
       },
     });
+  };
   const replies = () => sent.filter((x) => x.messageBox === 'spacedoor_reply').map((x) => JSON.parse(x.body));
-
-  test('a payment that was never sent and the network refuses buys no ticket and is not taken in', async () => {
+  let ids = 0;
+  const ask = (p: unknown, at = NOW, from = PAYER) =>
+    req({ id: (++ids).toString(16).padStart(32, '0'), payment: p, at, from });
+  beforeEach(() => {
     realCheck = true;
+    tickets = [];
+  });
+  afterAll(() => {
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+  });
+
+  test('a payment the network has: taken in under a record for this request, one ticket', async () => {
     const p = await payment();
-    inbox = [msg('m1', req({ payment: p }))];
+    const r1 = ask(p);
+    inbox = [msg('m1', r1)];
+    const h = host();
+    const { net } = network({ has: [p.txid] });
+    expect((await open(h, net)).admitted).toBe(1);
+    expect(tickets.length).toBe(1);
+    expect([...(h.account.get(p.txid) ?? [])]).toEqual([`bmail stamp ${p.txid}.0`, `bmail paid door ${r1.id}`]);
+    expect(replies()).toMatchObject([{ ok: true }]);
+    expect(acked).toEqual(['m1']);
+  });
+
+  test('never sent and refused by the network: no ticket, nothing taken in; refused once a second look agrees', async () => {
+    const p = await payment();
+    inbox = [msg('m1', ask(p))];
     const h = host();
     const { net, state } = network({ refuses: [p.txid] });
-    const tickets: string[] = [];
-    const r = await open(h.wallet, net, tickets);
-    expect(r).toMatchObject({ admitted: 0, refused: 1 });
-    expect(tickets).toEqual([]);
-    expect(h.coins).toEqual([]);
+    expect(await open(h, net)).toMatchObject({ admitted: 0, refused: 0 });
+    expect(acked).toEqual([]);
+    // Not looked at again before its time.
+    await open(h, net, NOW + door.DOOR_CONFIRM_MS - 1);
     expect(state.broadcasts).toBe(1);
+    expect(await open(h, net, NOW + door.DOOR_CONFIRM_MS)).toMatchObject({ admitted: 0, refused: 1 });
+    expect(state.broadcasts).toBe(2);
+    expect(tickets).toEqual([]);
+    expect(h.account.size).toBe(0);
     expect(replies()).toMatchObject([{ ok: false }]);
-    expect(loadLedger(HOST)[p.txid].status).toBe('refused');
     expect(acked).toEqual(['m1']);
   });
 
   test('no answer from the network: nothing taken, sent or recorded; once it has the payment, one ticket', async () => {
-    realCheck = true;
     const p = await payment();
-    inbox = [msg('m1', req({ payment: p }))];
+    inbox = [msg('m1', ask(p))];
     const h = host();
     const { net, state } = network({ down: true });
-    const tickets: string[] = [];
-    const r = await open(h.wallet, net, tickets);
-    expect(r).toMatchObject({ admitted: 0, refused: 0 });
-    expect(h.coins).toEqual([]);
+    expect(await open(h, net)).toMatchObject({ admitted: 0, refused: 0 });
+    expect(h.account.size).toBe(0);
     expect(loadLedger(HOST)).toEqual({});
     expect(acked).toEqual([]);
     state.down = false;
-    expect((await open(h.wallet, net, tickets)).admitted).toBe(1);
+    expect((await open(h, net)).admitted).toBe(1);
     expect(tickets.length).toBe(1);
-    expect(h.coins).toEqual([p.txid]);
     expect(acked).toEqual(['m1']);
   });
 
-  test('a payment that paid for a bMail letter buys no ticket; a door payment is recorded as used', async () => {
-    realCheck = true;
-    const [stampOfALetter, fresh] = [await payment(), await payment()];
-    saveStamps(HOST, new Map([[stampOutpoint(stampOfALetter), 'a-letter']]));
-    inbox = [msg('m1', req({ payment: stampOfALetter })), msg('m2', req({ id: 'cd'.repeat(16), payment: fresh }))];
+  test("yesterday's payment, asked again at the host's other device: no second ticket, synced or not", async () => {
+    const p = await payment();
+    const phone = host();
+    const { net, state } = network({ has: [p.txid] });
+    inbox = [msg('m1', ask(p))];
+    expect((await open(phone, net)).admitted).toBe(1);
+    state.spent.add(`${p.txid}_0`); // the host spends the coin
+    const later = NOW + 86_400_000;
+    // The desktop has synced the wallet (the same account record), and none of the phone's app data.
+    const desktop = host(phone.account, state.spent);
+    inbox.push(msg('m2', ask(p, later)));
+    expect(await open(desktop, net, later)).toMatchObject({ admitted: 0, refused: 1 });
+    // A device that has not synced has no record of a spent payment: it waits, and never sends a ticket for it.
+    const stale = host(new Map(), state.spent);
+    inbox.push(msg('m3', ask(p, later)));
+    expect(await open(stale, net, later)).toMatchObject({ admitted: 0, refused: 0 });
+    expect(acked).toEqual(['m1', 'm2']);
+    expect(tickets.length).toBe(1);
+  });
+
+  test('the very same request sent again to the other device: paid, but the ticket is left for the host to check', async () => {
+    const p = await payment();
+    const again = ask(p);
+    const phone = host();
+    const { net } = network({ has: [p.txid] });
+    inbox = [msg('m1', again)];
+    expect((await open(phone, net)).admitted).toBe(1);
+    const desktop = host(phone.account);
+    inbox.push(msg('m2', again));
+    const r = await open(desktop, net);
+    expect(r).toMatchObject({ admitted: 0, check: 1 });
+    expect(tickets.length).toBe(1);
+    desktop.use();
+    expect(needsHandCheck(loadLedger(HOST), 'PENNY1').length).toBe(1);
+  });
+
+  test('a payment that paid for a bMail letter buys no ticket, spent or not; nor one already in the wallet', async () => {
+    const [stampOfALetter, spentStamp, held] = [await payment(), await payment(), await payment()];
+    const { net, state } = network({ has: [stampOfALetter.txid, spentStamp.txid, held.txid] });
+    state.spent.add(`${spentStamp.txid}_0`);
+    const h = host(new Map(), state.spent);
+    for (const p of [stampOfALetter, spentStamp])
+      h.account.set(p.txid, new Set([`bmail stamp ${p.txid}.0`, bmailClient.usedLabel(`letter ${'ab'.repeat(16)}`)]));
+    h.account.set(held.txid, new Set());
+    inbox = [msg('m1', ask(stampOfALetter)), msg('m2', ask(spentStamp)), msg('m3', ask(held))];
+    expect(await open(h, net)).toMatchObject({ admitted: 0, refused: 3 });
+    expect(tickets).toEqual([]);
+  });
+
+  test('the same payment as a door request and a bMail stamp, checked at the same moment: the ticket, no paid letter', async () => {
+    const p = await payment();
     const h = host();
-    const { net } = network({ has: [stampOfALetter.txid, fresh.txid] });
-    const tickets: string[] = [];
-    const r = await open(h.wallet, net, tickets);
+    const { net, state } = network({ has: [p.txid] });
+    inbox = [msg('m1', ask(p))];
+    const env = {
+      t: 'bmail',
+      v: 1,
+      id: 'ab'.repeat(16),
+      from: PAYER,
+      to: HOST,
+      at: NOW,
+      sealed: 'c2VhbGVk',
+      postage: p,
+    };
+    const relay = {
+      list: async () => [{ messageId: 'r1', sender: PAYER, body: encodeEnvelope(env as Envelope) }],
+      ack: async () => undefined,
+    };
+    let release!: () => void;
+    state.gate = new Promise<void>((ok) => (release = ok));
+    const atDoor = open(h, net);
+    const mail = realClient.syncMail(h.wallet, HOST, relay, NOW, net);
+    await new Promise((ok) => setTimeout(ok, 20));
+    state.gate = null;
+    release();
+    const [r] = await Promise.all([atDoor, mail]);
+    h.use();
+    const letter = loadMail(HOST).received[0];
+    expect(r.admitted).toBe(1);
+    expect(letter.verifiedSats).toBe(0);
+    expect(letter.verifyNote).toBe(bmailClient.STAMP_USED);
+  });
+
+  test('a wallet that is locked for a moment refuses nothing and records nothing: the request is paid next pass', async () => {
+    const p = await payment();
+    inbox = [msg('m1', ask(p))];
+    const h = host();
+    const { net } = network({ has: [p.txid] });
+    h.lock(1);
+    expect(await open(h, net)).toMatchObject({ admitted: 0, refused: 0 });
+    expect(loadLedger(HOST)).toEqual({});
+    expect(acked).toEqual([]);
+    expect(sent).toEqual([]);
+    expect((await open(h, net)).admitted).toBe(1);
+    expect(tickets.length).toBe(1);
+  });
+
+  test("a junk request that names someone's payment does not use that payment up", async () => {
+    const p = await payment();
+    const h = host();
+    const { net } = network({ has: [p.txid] });
+    const EVE = K('e');
+    // Eve knows the txid (it is on chain) and sends a request with a made-up proof before the payer's is read.
+    inbox = [msg('e1', ask({ ...p, beef: '00' }, NOW, EVE), EVE), msg('good', ask(p))];
+    const r = await open(h, net);
     expect(r).toMatchObject({ admitted: 1, refused: 1 });
-    expect(h.coins).toEqual([fresh.txid]);
-    expect(loadStamps(HOST).get(stampOutpoint(fresh))).toBe(`door:${'cd'.repeat(16)}`);
+    expect(tickets).toEqual([PAYER]);
   });
 
   test('the door boxes are listed with message-box payments off', async () => {
+    realCheck = false;
     await run();
     await door.readDoorReply({} as never, 'ab'.repeat(16));
     expect(listed.map((x) => [x.messageBox, x.acceptPayments])).toEqual([

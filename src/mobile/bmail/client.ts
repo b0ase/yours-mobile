@@ -15,7 +15,7 @@ import {
   type ReleaseOpts,
   type UnsentWallet,
 } from '../../services/unsentGuard';
-import { Beef, P2PKH, PublicKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
+import { Beef, Hash, P2PKH, PublicKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import {
   BMAIL_BOX,
   BMAIL_PROTOCOL,
@@ -37,19 +37,18 @@ import {
   isTrustedSender,
   loadMail,
   loadRelaySeen,
-  loadStamps,
   relayKey,
   saveRelaySeen,
-  saveStamps,
   stampOutpoint,
   updateMail,
+  usedStamps,
   type Received,
   type RelaySeen,
   type Sent,
 } from './store';
 import { replyCreditOk } from './route';
 import { isPermanentInternalizeError } from '../../services/internalizeBackoff';
-import { ARC_ACCEPTED, chainLookups } from '../../services/unsentGuard';
+import { ARC_ACCEPTED, releaseLookups } from '../../services/unsentGuard';
 import { wocSpendLookup } from '../../services/spendCheck';
 import { deadline } from '../../utils/abortTimeout';
 import {
@@ -394,10 +393,15 @@ export const sendMail = async (wallet: WalletInterface, a: SendArgs, deps: SendD
   };
 };
 
+/** What a network lookup says of a transaction: it has it, it does not, or it could not tell. */
+export type Sighting = 'seen' | 'missing' | 'unclear';
 /** What bMail asks the network about a stamp (tests pass a fake). */
 export type StampNet = {
-  /** The network has this transaction, in a block or in the mempool. False: not known, or nobody could tell. */
-  seen: (txid: string) => Promise<boolean>;
+  /**
+   * Does the network have this transaction (in a block or in the mempool)? 'missing' only when every lookup answered
+   * and none has it; 'unclear' when one could not tell. (true and false are read as 'seen' and 'missing'.)
+   */
+  seen: (txid: string) => Promise<Sighting | boolean>;
   /** Hand the stamp to the network: 'seen' (accepted, or already there), 'refused' (double spend, invalid), 'unclear'. */
   broadcast: (beefHex: string) => Promise<'seen' | 'refused' | 'unclear'>;
   /** Who spent the output ("txid_vout"): a txid, or null when unspent. Throws when it cannot tell. */
@@ -407,12 +411,16 @@ export type StampNet = {
 const BROADCAST_TIMEOUT_MS = 15_000;
 /**
  * The network, as the rest of the wallet reads it (services/unsentGuard.ts): seen = WhatsOnChain has the transaction
- * or ARC reports it accepted by the network (SEEN_ON_NETWORK, MINED…); ARC merely holding it is not seen. A stamp
- * nobody has seen is handed to ARC, as the sender's own fallback does: seen when ARC reports it accepted, refused
- * when ARC rejects it (REJECTED, DOUBLE_SPEND…, or its 46x "this transaction is not valid" answers).
+ * or ARC reports it accepted by the network (SEEN_ON_NETWORK, MINED…); ARC merely holding it is not seen. Missing =
+ * WhatsOnChain answers 404 and ARC has no record of it or refused it; a lookup that fails or is rate-limited makes
+ * the answer unclear. A stamp nobody has seen is handed to ARC, as the sender's own fallback does: seen when ARC
+ * reports it accepted, refused when ARC rejects it (REJECTED, DOUBLE_SPEND…, or its 46x "not valid" answers).
  */
 export const stampNet = (f: typeof fetch = (...a) => fetch(...a)): StampNet => ({
-  seen: async (txid) => (await Promise.all(chainLookups(f).map((look) => look(txid)))).includes('seen'),
+  seen: async (txid) => {
+    const said = await Promise.all(releaseLookups(f).map((look) => look(txid)));
+    return said.includes('seen') ? 'seen' : said.every((s) => s === 'missing') ? 'missing' : 'unclear';
+  },
   broadcast: async (beefHex) => {
     const d = deadline(BROADCAST_TIMEOUT_MS);
     try {
@@ -428,10 +436,31 @@ export const stampNet = (f: typeof fetch = (...a) => fetch(...a)): StampNet => (
   spender: wocSpendLookup(undefined, f),
 });
 
-export type StampCheck = { sats: number; note?: string; pending?: boolean };
+/**
+ * The answer of one postage check.
+ *  - sats > 0: paid. `fresh`: this very check took the coin into the wallet (it was not there before).
+ *  - `pending`: nothing was learnt, or what was learnt may still change; recheckPostage tries again. `answered`: the
+ *    wallet and the network did answer (the try counts towards giving up); without it they could not be reached.
+ *  - `confirm`: unpaid, on an answer that one look does not settle (the key did not match, the network refused it):
+ *    final only when a later check says the same.
+ *  - none of these, at 0 sats: unpaid for good.
+ */
+export type StampCheck = {
+  sats: number;
+  note?: string;
+  pending?: boolean;
+  answered?: boolean;
+  confirm?: boolean;
+  fresh?: boolean;
+};
 /** Shown on a letter whose stamp another letter used first. */
 export const STAMP_USED = 'This stamp was already used for another letter';
+/** Shown when the wallet held the stamp's coin before this letter, with no record of what it paid for. */
+export const STAMP_HELD = 'This payment was already in your wallet before this letter';
+/** Shown while a spent stamp waits for the account's own record of it (another device took it in). */
+export const STAMP_NO_RECORD = 'Postage not checked yet: this wallet has no record of the stamp so far';
 const NOT_CHECKED = 'Postage not checked yet';
+const GAVE_UP = 'Postage could not be checked';
 
 /**
  * What the envelope alone tells about its stamp (no wallet, no network): the BEEF holds the claimed transaction, its
@@ -464,32 +493,22 @@ const proofsHold = (wallet: WalletInterface, beefHex: string): Promise<boolean> 
     currentHeight: async () => (await wallet.getHeight({})).height,
   });
 
+const later = (why: unknown, answered = false): StampCheck => ({
+  sats: 0,
+  note: `${NOT_CHECKED}: ${why instanceof Error ? why.message : String(why)}`.slice(0, 160),
+  pending: true,
+  ...(answered ? { answered } : {}),
+});
+
 /**
- * Check the postage and take it in. A stamp counts as paid only when all of this holds, in this order:
- *  1. the envelope's own claims (readStamp), and the output pays the BRC-29 key only I can derive from the sender's;
- *  2. the BEEF is complete (every transaction proven or with its inputs in the BEEF);
- *  3. the network has the transaction (`net.seen`), or takes it when this wallet hands it over (`net.broadcast`).
- *     A stamp that was signed and never sent, or whose coins were spent elsewhere, stops here: nothing is taken in;
- *  4. the output is unspent, and then the wallet takes it in (internalizeAction, which checks the BEEF's proofs).
- *     An output already spent was spent by this account (only its key can), on another device: the letter is paid
- *     and no coin is added here.
- * Returns the verified sats. `pending`: a step could not be done (wallet locked or busy, network or chain lookup
- * down), which says nothing about the stamp; recheckPostage tries again. Anything else at 0 sats is final.
- * `internalize` false (the notifier's peek): step 1 only, read-only.
+ * What the wallet alone can tell of a stamp, no network: the envelope's own claims (readStamp), the output pays the
+ * BRC-29 key only this account can derive from the sender's, and the BEEF is complete (every transaction proven or
+ * with its inputs in the BEEF). A key that does not match is `confirm`: the wallet may have been on another account
+ * for that one call.
  */
-export const verifyPostage = async (
-  wallet: WalletInterface,
-  env: Envelope,
-  internalize = true,
-  net: StampNet = stampNet(),
-): Promise<StampCheck> => {
+const stampPaysMe = async (wallet: WalletInterface, env: Envelope): Promise<StampCheck> => {
   const p = env.postage;
   if (!p) return { sats: 0 };
-  const later = (why: unknown): StampCheck => ({
-    sats: 0,
-    note: `${NOT_CHECKED}: ${why instanceof Error ? why.message : String(why)}`.slice(0, 160),
-    pending: true,
-  });
   const stamp = readStamp(env);
   if (typeof stamp === 'string') return { sats: 0, note: stamp };
   try {
@@ -500,27 +519,111 @@ export const verifyPostage = async (
       forSelf: true,
     });
     const want = new P2PKH().lock(PublicKey.fromString(publicKey).toHash()).toHex();
-    if (stamp.script !== want) return { sats: 0, note: 'Postage is not paid to you' };
+    if (stamp.script !== want) return { sats: 0, note: 'Postage is not paid to you', confirm: true };
   } catch (e) {
     // The wallet could not derive the key (locked, busy): nothing was learnt about the stamp.
     return later(e);
   }
-  if (!internalize) return { sats: stamp.sats };
-  if (!Beef.fromBinary(Utils.toArray(p.beef, 'hex')).isValid()) return { sats: 0, note: 'Postage proof is incomplete' };
+  let whole = false;
   try {
-    if (!(await net.seen(p.txid))) {
+    whole = Beef.fromBinary(Utils.toArray(p.beef, 'hex')).isValid();
+  } catch {
+    /* not a BEEF the SDK can walk */
+  }
+  return whole ? { sats: stamp.sats } : { sats: 0, note: 'Postage proof is incomplete' };
+};
+
+/**
+ * The account's own record of what a stamp paid for. It lives in the wallet, so every device of the account has it
+ * once the devices have synced: the stamp's transaction carries the label stampLabel(outpoint) and one usedLabel per
+ * letter or door request it was taken in for.
+ */
+const stampLabel = (p: Pick<Postage, 'txid' | 'outputIndex'>) => `bmail stamp ${p.txid}.${p.outputIndex}`.toLowerCase();
+/** `use`: what the stamp pays for, "letter <id>" or "door <request id>". */
+export const usedLabel = (use: string) => {
+  const u = use.trim().toLowerCase();
+  const plain = /^[a-z0-9 ]{1,200}$/.test(u) ? u : Utils.toHex(Hash.sha256(Utils.toArray(u, 'utf8')));
+  return `bmail paid ${plain}`;
+};
+/**
+ * What the wallet has recorded for a stamp: `known`, it holds the stamp's transaction under the stamp's label;
+ * `uses`, what it was taken in for. More than one use is a race (two checks at the same moment, or two devices that
+ * had not synced): the first in order is the one that counts, on every device alike.
+ */
+const stampRecord = async (wallet: WalletInterface, p: Postage): Promise<{ known: boolean; uses: string[] }> => {
+  const { actions } = await wallet.listActions({ labels: [stampLabel(p)], includeLabels: true, limit: 10 });
+  const mine = actions.filter((a) => a.txid === p.txid && a.status !== 'failed');
+  const uses = mine.flatMap((a) => (a.labels ?? []).filter((l) => l.startsWith('bmail paid ')));
+  return { known: mine.length > 0, uses: [...new Set(uses)].sort() };
+};
+/** Is the outpoint one of the wallet's own spendable coins already? */
+const walletHolds = async (wallet: WalletInterface, p: Postage): Promise<boolean> => {
+  const outpoint = `${p.txid}.${p.outputIndex}`;
+  for (let offset = 0; ; ) {
+    const page = await wallet.listOutputs({ basket: 'default', limit: 1000, offset });
+    if (page.outputs.some((o) => o.outpoint === outpoint)) return true;
+    offset += page.outputs.length;
+    if (!page.outputs.length || offset >= page.totalOutputs) return false;
+  }
+};
+
+/**
+ * Check the postage and take it in. A stamp counts as paid only when all of this holds, in this order:
+ *  1. what the wallet alone can tell (stampPaysMe);
+ *  2. the network has the transaction (`net.seen`), or takes it when this wallet hands it over (`net.broadcast`).
+ *     A stamp that was signed and never sent, or whose coins were spent elsewhere, stops here: nothing is taken in.
+ *     A refusal is believed only when the lookups said, before and after it, that the network does not have the
+ *     transaction, and then only on a second check (`confirm`);
+ *  3. the account's own record (stampRecord) does not show the stamp taken in for anything else. Taken in for this
+ *     very letter (`use`) already, on this or another device: paid, nothing more to do;
+ *  4. with no record: the output is unspent and not already one of the wallet's coins, and the wallet takes it in
+ *     (internalizeAction, which checks the BEEF's proofs) under the labels that make the record. An output that is
+ *     spent, with no record, was not taken in for this letter as far as this wallet knows: never paid on the spot.
+ *     Another device of the account may have taken it in and not synced yet, so it is asked again later
+ *     (`answered`), and given up on if the record never comes. A coin the wallet held before, with no record, paid
+ *     for something else.
+ * Returns the verified sats. `internalize` false (the notifier's peek): step 1 only, read-only.
+ */
+export const verifyPostage = async (
+  wallet: WalletInterface,
+  env: Envelope,
+  internalize = true,
+  net: StampNet = stampNet(),
+  use = `letter ${env.id}`,
+): Promise<StampCheck> => {
+  const p = env.postage;
+  if (!p) return { sats: 0 };
+  const local = await stampPaysMe(wallet, env);
+  if (!internalize || local.sats <= 0) return local;
+  const sats = local.sats;
+  const sighting = async (): Promise<Sighting> => {
+    const s = await net.seen(p.txid);
+    return s === true ? 'seen' : s === false ? 'missing' : s;
+  };
+  const mine = usedLabel(use);
+  try {
+    const before = await sighting();
+    if (before !== 'seen') {
       const sent = await net.broadcast(p.beef);
-      // A refusal counts only if the network still does not have it (someone else may have sent it meanwhile).
-      if (sent === 'refused' && !(await net.seen(p.txid)))
-        return { sats: 0, note: 'The network refused this stamp (already spent, or not valid)' };
-      if (sent !== 'seen' && !(await net.seen(p.txid))) return later('the network does not have the stamp yet');
+      // Someone else may have sent it meanwhile: a second look, whatever the broadcaster said.
+      const after = sent === 'seen' ? 'seen' : await sighting();
+      if (after !== 'seen') {
+        if (sent === 'refused' && before === 'missing' && after === 'missing')
+          return { sats: 0, note: 'The network refused this stamp (already spent, or not valid)', confirm: true };
+        return later('the network does not have the stamp yet');
+      }
     }
-    // Spent already: by this account, on another device. Paid; the coin is not this device's to add.
-    if (await net.spender(`${p.txid}_${p.outputIndex}`)) return { sats: stamp.sats };
+    const record = await stampRecord(wallet, p);
+    if (record.uses.length) return record.uses[0] === mine ? { sats } : { sats: 0, note: STAMP_USED };
+    // Spent, and this wallet has no record of taking it in: not paid by it here. Another device may yet sync one.
+    if (await net.spender(`${p.txid}_${p.outputIndex}`))
+      return { sats: 0, note: STAMP_NO_RECORD, pending: true, answered: true };
+    if (record.known || (await walletHolds(wallet, p))) return { sats: 0, note: STAMP_HELD };
   } catch (e) {
     return later(e);
   }
-  const take = () =>
+  // isMerge, satoshis: what the wallet toolbox adds to the BRC-100 answer.
+  const take = (): Promise<{ accepted: boolean; isMerge?: boolean; satoshis?: number }> =>
     wallet.internalizeAction({
       tx: Utils.toArray(p.beef, 'hex'),
       outputs: [
@@ -535,13 +638,17 @@ export const verifyPostage = async (
         },
       ],
       description: 'bMail postage received',
+      labels: [stampLabel(p), mine],
     });
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  let fresh = true;
   try {
     // "…undergoing active changes": device sync wrote this same payment (taken in on another device of this wallet)
-    // while the call ran. A second try finds it stored and merges. A payment this wallet already holds is merged by
-    // the wallet without an error and without counting it twice, so no error text is read as "paid".
-    await take().catch((e) => (/active changes/i.test(message(e)) ? take() : Promise.reject(e)));
+    // while the call ran. A second try finds it stored and merges. No error text is read as "paid".
+    const took = await take().catch((e) => (/active changes/i.test(message(e)) ? take() : Promise.reject(e)));
+    // The toolbox says when the transaction was in the wallet already and nothing was added: another check of this
+    // same stamp took it in a moment ago.
+    fresh = !(took.isMerge === true && took.satoshis === 0);
   } catch (e) {
     // The wallet holds the transaction as failed/invalid: not good.
     if (isPermanentInternalizeError(e)) return { sats: 0, note: `Postage not accepted: ${message(e)}`.slice(0, 160) };
@@ -550,7 +657,15 @@ export const verifyPostage = async (
       return { sats: 0, note: 'Postage proof is not valid' };
     return later(e);
   }
-  return { sats: stamp.sats };
+  // Two checks at the same moment (a letter and a door request showing one payment) both get this far: the record
+  // now holds both, and only the first in order is paid.
+  try {
+    const now = await stampRecord(wallet, p);
+    if (now.uses.length && now.uses[0] !== mine) return { sats: 0, note: STAMP_USED };
+  } catch (e) {
+    return later(e);
+  }
+  return fresh ? { sats, fresh } : { sats };
 };
 
 /**
@@ -574,35 +689,97 @@ const sameAccount = (wallet: WalletInterface, me: string) =>
 
 /** A stamp that could not be checked is tried again at most this often, */
 export const RECHECK_EVERY_MS = 10 * 60 * 1000;
-/** at most this many times, and for RELAY_KEEP_MS from the first try; then it is unpaid for good. */
+/**
+ * given up on after this many tries that the wallet and the network answered (tries they could not be reached for do
+ * not count), or RELAY_KEEP_MS after the first, by this device's clock and the chain's.
+ */
 export const RECHECK_TRIES = 12;
-/** At most this many letters are checked in one refresh, */
+/** At most this many letters are checked against the network in one refresh, */
 export const RECHECK_MAX = 20;
 /** and this many of one sender's, so one sender's backlog cannot hold up another sender's letter. */
 export const RECHECK_PER_SENDER = 5;
+/** At most this many stamps are read by the wallet alone (no network) in one refresh. */
+export const RECHECK_LOCAL_MAX = 200;
 
-/** The letters to check now: senders take turns (longest-waiting sender first, its longest-waiting letter first). */
-const recheckQueue = (received: Received[], now: number): Received[] => {
+/** Has RECHECK_EVERY_MS passed since `t` (0: never; a time ahead of the clock was a wrong clock's)? */
+const waited = (t: number | undefined, now: number) => !t || t > now || now - t >= RECHECK_EVERY_MS;
+
+/**
+ * The letters to check against the network now: only stamps the wallet has found to pay this account
+ * (`recheck.mine`), so a stamp that pays someone else never costs a network check. Senders take turns: senders the
+ * user deals with first, then the sender whose letter has waited longest, a letter never tried before any tried one.
+ */
+const recheckQueue = (received: Received[], now: number, trusted: (from: string) => boolean): Received[] => {
   const bySender = new Map<string, Received[]>();
   for (const r of received) {
-    if (!r.recheck || (r.recheck.tries > 0 && now - r.recheck.last < RECHECK_EVERY_MS)) continue;
+    if (!r.recheck?.mine || !waited(r.recheck.last, now)) continue;
     bySender.set(r.from, [...(bySender.get(r.from) ?? []), r]);
   }
-  const waited = (r: Received) => r.recheck?.last ?? 0;
+  // Never tried (last 0): the one first seen longest ago goes first. Then the one whose last try is longest ago.
+  const order = (a: Received, z: Received) =>
+    (a.recheck?.last ?? 0) - (z.recheck?.last ?? 0) || (a.recheck?.first ?? 0) - (z.recheck?.first ?? 0);
   const lines = [...bySender.values()]
-    .map((l) => l.sort((a, z) => waited(a) - waited(z)).slice(0, RECHECK_PER_SENDER))
-    .sort((a, z) => waited(a[0]) - waited(z[0]));
+    .map((l) => l.sort(order).slice(0, RECHECK_PER_SENDER))
+    .sort((a, z) => Number(trusted(z[0].from)) - Number(trusted(a[0].from)) || order(a[0], z[0]));
   const out: Received[] = [];
   for (let turn = 0; turn < RECHECK_PER_SENDER; turn++) for (const l of lines) if (l[turn]) out.push(l[turn]);
   return out.slice(0, RECHECK_MAX);
 };
 
+/** Write one check's answer to the stored letter (see StampCheck). */
+const settleStamp = (
+  me: string,
+  id: string,
+  v: StampCheck,
+  now: number,
+  o: { local?: boolean; giveUp?: boolean } = {},
+) =>
+  updateMail(me, (s) => ({
+    ...s,
+    received: s.received.map((x) => {
+      if (x.id !== id || !x.recheck) return x;
+      const { recheck, stampOpen: _open, ...rest } = x;
+      const first = recheck.first;
+      // Given up, not refused: the letter can be checked again when it is opened (recheckLetter).
+      if (o.giveUp) return { ...rest, verifiedSats: 0, verifyNote: GAVE_UP, stampOpen: now };
+      if (v.sats > 0) {
+        // The wallet alone found it pays this account: the network check is still to come.
+        if (o.local) return { ...x, recheck: { first, last: recheck.last, tries: recheck.tries, mine: true as const } };
+        return { ...rest, verifiedSats: v.sats, verifyNote: v.note };
+      }
+      if (v.pending) {
+        const tries = recheck.tries + (v.answered ? 1 : 0);
+        if (tries >= RECHECK_TRIES) return { ...rest, verifiedSats: 0, verifyNote: GAVE_UP, stampOpen: now };
+        const { doubt: _doubt, ...kept } = recheck;
+        return { ...x, verifyNote: v.note, recheck: { ...kept, first, last: o.local ? recheck.last : now, tries } };
+      }
+      // One look does not settle it: unpaid for good only when a check at least RECHECK_EVERY_MS later agrees.
+      if (v.confirm && !(recheck.doubt !== undefined && waited(recheck.doubt, now)))
+        return {
+          ...x,
+          verifyNote: NOT_CHECKED,
+          recheck: {
+            ...recheck,
+            first,
+            last: o.local ? recheck.last : now,
+            doubt: Math.min(recheck.doubt ?? now, now),
+          },
+        };
+      return { ...rest, verifiedSats: 0, verifyNote: v.note };
+    }),
+  }));
+
 /**
  * Stored letters whose postage is not checked yet (`recheck`; every stamped letter starts so): check from the stored
- * envelope (the relay ledger plays no part) and settle each one. Paid: the stamp is recorded as used by this letter
- * and verifiedSats is set, once, so it routes and shows as any paid letter. Of several letters showing one stamp, the
- * first found paid keeps it and the others are unstamped. Not good, or still unchecked after RECHECK_TRIES tries or RELAY_KEEP_MS: unpaid for good.
- * Still unknown: tried again on a later refresh.
+ * envelope (the relay ledger plays no part) and settle each one.
+ *  - First what the wallet alone can tell (stampPaysMe), for up to RECHECK_LOCAL_MAX letters: a stamp that does not
+ *    pay this account never reaches the network queue.
+ *  - Then the network and the account's record (verifyPostage), for the letters of recheckQueue. Paid: verifiedSats
+ *    is set, once, so the letter routes and shows as any paid letter. Of several letters showing one stamp, the one
+ *    the wallet took it in for keeps it and the others are unstamped.
+ *  - Given up on (RECHECK_TRIES answered tries, or RELAY_KEEP_MS by this device's clock and by the chain's, and
+ *    never before a first network try): unpaid, and checked again when the letter is opened (recheckLetter).
+ * Nothing is written for a check during which the wallet was on another account.
  */
 export const recheckPostage = async (
   wallet: WalletInterface,
@@ -610,41 +787,77 @@ export const recheckPostage = async (
   now = Date.now(),
   net: StampNet = stampNet(),
 ): Promise<void> => {
-  const settle = (id: string, v: StampCheck) =>
-    updateMail(me, (s) => ({
-      ...s,
-      received: s.received.map((x) => {
-        if (x.id !== id || !x.recheck) return x;
-        const { recheck, ...rest } = x;
-        const tries = (recheck.tries ?? 0) + 1;
-        if (v.pending && tries < RECHECK_TRIES)
-          return { ...x, verifyNote: v.note, recheck: { first: Math.min(recheck.first, now), last: now, tries } };
-        return { ...rest, verifiedSats: v.sats, verifyNote: v.pending ? 'Postage could not be checked' : v.note };
-      }),
-    }));
-  for (const r of loadMail(me).received)
-    if (r.recheck && now - Math.min(r.recheck.first, now) >= RELAY_KEEP_MS)
-      settle(r.id, { sats: 0, note: 'Postage could not be checked' });
-  // One stamp, one letter: a letter whose stamp has paid for another is unstamped, with nothing asked of anyone.
-  const usedElsewhere = (r: Received, stamps = loadStamps(me)) =>
-    !!r.env.postage && (stamps.get(stampOutpoint(r.env.postage)) ?? r.id) !== r.id;
+  const settle = (id: string, v: StampCheck, o?: { local?: boolean; giveUp?: boolean }) =>
+    settleStamp(me, id, v, now, o);
+  // One stamp, one letter: a letter whose stamp has paid for another stored letter is unstamped, nothing asked.
   const settleUsed = () => {
-    const stamps = loadStamps(me);
-    for (const r of loadMail(me).received)
-      if (r.recheck && usedElsewhere(r, stamps)) settle(r.id, { sats: 0, note: STAMP_USED });
+    const s = loadMail(me);
+    const used = usedStamps(s);
+    for (const r of s.received)
+      if (r.recheck && r.env.postage && (used.get(stampOutpoint(r.env.postage)) ?? r.id) !== r.id)
+        settle(r.id, { sats: 0, note: STAMP_USED });
   };
   settleUsed();
-  for (const r of recheckQueue(loadMail(me).received, now)) {
-    // The wallet may have switched account since the refresh began: its coins and this mail are then not one account's.
+  // Too old by this device's clock: given up only if the newest block's time says so too, and never a stamp that
+  // pays this account before its first network check.
+  const old = (r: Received, t: number) =>
+    !!r.recheck && (r.recheck.last > 0 || !r.recheck.mine) && t - r.recheck.first >= RELAY_KEEP_MS;
+  if (loadMail(me).received.some((r) => old(r, now))) {
+    const chainNow = await chainTime(wallet).catch(() => undefined);
+    if (chainNow !== undefined)
+      for (const r of loadMail(me).received)
+        if (old(r, now) && old(r, chainNow)) settle(r.id, { sats: 0 }, { giveUp: true });
+  }
+  const s0 = loadMail(me);
+  const trusted = (from: string) => isTrustedSender(s0, from);
+  const unread = s0.received
+    .filter((r) => r.recheck && !r.recheck.mine && waited(r.recheck.doubt, now))
+    .sort((a, z) => Number(trusted(z.from)) - Number(trusted(a.from)));
+  // The wallet may have switched account since the refresh began: its keys and this mail are then not one account's.
+  if (!(await sameAccount(wallet, me))) return;
+  for (const r of unread.slice(0, RECHECK_LOCAL_MAX)) {
+    const v = await stampPaysMe(wallet, r.env);
     if (!(await sameAccount(wallet, me))) return;
-    if (usedElsewhere(r)) continue;
+    settle(r.id, v, { local: true });
+  }
+  for (const r of recheckQueue(loadMail(me).received, now, trusted)) {
+    if (!(await sameAccount(wallet, me))) return;
+    const used = usedStamps(loadMail(me));
+    if (r.env.postage && (used.get(stampOutpoint(r.env.postage)) ?? r.id) !== r.id) continue;
     const v = await verifyPostage(wallet, r.env, true, net);
     if (!(await sameAccount(wallet, me))) return;
-    // The stamp is this letter's from here on: recorded before the letter shows as paid.
-    if (v.sats > 0 && r.env.postage) saveStamps(me, loadStamps(me).set(stampOutpoint(r.env.postage), r.id));
     settle(r.id, v);
   }
   settleUsed();
+};
+
+/**
+ * A letter whose stamp was given up on (`stampOpen`: no answer in time, never a refusal) is checked once more, at
+ * most every RECHECK_EVERY_MS: the bMail screen calls this when the letter is opened. Paid: it shows and routes as
+ * any paid letter from then on.
+ */
+export const recheckLetter = async (
+  wallet: WalletInterface,
+  me: string,
+  id: string,
+  now = Date.now(),
+  net: StampNet = stampNet(),
+): Promise<void> => {
+  const r = loadMail(me).received.find((x) => x.id === id);
+  if (!r?.env.postage || r.stampOpen === undefined || r.verifiedSats > 0) return;
+  if (!waited(r.stampOpen, now)) return;
+  if ((usedStamps(loadMail(me)).get(stampOutpoint(r.env.postage)) ?? id) !== id) return;
+  if (!(await sameAccount(wallet, me))) return;
+  const v = await verifyPostage(wallet, r.env, true, net);
+  if (!(await sameAccount(wallet, me))) return;
+  updateMail(me, (s) => ({
+    ...s,
+    received: s.received.map((x) => {
+      if (x.id !== id || x.stampOpen === undefined) return x;
+      const { stampOpen: _open, ...rest } = x;
+      return v.sats > 0 ? { ...rest, verifiedSats: v.sats, verifyNote: undefined } : { ...x, stampOpen: now };
+    }),
+  }));
 };
 
 /** At most this many new letters are taken in by one fetch; the rest wait for the next. */
@@ -697,7 +910,8 @@ const pickNew = <T extends { env: Envelope; at: number }>(
  * stored it: the user's other devices fetch the same box. `ack` holds only what is due:
  *  (a) any listed message, stored or refused, that arrived RELAY_KEEP_MS ago (arrivedAt), once two refreshes at
  *      least RELAY_CONFIRM_MS apart have both found it so. A clock that jumps ahead for one refresh, or a first
- *      sight recorded by a clock that was behind, therefore clears nothing at once; a mark made by a clock that has
+ *      sight by a clock that was behind (recorded at the newest block's time when that is later: `ctx.chainNow`),
+ *      therefore clears nothing at once; a mark made by a clock that has
  *      since gone back is dropped. The envelope's `at` is the sender's claim and plays no part. These are also listed
  *      in `aged` (relay id → when it arrived): syncMail clears them only if the newest block's time agrees;
  *  (b) a letter this device has erased (30 days in the Bin; `ctx.erased`, by relay id).
@@ -726,6 +940,8 @@ export const fetchMail = async (
     trusted?: (from: string) => boolean;
     blocked?: (from: string) => boolean;
     now?: number;
+    /** The time of the newest block (syncMail: chainTime), asked for only when a first sight is recorded. */
+    chainNow?: () => Promise<number>;
   },
   relay: MailRelay,
 ): Promise<{ items: Received[]; ack: string[]; aged: Map<string, number>; seen: RelaySeen }> => {
@@ -736,6 +952,10 @@ export const fetchMail = async (
   const items: Received[] = [];
   const ack: string[] = [];
   const aged = new Map<string, number>();
+  // The time a first sight is recorded at: this device's clock, or the newest block's when that is later (a clock
+  // that is behind would otherwise make the message look 30 days old as soon as it is put right).
+  let latest: number | undefined;
+  const sighted = async () => (latest ??= Math.max(now, (await ctx.chainNow?.().catch(() => undefined)) ?? 0));
   const seen: RelaySeen = new Map();
   const cands: { m: RelayMessage; key: string; env: Envelope; at: number }[] = [];
   for (const m of msgs) {
@@ -743,8 +963,8 @@ export const fetchMail = async (
     const had = ctx.seen?.get(key);
     if (had) {
       // Dealt with on an earlier fetch: nothing is decoded or checked again.
-      // A first-seen time ahead of the clock (the clock was wrong then) starts again from now.
-      const first = Math.min(had.first, now);
+      // A first-seen time ahead of the clock and of the chain (the clock was wrong then) starts again from now.
+      const first = had.first > now ? Math.min(had.first, await sighted()) : had.first;
       const arrived = arrivedAt(first, m.created_at, now);
       const old = now - arrived >= RELAY_KEEP_MS;
       const due = !old ? 0 : had.due && had.due <= now ? had.due : now;
@@ -760,12 +980,12 @@ export const fetchMail = async (
     // Not bMail, or the relay-authenticated sender is not who the envelope claims: refuse it. Or stored already
     // under another relay id (sent twice, or this device lost its ledger). Either way: remembered, not taken.
     if (!env || env.from !== String(m.sender).toLowerCase() || env.to !== ctx.me || known.has(env.id))
-      seen.set(key, { first: now, due: 0 });
+      seen.set(key, { first: await sighted(), due: 0 });
     else cands.push({ m, key, env, at: typeof m.created_at === 'string' ? Date.parse(m.created_at) : NaN });
   }
   const rank = (env: Envelope) => (ctx.blocked?.(env.from) ? 3 : ctx.trusted?.(env.from) ? 0 : env.postage ? 1 : 2);
   for (const { m, key, env } of pickNew(cands, rank, TAKE_MAX)) {
-    seen.set(key, { first: now, due: 0 });
+    seen.set(key, { first: await sighted(), due: 0 });
     // The same letter twice in one listing.
     if (known.has(env.id)) continue;
     known.add(env.id);
@@ -794,7 +1014,7 @@ export const fetchMail = async (
       env,
       relayId: m.messageId,
       verifyNote: note,
-      ...(unchecked ? { recheck: { first: now, last: 0, tries: 0 } } : {}),
+      ...(unchecked ? { recheck: { first: await sighted(), last: 0, tries: 0 } } : {}),
     });
   }
   return { items, ack, aged, seen };
@@ -816,11 +1036,6 @@ export const syncMail = async (
 ): Promise<void> => {
   if (!(await sameAccount(wallet, me))) return;
   const s = loadMail(me);
-  // Used stamps: the kept record, and every stored letter whose stamp counted (letters from before the record).
-  const used = loadStamps(me);
-  for (const r of [...s.received].reverse())
-    if (r.env.postage && r.verifiedSats > 0 && !used.has(stampOutpoint(r.env.postage)))
-      used.set(stampOutpoint(r.env.postage), r.id);
   const { items, ack, aged, seen } = await fetchMail(
     {
       me,
@@ -830,12 +1045,13 @@ export const syncMail = async (
       creditsUsed: new Set(
         s.received.filter((r) => r.replyCredit && r.env.inReplyTo).map((r) => r.env.inReplyTo as string),
       ),
-      stamps: used,
+      stamps: usedStamps(s),
       seen: loadRelaySeen(me),
       erased: new Set(s.received.flatMap((r) => (r.erased && r.relayId ? [r.relayId] : []))),
       trusted: (from) => isTrustedSender(s, from),
       blocked: (from) => (s.blocked ?? []).includes(from),
       now,
+      chainNow: () => chainTime(wallet),
     },
     relay,
   );
@@ -846,7 +1062,6 @@ export const syncMail = async (
   const have = new Set(loadMail(me).received.map((r) => r.id));
   for (const i of items) if (!have.has(i.id) && i.relayId) seen.delete(relayKey(i.relayId));
   saveRelaySeen(me, seen);
-  saveStamps(me, used);
   await recheckPostage(wallet, me, now, net);
   if (!(await sameAccount(wallet, me))) return;
   // The 30 days by this device's clock must also have passed by the chain's: without that answer nothing aged goes.
@@ -857,6 +1072,14 @@ export const syncMail = async (
   });
   await relay.ack(due).catch(() => undefined);
 };
+
+/**
+ * How long the notifier waits before its next peek, by how many messages the last one listed. The relay has no
+ * "new since" or ids-only listing (message box client 2.5.4: offset, limit, page size), so every peek downloads the
+ * whole box, bodies included, and mail stays in it for 30 days: a large box is peeked less often.
+ */
+export const peekGapMs = (listed: number): number =>
+  listed <= 20 ? 0 : listed <= 200 ? 5 * 60 * 1000 : 15 * 60 * 1000;
 
 /** The notifier reads at most this many stamps in one peek. */
 export const PEEK_CHECKS = 50;
@@ -869,10 +1092,17 @@ export const PEEK_CHECKS = 50;
 export const peekMail = async (
   wallet: WalletInterface,
   me: string,
-  skip: { known?: ReadonlySet<string>; seen?: RelaySeen; stamps?: ReadonlyMap<string, string> } = {},
+  skip: {
+    known?: ReadonlySet<string>;
+    seen?: RelaySeen;
+    stamps?: ReadonlyMap<string, string>;
+    /** Told how many messages the relay listed (the notifier paces its next peek by it: peekGapMs). */
+    onListed?: (count: number) => void;
+  } = {},
   relay: MailRelay = relayOf(wallet),
 ): Promise<{ env: Envelope; sats: number }[]> => {
   const msgs = await relay.list();
+  skip.onListed?.(msgs.length);
   const out: { env: Envelope; sats: number }[] = [];
   const shown = new Map(skip.stamps ?? []);
   let checks = 0;
