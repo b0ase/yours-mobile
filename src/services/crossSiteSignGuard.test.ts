@@ -1129,9 +1129,23 @@ describe('blind-hash sites: exact hosts only', () => {
       'https://WWW.BSocialX.com/feed',
       'scammerscartel.com:443',
       'https://chat.bwalletx.com./room',
-      'CHAT.BWALLETX.COM:8443',
+      'http://bchatx.com:80',
     ])
       expect([site, ...both(site)]).toEqual([site, null, null]);
+  });
+
+  // Was allowed until the final check of 15 Nov 2026 ('CHAT.BWALLETX.COM:8443' stood in the list above): whatever
+  // listens on another port of a listed host is not the site.
+  test('another port of a listed host is refused', () => {
+    for (const site of [
+      'CHAT.BWALLETX.COM:8443',
+      'bchatx.com:8443',
+      'https://bchatx.com:8443/feed',
+      'https://www.bchatx.com:80',
+      'http://bchatx.com:443',
+      'scammerscartel.com:1',
+    ])
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
   });
 
   test('subdomains are refused', () => {

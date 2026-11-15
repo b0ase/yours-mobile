@@ -22,7 +22,7 @@
 import { normalizeOriginator } from '@1sat/wallet';
 import { bareHost, scanSignData } from './signDataScan';
 import { ownBackendRefusal } from './ownBackendKeys';
-import { PendingSighashes, UNGRANTED } from './pendingSighash';
+import { PendingSighashes, type PendingCoin, type SighashRefusal } from './pendingSighash';
 import { pinnedProtocol } from './pinnedProtocols';
 
 // The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
@@ -75,8 +75,25 @@ const TOO_MUCH = `${UNCHECKABLE_REFUSAL} (too much encoded data to read)`;
 
 export const CROSS_SITE_REFUSAL = 'This message is for a different site than the one asking you to sign it';
 export const BLIND_SIGN_REFUSAL = 'Sites cannot ask for a signature over a hash the wallet cannot read';
-/** For a site with a pending transaction of its own that asks to sign with a protocol it was never granted. */
+/**
+ * The refusal with the rule that applied and what the site can do about it (final check, 15 Nov 2026: third-party
+ * PushDrop apps got only the bare sentence). Always starts with BLIND_SIGN_REFUSAL, so a check on that still matches.
+ */
+/** A pending transaction of the site's own, signed with a protocol it was never granted. */
 export const UNGRANTED_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. To sign an input of your own pending transaction, ask for this protocol's permission first (getPublicKey with the same protocolID and counterparty), then sign`;
+export const UNPAID_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. This action takes nothing from the wallet, so no payment was shown for it; bWalletX signs an input of a pending transaction only when the user approved a payment for that transaction`;
+export const SCOPE_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. Only SIGHASH_ALL|FORKID (0x41) signatures of a pending transaction's input are accepted`;
+export const SCRIPT_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. bWalletX can't read which key this input's locking script needs (P2PKH, an inscription then P2PKH, or PushDrop)`;
+export const DATA_HASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. 32 bytes of data is treated as a hash: sign it as an input of your own pending transaction (createAction first), or change its length`;
+const SIGHASH_REFUSALS: Record<SighashRefusal, string> = {
+  ungranted: UNGRANTED_SIGHASH_REFUSAL,
+  unpaid: UNPAID_SIGHASH_REFUSAL,
+  scope: SCOPE_SIGHASH_REFUSAL,
+  script: SCRIPT_SIGHASH_REFUSAL,
+};
+/** The user said no to a coin of theirs leaving through a site's action. */
+export const COIN_SPEND_DENIED = 'You said no: this coin was not signed for';
+export const COIN_SPEND_UNASKABLE = "bWalletX couldn't ask you about this coin, so it was not signed";
 
 /**
  * Our own sites that sign BSM digests (AIP posts, boost sighashes, escrow arbiter digests) through hashToDirectlySign.
@@ -99,6 +116,11 @@ export const BLIND_HASH_SITES: ReadonlySet<string> = new Set([
  * trailing dot or pairing suffix, so "exactly" has one spelling.
  */
 export const blindHashAllowed = (caller: string) => BLIND_HASH_SITES.has(caller);
+/**
+ * The site's own port (final check, 15 Nov 2026: "bchatx.com:8443" passed as bchatx.com, and whatever listens on
+ * another port of a listed host is not the site). normalizeOriginator drops only the scheme's default port.
+ */
+const onDefaultPort = (originator: string) => !/:\d+$/.test(normalizeOriginator(originator));
 
 /**
  * createSignature signs sha256(data), so exactly 32 bytes of `data` is a hash the wallet can't read, by the other
@@ -130,7 +152,9 @@ export const isBlindHashRequest = (args: object, method: string = 'createSignatu
  */
 const RECORD_KEY_ID = /^(?:public|seal) /;
 const isPinnedRecordHash = (args: object, originator: string) => {
-  const { hashToDirectlySign, protocolID, keyID } = args as Record<string, unknown>;
+  const { hashToDirectlySign, protocolID, keyID, privileged } = args as Record<string, unknown>;
+  // Never the privileged keyring: a record is signed with the everyday key.
+  if (privileged) return false;
   if (hashToDirectlySign !== undefined || typeof keyID !== 'string' || !RECORD_KEY_ID.test(keyID)) return false;
   return pinnedProtocol(protocolID)?.origins.includes(normalizeOriginator(originator)) === true;
 };
@@ -197,7 +221,11 @@ export const crossSiteSignRefusal = (
   // (owner, 25 Oct 2026: posting broke after the blind-sign refusal).
   // The same goes for 32 bytes of `data`: a digest by another door (isBlindHashRequest), but for a site's record hash
   // under its own pinned protocol.
-  if (isBlindHashRequest(args, method) && !blindHashAllowed(caller) && !isPinnedRecordHash(args as object, originator))
+  if (
+    isBlindHashRequest(args, method) &&
+    !(blindHashAllowed(caller) && onDefaultPort(originator)) &&
+    !isPinnedRecordHash(args as object, originator)
+  )
     return BLIND_SIGN_REFUSAL;
   // Text or not (b-Aware triage 13 Nov 2026), every site the data names must be the caller's: one matching field must
   // not launder another, and bytes that aren't valid text are read leniently rather than waved through.
@@ -272,6 +300,25 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
       return false;
     }
   };
+  // The coin a site is about to get a signature for is locked to a key of the user's: its value is theirs, and the
+  // pay sheet did not count it (it shows the outputs and fee LESS the inputs the site named). The user is asked about
+  // that value on the wallet's own spending sheet, with every guard on it (the sheet for this amount, or the site's
+  // envelope), once per input per action. No, or no way to ask, refuses the signature; the action stays abortable.
+  const askAboutCoin = async (originator: string, coin: PendingCoin, protocolID: unknown) => {
+    if (coin.satoshis === 0) return;
+    const ensure = m.ensureSpendingAuthorization;
+    if (typeof ensure !== 'function') throw new Error(COIN_SPEND_UNASKABLE);
+    const name = Array.isArray(protocolID) ? String(protocolID[1]) : '';
+    const held = pinnedProtocol(protocolID)?.label ?? `"${name}"`;
+    const description = `${bareHost(originator) ?? originator} is spending a coin of yours worth ${coin.satoshis} sats, held under ${held}`;
+    const ok = await (ensure as (a: unknown) => Promise<unknown>).call(manager, {
+      originator,
+      satoshis: coin.satoshis,
+      lineItems: [{ type: 'input', satoshis: coin.satoshis, description }],
+      reason: description,
+    });
+    if (ok !== true) throw new Error(COIN_SPEND_DENIED);
+  };
   const createAction = m.createAction;
   if (typeof createAction === 'function')
     m.createAction = async (args: unknown, originator?: string) => {
@@ -323,10 +370,28 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
                 derive: signingKey,
               })
             : null;
-        if (ownSighash === UNGRANTED) throw new Error(UNGRANTED_SIGHASH_REFUSAL);
-        if (refusal && !ownSighash) throw new Error(refusal);
-        // Signed from the copy that was checked, not from an object the caller still holds.
-        if (ownSighash) args = ownSighash;
+        if (ownSighash && 'refusal' in ownSighash) throw new Error(SIGHASH_REFUSALS[ownSighash.refusal]);
+        if (refusal && !ownSighash) {
+          const asData =
+            refusal === BLIND_SIGN_REFUSAL &&
+            (args as { hashToDirectlySign?: unknown }).hashToDirectlySign === undefined;
+          throw new Error(asData ? DATA_HASH_REFUSAL : refusal);
+        }
+        if (ownSighash) {
+          const { coin, reference, sign } = ownSighash;
+          coin.approval ??= askAboutCoin(originator!, coin, (sign as { protocolID?: unknown }).protocolID);
+          try {
+            await coin.approval;
+          } catch (e) {
+            // Asked again next time: a No is for this request, and the action can still be aborted.
+            coin.approval = undefined;
+            throw e;
+          }
+          // Signed or aborted while the sheet was up: nothing to sign any more.
+          if (pending.owner(reference) !== originator) throw new Error(BLIND_SIGN_REFUSAL);
+          // Signed from the copy that was checked, not from an object the caller still holds.
+          args = sign;
+        }
       }
       return (original as (a: unknown, o?: string) => Promise<unknown>).call(manager, args, originator);
     };

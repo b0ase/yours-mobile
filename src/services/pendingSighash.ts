@@ -31,6 +31,11 @@
  *    BRC-42 keys don't depend on the site, so a site the user gives another app's (unpinned) protocol to can spend
  *    that app's coins, here as anywhere else in BRC-100. Pinning the protocol is what stops that.
  *
+ * One thing more before the signature (final check, 15 Nov 2026): by then the wallet has shown the coin is locked to
+ * a key of the USER's, so its value is the user's money leaving through this action, and the pay sheet never counted
+ * it (it shows outputs + fee LESS the inputs the site named). The guard asks the user about that value, once per
+ * input per action, on the wallet's own spending sheet (crossSiteSignGuard.ts); No refuses the signature.
+ *
  * Kept in memory, per wallet instance (guardCrossSiteSigning makes one): a lock or an account switch drops the wallet
  * and this with it. A restarted service worker has none, so the hash is refused; the toolbox can't finish that
  * action either (Wallet.signAction: "recovery of out-of-session signAction reference data is not yet implemented"),
@@ -129,12 +134,41 @@ type Signable = { tx?: unknown; reference?: unknown };
 const isSats = (n: unknown): n is number =>
   typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 && n < SPEND_ALL_SENTINEL;
 
+/** Why a hash that does belong to the site's pending action is still not signed (told to the site, in words). */
+export type SighashRefusal = 'ungranted' | 'unpaid' | 'scope' | 'script';
+
+/** One input the site named and must unlock, by a digest of it. */
+export type PendingCoin = {
+  index: number;
+  /** What the coin holds: the user's money, once the key check has shown the coin is locked to a key of theirs. */
+  satoshis: number;
+  /** The hash of the key its lock needs; absent when the digest can't be signed (`why`). */
+  keyHash?: string;
+  /** A digest with other sighash flags, or of an input whose script the wallet can't read: never signed. */
+  why?: 'scope' | 'script';
+  /** The user's answer about this coin leaving, asked once per input per action (crossSiteSignGuard.ts). */
+  approval?: Promise<void>;
+};
+
+const S = TransactionSignature;
+/** The other flags a signer could ask for. Their digests are kept only to tell the site which rule refused it. */
+const OTHER_SCOPES = [
+  S.SIGHASH_ALL | S.SIGHASH_FORKID | S.SIGHASH_ANYONECANPAY,
+  S.SIGHASH_NONE | S.SIGHASH_FORKID,
+  S.SIGHASH_NONE | S.SIGHASH_FORKID | S.SIGHASH_ANYONECANPAY,
+  S.SIGHASH_SINGLE | S.SIGHASH_FORKID,
+  S.SIGHASH_SINGLE | S.SIGHASH_FORKID | S.SIGHASH_ANYONECANPAY,
+];
+
 /**
- * Pure: the sighashes a site may ask for on this signable action, as digest (hex) → the key hash its input is locked
- * to. Null when nothing may be asked: the transaction can't be read, the site's inputs don't match it, or the pay
- * check did not run on it (see the file comment). An input whose script has no readable key is left out.
+ * Pure: the inputs a site named and must unlock on this signable action, by digest (hex), and whether the pay check
+ * ran on the action (see the file comment). Null when the transaction can't be read or the site's inputs don't match
+ * it. Only a coin with a `keyHash` and no `why`, in a paid action, can be signed.
  */
-export const callerSighashes = (args: CreateArgs | undefined, signableTx: unknown): Map<string, string> | null => {
+export const pendingCoins = (
+  args: CreateArgs | undefined,
+  signableTx: unknown,
+): { paid: boolean; coins: Map<string, PendingCoin> } | null => {
   try {
     // The wallet's own AtomicBEEF of the action (a number[] from the toolbox; bytes either way).
     const beef = signableTx instanceof Uint8Array ? Array.from(signableTx) : signableTx;
@@ -175,34 +209,57 @@ export const callerSighashes = (args: CreateArgs | undefined, signableTx: unknow
     const paidOut = tx.outputs.reduce((n, o) => n + (o.satoshis ?? 0), 0);
     const fromSite = sources.reduce((n, s) => n + (named.has(s!.outpoint) ? s!.satoshis : 0), 0);
     const fee = paidIn - paidOut;
-    if (!isSats(fee) || requested > paidOut || !(requested + fee - fromSite > 0)) return null;
+    if (!isSats(fee) || requested > paidOut) return null;
+    const paid = requested + fee - fromSite > 0;
 
-    const digests = new Map<string, string>();
+    const coins = new Map<string, PendingCoin>();
     tx.inputs.forEach((input, index) => {
       const source = sources[index]!;
       // Only an input the site named and has yet to unlock. The wallet's own inputs are never in the map.
       if (named.get(source.outpoint) !== true || (input.unlockingScript?.chunks.length ?? 0) > 0) return;
-      const keyHash = lockKeyHash(source.script);
-      if (keyHash === null) return;
-      const preimage = TransactionSignature.format({
-        sourceTXID: source.txid,
-        sourceOutputIndex: input.sourceOutputIndex,
-        sourceSatoshis: source.satoshis,
-        transactionVersion: tx.version,
-        otherInputs: tx.inputs.filter((_, j) => j !== index),
-        inputIndex: index,
-        outputs: tx.outputs,
-        inputSequence: input.sequence ?? 0xffffffff,
-        subscript: source.script,
-        lockTime: tx.lockTime,
-        scope: SIGHASH_ALL_FORKID,
-      });
-      digests.set(Utils.toHex(Hash.hash256(preimage)), keyHash);
+      const digest = (scope: number) =>
+        Utils.toHex(
+          Hash.hash256(
+            TransactionSignature.format({
+              sourceTXID: source.txid,
+              sourceOutputIndex: input.sourceOutputIndex,
+              sourceSatoshis: source.satoshis,
+              transactionVersion: tx.version,
+              otherInputs: tx.inputs.filter((_, j) => j !== index),
+              inputIndex: index,
+              outputs: tx.outputs,
+              inputSequence: input.sequence ?? 0xffffffff,
+              subscript: source.script,
+              lockTime: tx.lockTime,
+              scope,
+            }),
+          ),
+        );
+      const keyHash = lockKeyHash(source.script) ?? undefined;
+      const coin = { index, satoshis: source.satoshis };
+      coins.set(digest(SIGHASH_ALL_FORKID), keyHash ? { ...coin, keyHash } : { ...coin, why: 'script' });
+      for (const scope of OTHER_SCOPES) {
+        try {
+          const other = digest(scope);
+          if (!coins.has(other)) coins.set(other, { ...coin, why: 'scope' });
+        } catch {
+          // No such digest for this input (the SDK can't form it): nothing to explain.
+        }
+      }
     });
-    return digests.size ? digests : null;
+    return coins.size ? { paid, coins } : null;
   } catch {
     return null;
   }
+};
+
+/** Pure: digest (hex) → key hash for the sighashes that can be signed on this action; null when there are none. */
+export const callerSighashes = (args: CreateArgs | undefined, signableTx: unknown): Map<string, string> | null => {
+  const found = pendingCoins(args, signableTx);
+  if (!found?.paid) return null;
+  const digests = new Map<string, string>();
+  for (const [digest, coin] of found.coins) if (coin.keyHash && !coin.why) digests.set(digest, coin.keyHash);
+  return digests.size ? digests : null;
 };
 
 type SignArgs = {
@@ -240,10 +297,14 @@ export type SigningKeyChecks = {
   /** The public key (hex) createSignature would sign with. */
   derive: (key: SigningKey) => Promise<string | undefined>;
 };
-/** request()'s answer for a site that has a pending action but no grant for the protocol it asks to sign with. */
-export const UNGRANTED = 'ungranted';
 
-type Pending = { originator: string; expires: number; digests: Map<string, string> };
+/**
+ * request()'s answer: the request to sign (a copy read once: what was checked is what is signed) with the coin it
+ * spends and its action; why a hash of the site's own pending action is not signed; or null (not such a hash).
+ */
+export type SighashAnswer = { sign: object; coin: PendingCoin; reference: string } | { refusal: SighashRefusal } | null;
+
+type Pending = { originator: string; expires: number; paid: boolean; coins: Map<string, PendingCoin> };
 
 /** The pending actions of one wallet instance and the sighashes each allows. */
 export class PendingSighashes {
@@ -256,10 +317,10 @@ export class PendingSighashes {
     const reference = signable?.reference;
     if (!originator || typeof reference !== 'string' || !reference) return;
     this.pending.delete(reference);
-    const digests = callerSighashes(args as CreateArgs, signable?.tx);
-    if (!digests) return;
+    const found = pendingCoins(args as CreateArgs, signable?.tx);
+    if (!found) return;
     const now = this.now();
-    this.pending.set(reference, { originator, expires: now + PENDING_SIGHASH_TTL_MS, digests });
+    this.pending.set(reference, { originator, expires: now + PENDING_SIGHASH_TTL_MS, ...found });
     // Expired ones first, then this site's own oldest, and only then the oldest of all.
     const mine: string[] = [];
     for (const [ref, p] of this.pending) {
@@ -275,36 +336,29 @@ export class PendingSighashes {
     if (typeof reference === 'string') this.pending.delete(reference);
   }
 
-  /** Who created this pending action, if it is one. */
+  /** Who created this pending action, if it is one (and it has not expired). */
   owner(reference: unknown): string | undefined {
-    return typeof reference === 'string' ? this.pending.get(reference)?.originator : undefined;
+    const p = typeof reference === 'string' ? this.pending.get(reference) : undefined;
+    return p && p.expires > this.now() ? p.originator : undefined;
   }
 
-  /** The key hash this originator's live pending actions want for a digest (expired actions are dropped here). */
-  private wanted(originator: string, digest?: string): { any: boolean; keyHash?: string } {
+  /** This originator's live pending actions that know a digest (expired actions are dropped here). */
+  private live(originator: string, digest?: string): { any: boolean; hits: { reference: string; p: Pending }[] } {
     const now = this.now();
     let any = false;
-    let keyHash: string | undefined;
+    const hits: { reference: string; p: Pending }[] = [];
     for (const [reference, p] of this.pending) {
       if (p.expires <= now) this.pending.delete(reference);
       else if (p.originator === originator) {
         any = true;
-        if (digest !== undefined) keyHash ??= p.digests.get(digest);
+        if (digest !== undefined && p.coins.has(digest)) hits.push({ reference, p });
       }
     }
-    return { any, keyHash };
+    return { any, hits };
   }
 
-  /**
-   * Is this createSignature a sighash of one of this originator's pending actions, asked with the input's own key?
-   * Answers the request to sign, as a copy read once (what was checked is what is signed); UNGRANTED when the site
-   * has something pending but not the protocol's grant; or null.
-   */
-  async request(
-    originator: string,
-    args: unknown,
-    checks: SigningKeyChecks,
-  ): Promise<object | typeof UNGRANTED | null> {
+  /** Is this createSignature a sighash of one of this originator's pending actions, asked with the input's own key? */
+  async request(originator: string, args: unknown, checks: SigningKeyChecks): Promise<SighashAnswer> {
     if (!originator || !args || typeof args !== 'object') return null;
     const a: SignArgs = { ...(args as SignArgs) };
     if (a.privileged || (a.data !== undefined && a.hashToDirectlySign !== undefined)) return null;
@@ -320,19 +374,26 @@ export class PendingSighashes {
     if (Array.isArray(a.protocolID)) a.protocolID = [...a.protocolID];
     if (excludedProtocol(a.protocolID) || reservedProtocolRefusal('createSignature', a) !== null) return null;
     if (pinnedProtocolRefusal('createSignature', a, normalizeOriginator(originator)) !== null) return null;
-    if (!this.wanted(originator).any) return null;
+    if (!this.live(originator).any) return null;
     // createSignature's own default: no counterparty means 'anyone'.
     const key = { protocolID: a.protocolID, keyID: a.keyID, counterparty: a.counterparty ?? 'anyone' };
     try {
       // The grant first: nothing below (the lookup, the derivation) runs for a site that doesn't hold it, so a right
       // and a wrong guess of a coin's key are the same refusal.
-      if ((await checks.granted(key)) !== true) return UNGRANTED;
+      if ((await checks.granted(key)) !== true) return { refusal: 'ungranted' };
       // Looked up after the wait: the action may have been signed or aborted meanwhile.
-      const { keyHash } = this.wanted(originator, digest);
-      if (keyHash === undefined) return null;
+      const { hits } = this.live(originator, digest);
+      const signable = hits.find(({ p }) => p.paid && p.coins.get(digest)?.keyHash && !p.coins.get(digest)?.why);
+      if (!signable) {
+        // The site's own digest, refused by a rule it can do something about: say which (it learns nothing new).
+        const coin = hits[0]?.p.coins.get(digest);
+        return coin ? { refusal: coin.why ?? 'unpaid' } : null;
+      }
+      const coin = signable.p.coins.get(digest)!;
       const publicKey = await checks.derive(key);
       if (typeof publicKey !== 'string' || !/^0[23][0-9a-f]{64}$/i.test(publicKey)) return null;
-      return Utils.toHex(Hash.hash160(Utils.toArray(publicKey, 'hex'))) === keyHash ? a : null;
+      if (Utils.toHex(Hash.hash160(Utils.toArray(publicKey, 'hex'))) !== coin.keyHash) return null;
+      return { sign: a, coin, reference: signable.reference };
     } catch {
       return null;
     }

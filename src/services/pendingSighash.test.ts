@@ -33,7 +33,13 @@ import {
 import { ONESAT, bsv21, tokenSpends } from '../mobile/market/launchpad/tokens';
 import {
   BLIND_SIGN_REFUSAL,
+  COIN_SPEND_DENIED,
+  COIN_SPEND_UNASKABLE,
+  DATA_HASH_REFUSAL,
+  SCOPE_SIGHASH_REFUSAL,
+  SCRIPT_SIGHASH_REFUSAL,
   UNGRANTED_SIGHASH_REFUSAL,
+  UNPAID_SIGHASH_REFUSAL,
   bareHost,
   guardCrossSiteSigning,
   setProvenPairingCheck,
@@ -45,7 +51,6 @@ import {
   PENDING_SIGHASH_TTL_MS,
   PendingSighashes,
   type SigningKeyChecks,
-  UNGRANTED,
   callerSighashes,
   lockKeyHash,
 } from './pendingSighash';
@@ -72,6 +77,13 @@ const ALL_FORKID = TransactionSignature.SIGHASH_ALL | TransactionSignature.SIGHA
 type Call = (args: any, originator?: string) => Promise<any>;
 type Wallet = Record<string, Call>;
 type Sheet = { type: string; originator: string; satoshis?: number };
+/** A pay sheet as the user reads it: the amount, the reason line and the line items. */
+type PaySheet = {
+  originator: string;
+  satoshis: number;
+  reason?: string;
+  lineItems?: { type: string; satoshis: number; description: string }[];
+};
 
 const atomic = (tx: Transaction) => {
   const beef = new Beef();
@@ -108,10 +120,13 @@ const unlocks = (tx: Transaction, index: number) => {
  * real permissions manager on top, then the guards. `restart()` is a new service worker over the same keys: new
  * manager, new guards, nothing remembered.
  */
-const setup = (opts: { approve?: boolean; now?: () => number; signFails?: boolean } = {}) => {
+const setup = (
+  opts: { approve?: boolean; now?: () => number; signFails?: boolean; denyPay?: (sheet: PaySheet) => boolean } = {},
+) => {
   const proto = new ProtoWallet(PrivateKey.fromRandom());
   const fundKey = PrivateKey.fromRandom();
   const sheets: Sheet[] = [];
+  const paySheets: PaySheet[] = [];
   const sent: Transaction[] = [];
   // Grants outlive a service worker (IndexedDB in the wallet): one store for every build().
   const store = new InMemoryPermissionStore();
@@ -195,13 +210,24 @@ const setup = (opts: { approve?: boolean; now?: () => number; signFails?: boolea
     (mgr as unknown as Record<string, unknown>).requestPermissionFlow = async (r: {
       type: string;
       originator: string;
-      spending?: { satoshis: number };
+      spending?: { satoshis: number; lineItems?: PaySheet['lineItems'] };
+      reason?: string;
       protocolID?: [number, string];
       counterparty?: string;
       privileged?: boolean;
     }) => {
       sheets.push({ type: r.type, originator: r.originator, satoshis: r.spending?.satoshis });
       if (opts.approve === false) throw new Error('User denied');
+      if (r.type === 'spending' && r.spending) {
+        const sheet = {
+          originator: r.originator,
+          satoshis: r.spending.satoshis,
+          reason: r.reason,
+          lineItems: r.spending.lineItems,
+        };
+        paySheets.push(sheet);
+        if (opts.denyPay?.(sheet)) throw new Error('User denied');
+      }
       // Allow on a protocol sheet stores the grant, as the wallet's own sheet does (grantPermission).
       if (r.type === 'protocol' && r.protocolID)
         await store.putGrant({
@@ -238,6 +264,7 @@ const setup = (opts: { approve?: boolean; now?: () => number; signFails?: boolea
     restart: () => void (live = build()),
     proto,
     sheets,
+    paySheets,
     sent,
     as,
     keyOf,
@@ -939,6 +966,10 @@ describe('32 bytes of data is a hash too (the data door, review 15 Nov 2026)', (
         await expect(w.wallet.createSignature(call, other)).rejects.toThrow(PINNED_REFUSAL);
       await expect(w.wallet.createSignature(call, `bjobsx.com.c${'0a'.repeat(22)}.paired.invalid`)).rejects.toThrow();
     }
+    // Never the privileged keyring.
+    await expect(w.wallet.createSignature({ ...record, privileged: true }, 'bjobsx.com')).rejects.toThrow(
+      BLIND_SIGN_REFUSAL,
+    );
     // The same site, a key that is not a record-signing key (bMintX's pot is 'pot <account>'), or a bare hash.
     for (const keyID of ['pot 123', 'publicprofile', 'k', ' public profile', 'Public profile'])
       await expect(w.wallet.createSignature({ ...record, keyID }, 'bjobsx.com')).rejects.toThrow(BLIND_SIGN_REFUSAL);
@@ -1044,22 +1075,184 @@ describe('only a site that already holds the key’s protocol (review 15 Nov 202
     const create = { inputs: [{ outpoint: c.outpoint }], outputs: [{ satoshis: 900 }] };
     for (const site of [EVIL, 'bjobsx.com']) p.record(site, create, { reference: `r-${site}`, tx: atomic(t) });
     expect(await p.request(EVIL, sign, checks)).toBeNull();
-    expect(await p.request('bjobsx.com', sign, checks)).toMatchObject({ keyID: 'k' });
+    expect(await p.request('bjobsx.com', sign, checks)).toMatchObject({ sign: { keyID: 'k' } });
   });
 
-  test('KNOWN LIMIT: a site the user grants another app’s unpinned protocol to can spend that app’s coins', async () => {
+  test('M1: a site holding another app’s unpinned protocol takes that app’s coin only past a sheet for its value', async () => {
     const w = setup();
     const writerKey = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
     // The user says Allow to "evil.example wants to use 'bitcoin writer chain'": BRC-42 keys are not per site.
-    await w.siteKey(EVIL, CHAIN_PROTOCOL, chainKeyID('doc-1'));
-    expect(w.sheets.filter((s) => s.originator === EVIL)).toEqual([{ type: 'protocol', originator: EVIL }]);
+    await w.siteKey(EVIL, CHAIN_PROTOCOL, 'anything-else');
     const tx = await nameCoin(w, EVIL, coin(p2pkh(writerKey), 1_000_000));
+    // The pay sheet at createAction: 1 sat, the coin subtracted (its own line says "a gift coin").
+    expect(w.paySheets.map((p) => p.satoshis)).toEqual([1]);
     await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).resolves.toBeDefined();
-    // What the user was shown in all: that protocol sheet and a pay sheet for 1 sat.
-    expect(w.sheets.filter((s) => s.originator === EVIL).map((s) => [s.type, s.satoshis])).toEqual([
+    // Before the signature: the coin's whole value, in the wallet's words.
+    const line = 'evil.example is spending a coin of yours worth 1000000 sats, held under "bitcoin writer chain"';
+    expect(w.paySheets[1]).toEqual({
+      originator: EVIL,
+      satoshis: 1_000_000,
+      reason: line,
+      lineItems: [{ type: 'input', satoshis: 1_000_000, description: line }],
+    });
+    // Once per input per action: the same request again shows nothing more.
+    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).resolves.toBeDefined();
+    expect(w.paySheets).toHaveLength(2);
+  });
+
+  test('M1: No on that sheet refuses the signature; the action can still be aborted, and asking again asks again', async () => {
+    let deny = true;
+    const w = setup({ denyPay: (sheet) => deny && sheet.satoshis === 1_000_000 });
+    const writerKey = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    await w.siteKey(EVIL, CHAIN_PROTOCOL, 'anything-else');
+    const c = coin(p2pkh(writerKey), 1_000_000);
+    const action = await w.as(EVIL).createAction({
+      description: 'Claim your free gift',
+      inputBEEF: beefOf(c),
+      inputs: [{ outpoint: c.outpoint, unlockingScriptLength: 108, inputDescription: 'a gift coin' }],
+      outputs: [payTo(1_000_000 - FEE + 1)],
+    });
+    const tx = Transaction.fromAtomicBEEF(action.signableTransaction!.tx);
+    const signed: unknown[] = [];
+    const base = w.proto.createSignature.bind(w.proto);
+    w.proto.createSignature = async (a) => (signed.push(a), base(a));
+    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).rejects.toThrow('User denied');
+    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).rejects.toThrow('User denied');
+    expect(signed).toEqual([]);
+    expect(w.paySheets.filter((p) => p.satoshis === 1_000_000)).toHaveLength(2);
+    // Yes the third time signs; then the action is aborted and its hash is refused again.
+    deny = false;
+    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).resolves.toBeDefined();
+    expect(signed).toHaveLength(1);
+    await expect(w.as(EVIL).abortAction({ reference: action.signableTransaction!.reference })).resolves.toEqual({
+      aborted: true,
+    });
+    await expect(blindSign(w, EVIL, sighash(tx, 0), chainKeyArgs())).rejects.toThrow(BLIND_SIGN_REFUSAL);
+  });
+
+  test('M1: a manager with no way to ask, or one that answers anything but yes, signs nothing', async () => {
+    const key = PrivateKey.fromRandom();
+    const c = coin(new P2PKH().lock(key.toAddress()), 10);
+    const funding = coin(new P2PKH().lock(PrivateKey.fromRandom().toAddress()), 1_000);
+    const t = new Transaction();
+    for (const x of [c, funding])
+      t.addInput({ sourceTransaction: x.tx, sourceOutputIndex: 0, unlockingScript: new UnlockingScript() });
+    t.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 900 });
+    const sign = { hashToDirectlySign: sighash(t, 0), protocolID: [1, 'app'], keyID: 'k' };
+    const create = { inputs: [{ outpoint: c.outpoint }], outputs: [{ satoshis: 900 }] };
+    for (const [ensure, words] of [
+      [undefined, COIN_SPEND_UNASKABLE],
+      [async () => false, COIN_SPEND_DENIED],
+      [async () => undefined, COIN_SPEND_DENIED],
+      [async () => Promise.reject(new Error('sheet closed')), 'sheet closed'],
+    ] as const) {
+      const signed: unknown[] = [];
+      const m = guardCrossSiteSigning(
+        {
+          getPublicKey: async () => ({ publicKey: key.toPublicKey().toString() }),
+          ensureProtocolPermission: async () => true,
+          ...(ensure ? { ensureSpendingAuthorization: ensure } : {}),
+          createSignature: async (a: unknown) => (signed.push(a), { signature: [1] }),
+          createAction: async () => ({ signableTransaction: { reference: 'r', tx: atomic(t) } }),
+        },
+        ADMIN,
+      );
+      await m.createAction(create as never, 'a.example');
+      await expect(m.createSignature(sign as never, 'a.example')).rejects.toThrow(words);
+      expect(signed).toEqual([]);
+    }
+  });
+
+  test('a Bitcoin Writer save (546-sat chain coin in, 546 out): exactly which sheets the user sees', async () => {
+    const w = setup();
+    const chainKey = await w.siteKey(WRITER, CHAIN_PROTOCOL, chainKeyID('doc-1'));
+    const prev = coin(p2pkh(chainKey), 546);
+    const created = await w.as(WRITER).createAction({
+      description: 'Save your document on chain',
+      inputBEEF: beefOf(prev),
+      inputs: [{ outpoint: prev.outpoint, unlockingScriptLength: 108, inputDescription: 'Previous save (chain UTXO)' }],
+      outputs: [{ lockingScript: p2pkh(chainKey).toHex(), satoshis: 546, outputDescription: 'This save' }, payTo(20)],
+      options: { randomizeOutputs: false, acceptDelayedBroadcast: false },
+    });
+    const signable = created.signableTransaction!;
+    const { index, unlockingScript } = await signChainInput(w.as(WRITER), signable.tx, 'doc-1', prev.outpoint);
+    await w.as(WRITER).signAction({ reference: signable.reference, spends: { [index]: { unlockingScript } } });
+    expect(unlocks(w.sent[0], index)).toBe(true);
+    // One protocol sheet (the first time only: the grant is kept), the pay sheet, and the sheet for the chain coin.
+    expect(w.sheets.map((s) => [s.type, s.satoshis])).toEqual([
       ['protocol', undefined],
-      ['spending', 1],
+      ['spending', 20 + FEE],
+      ['spending', 546],
     ]);
+    expect(w.paySheets[1].reason).toBe(
+      'www.bitcoin-writer.example is spending a coin of yours worth 546 sats, held under "bitcoin writer chain"',
+    );
+  });
+});
+
+describe('the refusal says which rule applied (third-party PushDrop apps, final check 15 Nov 2026)', () => {
+  const P: WalletProtocol = [2, 'todo list'];
+  const SITE = 'todo.example';
+
+  test('a redeem that takes nothing from the wallet; other sighash flags; a script the wallet cannot read', async () => {
+    const w = setup();
+    const pd = new PushDrop(w.as(SITE));
+    const lock = await pd.lock([Utils.toArray('buy milk', 'utf8')], P, '1', 'self', true, true);
+    const token = coin(lock, 1000);
+    const create = async (outputs: unknown[]) => {
+      const created = await w.as(SITE).createAction({
+        description: 'A todo token',
+        inputBEEF: beefOf(token),
+        inputs: [{ outpoint: token.outpoint, unlockingScriptLength: 74, inputDescription: 'the token' }],
+        outputs: outputs as never,
+        options: { randomizeOutputs: false },
+      });
+      return Transaction.fromAtomicBEEF(created.signableTransaction!.tx);
+    };
+    // (a) Redeemed back to the wallet: no pay sheet was shown, and the refusal says so.
+    const redeem = await create([]);
+    expect(w.paySheets).toEqual([]);
+    await expect(pd.unlock(P, '1', 'self').sign(redeem, 0)).rejects.toThrow(UNPAID_SIGHASH_REFUSAL);
+    // (c) Flags other than SIGHASH_ALL|FORKID.
+    const paid = await create([payTo(2000)]);
+    for (const [signOutputs, anyoneCanPay] of [
+      ['all', true],
+      ['none', false],
+      ['none', true],
+      ['single', false],
+      ['single', true],
+    ] as const)
+      await expect(pd.unlock(P, '1', 'self', signOutputs, anyoneCanPay).sign(paid, 0)).rejects.toThrow(
+        SCOPE_SIGHASH_REFUSAL,
+      );
+    await expect(pd.unlock(P, '1', 'self').sign(paid, 0)).resolves.toBeDefined();
+    // A lock the wallet can't read a key from.
+    const odd = coin(new LockingScript([...lock.chunks, { op: OP.OP_NOP }]), 1000);
+    const created = await w.as(SITE).createAction({
+      description: 'A todo token',
+      inputBEEF: beefOf(odd),
+      inputs: [{ outpoint: odd.outpoint, unlockingScriptLength: 74, inputDescription: 'the token' }],
+      outputs: [payTo(2000)],
+    });
+    const oddTx = Transaction.fromAtomicBEEF(created.signableTransaction!.tx);
+    await expect(blindSign(w, SITE, sighash(oddTx, 0), { protocolID: P, keyID: '1' })).rejects.toThrow(
+      SCRIPT_SIGHASH_REFUSAL,
+    );
+    // Every one of them still starts with the sentence sites already check for.
+    for (const words of [UNPAID_SIGHASH_REFUSAL, SCOPE_SIGHASH_REFUSAL, SCRIPT_SIGHASH_REFUSAL, DATA_HASH_REFUSAL])
+      expect(words.startsWith(BLIND_SIGN_REFUSAL)).toBe(true);
+  });
+
+  test('(b) 32 bytes of data that is no pending sighash: told it is read as a hash', async () => {
+    const w = setup();
+    await expect(new PushDrop(w.as(SITE)).lock([new Array(32).fill(9)], P, '1', 'self', true)).rejects.toThrow(
+      DATA_HASH_REFUSAL,
+    );
+    // A bare hash that is none keeps the plain sentence, and nothing about pending actions leaks to a site without
+    // the grant: right digest or wrong, the same words.
+    await expect(blindSign(w, SITE, Hash.hash256([1]), { protocolID: P, keyID: '1' })).rejects.toThrow(
+      new RegExp(`^${BLIND_SIGN_REFUSAL}$`),
+    );
   });
 });
 
@@ -1226,6 +1419,7 @@ describe('callerSighashes and PendingSighashes', () => {
       {
         getPublicKey: async () => ({ publicKey: key.toPublicKey().toString() }),
         ensureProtocolPermission: async () => true,
+        ensureSpendingAuthorization: async () => true,
         createSignature: async () => ({ signature: [1] }),
         createAction: async () => ({ signableTransaction: { reference: 'r', tx: atomic(tx) } }),
       },
@@ -1248,6 +1442,7 @@ describe('callerSighashes and PendingSighashes', () => {
       {
         getPublicKey: async () => ({ publicKey: key.toPublicKey().toString() }),
         ensureProtocolPermission: async () => true,
+        ensureSpendingAuthorization: async () => true,
         createSignature: async (a: unknown) => (signedWith.push(a), { signature: [1] }),
         createAction: async () => ({ signableTransaction: { reference: 'r', tx: atomic(tx) } }),
       },
@@ -1283,7 +1478,7 @@ describe('callerSighashes and PendingSighashes', () => {
     const signFor = (tx: Transaction) => ({ hashToDirectlySign: sighash(tx, 0), protocolID: [1, 'app'], keyID: 'k' });
     const ask = async (tx: Transaction, site = 'a.example') => {
       const r = await answer(site, signFor(tx));
-      return r !== null && r !== UNGRANTED;
+      return r !== null && 'sign' in r;
     };
     const victim = build(899);
     p.record('victim.example', args(899), { reference: 'victim', tx: atomic(victim) });
@@ -1319,8 +1514,8 @@ describe('callerSighashes and PendingSighashes', () => {
     const miss = { ...hit, hashToDirectlySign: Hash.hash256([1]) };
     const asked: unknown[] = [];
     const none = { granted: async (k: unknown) => (asked.push(k), false), derive };
-    expect(await p.request('a.example', hit, none)).toBe(UNGRANTED);
-    expect(await p.request('a.example', miss, none)).toBe(UNGRANTED);
+    expect(await p.request('a.example', hit, none)).toEqual({ refusal: 'ungranted' });
+    expect(await p.request('a.example', miss, none)).toEqual({ refusal: 'ungranted' });
     expect(
       await p.request('a.example', hit, { granted: async () => Promise.reject(new Error('x')), derive }),
     ).toBeNull();
@@ -1333,7 +1528,7 @@ describe('callerSighashes and PendingSighashes', () => {
     const yes = { granted: async () => true, derive };
     expect(await p.request('a.example', miss, yes)).toBeNull();
     expect(derived).toBe(0);
-    expect(await p.request('a.example', hit, yes)).toMatchObject({ keyID: 'k' });
+    expect(await p.request('a.example', hit, yes)).toMatchObject({ sign: { keyID: 'k' } });
     expect(derived).toBe(1);
     // A key lookup that fails, or answers something that is not a key, allows nothing.
     expect(await p.request('a.example', hit, { ...yes, derive: async () => undefined })).toBeNull();
