@@ -21,6 +21,7 @@
 
 import { bareHost, scanSignData } from './signDataScan';
 import { ownBackendRefusal } from './ownBackendKeys';
+import { PendingSighashes } from './pendingSighash';
 
 // The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
 export { bareHost, boundHosts, normaliseKey } from './signDataScan';
@@ -215,9 +216,62 @@ export const malformedSignRefusal = (args: unknown): string | null => {
   return null;
 };
 
-/** Wrap the manager's signing methods so an outside originator's cross-site message is refused before any prompt. */
-export function guardCrossSiteSigning<T extends object>(manager: T, adminOriginator: string): T {
+/**
+ * An originator that names a site the wallet can hold to an action: it has a host, and a phone pairing proved it.
+ * The same two tests crossSiteSignRefusal makes before it lets any site sign.
+ */
+const namesProvenSite = (originator: string) =>
+  !(isPairedOriginator(originator) && !provenPairing(originator)) && bareHost(originator) !== null;
+
+type ActionCall = (args: unknown, originator?: string) => Promise<unknown>;
+
+/**
+ * Wrap the manager's signing methods so an outside originator's cross-site message is refused before any prompt.
+ * One bare hash is let through: the sighash of an input the same site must unlock in its own pending action, asked
+ * with that input's key (pendingSighash.ts). The guard watches createAction / signAction / abortAction for that only;
+ * it changes nothing about them.
+ */
+export function guardCrossSiteSigning<T extends object>(manager: T, adminOriginator: string, now?: () => number): T {
   const m = manager as Record<string, unknown>;
+  const pending = new PendingSighashes(now);
+  // The key a createSignature would use, derived as the wallet itself: compared, never returned to the site.
+  const getPublicKey = m.getPublicKey;
+  const signingKey = async (key: { protocolID: unknown; keyID: unknown; counterparty: unknown }) => {
+    if (typeof getPublicKey !== 'function') return undefined;
+    const r = (await (getPublicKey as ActionCall).call(manager, { ...key, forSelf: true }, adminOriginator)) as
+      | { publicKey?: string }
+      | undefined;
+    return r?.publicKey;
+  };
+  const createAction = m.createAction;
+  if (typeof createAction === 'function')
+    m.createAction = async (args: unknown, originator?: string) => {
+      const result = (await (createAction as ActionCall).call(manager, args, originator)) as
+        | { signableTransaction?: { tx?: unknown; reference?: unknown } }
+        | undefined;
+      // Only once the manager has returned it: its output check and its pay sheet have passed by then.
+      if (originator && originator !== adminOriginator && result?.signableTransaction)
+        pending.record(originator, args, result.signableTransaction);
+      return result;
+    };
+  // Signed, aborted, or a sign that failed (the manager aborts the action then): its sighashes are over. Another
+  // site naming the reference is refused by the manager and ends nothing here.
+  for (const method of ['signAction', 'abortAction'] as const) {
+    const original = m[method];
+    if (typeof original !== 'function') continue;
+    m[method] = async (args: unknown, originator?: string) => {
+      const reference = (args as { reference?: unknown } | null)?.reference;
+      const own = originator === adminOriginator || pending.owner(reference) === originator;
+      try {
+        const result = await (original as ActionCall).call(manager, args, originator);
+        pending.settle(reference);
+        return result;
+      } catch (e) {
+        if (own) pending.settle(reference);
+        throw e;
+      }
+    };
+  }
   for (const method of SIGNING_METHODS) {
     const original = m[method];
     if (typeof original !== 'function') continue;
@@ -232,7 +286,14 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
         const malformed = method === 'createSignature' ? malformedSignRefusal(args) : null;
         if (malformed) throw new Error(malformed);
         const refusal = crossSiteSignRefusal(originator, args, method);
-        if (refusal) throw new Error(refusal);
+        // The one readable hash (pendingSighash.ts). Every other refusal, and every other hash, stands.
+        const ownSighash =
+          refusal === BLIND_SIGN_REFUSAL && method === 'createSignature' && !!originator && namesProvenSite(originator)
+            ? await pending.request(originator, args, signingKey)
+            : null;
+        if (refusal && !ownSighash) throw new Error(refusal);
+        // Signed from the copy that was checked, not from an object the caller still holds.
+        if (ownSighash) args = ownSighash;
       }
       return (original as (a: unknown, o?: string) => Promise<unknown>).call(manager, args, originator);
     };
