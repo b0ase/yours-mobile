@@ -37,9 +37,9 @@ import { ONESAT, search, type SearchRow } from '../market/indexer';
 import { rememberedTicketIds } from '../wallet/walletTickets';
 import { loadPrefs } from '../settings/prefs';
 import type { WalletInterface } from '@bsv/sdk';
-import { myKey, openMail, peekMail } from '../bmail/client';
+import { myKey, openMail, peekGapMs, peekMail } from '../bmail/client';
 import { route } from '../bmail/route';
-import { loadMail, savePending } from '../bmail/store';
+import { loadMail, loadRelaySeen, savePending, usedStamps } from '../bmail/store';
 import { fetchPeerBPhone } from '../calls/bphone';
 import { getFriends, isFriend as isCallFriend } from '../calls/friends';
 import { shortKey } from '../calls/machine';
@@ -455,7 +455,8 @@ async function myTxids(m: Me): Promise<Set<string>> {
 
 // ── bMail ────────────────────────────────────────────────────────────────────
 // Peeks the 'bmail' message box (never acknowledges or internalizes: the bMail screen does that) and notifies
-// only for mail that routes to Inbox. Requests (unstamped, under-priced) stay quiet.
+// only for mail that routes to Inbox. Requests (unstamped, under-priced) stay quiet. Mail stays on the relay for the
+// user's other devices, so what this device already has is skipped: new here means not yet stored on this device.
 // TODO(bmail closed-app push, owner 9 Oct): the PHONE decrypts the subject (iOS Notification Service Extension /
 // Android FCM data handler using the wallet's BRC-2 key); the push server only relays the sealed envelope and never
 // sees plaintext. Not built yet: needs push-server work (docs/NOTIFICATIONS.md, bwalletx-push-project).
@@ -468,15 +469,24 @@ const bmailLabel = async (key: string): Promise<string> => {
   return p?.name || shortKey(key);
 };
 
+/** Per account: no bMail peek before this time (a large box is peeked less often: peekGapMs). */
+const bmailPeekAfter = new Map<string, number>();
+
 async function bmail(m: Me, st: PollState, out: NotifyItem[]) {
   const wallet = m.ctx?.wallet as unknown as WalletInterface | undefined;
   if (!wallet) return;
   const me = await myKey(wallet);
+  if (now() < (bmailPeekAfter.get(me) ?? 0)) return;
   const mail = loadMail(me);
   const known = new Set(mail.received.map((r) => r.id));
   const priceSats = usdToSats(mail.priceUsd, cachedExchangeRate()) ?? 0;
   const isFriend = (k: string) => isCallFriend(k) || mail.contacts.includes(k);
-  const peek = (await peekMail(wallet, me)).filter((p) => !known.has(p.env.id));
+  const peek = await peekMail(wallet, me, {
+    known,
+    seen: loadRelaySeen(me),
+    stamps: usedStamps(mail),
+    onListed: (count) => void bmailPeekAfter.set(me, now() + peekGapMs(count)),
+  });
   const inbox = peek.filter(({ env, sats }) => {
     const replyCredit =
       !!env.usesReplyCredit &&

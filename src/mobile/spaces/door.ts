@@ -10,16 +10,28 @@
  *             accepts it, sends `amount` ticket tokens to the listener's ordinals address, replies on
  *             `spacedoor_reply`. bit-sign then lets the listener in because they hold the ticket.
  *
- * No server custody and no new server secrets: the relay is the bMail message box. One admission per payment
- * txid (`DoorLedger`). A payment the host was half-way through sending a ticket for when the app stopped is never
- * re-sent automatically: it shows as "check by hand".
+ * No server custody and no new server secrets: the relay is the bMail message box. One admission per payment:
+ * the wallet records what each payment was taken in for (bmail/client.ts verifyPostage: labels on the payment's
+ * transaction, so every device of the host has the record once synced), and a ticket is sent only by the check that
+ * took the payment in for this very request. This device's `DoorLedger` (by payment txid) keeps what it sent. A
+ * payment the host was half-way through sending a ticket for when the app stopped, or that another device of the
+ * host took in, is never sent a ticket automatically: it shows as "check by hand".
  *
  * Tickets are access passes (docs/TICKETS.md): the copy says "ticket" and "entry", never investment words.
  */
 import type { WalletInterface } from '@bsv/sdk';
 import { MessageBoxClient } from '@bsv/message-box-client';
 import { trackOwnAuthFetch } from '../../services/ownBackendKeys';
-import { bmailHost, payPostage, verifyPostage } from '../bmail/client';
+import {
+  bmailHost,
+  noteStamp,
+  payPostage,
+  RECHECK_EVERY_MS,
+  stampNet,
+  verifyPostage,
+  type StampCheck,
+  type StampNet,
+} from '../bmail/client';
 import { newMessageId, parsePostage, type Envelope, type Postage } from '../bmail/envelope';
 
 export const DOOR_BOX = 'spacedoor';
@@ -144,6 +156,12 @@ export type LedgerEntry = {
   at: number;
   ticketTxid?: string;
   note?: string;
+  /** The payment was not in a block when the ticket went out: when it was last looked up (confirmPayments). */
+  confirming?: number;
+  /** When a look first found the network without the payment. */
+  doubt?: number;
+  /** The network dropped the payment after the ticket was sent (replaced or never mined): shown to the host. */
+  dropped?: true;
 };
 export type DoorLedger = Record<string, LedgerEntry>;
 
@@ -186,7 +204,9 @@ export const checkDoorRequest = (
   if (req.from !== ctx.sender.toLowerCase()) return { ok: false, reason: 'Sender does not match the request' };
   if (req.to !== ctx.hostKey) return { ok: false, reason: 'Not addressed to this host' };
   if (req.ticker !== ctx.ticker.toUpperCase()) return { ok: false, reason: 'For another room', retry: true };
-  if (ctx.ledger[req.payment.txid]) return { ok: false, reason: 'Payment already used' };
+  // Only a payment a ticket was sent (or begun) for is used: a refusal says nothing about the payment itself.
+  const entry = ctx.ledger[req.payment.txid];
+  if (entry && entry.status !== 'refused') return { ok: false, reason: 'Payment already used' };
   if (req.at > ctx.now + FUTURE_SKEW_MS || ctx.now - req.at > DOOR_MAX_AGE_MS)
     return { ok: false, reason: 'Request expired. Ask again.' };
   if (!ctx.priceSats) return { ok: false, reason: 'No BSV price yet', retry: true };
@@ -273,7 +293,8 @@ export const resendDoorRequest = (wallet: WalletInterface, req: DoorRequest) => 
 /** Listener: the host's answer to request `id`, if it has come (acknowledges what it reads). */
 export const readDoorReply = async (wallet: WalletInterface, id: string): Promise<DoorReply | null> => {
   const client = mbox(wallet);
-  const msgs = await client.listMessages({ messageBox: DOOR_REPLY_BOX, host: bmailHost() });
+  // acceptPayments off: the client would otherwise take in any payment a message carries, unchecked.
+  const msgs = await client.listMessages({ messageBox: DOOR_REPLY_BOX, host: bmailHost(), acceptPayments: false });
   let found: DoorReply | null = null;
   const ack: string[] = [];
   for (const m of msgs) {
@@ -286,6 +307,11 @@ export const readDoorReply = async (wallet: WalletInterface, id: string): Promis
   if (ack.length) await client.acknowledgeMessage({ messageIds: ack, host: bmailHost() }).catch(() => undefined);
   return found;
 };
+
+/** A payment that reads as unpaid on an answer one look does not settle is refused only on a look this much later. */
+export const DOOR_CONFIRM_MS = 60_000;
+/** Request id → when such an answer was first given (this session only). */
+const doubts = new Map<string, number>();
 
 export type SendTicket = (a: { ordAddress: string; payer: string }) => Promise<string>;
 
@@ -303,14 +329,19 @@ export const runDoor = async (
     priceSats: number | null;
     sendTicket: SendTicket;
     now?: () => number;
+    /** The network checks on the payment (tests; default: bMail's, WhatsOnChain + ARC). */
+    net?: StampNet;
   },
 ): Promise<DoorRound> => {
   const hostKey = a.hostKey.toLowerCase();
   const client = mbox(wallet);
-  const msgs = await client.listMessages({ messageBox: DOOR_BOX, host: bmailHost() });
+  // acceptPayments off: the only money taken in here is the door payment, after verifyPostage's network check.
+  const msgs = await client.listMessages({ messageBox: DOOR_BOX, host: bmailHost(), acceptPayments: false });
   const ledger = loadLedger(hostKey);
   const round: DoorRound = { admitted: 0, refused: 0, check: 0 };
   const now = a.now ?? Date.now;
+  for (const [id, at] of doubts) if (now() - at > DOOR_MAX_AGE_MS) doubts.delete(id);
+  await confirmPayments(hostKey, a.net ?? stampNet(), now()).catch(() => undefined);
   for (const m of msgs) {
     const req = parseDoorRequest(m.body);
     const done = () =>
@@ -341,29 +372,85 @@ export const runDoor = async (
       await done();
       continue;
     }
+    // A refusal is answered and cleared, and never written against the payment's txid: a request anyone can send
+    // (it only has to name a txid) must not use up somebody's payment.
+    const refuse = async (note: string) => {
+      await reply(client, req, { ok: false, note });
+      round.refused++;
+      round.lastNote = note;
+      doubts.delete(req.id);
+      await done();
+    };
+    // Not settled by this look: the request stays in the box for the next pass. `pending`: the wallet or the network
+    // could not answer. `confirm`: unpaid on an answer one look does not settle (bmail/client.ts StampCheck); it is
+    // refused when a look at least DOOR_CONFIRM_MS later says the same.
+    const wait = (v: StampCheck): boolean => {
+      if (v.pending) return true;
+      if (!v.confirm) return false;
+      const since = doubts.get(req.id);
+      if (since !== undefined && now() - since >= DOOR_CONFIRM_MS) return false;
+      if (since === undefined) doubts.set(req.id, now());
+      return true;
+    };
+    const since = doubts.get(req.id);
+    if (since !== undefined && now() >= since && now() - since < DOOR_CONFIRM_MS) continue;
     // The wallet checks the BEEF: txid, output amount, and that it pays a key only I can derive. Read-only first.
     const env = { from: req.from, postage: req.payment } as Envelope;
     const look = await verifyPostage(wallet, env, false);
     if (look.sats < minAcceptSats(a.priceSats ?? 0)) {
-      await reply(client, req, { ok: false, note: look.note ?? 'Payment not valid' });
-      ledger[req.payment.txid] = { status: 'refused', ticker: req.ticker, payer: req.from, at: now(), note: look.note };
-      saveLedger(hostKey, ledger);
-      round.refused++;
-      round.lastNote = look.note;
+      round.lastNote = look.note ?? 'Payment not valid';
+      // e.g. wallet locked: nothing was learnt about the payment, so nothing is refused or recorded.
+      if (!wait(look)) await refuse(round.lastNote);
+      continue;
+    }
+    // Then the network and the account's own record of the payment (kept in the wallet, so the host's other devices
+    // have it too): paid only when the network has the transaction and the wallet took it in for this very request.
+    // Never sent, double-spent, spent long ago, or taken in for a letter or another request: no ticket.
+    // What the payment is for: this request, by id and by what it asks (a later request with the same id and
+    // another ticket address is another use).
+    const use = `door ${req.id} ${req.ticker} ${req.ordAddress}`;
+    const took = await verifyPostage(wallet, env, true, a.net, use);
+    if (took.sats <= 0) {
+      round.lastNote = took.note ?? 'Payment not accepted';
+      if (!wait(took)) await refuse(round.lastNote);
+      continue;
+    }
+    doubts.delete(req.id);
+    const ticketSent = took.notes?.find((n) => /^ticket [0-9a-f]{64}$/.test(n))?.slice('ticket '.length);
+    if (!took.fresh && ticketSent) {
+      // The account's record says a ticket went out for this very request (on another device of the host, or on
+      // this one before its data was cleared): tell the payer again, and there is nothing for the host to do.
+      await reply(client, req, { ok: true, ticketTxid: ticketSent });
+      round.lastNote = 'Already admitted';
       await done();
       continue;
     }
-    const took = await verifyPostage(wallet, env, true);
-    if (took.sats <= 0) {
-      round.lastNote = took.note ?? 'Payment not accepted';
-      continue; // e.g. wallet busy: try again next pass; nothing recorded, nothing sent
+    if (!took.fresh) {
+      // The wallet had taken this payment in for this request already and no ticket is on record for it (this
+      // device stopped half-way, or the host's other device is sending it right now): never send one on our own.
+      const note = 'Payment taken in earlier; no ticket on record';
+      ledger[req.payment.txid] = { status: 'sending', ticker: req.ticker, payer: req.from, at: now(), note };
+      saveLedger(hostKey, ledger);
+      await reply(client, req, { ok: false, note: 'Paid. The host will send your ticket by hand.' });
+      round.check++;
+      round.lastNote = note;
+      await done();
+      continue;
     }
-    ledger[req.payment.txid] = { status: 'sending', ticker: req.ticker, payer: req.from, at: now() };
+    ledger[req.payment.txid] = {
+      status: 'sending',
+      ticker: req.ticker,
+      payer: req.from,
+      at: now(),
+      ...(took.confirming ? { confirming: now() } : {}),
+    };
     saveLedger(hostKey, ledger);
     try {
       const ticketTxid = await a.sendTicket({ ordAddress: req.ordAddress, payer: req.from });
       ledger[req.payment.txid] = { ...ledger[req.payment.txid], status: 'sent', ticketTxid };
       saveLedger(hostKey, ledger);
+      // On the account's record too, so the host's other devices know this request has its ticket.
+      await noteStamp(wallet, env, use, `ticket ${ticketTxid}`).catch(() => undefined);
       await reply(client, req, { ok: true, ticketTxid });
       round.admitted++;
     } catch (e) {
@@ -389,6 +476,42 @@ const reply = (client: MessageBoxClient, req: DoorRequest, r: { ok: boolean; tic
     )
     .catch(() => undefined);
 };
+
+/** At most this many unconfirmed payments are looked up in one pass. */
+const CONFIRM_MAX = 10;
+/**
+ * Payments that were not in a block when their ticket went out: one lookup each, at most every RECHECK_EVERY_MS,
+ * until the payment has a confirmation. If the network no longer has it, and a second look at least
+ * RECHECK_EVERY_MS later says the same, the payment was replaced or dropped after the ticket was sent: nothing can
+ * be taken back, so it is recorded (`dropped`) and shown to the host (paymentsDropped).
+ */
+export const confirmPayments = async (hostKey: string, net: StampNet, now: number): Promise<void> => {
+  if (!net.status) return;
+  const due = (at: number | undefined) => at === undefined || at > now || now - at >= RECHECK_EVERY_MS;
+  const todo = Object.entries(loadLedger(hostKey))
+    .filter(([, e]) => e.confirming !== undefined && !e.dropped && due(e.confirming))
+    .slice(0, CONFIRM_MAX);
+  for (const [txid] of todo) {
+    const said = await net.status(txid).catch(() => 'unclear' as const);
+    // Read again after the lookup: the door may have written the ledger meanwhile.
+    const ledger = loadLedger(hostKey);
+    const e = ledger[txid];
+    if (!e || e.confirming === undefined) continue;
+    const { confirming: _was, doubt, ...rest } = e;
+    if (said === 'confirmed') ledger[txid] = rest;
+    else if (said !== 'missing') ledger[txid] = { ...rest, confirming: now };
+    else if (doubt !== undefined && due(doubt))
+      ledger[txid] = { ...rest, dropped: true, note: 'The network dropped this payment after the ticket was sent' };
+    else ledger[txid] = { ...rest, confirming: now, doubt: Math.min(doubt ?? now, now) };
+    saveLedger(hostKey, ledger);
+  }
+};
+
+/** Payments the network dropped after their ticket was sent (the host is told; the ticket is not taken back). */
+export const paymentsDropped = (l: DoorLedger, ticker: string) =>
+  Object.entries(l)
+    .filter(([, e]) => e.dropped && e.ticker === ticker.toUpperCase())
+    .map(([txid, e]) => ({ txid, ...e }));
 
 /** Payments the host took but could not confirm a ticket for (status still 'sending'). */
 export const needsHandCheck = (l: DoorLedger, ticker: string) =>

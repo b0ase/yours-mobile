@@ -14,6 +14,7 @@
  *    that action's own spend (matched by its outputs). Any other label asks on its own sheet.
  */
 import { routesToModule } from './pModuleSpendGate';
+import { isReservedLabel } from './reservedLabels';
 import { permissionSite } from './permissionSite';
 import { lineItemsMatch } from './spendRecipients';
 
@@ -131,7 +132,9 @@ export function guardLabelsOnSpend<T extends object>(manager: T, deps: LabelGuar
       typeof args.label !== 'string' ||
       // Admin-only labels are refused by the manager itself: never deferred past that check.
       args.label.startsWith('admin') ||
-      args.label.startsWith('p ')
+      args.label.startsWith('p ') ||
+      // The wallet's own labels are refused by reservedLabels.ts: never deferred onto a sheet.
+      isReservedLabel(args.label)
     )
       return label.call(manager, args);
     // Already granted: nothing to show.

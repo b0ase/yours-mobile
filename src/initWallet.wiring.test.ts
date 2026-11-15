@@ -15,6 +15,7 @@ import { getKeys } from './utils/keys';
 import { encrypt } from './utils/crypto';
 import { CHROME_STORAGE_OBJECT_VERSION, ACCOUNT_DATA_VERSION } from './utils/constants';
 import { HELD_ASSET_REFUSAL } from './services/pModuleSpendGate';
+import { RESERVED_LABEL_REFUSAL } from './services/reservedLabels';
 import { MODULE_PROBE_ANSWER, P_MODULE_PROTOCOL_REFUSAL } from './services/reservedProtocols';
 import {
   NO_VERIFIER,
@@ -131,6 +132,29 @@ describe('the real initWallet wiring', () => {
     await expect(ctx.wallet.createAction(pay(['p 1sat input id abc123']) as never, SITE)).rejects.toThrow(
       HELD_ASSET_REFUSAL,
     );
+  });
+
+  // bMail review 15 Nov 2026 (N1): bMail's record of what a stamp paid for is kept as "bmail …" labels.
+  test("the wallet's own action labels: no site can write or list by one, through every guard; the wallet can", async () => {
+    const stamp = `bmail stamp ${'ab'.repeat(32)}.0`;
+    const paid = `BMAIL Paid ${'ab'.repeat(32)}.0 ${'cd'.repeat(20)} `;
+    for (const originator of [SITE, undefined, '']) {
+      await expect(ctx.wallet.createAction(pay(['game', paid]) as never, originator)).rejects.toThrow(
+        RESERVED_LABEL_REFUSAL,
+      );
+      await expect(
+        ctx.wallet.internalizeAction(
+          { tx: [1, 2, 3], outputs: [], description: 'a site call', labels: [stamp, paid] } as never,
+          originator,
+        ),
+      ).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(
+        ctx.wallet.listActions({ labels: [stamp], includeLabels: true } as never, originator),
+      ).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+    }
+    const { ADMIN_ORIGINATOR } = await import('./initWallet');
+    const mine = await ctx.wallet.listActions({ labels: [stamp], includeLabels: true } as never, ADMIN_ORIGINATOR);
+    expect(mine.actions).toEqual([]);
   });
 
   test('G2 holds on the real wallet, and the 1sat module probe answers with the fixed key', async () => {
