@@ -6,7 +6,7 @@
     <title>bWallet — Just b</title>
     <meta
       name="description"
-      content="bWallet: the BSV wallet for tokens, media and apps. BSV, MNEE and BSV-21 tokens, a market to browse tokens and NFTs, the bApps store, an ordinals media player and bChat. Non-custodial, by The Bitcoin Corporation Ltd."
+      content="bWallet: the BSV wallet for tokens, media and apps. BSV, MNEE and BSV-21 tokens, the bApps store, an ordinals media player and bChat. Non-custodial, by The Bitcoin Corporation Ltd."
     />
     <meta name="theme-color" content="#000000" />
     <link rel="canonical" href="https://www.bwallet.space/" />
@@ -16,7 +16,7 @@
     <meta property="og:title" content="bWallet — Just b. The BSV wallet for tokens, media and apps" />
     <meta
       property="og:description"
-      content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd. Tokens, market, bApps, media and chat in one app."
+      content="Non-custodial BSV wallet by The Bitcoin Corporation Ltd. Tokens, bApps, media and chat in one app."
     />
     <meta property="og:image" content="https://bwalletx.com/og-home-v3.png" />
     <meta property="og:image:width" content="1200" />
@@ -71,6 +71,13 @@
         border-color: rgba(0, 0, 0, 0.15) !important;
       }
     </style>
+    <style>
+      .showcase-grid {
+        grid-template-columns: minmax(0, 1fr);
+        justify-items: center;
+        text-align: center;
+      }
+    </style>
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
@@ -79,7 +86,7 @@
       <div class="wrap topbar-in">
         <a class="brand" href="/"><img src="/logo.svg" alt="" width="34" height="30" /><span>bWallet</span></a>
         <nav aria-label="Pages">
-          <a href="/market">Market</a><a href="https://bwalletx.com/features">bWalletX features</a
+          <a href="https://bwalletx.com/features">bWalletX features</a
           ><a href="https://bwalletx.com/friends">Rooms &amp; tokens</a
           ><a href="https://bwalletx.com">Get bWalletX &rarr;</a>
         </nav>
@@ -90,8 +97,8 @@
       </div>
       <nav class="section-nav" aria-label="On this page">
         <div class="wrap">
-          <a href="#wallet">Wallet</a><a href="#market">Market</a><a href="#apps">Apps</a><a href="#media">Media</a
-          ><a href="#chat">bWalletX</a><a href="#identity">Identity</a><a href="#security">Security</a>
+          <a href="#wallet">Wallet</a><a href="#apps">Apps</a><a href="#media">Media</a><a href="#chat">bWalletX</a
+          ><a href="#identity">Identity</a><a href="#security">Security</a>
         </div>
       </nav>
     </header>
@@ -117,8 +124,8 @@
           <p class="wordmark">bWallet</p>
           <h1>The BSV wallet for <span class="gold">tokens, media and apps.</span></h1>
           <p class="lede">
-            Hold, send and mint in one non-custodial app. Send to names, browse 180+ BSV-21 tokens, open the bApps store
-            and play your on-chain media.
+            Hold, send and mint in one non-custodial app. Send to names, open the bApps store and play your on-chain
+            media.
           </p>
           <div class="cta-row">
             <a class="btn btn-store" href="https://bwalletx.com/android"
@@ -220,10 +227,10 @@
         <div class="wrap showcase-grid">
           <div class="showcase-copy reveal">
             <p class="eyebrow">One app</p>
-            <h2>Meet bWallet. Five tabs, everything on-chain.</h2>
+            <h2>Meet bWallet. Everything on-chain.</h2>
             <p class="lede">
-              Wallet, Market, Apps, Feed and Chat, with Settings tucked into the account drawer. A wallet that does more
-              than hold a balance.
+              Wallet, Apps, Feed and Chat, with Settings tucked into the account drawer. A wallet that does more than
+              hold a balance.
             </p>
             <div class="film">
               <video
@@ -240,21 +247,6 @@
                 height="400"
               ></video>
             </div>
-          </div>
-          <div class="phone-stage reveal">
-            <div class="phone" id="phone">
-              <div class="phone-screen phone-real">
-                <div class="notch" aria-hidden="true"></div>
-                <img
-                  src="/media/app-home.webp"
-                  alt="The bWallet wallet home screen: balance in dollars, Send, Receive and Mint, and BSV, MNEE and PNEEs cards"
-                  width="390"
-                  height="844"
-                  loading="eager"
-                />
-              </div>
-            </div>
-            <p class="phone-cap">The real wallet home screen (web app, test wallet).</p>
           </div>
         </div>
       </section>
@@ -331,71 +323,6 @@
                 ><span class="row-main"><b>Send to $handle</b><small>Paymail and OpNS names too</small></span
                 ><span class="row-amt">Get your name</span>
               </div>
-            </div>
-          </div>
-        </div>
-      </section>
-      <section class="feature rev" id="market">
-        <div class="wrap feature-grid">
-          <div class="feature-copy reveal">
-            <span class="ring-icon" aria-hidden="true"
-              ><svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.8"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M3 17l6-6 4 4 8-8" />
-                <path d="M15 7h6v6" /></svg
-            ></span>
-            <p class="eyebrow">Market</p>
-            <h2>Browse tokens and NFTs, filtered for safety.</h2>
-            <p class="lede">
-              Switch between Tokens and NFTs. Browse 180+ BSV-21 tokens, plus music, video and image NFTs, and view them
-              in your wallet. An always-on safety filter hides harmful content, and Report removes anything that slips
-              through.
-            </p>
-          </div>
-          <div class="feature-visual reveal">
-            <!-- SECTION LOOP VIDEO SLOT (market): drop site/media/market.mp4 (+ .webm, -poster.jpg) and copy the .film.section-film block used in #market here; main.js lazy-loads .section-loop videos in view. -->
-            <div class="film section-film">
-              <video
-                class="section-loop"
-                data-src-webm="/media/market.webm"
-                data-src="/media/market.mp4"
-                poster="/media/market-poster.jpg"
-                muted
-                loop
-                playsinline
-                preload="none"
-                aria-hidden="true"
-                width="736"
-                height="400"
-              ></video>
-            </div>
-            <div class="card">
-              <div class="card-head"><span>Trending</span><span class="chip">1Sat</span></div>
-              <ol class="trend">
-                <li>
-                  <span class="bar" style="--w: 92%"></span><span class="t-name">Tokens</span
-                  ><span class="t-tag">180+ BSV-21</span>
-                </li>
-                <li>
-                  <span class="bar" style="--w: 74%"></span><span class="t-name">NFTs · Music</span
-                  ><span class="t-tag">Play</span>
-                </li>
-                <li>
-                  <span class="bar" style="--w: 58%"></span><span class="t-name">NFTs · Video</span
-                  ><span class="t-tag">Watch</span>
-                </li>
-                <li>
-                  <span class="bar" style="--w: 40%"></span><span class="t-name">NFTs · Images</span
-                  ><span class="t-tag">Report</span>
-                </li>
-              </ol>
-              <p class="note">Illustrative layout, not live market data.</p>
             </div>
           </div>
         </div>
@@ -508,12 +435,8 @@
                 <path d="M4 5h16v11H9l-5 4z" /></svg
             ></span>
             <p class="eyebrow">The full edition</p>
-            <h2>Want rooms, trading and your own token?</h2>
-            <p class="lede">
-              Token chat rooms, buying and selling in the Market, a personal $HANDLE token and sign-in with X or Google
-              are in <a href="https://bwalletx.com" class="gold">bWalletX</a>, the full edition for Chrome, Android and
-              the web. <a href="https://bwalletx.com/friends">How it works &rarr;</a>
-            </p>
+            <h2>bWalletX is our full-feature edition.</h2>
+            <p class="lede"><a href="https://bwalletx.com" class="gold">bwalletx.com &rarr;</a></p>
           </div>
           <div class="feature-visual reveal">
             <!-- SECTION LOOP VIDEO SLOT (chat): drop site/media/chat.mp4 (+ .webm, -poster.jpg) and copy the .film.section-film block used in #market here; main.js lazy-loads .section-loop videos in view. -->
