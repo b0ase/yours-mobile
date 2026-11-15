@@ -632,7 +632,8 @@ describe('review 13 Nov: readings the first fix missed (A3, A4)', () => {
     ['a mixed-case key', bytes('{"DoMaIn":"good.com"}')],
     ['JSON nested in a JSON string', bytes(JSON.stringify({ payload: JSON.stringify({ domain: 'good.com' }) }))],
     ['a field after another in a query string', bytes('note=1&domain=good.com')],
-    ['0xff + \\u-escaped key', [0xff, ...bytes('{"\\u0064omain":"good\\u002ecom"}')]],
+    // Two 0xff, not one: with one this fixture was exactly 32 bytes, which is now a blind hash for any site.
+    ['0xff + \\u-escaped key', [0xff, 0xff, ...bytes('{"\\u0064omain":"good\\u002ecom"}')]],
   ])('%s: refused for evil.com, allowed for good.com', (_name, data) => {
     expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('good.com');
     expect(crossSiteSignRefusal('https://good.com', { data })).toBeNull();
@@ -969,10 +970,18 @@ describe('32 bytes of data under the posting protocol is a blind hash', () => {
     ).toBeNull();
   });
 
-  test('32 bytes under any other protocol is signed as before', () => {
-    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [2, 'sigma'] }))).toBeNull();
-    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [1, 'sigmas'] }))).toBeNull();
-    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [2, 'my app'] }))).toBeNull();
+  // Was "signed as before" until 15 Nov 2026: data = sha256(preimage) under any protocol a site holds is a transaction
+  // signature over a transaction the wallet never saw (review of the pending-sighash fix; pendingSighash.test.ts).
+  test('32 bytes under any other protocol is a blind hash too', () => {
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [2, 'sigma'] }))).toBe(BLIND_SIGN_REFUSAL);
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [1, 'sigmas'] }))).toBe(
+      BLIND_SIGN_REFUSAL,
+    );
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [2, 'my app'] }))).toBe(
+      BLIND_SIGN_REFUSAL,
+    );
+    for (const n of [31, 33])
+      expect(crossSiteSignRefusal('app.example', posting(rand(n, n), { protocolID: [2, 'my app'] }))).toBeNull();
   });
 
   test('through the guard: the site is refused before the wallet signs; the wallet itself and an HMAC are not', async () => {
@@ -1120,9 +1129,23 @@ describe('blind-hash sites: exact hosts only', () => {
       'https://WWW.BSocialX.com/feed',
       'scammerscartel.com:443',
       'https://chat.bwalletx.com./room',
-      'CHAT.BWALLETX.COM:8443',
+      'http://bchatx.com:80',
     ])
       expect([site, ...both(site)]).toEqual([site, null, null]);
+  });
+
+  // Was allowed until the final check of 15 Nov 2026 ('CHAT.BWALLETX.COM:8443' stood in the list above): whatever
+  // listens on another port of a listed host is not the site.
+  test('another port of a listed host is refused', () => {
+    for (const site of [
+      'CHAT.BWALLETX.COM:8443',
+      'bchatx.com:8443',
+      'https://bchatx.com:8443/feed',
+      'https://www.bchatx.com:80',
+      'http://bchatx.com:443',
+      'scammerscartel.com:1',
+    ])
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
   });
 
   test('subdomains are refused', () => {
