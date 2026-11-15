@@ -73,11 +73,17 @@ const TOO_MUCH = `${UNCHECKABLE_REFUSAL} (too much encoded data to read)`;
 export const CROSS_SITE_REFUSAL = 'This message is for a different site than the one asking you to sign it';
 export const BLIND_SIGN_REFUSAL = 'Sites cannot ask for a signature over a hash the wallet cannot read';
 
-/** Our own sites that sign BSM digests (AIP posts, boost sighashes, escrow arbiter digests) through hashToDirectlySign. */
-const BLIND_HASH_SITES = ['bchatx.com', 'chat.bwalletx.com', 'bit-sign.online'];
-/** The caller is one of them or a subdomain of one (never a parent: bwalletx.com is not chat.bwalletx.com). */
-export const blindHashAllowed = (caller: string) =>
-  BLIND_HASH_SITES.some((site) => caller === site || caller.endsWith(`.${site}`));
+/**
+ * Our own sites that sign BSM digests (AIP posts, boost sighashes, escrow arbiter digests) through hashToDirectlySign.
+ * Exact hosts only (owner, 15 Nov 2026, "tightening"): no subdomain of one counts, so a stray or taken-over
+ * subdomain can't blind-sign. bit-sign.online is no longer one: its posting pages redirect to bChatX.
+ */
+const BLIND_HASH_SITES: ReadonlySet<string> = new Set(['www.bchatx.com', 'bchatx.com', 'chat.bwalletx.com']);
+/**
+ * The caller is exactly one of them. `caller` is a bareHost (signDataScan.ts): lower-case, no scheme, port, path,
+ * trailing dot or pairing suffix, so "exactly" has one spelling.
+ */
+export const blindHashAllowed = (caller: string) => BLIND_HASH_SITES.has(caller);
 
 /**
  * The posting key ([1,'sigma'], the BAP key that AIP-signs feed posts) signs Bitcoin Signed Messages, and a BSM digest

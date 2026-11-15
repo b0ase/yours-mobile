@@ -9,6 +9,7 @@ import {
   boundHosts,
   normaliseKey,
   crossSiteSignRefusal,
+  blindHashAllowed,
   guardCrossSiteSigning,
   malformedSignRefusal,
   sameSite,
@@ -195,12 +196,7 @@ describe('b-Aware 24-25 Oct: encoded and blind challenges', () => {
     expect(crossSiteSignRefusal(caller, { hashToDirectlySign: [1, 2, 3] })).toBe(BLIND_SIGN_REFUSAL);
   });
   test('our chat sites may sign a hash (bChatX AIP posts), look-alikes and parents may not', () => {
-    for (const ok of [
-      'https://bchatx.com',
-      'https://www.bchatx.com',
-      'https://chat.bwalletx.com',
-      'https://bit-sign.online',
-    ])
+    for (const ok of ['https://bchatx.com', 'https://www.bchatx.com', 'https://chat.bwalletx.com'])
       expect(crossSiteSignRefusal(ok, { hashToDirectlySign: [1, 2, 3] })).toBeNull();
     for (const bad of [
       'https://bwalletx.com',
@@ -956,7 +952,7 @@ describe('32 bytes of data under the posting protocol is a blind hash', () => {
   });
 
   test('our own chat sites keep it, exactly as they keep hashToDirectlySign', () => {
-    for (const site of ['bchatx.com', 'www.bchatx.com', 'chat.bwalletx.com', 'bit-sign.online']) {
+    for (const site of ['bchatx.com', 'www.bchatx.com', 'chat.bwalletx.com']) {
       expect(crossSiteSignRefusal(site, posting(digest))).toBeNull();
       expect(crossSiteSignRefusal(site, { ...posting([]), data: undefined, hashToDirectlySign: digest })).toBeNull();
     }
@@ -1073,5 +1069,85 @@ describe('a site’s malformed createSignature is refused by the guard', () => {
     await m.createSignature({ ...ok, protocolID: undefined }, 'wallet-admin');
     await m.createHmac({ ...ok, protocolID: undefined }, 'app.example');
     expect(calls).toEqual(['sign:app.example', 'sign:wallet-admin', 'sign:wallet-admin', 'hmac:app.example']);
+  });
+});
+
+// Owner, 15 Nov 2026 ("tightening"): the sites that may ask for a signature over a hash are three exact hosts.
+// No subdomain of one counts, and bit-sign.online is no longer one (its posting pages redirect to bChatX).
+describe('blind-hash sites: exact hosts only', () => {
+  const hash = { hashToDirectlySign: rand(32, 5) };
+  const postingDigest = { protocolID: [1, 'sigma'], keyID: 'identity-1', counterparty: 'self', data: rand(32, 6) };
+  const both = (site: string) => [crossSiteSignRefusal(site, hash), crossSiteSignRefusal(site, postingDigest)];
+
+  test('exactly www.bchatx.com, bchatx.com and chat.bwalletx.com', () => {
+    for (const site of ['www.bchatx.com', 'bchatx.com', 'chat.bwalletx.com']) {
+      expect(blindHashAllowed(site)).toBe(true);
+      expect(both(site)).toEqual([null, null]);
+    }
+  });
+
+  test('every spelling of those three is the same host: scheme, port, path, case, trailing dot', () => {
+    for (const site of [
+      'https://www.bchatx.com',
+      'https://WWW.BCHATX.COM/feed?x=1',
+      'https://bchatx.com:443',
+      'bchatx.com.',
+      'https://chat.bwalletx.com./room',
+      'CHAT.BWALLETX.COM:8443',
+    ])
+      expect([site, ...both(site)]).toEqual([site, null, null]);
+  });
+
+  test('subdomains are refused', () => {
+    for (const site of [
+      'x.bchatx.com',
+      'evil.chat.bwalletx.com',
+      'app.bchatx.com',
+      'www.www.bchatx.com',
+      'www.chat.bwalletx.com',
+      'https://staging.bchatx.com',
+    ]) {
+      expect(blindHashAllowed(site)).toBe(false);
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+    }
+  });
+
+  test('bit-sign.online, in any form, is refused', () => {
+    for (const site of ['bit-sign.online', 'www.bit-sign.online', 'https://bit-sign.online', 'app.bit-sign.online'])
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+  });
+
+  test('sites not on the list, parents and look-alikes are refused', () => {
+    for (const site of [
+      'bsocialx.com',
+      'scammerscartel.com',
+      'bwalletx.com',
+      'web.bwalletx.com',
+      'evilbchatx.com',
+      'bchatx.com.evil.example',
+      'bchatx.co',
+    ])
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+  });
+
+  test('a phone pairing that proved one of the three hosts still works; a subdomain or unproven one does not', () => {
+    const paired = (host: string) => `${host}.c${'ab'.repeat(22)}.paired.invalid`;
+    setProvenPairingCheck(() => true);
+    for (const host of ['www.bchatx.com', 'bchatx.com', 'chat.bwalletx.com'])
+      expect([host, ...both(paired(host))]).toEqual([host, null, null]);
+    for (const host of ['x.bchatx.com', 'bit-sign.online'])
+      expect([host, ...both(paired(host))]).toEqual([host, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+    setProvenPairingCheck(() => false);
+    expect(both(paired('www.bchatx.com'))).toEqual([BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+  });
+
+  test('bit-sign.online still signs readable data that names it (its document seal); only the blind hash is gone', () => {
+    const record = JSON.stringify({
+      v: 1,
+      kind: 'nds-seal',
+      docHash: 'ab'.repeat(32),
+      origin: 'https://bit-sign.online',
+    });
+    expect(crossSiteSignRefusal('https://bit-sign.online', { data: bytes(record) })).toBeNull();
   });
 });
