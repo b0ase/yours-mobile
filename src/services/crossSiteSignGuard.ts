@@ -77,8 +77,18 @@ export const BLIND_SIGN_REFUSAL = 'Sites cannot ask for a signature over a hash 
  * Our own sites that sign BSM digests (AIP posts, boost sighashes, escrow arbiter digests) through hashToDirectlySign.
  * Exact hosts only (owner, 15 Nov 2026, "tightening"): no subdomain of one counts, so a stray or taken-over
  * subdomain can't blind-sign. bit-sign.online is no longer one: its posting pages redirect to bChatX.
+ * bsocialx.com and scammerscartel.com (with www) are our own sites running the bChatX posting pages, added on the
+ * owner's word on 15 Nov 2026. ⚠ Any further host needs the owner's word; crossSiteSignGuard.test.ts pins this list.
  */
-const BLIND_HASH_SITES: ReadonlySet<string> = new Set(['www.bchatx.com', 'bchatx.com', 'chat.bwalletx.com']);
+export const BLIND_HASH_SITES: ReadonlySet<string> = new Set([
+  'www.bchatx.com',
+  'bchatx.com',
+  'chat.bwalletx.com',
+  'bsocialx.com',
+  'www.bsocialx.com',
+  'scammerscartel.com',
+  'www.scammerscartel.com',
+]);
 /**
  * The caller is exactly one of them. `caller` is a bareHost (signDataScan.ts): lower-case, no scheme, port, path,
  * trailing dot or pairing suffix, so "exactly" has one spelling.

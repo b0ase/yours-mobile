@@ -9,6 +9,7 @@ import {
   boundHosts,
   normaliseKey,
   crossSiteSignRefusal,
+  BLIND_HASH_SITES,
   blindHashAllowed,
   guardCrossSiteSigning,
   malformedSignRefusal,
@@ -1072,26 +1073,52 @@ describe('a site’s malformed createSignature is refused by the guard', () => {
   });
 });
 
-// Owner, 15 Nov 2026 ("tightening"): the sites that may ask for a signature over a hash are three exact hosts.
+// Owner, 15 Nov 2026 ("tightening"): the sites that may ask for a signature over a hash are exact hosts.
 // No subdomain of one counts, and bit-sign.online is no longer one (its posting pages redirect to bChatX).
+// bsocialx.com and scammerscartel.com (with www) were added the same day, on the owner's word ("add both").
 describe('blind-hash sites: exact hosts only', () => {
   const hash = { hashToDirectlySign: rand(32, 5) };
   const postingDigest = { protocolID: [1, 'sigma'], keyID: 'identity-1', counterparty: 'self', data: rand(32, 6) };
   const both = (site: string) => [crossSiteSignRefusal(site, hash), crossSiteSignRefusal(site, postingDigest)];
 
-  test('exactly www.bchatx.com, bchatx.com and chat.bwalletx.com', () => {
-    for (const site of ['www.bchatx.com', 'bchatx.com', 'chat.bwalletx.com']) {
+  test('the complete list, exactly: adding or removing a host must change this test (and needs the owner’s word)', () => {
+    expect([...BLIND_HASH_SITES].sort()).toEqual(
+      [
+        'bchatx.com',
+        'bsocialx.com',
+        'chat.bwalletx.com',
+        'scammerscartel.com',
+        'www.bchatx.com',
+        'www.bsocialx.com',
+        'www.scammerscartel.com',
+      ].sort(),
+    );
+    expect(BLIND_HASH_SITES.size).toBe(7);
+  });
+
+  test('each listed host is allowed', () => {
+    for (const site of [
+      'www.bchatx.com',
+      'bchatx.com',
+      'chat.bwalletx.com',
+      'bsocialx.com',
+      'www.bsocialx.com',
+      'scammerscartel.com',
+      'www.scammerscartel.com',
+    ]) {
       expect(blindHashAllowed(site)).toBe(true);
       expect(both(site)).toEqual([null, null]);
     }
   });
 
-  test('every spelling of those three is the same host: scheme, port, path, case, trailing dot', () => {
+  test('every spelling of a listed host is the same host: scheme, port, path, case, trailing dot', () => {
     for (const site of [
       'https://www.bchatx.com',
       'https://WWW.BCHATX.COM/feed?x=1',
       'https://bchatx.com:443',
       'bchatx.com.',
+      'https://WWW.BSocialX.com/feed',
+      'scammerscartel.com:443',
       'https://chat.bwalletx.com./room',
       'CHAT.BWALLETX.COM:8443',
     ])
@@ -1106,6 +1133,9 @@ describe('blind-hash sites: exact hosts only', () => {
       'www.www.bchatx.com',
       'www.chat.bwalletx.com',
       'https://staging.bchatx.com',
+      'x.bsocialx.com',
+      'evil.scammerscartel.com',
+      'www.www.bsocialx.com',
     ]) {
       expect(blindHashAllowed(site)).toBe(false);
       expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
@@ -1119,8 +1149,9 @@ describe('blind-hash sites: exact hosts only', () => {
 
   test('sites not on the list, parents and look-alikes are refused', () => {
     for (const site of [
-      'bsocialx.com',
-      'scammerscartel.com',
+      'bsocialx.com.evil.example',
+      'scammerscartel.co',
+      'evilbsocialx.com',
       'bwalletx.com',
       'web.bwalletx.com',
       'evilbchatx.com',
@@ -1130,12 +1161,11 @@ describe('blind-hash sites: exact hosts only', () => {
       expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
   });
 
-  test('a phone pairing that proved one of the three hosts still works; a subdomain or unproven one does not', () => {
+  test('a phone pairing that proved a listed host still works; a subdomain or unproven one does not', () => {
     const paired = (host: string) => `${host}.c${'ab'.repeat(22)}.paired.invalid`;
     setProvenPairingCheck(() => true);
-    for (const host of ['www.bchatx.com', 'bchatx.com', 'chat.bwalletx.com'])
-      expect([host, ...both(paired(host))]).toEqual([host, null, null]);
-    for (const host of ['x.bchatx.com', 'bit-sign.online'])
+    for (const host of BLIND_HASH_SITES) expect([host, ...both(paired(host))]).toEqual([host, null, null]);
+    for (const host of ['x.bchatx.com', 'bit-sign.online', 'x.bsocialx.com', 'evil.scammerscartel.com'])
       expect([host, ...both(paired(host))]).toEqual([host, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
     setProvenPairingCheck(() => false);
     expect(both(paired('www.bchatx.com'))).toEqual([BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
