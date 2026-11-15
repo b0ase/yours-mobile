@@ -76,6 +76,17 @@ export const PINNED_PROTOCOLS: readonly PinnedProtocol[] = [
     // bx-starter-kit mint: description `bCalX: 3 private calendar records`.
     mint: { verb: 'Mint', noun: 'calendar record', countFrom: /(\d+) private (?:calendar )?records?/i },
   },
+  {
+    // bChatX (15 Nov 2026): the backup of the key that opens the user's encrypted DMs is encrypted with these keys
+    // (bit-sign lib/e2ee-chat-crypto.ts: keyID 'chat-key-v1', counterparty self). Unpinned, any site could ask for
+    // it and, on one Allow, read every DM. The hosts are the ones that serve the bChatX room page; a new one needs
+    // the owner's word.
+    protocolID: [2, 'bchatx chat key'],
+    origins: ['www.bchatx.com', 'bchatx.com', 'chat.bwalletx.com', 'scammerscartel.com', 'www.scammerscartel.com'],
+    label: 'Your private messages (bChatX)',
+    description:
+      'bChatX wants to keep a locked copy of the key to your private messages, so you can read them on your other devices. Only your 12 words can open it.',
+  },
 ];
 
 const key = (p: Protocol) => `${p[0]}:${p[1].trim().toLowerCase()}`;
@@ -92,9 +103,9 @@ export const pinnedProtocol = (protocolID: unknown): PinnedProtocol | undefined 
 /**
  * Advertised in getVersion's result so a site can check the wallet pins its protocol. Bumped whenever a protocol is
  * added: 1 = bmintx archive (bmintx.com checks >= 1), 2 = + bvideox records (bvideox.com checks >= 2),
- * 3 = + bjobsx, bdrivex, bcalx records (those sites check >= 3).
+ * 3 = + bjobsx, bdrivex, bcalx records (those sites check >= 3), 4 = + bchatx chat key.
  */
-export const PINNED_PROTOCOLS_VERSION = 3;
+export const PINNED_PROTOCOLS_VERSION = 4;
 
 /** BRC-205 `base`: vendor "-" major.minor.patch, no leading zeroes, 7–30 ASCII bytes. */
 const BRC205_BASE = /^[A-Za-z0-9][A-Za-z0-9._-]*-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;

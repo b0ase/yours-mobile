@@ -72,6 +72,37 @@ describe('pinned protocols', () => {
     expect(pinnedAllowed(VIDEO, 'bvideox.com')).toBe(true);
     expect(knownProtocol(VIDEO)?.label).toBe('Your video records (bVideoX)');
   });
+  test('the bChatX chat key (DM key backup) is pinned to the hosts that serve bChatX rooms', () => {
+    const CHAT_KEY = [2, 'bchatx chat key'] as const;
+    const args = { protocolID: CHAT_KEY, keyID: 'chat-key-v1', counterparty: 'self' };
+    for (const o of [
+      'www.bchatx.com',
+      'bchatx.com',
+      'chat.bwalletx.com',
+      'scammerscartel.com',
+      'www.scammerscartel.com',
+    ])
+      for (const m of ['encrypt', 'decrypt']) expect(pinnedProtocolRefusal(m, args, o)).toBeNull();
+    for (const o of [
+      'bjobsx.com',
+      'evil.com',
+      'x.bchatx.com',
+      'www.bchatx.com.evil.com',
+      'www.bit-sign.online',
+      'bsocialx.com',
+      'bmessagex.com',
+      undefined,
+    ])
+      for (const m of ['encrypt', 'decrypt', 'getPublicKey', 'createSignature', 'createHmac'])
+        expect(pinnedProtocolRefusal(m, args, o)).toContain(PINNED_REFUSAL);
+    expect(pinnedProtocolRefusal('decrypt', { ...args, protocolID: [2, ' BChatX Chat Key '] }, 'evil.com')).toContain(
+      PINNED_REFUSAL,
+    );
+    expect(pinnedAllowed(CHAT_KEY, 'evil.com')).toBe(false);
+    expect(pinnedAllowed(CHAT_KEY, 'www.bchatx.com')).toBe(true);
+    expect(knownProtocol(CHAT_KEY)?.label).toBe('Your private messages (bChatX)');
+    expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(4);
+  });
   test('the advertised version covers bvideox records (bvideox.com checks >= 2)', () => {
     expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(2);
   });
