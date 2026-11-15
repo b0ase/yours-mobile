@@ -3,7 +3,7 @@ import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
 import type { AuthorDeps } from './authorFeed';
-import { aipAddressOf, ensureFeedAuthorBinding } from './authorBinding';
+import { aipAddressOf, ensureFeedAuthorBinding, isAuthoredPost } from './authorBinding';
 import { FWETCH_API, parseFwetchFeed, parseFwetchItem, verifyFwetchTx } from './fwetch';
 import {
   parseOverlayAny,
@@ -529,14 +529,16 @@ export async function publish(
   if (res.tx) void ingest(res.tx);
   // Link this posting address to the account's $name on bChatX (authorBinding.ts). Fired after the post is out and
   // never awaited: it cannot delay or fail a post, and an account already linked costs one identity-key lookup.
-  void linkAuthor(ctx, signed);
+  void linkAuthor(ctx, signed, isAuthoredPost(tags));
   return res.txid;
 }
 
 /** Nothing in here can reach publish(): reading the post's address and the binding are both inside the try. */
-const linkAuthor = async (ctx: OneSatContext, signed: Script) => {
+const linkAuthor = async (ctx: OneSatContext, signed: Script, authored: boolean) => {
   try {
-    await ensureFeedAuthorBinding(ctx, { posted: true, postingAddress: aipAddressOf(signed) });
+    // Only a post or a reply marks the account as one that posts; after a like, follow, branch or hide this is the
+    // Feed-open check (an account that has never authored anything sends nothing).
+    await ensureFeedAuthorBinding(ctx, { posted: authored, postingAddress: aipAddressOf(signed) });
   } catch {
     /* the binding is retried on the next Feed open or post */
   }

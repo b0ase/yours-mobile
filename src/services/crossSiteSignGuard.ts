@@ -175,6 +175,30 @@ export const crossSiteSignRefusal = (
 
 const SIGNING_METHODS = ['createSignature', 'createHmac'] as const;
 
+export const MALFORMED_SIGN_REFUSAL = 'The wallet could not read this signing request';
+/**
+ * Defence in depth (final check of the feed-author binding, 15 Nov 2026): a site's createSignature whose shape the
+ * checks above can't read is refused here, not left for the SDK to throw on later. `data`, when present, must be a
+ * plain dense array of integers 0-255 (a hole, a fraction or an object with a length could read as one thing here
+ * and sign as another); `protocolID` must be a [number, string] pair. A typed array stays refused for a site, as
+ * before. Well-formed requests are untouched.
+ */
+export const malformedSignRefusal = (args: unknown): string | null => {
+  if (!args || typeof args !== 'object') return `${MALFORMED_SIGN_REFUSAL} (no arguments)`;
+  const { data, protocolID: p } = args as { data?: unknown; protocolID?: unknown };
+  if (!Array.isArray(p) || p.length !== 2 || !Number.isInteger(p[0]) || typeof p[1] !== 'string')
+    return `${MALFORMED_SIGN_REFUSAL} (protocolID is not a [level, name] pair)`;
+  if (data === undefined) return null;
+  if (!Array.isArray(data) || Object.getPrototypeOf(data) !== Array.prototype)
+    return `${UNCHECKABLE_REFUSAL} (data is not a byte array)`;
+  for (let i = 0; i < data.length; i++) {
+    const b: unknown = i in data ? data[i] : undefined;
+    if (typeof b !== 'number' || !Number.isInteger(b) || b < 0 || b > 255)
+      return `${UNCHECKABLE_REFUSAL} (data is not a byte array)`;
+  }
+  return null;
+};
+
 /** Wrap the manager's signing methods so an outside originator's cross-site message is refused before any prompt. */
 export function guardCrossSiteSigning<T extends object>(manager: T, adminOriginator: string): T {
   const m = manager as Record<string, unknown>;
@@ -189,6 +213,8 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
         if (own) throw new Error(own);
       }
       if (originator !== adminOriginator) {
+        const malformed = method === 'createSignature' ? malformedSignRefusal(args) : null;
+        if (malformed) throw new Error(malformed);
         const refusal = crossSiteSignRefusal(originator, args, method);
         if (refusal) throw new Error(refusal);
       }

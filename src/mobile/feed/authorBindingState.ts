@@ -8,7 +8,8 @@
 export type AuthorBindingRecord = {
   /**
    * 'ok': the server linked `address` to `alias`. 'needs-name' / 'failed': it refused; see `at` for when.
-   * 'blocked': it refused for good (the address is linked to another name): never sent again for this pair.
+   * 'blocked': the address is linked to another name. Not sent again for this pair for 30 days, or until the name
+   * is re-signed.
    */
   status: 'ok' | 'needs-name' | 'failed' | 'blocked';
   /** The bWalletX name the claim was made for (lowercase, no domain). */
@@ -42,12 +43,12 @@ export const writeAuthorBinding = (identityAddress: string, record: AuthorBindin
 };
 
 /**
- * The account's name was just claimed or its binding re-signed: forget a "needs a name" refusal, so the next Feed
- * open or post tries the binding again. Anything else on record stays.
+ * The account's name was just claimed or its binding re-signed: forget a "needs a name" or "linked to another name"
+ * refusal, so the next Feed open or post tries the binding again. Anything else on record stays.
  */
 export const authorNameSigned = (identityAddress: string | null | undefined) => {
-  if (identityAddress && readAuthorBinding(identityAddress)?.status === 'needs-name')
-    writeAuthorBinding(identityAddress, null);
+  const status = identityAddress ? readAuthorBinding(identityAddress)?.status : undefined;
+  if (identityAddress && (status === 'needs-name' || status === 'blocked')) writeAuthorBinding(identityAddress, null);
 };
 
 const postedKey = (identityAddress: string) => `bwallet.feedPosted.${identityAddress}`;

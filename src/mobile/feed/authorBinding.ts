@@ -101,7 +101,7 @@ export async function signFeedAuthorClaim(ctx: OneSatContext, claim: FeedAuthorC
 
 /**
  * ok: linked. retry-later: try again soon, quietly. needs-name: claim or re-sign the name first. failed: refused, may
- * be tried again much later. blocked: refused for good (the address is linked to another name); never re-sent.
+ * be tried again much later. blocked: the address is linked to another name; not re-sent for 30 days, or until the name is re-signed.
  */
 export type BindingOutcome = 'ok' | 'retry-later' | 'needs-name' | 'failed' | 'blocked';
 
@@ -111,7 +111,7 @@ export const bindingOutcome = (status: number, body: { ok?: unknown; code?: unkn
   if (status === 200 && body?.ok === true) return 'ok';
   if (code === 'name_binding_not_verified') return 'needs-name';
   // 409: this posting address is already linked to a different identity key whose name still resolves to it. No
-  // retry can change that; support has to.
+  // quick retry can change that (BLOCKED_RETRY_MS).
   if (code === 'address_linked_to_another_name') return 'blocked';
   // 409 bap_not_indexed: Sigma's BAP index reads the chain, and a posting profile published a minute ago isn't in it
   // yet. Until the server says so by name it answers 401 bap_id_mismatch for the same case, so that waits too.
@@ -133,10 +133,16 @@ export async function postFeedAuthorBinding(
   return { outcome: bindingOutcome(answer.status, answer.body), code, answer };
 }
 
-/** Has this account published anything to the Feed from this wallet? Its bSocial basket holds every post it made. */
+/** The tag on a post or a reply in the wallet's bSocial basket (FeedPage's composer and reply). */
+export const AUTHORED_TAG = 'type:post';
+/** A publish that authors something: a post or a reply. Likes, follows, branches, hides and tips are not. */
+export const isAuthoredPost = (tags: readonly string[]) => tags.includes(AUTHORED_TAG);
+
+/** Has this account written a post or a reply from this wallet? Its bSocial basket holds each one, tagged. */
 const hasBsocialOutputs = async (ctx: OneSatContext): Promise<boolean> => {
   try {
-    const r = await ctx.wallet.listOutputs({ basket: BSOCIAL_BASKET, limit: 1 });
+    // Posts and replies only (feedApi's 'type:post' tag): a like, follow, branch or hide is not authorship.
+    const r = await ctx.wallet.listOutputs({ basket: BSOCIAL_BASKET, tags: [AUTHORED_TAG], limit: 1 });
     return (r.totalOutputs ?? r.outputs.length) > 0;
   } catch {
     return false;
@@ -188,6 +194,12 @@ export const NEEDS_NAME_RETRY_MS = 24 * 60 * 60_000;
 /** A refused claim (bad signature, clock far off) is not re-sent on every post. */
 export const FAILED_RETRY_MS = 6 * 60 * 60_000;
 
+/**
+ * "Linked to another name" is not retried on timers, on Feed open or after posts. It gets one fresh attempt after
+ * this long (the other name may have been released since), or at once when the name sync re-signs the name.
+ */
+export const BLOCKED_RETRY_MS = 30 * 24 * 60 * 60_000;
+
 /** Per account, this session: retry count, the earliest next try, and the request in flight. */
 type Session = { attempts: number; notBefore: number; flight: Promise<EnsureResult> | null; epoch: number };
 const sessions = new Map<string, Session>();
@@ -227,8 +239,9 @@ const linked = (r: AuthorBindingRecord | null, alias: string, address: string) =
 /** A refusal on record for exactly this claim that must not be asked about again (yet, or ever). */
 const refused = (r: AuthorBindingRecord | null, alias: string, address: string, now: number) => {
   if (!r || r.status === 'ok' || r.alias !== alias || r.address !== address) return false;
-  if (r.status === 'blocked') return true;
-  return now - r.at < (r.status === 'needs-name' ? NEEDS_NAME_RETRY_MS : FAILED_RETRY_MS);
+  const wait =
+    r.status === 'blocked' ? BLOCKED_RETRY_MS : r.status === 'needs-name' ? NEEDS_NAME_RETRY_MS : FAILED_RETRY_MS;
+  return now - r.at < wait;
 };
 
 export type EnsureOptions = {
@@ -273,10 +286,17 @@ export async function ensureFeedAuthorBinding(
 
     const s = sessions.get(identityAddress) ?? { attempts: 0, notBefore: 0, flight: null, epoch };
     sessions.set(identityAddress, s);
-    if (s.flight) return await s.flight;
+    const joined = s.flight;
+    if (joined) {
+      const r = await joined;
+      // A post that arrives while a Feed-open check is deciding "never posted" must not inherit that answer: it
+      // goes round once more as the post it is (or joins another post's run that got there first).
+      if (!(opts.posted && r === 'not-posted')) return r;
+      if (s.flight && s.flight !== joined) return await s.flight;
+    }
     if (!retry && d.now() < s.notBefore) return 'waiting';
 
-    s.flight = (async (): Promise<EnsureResult> => {
+    const run = (async (): Promise<EnsureResult> => {
       // Privacy: an account that has never posted is not bound (a retry was scheduled by one that had).
       if (!opts.posted && !retry && !(await d.hasPosted(ctx, identityAddress))) return 'not-posted';
       let postingAddress: string;
@@ -324,10 +344,11 @@ export async function ensureFeedAuthorBinding(
       d.write(identityAddress, { status: outcome, alias, address: postingAddress, at, ...(code && { code }) });
       return outcome;
     })();
+    s.flight = run;
     try {
-      return await s.flight;
+      return await run;
     } finally {
-      s.flight = null;
+      if (s.flight === run) s.flight = null;
     }
   } catch {
     return 'unavailable';

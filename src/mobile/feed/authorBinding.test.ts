@@ -19,6 +19,8 @@ import {
   FEED_AUTHOR_PROTOCOL,
   feedAuthorAlias,
   feedAuthorMessage,
+  BLOCKED_RETRY_MS,
+  isAuthoredPost,
   NEEDS_NAME_RETRY_MS,
   postFeedAuthorBinding,
   resetAuthorBindingSession,
@@ -99,17 +101,19 @@ const account = (seq = 1) => {
   const root = PrivateKey.fromRandom();
   const proto = new ProtoWallet(root);
   const counts: Counts = { listOutputs: 0, createSignature: 0, getPublicKey: 0 };
-  const state = { seq, actions: 0, posts: 1 };
+  const state = { seq, actions: 0, posts: 1, likes: 0 };
   const wallet = {
     getPublicKey: (a: Parameters<ProtoWallet['getPublicKey']>[0]) => (counts.getPublicKey++, proto.getPublicKey(a)),
     createSignature: (a: Parameters<ProtoWallet['createSignature']>[0]) => (
       counts.createSignature++,
       proto.createSignature(a)
     ),
-    listOutputs: async (a: { basket: string }) => {
+    listOutputs: async (a: { basket: string; tags?: string[] }) => {
       counts.listOutputs++;
-      // The bSocial basket holds the account's own posts; the bap basket its ID records.
-      if (a.basket === 'bsocial') return { totalOutputs: state.posts, outputs: [] };
+      // The bSocial basket holds what the account published: posts and replies ('type:post'), and likes, follows,
+      // branches, hides. The bap basket holds its ID records.
+      if (a.basket === 'bsocial')
+        return { totalOutputs: a.tags?.includes('type:post') ? state.posts : state.posts + state.likes, outputs: [] };
       const outputs = Array.from({ length: state.seq }, (_, i) => ({ tags: ['type:id', `seq:${i + 1}`] }));
       return { totalOutputs: outputs.length, outputs };
     },
@@ -159,7 +163,8 @@ const harness = (paymail = 'peytonmoon69@bwalletx.com') => {
     isAgentOrPot: (id) => h.agents.has(id),
     markPosted: (id) => void h.posted.add(id),
     hasPosted: async (ctx, id) =>
-      h.posted.has(id) || ((await ctx.wallet.listOutputs({ basket: 'bsocial', limit: 1 })).totalOutputs ?? 0) > 0,
+      h.posted.has(id) ||
+      ((await ctx.wallet.listOutputs({ basket: 'bsocial', tags: ['type:post'], limit: 1 })).totalOutputs ?? 0) > 0,
     post: (body, f) => postFeedAuthorBinding(body, f, 'direct'),
     read: (id) => store.get(id) ?? null,
     write: (id, r) => void (r ? store.set(id, r) : store.delete(id)),
@@ -772,6 +777,20 @@ describe('only accounts that post are bound', () => {
       expect(hasPostedFlag(older.identityAddress)).toBe(false);
     });
 
+    test('a basket holding only likes and follows is not "has posted"', async () => {
+      const h = realSignals();
+      const a = account();
+      a.state.posts = 0;
+      a.state.likes = 9;
+      expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('not-posted');
+      expect(await ensureFeedAuthorBinding(a.ctx, { posted: false, postingAddress: a.postingAddress() }, h.deps)).toBe(
+        'not-posted',
+      );
+      expect(h.sent.length).toBe(0);
+      a.state.posts = 1;
+      expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('ok');
+    });
+
     test('a basket the wallet can’t list counts as "not posted"', async () => {
       const h = realSignals();
       const a = account();
@@ -895,7 +914,7 @@ describe('server codes from bit-sign #719 / #720', () => {
     expect(h.timers.length).toBe(RETRY_DELAYS_MS.length);
   });
 
-  test('409 address_linked_to_another_name: permanent. No timers, no re-send on Feed open or after posts', async () => {
+  test('409 address_linked_to_another_name: no timers, no re-send on Feed open or after posts', async () => {
     const a = account();
     const h = harness();
     h.answers = [answer(409, 'address_linked_to_another_name')];
@@ -908,9 +927,9 @@ describe('server codes from bit-sign #719 / #720', () => {
       at: h.now,
       code: 'address_linked_to_another_name',
     });
-    // A year of Feed opens, posts and a stray retry: nothing more is signed or sent.
+    // Weeks of Feed opens, posts and a stray retry: nothing more is signed or sent.
     const signed = a.counts.createSignature;
-    for (const gap of [1_000, FAILED_RETRY_MS, NEEDS_NAME_RETRY_MS, 365 * 24 * 3600_000]) {
+    for (const gap of [1_000, FAILED_RETRY_MS, NEEDS_NAME_RETRY_MS, 27 * 24 * 3600_000]) {
       h.now += gap;
       resetAuthorBindingSession();
       expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
@@ -1095,9 +1114,183 @@ describe('where the request is sent from', () => {
   test('publish hands the signed script to linkAuthor: nothing after the broadcast runs outside its try', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('./feedApi.ts', import.meta.url), 'utf8');
-    expect(src).toContain('void linkAuthor(ctx, signed);');
+    expect(src).toContain('void linkAuthor(ctx, signed, isAuthoredPost(tags));');
     const link = src.slice(src.indexOf('const linkAuthor = async'));
     expect(link.indexOf('try {')).toBeLessThan(link.indexOf('aipAddressOf(signed)'));
     expect(src.split('aipAddressOf(').length - 1).toBe(1);
+  });
+});
+
+// ── round 3 (final check, 15 Nov 2026) ──────────────────────────────────────
+
+describe('only posts and replies make an account one that posts', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test('which publishes are authored: the composer’s post and a reply; nothing else', () => {
+    expect(isAuthoredPost(['app:bWallet', 'type:post'])).toBe(true);
+    expect(isAuthoredPost(['app:bWallet', 'type:post', 'context:tx', 'contextValue:ab'])).toBe(true);
+    for (const type of ['like', 'follow', 'repost', 'hide', 'tip', 'lock'])
+      expect(isAuthoredPost(['app:bWallet', `type:${type}`, 'tx:ab'])).toBe(false);
+    expect(isAuthoredPost([])).toBe(false);
+  });
+
+  test('a like-only account: nothing is sent after the like, and nothing on Feed open', async () => {
+    const a = account();
+    a.state.posts = 0;
+    a.state.likes = 4;
+    const h = harness();
+    // What publish() does after a like: the post's address, but not `posted`.
+    expect(await ensureFeedAuthorBinding(a.ctx, { posted: false, postingAddress: a.postingAddress() }, h.deps)).toBe(
+      'not-posted',
+    );
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('not-posted');
+    expect(h.posted.size).toBe(0);
+    expect(a.counts.createSignature).toBe(0);
+    expect(h.sent.length).toBe(0);
+  });
+
+  test('through publish(): a like, follow, branch or hide binds nothing and sets no flag; a post does', async () => {
+    const m = new Map<string, string>();
+    const realStorage = globalThis.localStorage;
+    globalThis.localStorage = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    } as unknown as Storage;
+    let requests = 0;
+    globalThis.fetch = (async () => (requests++, new Response('{"ok":true}'))) as unknown as typeof fetch;
+    try {
+      const a = account();
+      a.state.posts = 0;
+      const script = () => new Script().writeOpCode(0).writeOpCode(0x6a).writeBin(Utils.toArray('x'));
+      let identityAsks = 0;
+      const get = a.wallet.getPublicKey;
+      a.wallet.getPublicKey = (args) => (args.identityKey && identityAsks++, get(args));
+      for (const tags of [
+        ['app:bWallet', 'type:like', 'tx:ab'],
+        ['app:bWallet', 'type:follow'],
+        ['app:bWallet', 'type:repost', 'tx:ab'],
+        ['app:bWallet', 'type:hide', 'tx:ab'],
+      ]) {
+        await publish(a.ctx, script(), 'Feed action', tags);
+        await settle();
+      }
+      expect(identityAsks).toBe(4); // the check ran each time...
+      expect(hasPostedFlag(a.identityAddress)).toBe(false); // ...and left no mark
+      await publish(a.ctx, script(), 'Feed post', ['app:bWallet', 'type:post']);
+      await settle();
+      expect(hasPostedFlag(a.identityAddress)).toBe(true);
+      // No paymail outside a build, so nothing is sent in either case: the flag is what this pins.
+      expect(requests).toBe(0);
+    } finally {
+      globalThis.localStorage = realStorage;
+    }
+  });
+
+  test('a post that arrives while a Feed-open check is deciding "never posted" is still bound', async () => {
+    // The final check's repro: Feed open's "has posted?" is still waiting when the first post lands.
+    const a = account();
+    a.state.posts = 0;
+    const h = harness();
+    let release!: (v: boolean) => void;
+    const gate = new Promise<boolean>((r) => (release = r));
+    h.deps.hasPosted = () => gate;
+    const open = ensureFeedAuthorBinding(a.ctx, {}, h.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    const post = ensureFeedAuthorBinding(a.ctx, { posted: true, postingAddress: a.postingAddress() }, h.deps);
+    const second = ensureFeedAuthorBinding(a.ctx, { posted: true, postingAddress: a.postingAddress() }, h.deps);
+    release(false);
+    expect(await open).toBe('not-posted');
+    expect(await post).toBe('ok');
+    expect(await second).toBe('ok');
+    expect(h.posted.has(a.identityAddress)).toBe(true);
+    expect(h.sent.length).toBe(1); // two posts joining the same check still make one request
+    h.deps.hasPosted = async (_ctx, id) => h.posted.has(id);
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('already');
+  });
+
+  test('a like that joins such a check does inherit "never posted"', async () => {
+    const a = account();
+    a.state.posts = 0;
+    const h = harness();
+    let release!: (v: boolean) => void;
+    h.deps.hasPosted = () => new Promise<boolean>((r) => (release = r));
+    const open = ensureFeedAuthorBinding(a.ctx, {}, h.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    const like = ensureFeedAuthorBinding(a.ctx, { posted: false, postingAddress: a.postingAddress() }, h.deps);
+    release(false);
+    expect([await open, await like]).toEqual(['not-posted', 'not-posted']);
+    expect(h.sent.length).toBe(0);
+  });
+});
+
+describe('"linked to another name" has a way out', () => {
+  test('after 30 days: one fresh attempt on the next Feed open or post, and not before', async () => {
+    const a = account();
+    const h = harness();
+    h.answers = [answer(409, 'address_linked_to_another_name')];
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
+    h.now += BLOCKED_RETRY_MS - 1;
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
+    expect(await ensureFeedAuthorBinding(a.ctx, { posted: true, postingAddress: a.postingAddress() }, h.deps)).toBe(
+      'blocked',
+    );
+    expect(h.sent.length).toBe(1);
+    h.now += 2;
+    // Still linked elsewhere: one request, a fresh claim, and blocked again for another 30 days.
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
+    expect(h.sent.length).toBe(2);
+    expect(h.sent[1].timestamp).toBe(h.now);
+    expect(h.store.get(a.identityAddress)).toMatchObject({ status: 'blocked', at: h.now });
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
+    expect(h.sent.length).toBe(2);
+    expect(h.timers.length).toBe(0);
+  });
+
+  test('after 30 days, released meanwhile: linked', async () => {
+    const a = account();
+    const h = harness();
+    h.answers = [answer(409, 'address_linked_to_another_name'), { status: 200, body: { ok: true } }];
+    await ensureFeedAuthorBinding(a.ctx, {}, h.deps);
+    h.now += BLOCKED_RETRY_MS;
+    expect(await ensureFeedAuthorBinding(a.ctx, { posted: true, postingAddress: a.postingAddress() }, h.deps)).toBe(
+      'ok',
+    );
+    expect(h.store.get(a.identityAddress)?.status).toBe('ok');
+  });
+
+  test('the name is re-signed: the note is cleared and the next trigger tries again', async () => {
+    const m = new Map<string, string>();
+    const realStorage = globalThis.localStorage;
+    globalThis.localStorage = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      removeItem: (k: string) => void m.delete(k),
+    } as unknown as Storage;
+    try {
+      const a = account();
+      const h = harness();
+      // This device's own record, as the app keeps it.
+      h.deps.read = readAuthorBinding;
+      h.deps.write = writeAuthorBinding;
+      h.answers = [answer(409, 'address_linked_to_another_name'), { status: 200, body: { ok: true } }];
+      expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
+      expect(readAuthorBinding(a.identityAddress)?.status).toBe('blocked');
+      h.now += 60_000;
+      expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
+      // names/accountName.ts calls this when the name sync signs the name's binding.
+      authorNameSigned(a.identityAddress);
+      expect(readAuthorBinding(a.identityAddress)).toBeNull();
+      expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('ok');
+      expect(h.sent.length).toBe(2);
+      // A link that worked is not cleared by a later re-sign.
+      authorNameSigned(a.identityAddress);
+      expect(readAuthorBinding(a.identityAddress)?.status).toBe('ok');
+    } finally {
+      globalThis.localStorage = realStorage;
+    }
   });
 });
