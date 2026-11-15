@@ -5,6 +5,7 @@ import { getMyName, setMyName } from './myName';
 import { opnsNameOf } from './opnsName';
 import { bindMyNames, collectPaymailInbox, lookupPaymail, paymailEnabled } from './paymail';
 import { syncBchatHandle } from './bchatHandle';
+import { authorNameSigned } from '../feed/authorBindingState';
 import { requestBalanceRefresh } from '../../hooks/balanceRefresh';
 
 /**
@@ -203,7 +204,10 @@ export const syncAccountNames = async (
         // One identity: a bChat session still on its `yours-*` default takes the paymail name.
         void syncBchatHandle(ctx, p);
         // Sign "my names -> my key" so payers can check it without trusting our server (NAME-BINDINGS.md).
-        void bindMyNames(f, ctx.wallet, publicKey).catch(() => undefined);
+        void bindMyNames(f, ctx.wallet, publicKey)
+          // A name just signed: a feed-author binding refused for "name not signed" may be tried again.
+          .then((signed) => signed > 0 && authorNameSigned(identityAddress))
+          .catch(() => undefined);
         await collectPaymailNow(ctx);
       }
     })(),

@@ -111,6 +111,7 @@ import {
   PostCancelledError,
   setIdentitySetupHandler,
 } from './feedApi';
+import { ensureFeedAuthorBinding } from './authorBinding';
 import {
   BLOCKS_PER_DAY,
   formatLocked,
@@ -1721,6 +1722,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     setIdentitySetupHandler(() => new Promise<boolean>((resolve) => setSettingUp(() => resolve)));
     return () => setIdentitySetupHandler(null);
   }, []);
+  // Accounts that already have a posting profile: link its address to the $name on Feed open (authorBinding.ts).
+  // Silent; an account already linked, with no name, or with no posting profile sends nothing. Waits for the identity
+  // load (the wallet is open by then) and runs again when a posting profile is set up here.
+  useEffect(() => {
+    if (!identity.loading) void ensureFeedAuthorBinding(apiContext);
+  }, [apiContext, identity.loading, identity.isPublished]);
   const [locking, setLocking] = useState<FeedPost | null>(null);
   const [homeSort, setSort] = useState<FeedSort>(start.sort);
   const sort: FeedSort = appSource ? 'latest' : homeSort;

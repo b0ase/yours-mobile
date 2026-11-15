@@ -3,6 +3,7 @@ import { P1SAT_PROTOCOL } from '@1sat/types';
 import { decodeLockTx, lockCandidates, lockOutputs, type PostLock } from './locks';
 import { FEED_APP } from './sources';
 import type { AuthorDeps } from './authorFeed';
+import { aipAddressOf, ensureFeedAuthorBinding } from './authorBinding';
 import { FWETCH_API, parseFwetchFeed, parseFwetchItem, verifyFwetchTx } from './fwetch';
 import {
   parseOverlayAny,
@@ -526,8 +527,20 @@ export async function publish(
   });
   if (!res.txid) throw new Error('The wallet did not return a transaction id.');
   if (res.tx) void ingest(res.tx);
+  // Link this posting address to the account's $name on bChatX (authorBinding.ts). Fired after the post is out and
+  // never awaited: it cannot delay or fail a post, and an account already linked costs one identity-key lookup.
+  void linkAuthor(ctx, aipAddressOf(signed));
   return res.txid;
 }
+
+/** ensureFeedAuthorBinding never throws; this also keeps a synchronous surprise away from publish(). */
+const linkAuthor = async (ctx: OneSatContext, postingAddress: string | null) => {
+  try {
+    await ensureFeedAuthorBinding(ctx, { postingAddress });
+  } catch {
+    /* the binding is retried on the next Feed open or post */
+  }
+};
 
 async function ingest(tx: number[]) {
   try {

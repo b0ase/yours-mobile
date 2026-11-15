@@ -35,6 +35,9 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bwallet paymail'],
   // Contract listing author signature (src/mobile/contracts/contractNft.ts): "I listed this contract, pay me here".
   [2, 'bwallet contract'],
+  // Feed-author binding (src/mobile/feed/authorBinding.ts): "these feed posts are by this $name". Reserved so no
+  // site can attach its own posting address to the user's name.
+  [2, 'bwallet feed author'],
   [2, 'bwallet agreement'],
   // Company offers (src/mobile/offer/offer.ts): seal, director and subscriber signatures over the document hash.
   [2, 'bcorp offer'],
