@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import * as bmailClient from '../bmail/client';
 import { keepGlobals } from '../../testing/stubGlobals';
 
@@ -40,6 +40,11 @@ mock.module('../bmail/client', () => ({
     return { sats: paidSats };
   },
 }));
+// Put both modules back when this file is done: bMail's own tests fetch through the real verifyPostage.
+afterAll(() => {
+  mock.module('@bsv/message-box-client', () => realMessageBox);
+  mock.module('../bmail/client', () => realClient);
+});
 
 const door = await import('./door');
 const { checkDoorRequest, parseDoorRequest, runDoor, doorPriceUsd, minAcceptSats, needsHandCheck, loadLedger } = door;

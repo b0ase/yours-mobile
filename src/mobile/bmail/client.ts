@@ -1,7 +1,8 @@
 /**
  * bMail over the wallet + message box. BRC-100 calls only (works with any BRC-100 wallet):
  *  - send: BRC-29 postage payment (createAction) + BRC-2 encrypt + messagebox sendMessage, one tap.
- *  - fetch: listMessages('bmail') → decode → verify postage (output to me ≥ claimed) → internalize → store → ack.
+ *  - fetch: listMessages('bmail') → skip what this device has → decode → verify postage (output to me ≥ claimed) →
+ *    internalize → store. Mail stays on the relay for the user's other devices; it is cleared after 30 days (fetchMail).
  *  - open: BRC-2 decrypt.
  */
 import { MessageBoxClient } from '@bsv/message-box-client';
@@ -27,7 +28,16 @@ import {
   type Postage,
   type Sealed,
 } from './envelope';
-import type { Received, Sent } from './store';
+import {
+  RELAY_KEEP_MS,
+  addReceived,
+  loadMail,
+  loadRelaySeen,
+  saveRelaySeen,
+  updateMail,
+  type Received,
+  type Sent,
+} from './store';
 import { replyCreditOk } from './route';
 import {
   LetterTooLargeError,
@@ -69,6 +79,24 @@ const mbox = (wallet: WalletInterface) => {
   // host's key is seeded; an override host's counts once this client has connected.
   trackOwnAuthFetch('bmail', (client as unknown as { authFetch?: unknown }).authFetch, host);
   return client;
+};
+
+/** One message as the relay lists it (the message box client's PeerMessage, as far as bMail reads it). */
+export type RelayMessage = { messageId: string; sender: string; body: unknown };
+/** The relay calls bMail's fetch makes (tests pass a fake relay). */
+export type MailRelay = { list: () => Promise<RelayMessage[]>; ack: (ids: string[]) => Promise<void> };
+/** The relay takes at most this many ids in one acknowledge call; any more wait for the next fetch. */
+const ACK_MAX = 1000;
+const relayOf = (wallet: WalletInterface): MailRelay => {
+  const client = mbox(wallet);
+  const host = bmailHost();
+  return {
+    // No limit is passed: the client pages through the whole box (what this device has is skipped, see fetchMail).
+    list: () => client.listMessages({ messageBox: BMAIL_BOX, host }),
+    ack: async (ids) => {
+      if (ids.length) await client.acknowledgeMessage({ messageIds: ids.slice(0, ACK_MAX), host });
+    },
+  };
 };
 
 export const myKey = async (wallet: WalletInterface) =>
@@ -317,8 +345,8 @@ export const verifyPostage = async (
     const want = new P2PKH().lock(PublicKey.fromString(publicKey).toHash()).toHex();
     if (out.lockingScript.toHex() !== want) return { sats: 0, note: 'Postage is not paid to you' };
     if (!internalize) return { sats: out.satoshis ?? 0 };
-    try {
-      await wallet.internalizeAction({
+    const take = () =>
+      wallet.internalizeAction({
         tx: Utils.toArray(p.beef, 'hex'),
         outputs: [
           {
@@ -333,9 +361,16 @@ export const verifyPostage = async (
         ],
         description: 'bMail postage received',
       });
+    try {
+      // "…undergoing active changes": device sync wrote this same payment (taken in on another device of this wallet)
+      // while the call ran. A second try finds it stored and merges.
+      await take().catch((e) =>
+        /active changes/i.test(e instanceof Error ? e.message : String(e)) ? take() : Promise.reject(e),
+      );
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
-      // Already internalized on an earlier fetch is fine; anything else means the payment is not good.
+      // Taken in already (an earlier fetch, or another device of this wallet): the wallet merges it without counting it
+      // twice, and a wallet that says so instead is fine too. Anything else means the payment is not good.
       if (!/already|duplicate|exists/i.test(m)) return { sats: 0, note: `Postage not accepted: ${m}`.slice(0, 160) };
     }
     return { sats: out.satoshis ?? 0 };
@@ -344,27 +379,50 @@ export const verifyPostage = async (
   }
 };
 
-/** Fetch new mail, verify postage, return items to store plus relay ids to acknowledge afterwards. */
+/**
+ * Fetch the mail this device has not dealt with yet and verify its postage. Nothing is cleared from the relay just
+ * because this device stored it: the user's other devices fetch the same box. `ack` holds only what is due:
+ *  (a) any listed message, stored or refused, RELAY_KEEP_MS after this device first saw it (`ctx.seen`). The clock is
+ *      this device's own; the envelope's `at` is the sender's claim and plays no part;
+ *  (b) a letter this device has erased (30 days in the Bin; `ctx.erased`, by relay id).
+ * A message that fails the envelope checks is refused, remembered and skipped from then on, and goes by rule (a), so
+ * a newer wallet on another device still gets its chance at it. `seen` is the ledger to keep: the listed ids only.
+ */
 export const fetchMail = async (
   wallet: WalletInterface,
-  ctx: { me: string; sent: Sent[]; known: Set<string>; creditsUsed?: Set<string> },
-): Promise<{ items: Received[]; ack: string[] }> => {
+  ctx: {
+    me: string;
+    sent: Sent[];
+    known: Set<string>;
+    creditsUsed?: Set<string>;
+    seen?: ReadonlyMap<string, number>;
+    erased?: ReadonlySet<string>;
+    now?: number;
+  },
+  relay: MailRelay = relayOf(wallet),
+): Promise<{ items: Received[]; ack: string[]; seen: Map<string, number> }> => {
+  const now = ctx.now ?? Date.now();
   const creditsUsed = new Set(ctx.creditsUsed ?? []);
-  const client = mbox(wallet);
-  const msgs = await client.listMessages({ messageBox: BMAIL_BOX, host: bmailHost() });
+  const known = new Set(ctx.known);
+  const msgs = await relay.list();
   const items: Received[] = [];
   const ack: string[] = [];
+  const seen = new Map<string, number>();
   for (const m of msgs) {
+    const first = ctx.seen?.get(m.messageId);
+    // A first-seen time ahead of the clock (the clock was wrong then) starts again from now.
+    seen.set(m.messageId, Math.min(first ?? now, now));
+    if (first !== undefined) {
+      // Dealt with on an earlier fetch: nothing is decoded, verified or internalized again.
+      if (now - first >= RELAY_KEEP_MS || ctx.erased?.has(m.messageId)) ack.push(m.messageId);
+      continue;
+    }
     const env = decodeEnvelope(m.body);
-    // Not bMail, or the relay-authenticated sender is not who the envelope claims: drop it.
-    if (!env || env.from !== String(m.sender).toLowerCase() || env.to !== ctx.me) {
-      ack.push(m.messageId);
-      continue;
-    }
-    if (ctx.known.has(env.id)) {
-      ack.push(m.messageId);
-      continue;
-    }
+    // Not bMail, or the relay-authenticated sender is not who the envelope claims: refuse it.
+    if (!env || env.from !== String(m.sender).toLowerCase() || env.to !== ctx.me) continue;
+    // Stored already under another relay id (sent twice, or this device lost its ledger).
+    if (known.has(env.id)) continue;
+    known.add(env.id);
     const v = await verifyPostage(wallet, env);
     // One reply per credit: a credit already used by an earlier letter (stored, or earlier in this batch) is spent.
     const replyCredit = replyCreditOk(env, ctx.sent, creditsUsed);
@@ -372,7 +430,7 @@ export const fetchMail = async (
     items.push({
       id: env.id,
       from: env.from,
-      at: Math.min(env.at, Date.now()),
+      at: Math.min(env.at, now),
       // Only postage actually internalized counts as received money; a credit is not a payment to me.
       verifiedSats: v.sats,
       replyCredit,
@@ -380,28 +438,66 @@ export const fetchMail = async (
       relayId: m.messageId,
       verifyNote: v.note,
     });
-    ack.push(m.messageId);
   }
-  return { items, ack };
+  return { items, ack, seen };
+};
+
+/**
+ * One refresh on this device: fetch, store what is new, remember what the relay listed, then clear from the relay
+ * only what fetchMail found due.
+ */
+export const syncMail = async (
+  wallet: WalletInterface,
+  me: string,
+  relay: MailRelay = relayOf(wallet),
+  now = Date.now(),
+): Promise<void> => {
+  const s = loadMail(me);
+  const { items, ack, seen } = await fetchMail(
+    wallet,
+    {
+      me,
+      sent: s.sent,
+      known: new Set(s.received.map((r) => r.id)),
+      // Credits already spent by a stored letter: one reply per reply-paid credit.
+      creditsUsed: new Set(
+        s.received.filter((r) => r.replyCredit && r.env.inReplyTo).map((r) => r.env.inReplyTo as string),
+      ),
+      seen: loadRelaySeen(me),
+      erased: new Set(s.received.flatMap((r) => (r.erased && r.relayId ? [r.relayId] : []))),
+      now,
+    },
+    relay,
+  );
+  updateMail(me, (x) => addReceived(x, items));
+  // A letter that did not reach the store (storage full) is not remembered, so the next fetch takes it again.
+  const have = new Set(loadMail(me).received.map((r) => r.id));
+  for (const i of items) if (!have.has(i.id) && i.relayId) seen.delete(i.relayId);
+  saveRelaySeen(me, seen);
+  await relay.ack(ack).catch(() => undefined);
 };
 
 /**
  * Notifier peek (notify/engine.ts): list the bmail box WITHOUT acknowledging or internalizing anything, so the
- * bMail screen still receives every message. Postage is checked read-only.
+ * bMail screen still receives every message. Postage is checked read-only. Mail this device already dealt with
+ * (`skip`: stored letter ids, and the relay ids of its ledger) is passed over before any check.
  */
-export const peekMail = async (wallet: WalletInterface, me: string): Promise<{ env: Envelope; sats: number }[]> => {
-  const msgs = await mbox(wallet).listMessages({ messageBox: BMAIL_BOX, host: bmailHost() });
+export const peekMail = async (
+  wallet: WalletInterface,
+  me: string,
+  skip: { known?: ReadonlySet<string>; seen?: ReadonlyMap<string, number> } = {},
+  relay: MailRelay = relayOf(wallet),
+): Promise<{ env: Envelope; sats: number }[]> => {
+  const msgs = await relay.list();
   const out: { env: Envelope; sats: number }[] = [];
   for (const m of msgs) {
+    if (skip.seen?.has(m.messageId)) continue;
     const env = decodeEnvelope(m.body);
     if (!env || env.from !== String(m.sender).toLowerCase() || env.to !== me) continue;
+    if (skip.known?.has(env.id)) continue;
     out.push({ env, sats: (await verifyPostage(wallet, env, false)).sats });
   }
   return out;
-};
-
-export const acknowledge = async (wallet: WalletInterface, ids: string[]) => {
-  if (ids.length) await mbox(wallet).acknowledgeMessage({ messageIds: ids, host: bmailHost() });
 };
 
 export const openMail = async (wallet: WalletInterface, env: Envelope): Promise<Sealed> => {

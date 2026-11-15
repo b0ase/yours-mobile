@@ -39,7 +39,7 @@ import { loadPrefs } from '../settings/prefs';
 import type { WalletInterface } from '@bsv/sdk';
 import { myKey, openMail, peekMail } from '../bmail/client';
 import { route } from '../bmail/route';
-import { loadMail, savePending } from '../bmail/store';
+import { loadMail, loadRelaySeen, savePending } from '../bmail/store';
 import { fetchPeerBPhone } from '../calls/bphone';
 import { getFriends, isFriend as isCallFriend } from '../calls/friends';
 import { shortKey } from '../calls/machine';
@@ -455,7 +455,8 @@ async function myTxids(m: Me): Promise<Set<string>> {
 
 // ── bMail ────────────────────────────────────────────────────────────────────
 // Peeks the 'bmail' message box (never acknowledges or internalizes: the bMail screen does that) and notifies
-// only for mail that routes to Inbox. Requests (unstamped, under-priced) stay quiet.
+// only for mail that routes to Inbox. Requests (unstamped, under-priced) stay quiet. Mail stays on the relay for the
+// user's other devices, so what this device already has is skipped: new here means not yet stored on this device.
 // TODO(bmail closed-app push, owner 9 Oct): the PHONE decrypts the subject (iOS Notification Service Extension /
 // Android FCM data handler using the wallet's BRC-2 key); the push server only relays the sealed envelope and never
 // sees plaintext. Not built yet: needs push-server work (docs/NOTIFICATIONS.md, bwalletx-push-project).
@@ -476,7 +477,7 @@ async function bmail(m: Me, st: PollState, out: NotifyItem[]) {
   const known = new Set(mail.received.map((r) => r.id));
   const priceSats = usdToSats(mail.priceUsd, cachedExchangeRate()) ?? 0;
   const isFriend = (k: string) => isCallFriend(k) || mail.contacts.includes(k);
-  const peek = (await peekMail(wallet, me)).filter((p) => !known.has(p.env.id));
+  const peek = await peekMail(wallet, me, { known, seen: loadRelaySeen(me) });
   const inbox = peek.filter(({ env, sats }) => {
     const replyCredit =
       !!env.usesReplyCredit &&

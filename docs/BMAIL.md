@@ -272,6 +272,8 @@ Built in 5.1.90 (`test/5.1.90`, commit 64b97a9).
 
 **Delete sends mail to the Bin.** Deleted mail stays in the Bin tab for 30 days with **Restore**. After that its content (the decrypted copy and the sealed ciphertext) is erased from this device. A small record remains so a refresh can't bring the mail back. Money and tokens are untouched.
 
+**Several devices (phone, extension, web).** A letter is not cleared from the relay when one device stores it, so every device on the same account fetches it. Each device keeps a short list of the relay ids it has dealt with and skips them on later fetches (nothing is decrypted, verified or taken in twice). A device clears a message from the relay only when (a) 30 days have passed since that device first saw it (its own clock; the sender's date is not used), or (b) it erased the letter after 30 days in the Bin. Mail the wallet refuses (not bMail, wrong sender or recipient) also waits 30 days, so a newer wallet on another device can still read it. Read marks, Archive, Bin and Quarantine stay per device.
+
 **Gaps (not enforced yet):**
 
 - Quarantine works per token id, because @1sat/actions `sendBsv21` picks token UTXOs by token id and can't leave out single outputs. If someone airdrops more of a token you already hold, those outputs aren't quarantined and can be spent with yours. Fixing this needs an exclude-outpoints option in `sendBsv21` (or a separate toolbox basket/tag).

@@ -8,13 +8,13 @@ import { PENNY_POST_USD, type MailMeta } from './route';
 
 export type Received = MailMeta & {
   env: Envelope;
-  /** Relay message id (for acknowledge). */
+  /** Relay message id (to clear it from the relay once this device erased the letter). */
   relayId?: string;
   verifyNote?: string;
   read?: boolean;
   /** Decrypted on open; kept locally so it opens instantly next time. */
   opened?: Sealed;
-  /** Swipe-to-organise flags (local only: the relay has no per-message state after acknowledge). */
+  /** Swipe-to-organise flags (local only: the relay has no per-message state). */
   archived?: boolean;
   /** Soft delete: kept (hidden) so a refresh can't bring it back and Undo can restore it. */
   deleted?: boolean;
@@ -233,6 +233,44 @@ export const savePending = (me: string, ids: string[], st: Store | null = ls()) 
     /* ignore */
   }
   listeners.forEach((l) => l());
+};
+
+/**
+ * Mail stays on the relay this long after this device first saw it, so the user's other devices (phone, extension,
+ * web) can fetch it too; only then does this device clear it from the relay (client.ts fetchMail).
+ */
+export const RELAY_KEEP_DAYS = 30;
+export const RELAY_KEEP_MS = RELAY_KEEP_DAYS * 24 * 60 * 60 * 1000;
+/** At most this many relay ids are remembered (the relay allows ids of up to 256 bytes). */
+export const RELAY_SEEN_MAX = 2000;
+/**
+ * Relay message ids this device has already dealt with (stored, or refused) and when it first saw each (unix ms).
+ * A listed id found here is skipped without decoding, verifying or internalizing anything again. Only ids the relay
+ * still lists are kept, so it empties as mail is cleared. A Map, not an object: the sender chooses the relay id.
+ */
+const relaySeenKey = (me: string) => `bw-bmail-relay:${me}`;
+export const loadRelaySeen = (me: string, st: Store | null = ls()): Map<string, number> => {
+  try {
+    const j = JSON.parse(st?.getItem(relaySeenKey(me)) ?? '[]') as unknown;
+    const rows = Array.isArray(j) ? j : [];
+    return new Map(
+      rows.filter(
+        (x): x is [string, number] =>
+          Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'number' && Number.isFinite(x[1]),
+      ),
+    );
+  } catch {
+    return new Map();
+  }
+};
+/** Over the cap the longest-known ids are the ones kept, so a flood of new mail cannot restart their 30 days. */
+export const saveRelaySeen = (me: string, seen: Map<string, number>, st: Store | null = ls()) => {
+  try {
+    const rows = [...seen].sort((a, z) => a[1] - z[1]).slice(0, RELAY_SEEN_MAX);
+    st?.setItem(relaySeenKey(me), JSON.stringify(rows));
+  } catch {
+    /* ignore */
+  }
 };
 
 /** Event the notifier / notification taps use to open the bMail screen. */
