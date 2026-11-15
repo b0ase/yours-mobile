@@ -1,5 +1,9 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { P2PKH, PrivateKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import * as bmailClient from '../bmail/client';
+import type { StampNet } from '../bmail/client';
+import { tscToMerklePath } from '../bmail/delivery';
+import { loadStamps, saveStamps, stampOutpoint } from '../bmail/store';
 import { keepGlobals } from '../../testing/stubGlobals';
 
 // bun runs every test file in one process: put back the globals this file swaps so they can't leak into the next.
@@ -12,13 +16,17 @@ let sent: { recipient: string; messageBox: string; body: string }[] = [];
 let acked: string[] = [];
 let paidSats = 20_000;
 let internalized = 0;
+let listed: { messageBox?: string; acceptPayments?: boolean }[] = [];
+/** The door's own rules are tested with the BEEF check mocked; the money tests below run the real verifyPostage. */
+let realCheck = false;
 // Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
 // import other names from it.
 const realMessageBox = { ...(await import('@bsv/message-box-client')) };
 mock.module('@bsv/message-box-client', () => ({
   ...realMessageBox,
   MessageBoxClient: class {
-    async listMessages() {
+    async listMessages(a: { messageBox?: string; acceptPayments?: boolean }) {
+      listed.push(a);
       return inbox.filter((m) => !acked.includes(m.messageId));
     }
     async acknowledgeMessage({ messageIds }: { messageIds: string[] }) {
@@ -35,8 +43,9 @@ mock.module('../bmail/client', () => ({
   // Keep the real exports (bun module mocks leak across test files; bMail's own tests need sendMail).
   ...realClient,
   bmailHost: () => 'https://box.test',
-  verifyPostage: async (_w: unknown, _e: unknown, internalize = true) => {
-    if (internalize) internalized++;
+  verifyPostage: async (...a: Parameters<typeof bmailClient.verifyPostage>) => {
+    if (realCheck) return realClient.verifyPostage(...a);
+    if (a[2] ?? true) internalized++;
     return { sats: paidSats };
   },
 }));
@@ -90,6 +99,8 @@ beforeEach(() => {
   acked = [];
   paidSats = 20_000;
   internalized = 0;
+  listed = [];
+  realCheck = false;
   store.clear();
 });
 
@@ -190,5 +201,132 @@ describe('runDoor', () => {
     inbox = [msg('m1', req({ ticker: 'OTHER' }))];
     await run();
     expect(acked).toEqual([]);
+  });
+});
+
+describe('runDoor: the payment and the network (the real postage check)', () => {
+  /** The key the host's wallet derives for the payment. */
+  const PAID = PrivateKey.fromRandom();
+  const payment = async (sats = 20_000) => {
+    const k = PrivateKey.fromRandom();
+    const parent = new Transaction();
+    parent.addOutput({ lockingScript: new P2PKH().lock(k.toAddress()), satoshis: sats + 100 });
+    parent.merklePath = tscToMerklePath(parent.id('hex'), 0, [], 900_000);
+    const tx = new Transaction();
+    tx.addInput({ sourceTransaction: parent, sourceOutputIndex: 0, unlockingScriptTemplate: new P2PKH().unlock(k) });
+    tx.addOutput({ lockingScript: new P2PKH().lock(PAID.toPublicKey().toHash()), satoshis: sats });
+    await tx.sign();
+    return {
+      txid: tx.id('hex'),
+      sats,
+      outputIndex: 0,
+      beef: Utils.toHex(tx.toAtomicBEEF()),
+      derivationPrefix: 'p',
+      derivationSuffix: 's',
+    };
+  };
+  const host = () => {
+    const coins: string[] = [];
+    const wallet = {
+      getPublicKey: async () => ({ publicKey: PAID.toPublicKey().toString() }),
+      internalizeAction: async (a: { tx: number[] }) => {
+        coins.push(Transaction.fromAtomicBEEF(a.tx).id('hex'));
+        return { accepted: true };
+      },
+    } as unknown as WalletInterface;
+    return { wallet, coins };
+  };
+  /** The network: which transactions it has, which it refuses when handed them, and whether it answers. */
+  const network = (o: { has?: string[]; refuses?: string[]; down?: boolean } = {}) => {
+    const has = new Set(o.has ?? []);
+    const state = { down: !!o.down, broadcasts: 0 };
+    const net: StampNet = {
+      seen: async (txid) => !state.down && has.has(txid),
+      broadcast: async (beefHex) => {
+        state.broadcasts++;
+        if (state.down) return 'unclear';
+        const txid = Transaction.fromAtomicBEEF(Utils.toArray(beefHex, 'hex')).id('hex');
+        if (o.refuses?.includes(txid)) return 'refused';
+        has.add(txid);
+        return 'seen';
+      },
+      spender: async () => {
+        if (state.down) throw new Error('woc 500');
+        return null;
+      },
+    };
+    return { net, state };
+  };
+  const open = (wallet: WalletInterface, net: StampNet, tickets: string[] = []) =>
+    runDoor(wallet, {
+      hostKey: HOST,
+      ticker: 'PENNY1',
+      priceSats: 20_000,
+      now: () => NOW,
+      net,
+      sendTicket: async () => {
+        tickets.push('x');
+        return 'd'.repeat(64);
+      },
+    });
+  const replies = () => sent.filter((x) => x.messageBox === 'spacedoor_reply').map((x) => JSON.parse(x.body));
+
+  test('a payment that was never sent and the network refuses buys no ticket and is not taken in', async () => {
+    realCheck = true;
+    const p = await payment();
+    inbox = [msg('m1', req({ payment: p }))];
+    const h = host();
+    const { net, state } = network({ refuses: [p.txid] });
+    const tickets: string[] = [];
+    const r = await open(h.wallet, net, tickets);
+    expect(r).toMatchObject({ admitted: 0, refused: 1 });
+    expect(tickets).toEqual([]);
+    expect(h.coins).toEqual([]);
+    expect(state.broadcasts).toBe(1);
+    expect(replies()).toMatchObject([{ ok: false }]);
+    expect(loadLedger(HOST)[p.txid].status).toBe('refused');
+    expect(acked).toEqual(['m1']);
+  });
+
+  test('no answer from the network: nothing taken, sent or recorded; once it has the payment, one ticket', async () => {
+    realCheck = true;
+    const p = await payment();
+    inbox = [msg('m1', req({ payment: p }))];
+    const h = host();
+    const { net, state } = network({ down: true });
+    const tickets: string[] = [];
+    const r = await open(h.wallet, net, tickets);
+    expect(r).toMatchObject({ admitted: 0, refused: 0 });
+    expect(h.coins).toEqual([]);
+    expect(loadLedger(HOST)).toEqual({});
+    expect(acked).toEqual([]);
+    state.down = false;
+    expect((await open(h.wallet, net, tickets)).admitted).toBe(1);
+    expect(tickets.length).toBe(1);
+    expect(h.coins).toEqual([p.txid]);
+    expect(acked).toEqual(['m1']);
+  });
+
+  test('a payment that paid for a bMail letter buys no ticket; a door payment is recorded as used', async () => {
+    realCheck = true;
+    const [stampOfALetter, fresh] = [await payment(), await payment()];
+    saveStamps(HOST, new Map([[stampOutpoint(stampOfALetter), 'a-letter']]));
+    inbox = [msg('m1', req({ payment: stampOfALetter })), msg('m2', req({ id: 'cd'.repeat(16), payment: fresh }))];
+    const h = host();
+    const { net } = network({ has: [stampOfALetter.txid, fresh.txid] });
+    const tickets: string[] = [];
+    const r = await open(h.wallet, net, tickets);
+    expect(r).toMatchObject({ admitted: 1, refused: 1 });
+    expect(h.coins).toEqual([fresh.txid]);
+    expect(loadStamps(HOST).get(stampOutpoint(fresh))).toBe(`door:${'cd'.repeat(16)}`);
+  });
+
+  test('the door boxes are listed with message-box payments off', async () => {
+    await run();
+    await door.readDoorReply({} as never, 'ab'.repeat(16));
+    expect(listed.map((x) => [x.messageBox, x.acceptPayments])).toEqual([
+      ['spacedoor', false],
+      ['spacedoor_reply', false],
+    ]);
   });
 });

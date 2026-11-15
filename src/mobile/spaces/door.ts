@@ -19,8 +19,9 @@
 import type { WalletInterface } from '@bsv/sdk';
 import { MessageBoxClient } from '@bsv/message-box-client';
 import { trackOwnAuthFetch } from '../../services/ownBackendKeys';
-import { bmailHost, payPostage, verifyPostage } from '../bmail/client';
+import { bmailHost, payPostage, verifyPostage, type StampNet } from '../bmail/client';
 import { newMessageId, parsePostage, type Envelope, type Postage } from '../bmail/envelope';
+import { loadStamps, saveStamps, stampOutpoint } from '../bmail/store';
 
 export const DOOR_BOX = 'spacedoor';
 export const DOOR_REPLY_BOX = 'spacedoor_reply';
@@ -273,7 +274,8 @@ export const resendDoorRequest = (wallet: WalletInterface, req: DoorRequest) => 
 /** Listener: the host's answer to request `id`, if it has come (acknowledges what it reads). */
 export const readDoorReply = async (wallet: WalletInterface, id: string): Promise<DoorReply | null> => {
   const client = mbox(wallet);
-  const msgs = await client.listMessages({ messageBox: DOOR_REPLY_BOX, host: bmailHost() });
+  // acceptPayments off: the client would otherwise take in any payment a message carries, unchecked.
+  const msgs = await client.listMessages({ messageBox: DOOR_REPLY_BOX, host: bmailHost(), acceptPayments: false });
   let found: DoorReply | null = null;
   const ack: string[] = [];
   for (const m of msgs) {
@@ -303,11 +305,14 @@ export const runDoor = async (
     priceSats: number | null;
     sendTicket: SendTicket;
     now?: () => number;
+    /** The network checks on the payment (tests; default: bMail's, WhatsOnChain + ARC). */
+    net?: StampNet;
   },
 ): Promise<DoorRound> => {
   const hostKey = a.hostKey.toLowerCase();
   const client = mbox(wallet);
-  const msgs = await client.listMessages({ messageBox: DOOR_BOX, host: bmailHost() });
+  // acceptPayments off: the only money taken in here is the door payment, after verifyPostage's network check.
+  const msgs = await client.listMessages({ messageBox: DOOR_BOX, host: bmailHost(), acceptPayments: false });
   const ledger = loadLedger(hostKey);
   const round: DoorRound = { admitted: 0, refused: 0, check: 0 };
   const now = a.now ?? Date.now;
@@ -341,23 +346,37 @@ export const runDoor = async (
       await done();
       continue;
     }
+    const refuse = async (note: string) => {
+      await reply(client, req, { ok: false, note });
+      ledger[req.payment.txid] = { status: 'refused', ticker: req.ticker, payer: req.from, at: now(), note };
+      saveLedger(hostKey, ledger);
+      round.refused++;
+      round.lastNote = note;
+      await done();
+    };
+    // One payment, one use: a payment that already paid for a bMail letter (its record of used stamps) buys no ticket.
+    const claim = stampOutpoint(req.payment);
+    if (loadStamps(hostKey).has(claim)) {
+      await refuse('Payment already used');
+      continue;
+    }
     // The wallet checks the BEEF: txid, output amount, and that it pays a key only I can derive. Read-only first.
     const env = { from: req.from, postage: req.payment } as Envelope;
     const look = await verifyPostage(wallet, env, false);
     if (look.sats < minAcceptSats(a.priceSats ?? 0)) {
-      await reply(client, req, { ok: false, note: look.note ?? 'Payment not valid' });
-      ledger[req.payment.txid] = { status: 'refused', ticker: req.ticker, payer: req.from, at: now(), note: look.note };
-      saveLedger(hostKey, ledger);
-      round.refused++;
-      round.lastNote = look.note;
-      await done();
+      await refuse(look.note ?? 'Payment not valid');
       continue;
     }
-    const took = await verifyPostage(wallet, env, true);
+    // Then the network: paid only when it has the payment's transaction (never sent or double-spent: no ticket).
+    const took = await verifyPostage(wallet, env, true, a.net);
     if (took.sats <= 0) {
       round.lastNote = took.note ?? 'Payment not accepted';
-      continue; // e.g. wallet busy: try again next pass; nothing recorded, nothing sent
+      // Wallet busy, or the network has no answer yet: try again next pass; nothing recorded, nothing sent.
+      if (took.pending) continue;
+      await refuse(round.lastNote);
+      continue;
     }
+    saveStamps(hostKey, loadStamps(hostKey).set(claim, `door:${req.id}`));
     ledger[req.payment.txid] = { status: 'sending', ticker: req.ticker, payer: req.from, at: now() };
     saveLedger(hostKey, ledger);
     try {
