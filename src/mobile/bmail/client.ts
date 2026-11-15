@@ -31,16 +31,20 @@ import {
   type Sealed,
 } from './envelope';
 import {
+  RELAY_CONFIRM_MS,
   RELAY_KEEP_MS,
   addReceived,
+  isTrustedSender,
   loadMail,
   loadRelaySeen,
   loadStamps,
+  relayKey,
   saveRelaySeen,
   saveStamps,
   stampOutpoint,
   updateMail,
   type Received,
+  type RelaySeen,
   type Sent,
 } from './store';
 import { replyCreditOk } from './route';
@@ -91,22 +95,77 @@ const mbox = (wallet: WalletInterface) => {
 };
 
 /** One message as the relay lists it (the message box client's PeerMessage, as far as bMail reads it). */
-export type RelayMessage = { messageId: string; sender: string; body: unknown };
+export type RelayMessage = { messageId: string; sender: string; body: unknown; created_at?: unknown };
 /** The relay calls bMail's fetch makes (tests pass a fake relay). */
 export type MailRelay = { list: () => Promise<RelayMessage[]>; ack: (ids: string[]) => Promise<void> };
 /** The relay takes at most this many ids in one acknowledge call; any more wait for the next fetch. */
-const ACK_MAX = 1000;
-const relayOf = (wallet: WalletInterface): MailRelay => {
-  const client = mbox(wallet);
-  const host = bmailHost();
-  return {
-    // No limit is passed: the client pages through the whole box (what this device has is skipped, see fetchMail).
-    list: () => client.listMessages({ messageBox: BMAIL_BOX, host }),
-    ack: async (ids) => {
-      if (ids.length) await client.acknowledgeMessage({ messageIds: ids.slice(0, ACK_MAX), host });
-    },
+export const ACK_MAX = 1000;
+/** One clearing makes at most this many acknowledge calls (a refused batch is tried again in halves). */
+const ACK_CALLS = 24;
+/** Ids the message box client refuses to acknowledge (it throws before any request, for the whole batch). */
+const ackable = (id: unknown): id is string =>
+  typeof id === 'string' &&
+  id.length > 0 &&
+  id.trim() === id &&
+  new TextEncoder().encode(id).length <= 256 &&
+  // eslint-disable-next-line no-control-regex
+  !/[\u0000-\u001f\u007f-\u009f]/.test(id);
+/**
+ * A stored message as the server keeps it: the body itself, or { message, payment? } around it (the client's
+ * parseMessageEnvelope). Only unwrapped here: nothing is decrypted and no payment is taken in.
+ */
+const plainBody = (body: unknown): unknown => {
+  const parse = (x: unknown) => {
+    if (typeof x !== 'string') return x;
+    try {
+      return JSON.parse(x) as unknown;
+    } catch {
+      return x;
+    }
   };
+  const outer = parse(body);
+  if (outer && typeof outer === 'object' && !Array.isArray(outer) && Object.hasOwn(outer, 'message'))
+    return parse((outer as { message: unknown }).message) ?? outer;
+  return outer;
 };
+type RawPages = (host: string, box: string, o: Record<string, never>) => Promise<RelayMessage[]>;
+/**
+ * bMail's relay over the message box client. Listing reads the box page by page as the client itself does
+ * (fetchMessagePages: its authenticated, identity-pinned request) and stops there: the client's listMessages would
+ * also try to decrypt every body and take in every message-box payment, for every message, on every call, and
+ * bMail's envelopes use neither. Should a later client drop that method, listMessages is used with payments off.
+ * No limit is passed (every message is listed; what this device has is skipped by its ledger, see fetchMail).
+ */
+export const relayOf = (
+  wallet: WalletInterface,
+  client: MessageBoxClient = mbox(wallet),
+  host = bmailHost(),
+): MailRelay => ({
+  list: async () => {
+    const pages = (client as unknown as { fetchMessagePages?: RawPages }).fetchMessagePages;
+    const msgs =
+      typeof pages === 'function'
+        ? await pages.call(client, host, BMAIL_BOX, {})
+        : await client.listMessages({ messageBox: BMAIL_BOX, host, acceptPayments: false });
+    return msgs.map((m) => ({ ...m, body: plainBody(m.body) }));
+  },
+  ack: async (ids) => {
+    let calls = 0;
+    const send = async (batch: string[]): Promise<void> => {
+      if (!batch.length || calls++ >= ACK_CALLS) return;
+      try {
+        await client.acknowledgeMessage({ messageIds: batch, host });
+      } catch {
+        // One id the relay will not take must not hold up the rest: halves, down to the id itself.
+        if (batch.length < 2) return;
+        const mid = batch.length >> 1;
+        await send(batch.slice(0, mid));
+        await send(batch.slice(mid));
+      }
+    };
+    await send([...new Set(ids.filter(ackable))].slice(0, ACK_MAX));
+  },
+});
 
 export const myKey = async (wallet: WalletInterface) =>
   (await wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();
@@ -494,6 +553,25 @@ export const verifyPostage = async (
   return { sats: stamp.sats };
 };
 
+/**
+ * The time of the newest block the wallet knows (unix ms). A clock nobody can set on this device: it can lag the real
+ * time (by hours when blocks are slow or the wallet's headers are behind), which only keeps mail on the relay longer.
+ */
+const chainTime = async (wallet: WalletInterface): Promise<number> => {
+  const { height } = await wallet.getHeight({});
+  const { header } = await wallet.getHeaderForHeight({ height });
+  const bytes = Utils.toArray(header, 'hex');
+  if (bytes.length !== 80) throw new Error('No block header');
+  return new Utils.Reader(bytes.slice(68, 72)).readUInt32LE() * 1000;
+};
+
+/** Is the wallet still on the account this refresh was started for? */
+const sameAccount = (wallet: WalletInterface, me: string) =>
+  myKey(wallet).then(
+    (k) => k === me,
+    () => false,
+  );
+
 /** A stamp that could not be checked is tried again at most this often, */
 export const RECHECK_EVERY_MS = 10 * 60 * 1000;
 /** at most this many times, and for RELAY_KEEP_MS from the first try; then it is unpaid for good. */
@@ -521,8 +599,9 @@ const recheckQueue = (received: Received[], now: number): Received[] => {
 
 /**
  * Stored letters whose postage is not checked yet (`recheck`; every stamped letter starts so): check from the stored
- * envelope (the relay ledger plays no part) and settle each one. Paid: verifiedSats is set, once, so it routes and
- * shows as any paid letter. Not good, or still unchecked after RECHECK_TRIES tries or RELAY_KEEP_MS: unpaid for good.
+ * envelope (the relay ledger plays no part) and settle each one. Paid: the stamp is recorded as used by this letter
+ * and verifiedSats is set, once, so it routes and shows as any paid letter. Of several letters showing one stamp, the
+ * first found paid keeps it and the others are unstamped. Not good, or still unchecked after RECHECK_TRIES tries or RELAY_KEEP_MS: unpaid for good.
  * Still unknown: tried again on a later refresh.
  */
 export const recheckPostage = async (
@@ -546,21 +625,93 @@ export const recheckPostage = async (
   for (const r of loadMail(me).received)
     if (r.recheck && now - Math.min(r.recheck.first, now) >= RELAY_KEEP_MS)
       settle(r.id, { sats: 0, note: 'Postage could not be checked' });
-  for (const r of recheckQueue(loadMail(me).received, now)) settle(r.id, await verifyPostage(wallet, r.env, true, net));
+  // One stamp, one letter: a letter whose stamp has paid for another is unstamped, with nothing asked of anyone.
+  const usedElsewhere = (r: Received, stamps = loadStamps(me)) =>
+    !!r.env.postage && (stamps.get(stampOutpoint(r.env.postage)) ?? r.id) !== r.id;
+  const settleUsed = () => {
+    const stamps = loadStamps(me);
+    for (const r of loadMail(me).received)
+      if (r.recheck && usedElsewhere(r, stamps)) settle(r.id, { sats: 0, note: STAMP_USED });
+  };
+  settleUsed();
+  for (const r of recheckQueue(loadMail(me).received, now)) {
+    // The wallet may have switched account since the refresh began: its coins and this mail are then not one account's.
+    if (!(await sameAccount(wallet, me))) return;
+    if (usedElsewhere(r)) continue;
+    const v = await verifyPostage(wallet, r.env, true, net);
+    if (!(await sameAccount(wallet, me))) return;
+    // The stamp is this letter's from here on: recorded before the letter shows as paid.
+    if (v.sats > 0 && r.env.postage) saveStamps(me, loadStamps(me).set(stampOutpoint(r.env.postage), r.id));
+    settle(r.id, v);
+  }
+  settleUsed();
+};
+
+/** At most this many new letters are taken in by one fetch; the rest wait for the next. */
+export const TAKE_MAX = 200;
+
+/**
+ * When a message arrived, for the 30 days: the later of the relay's own time for it (`created_at`, set by the server,
+ * used when it parses and is not ahead of this device's clock by more than two days) and this device's first sight of
+ * it. Taking the later one means a wrong time on either side can only keep a message longer, never clear it early.
+ */
+const arrivedAt = (first: number, createdAt: unknown, now: number): number => {
+  const t = typeof createdAt === 'string' ? Date.parse(createdAt) : NaN;
+  return Number.isFinite(t) && t <= now + 2 * 24 * 60 * 60 * 1000 ? Math.max(first, t) : first;
+};
+
+/**
+ * Which new letters to take in now, at most `max`: senders the user deals with first, then stamped letters, then
+ * unstamped ones, then blocked senders; within each, senders take turns, each sender's newest first. Where the relay
+ * gives no time for a message, a sender's letters are taken from both ends of the listing in turn, so the newest is
+ * among the first whichever way the relay lists.
+ */
+const pickNew = <T extends { env: Envelope; at: number }>(
+  cands: T[],
+  rank: (env: Envelope) => number,
+  max: number,
+): T[] => {
+  if (cands.length <= max) return cands;
+  const out: T[] = [];
+  for (const level of [0, 1, 2, 3]) {
+    const bySender = new Map<string, T[]>();
+    for (const c of cands)
+      if (rank(c.env) === level) bySender.set(c.env.from, [...(bySender.get(c.env.from) ?? []), c]);
+    const lines = [...bySender.values()].map((l) => {
+      if (l.every((c) => Number.isFinite(c.at))) return [...l].sort((a, z) => z.at - a.at);
+      const ends: T[] = [];
+      for (let i = 0, j = l.length - 1; i <= j; i++, j--) ends.push(...(i === j ? [l[i]] : [l[j], l[i]]));
+      return ends;
+    });
+    for (let turn = 0; lines.some((l) => l[turn]); turn++)
+      for (const l of lines) {
+        if (l[turn]) out.push(l[turn]);
+        if (out.length >= max) return out;
+      }
+  }
+  return out;
 };
 
 /**
  * Fetch the mail this device has not dealt with yet. Nothing is cleared from the relay just because this device
  * stored it: the user's other devices fetch the same box. `ack` holds only what is due:
- *  (a) any listed message, stored or refused, RELAY_KEEP_MS after this device first saw it (`ctx.seen`). The clock is
- *      this device's own; the envelope's `at` is the sender's claim and plays no part;
+ *  (a) any listed message, stored or refused, that arrived RELAY_KEEP_MS ago (arrivedAt), once two refreshes at
+ *      least RELAY_CONFIRM_MS apart have both found it so. A clock that jumps ahead for one refresh, or a first
+ *      sight recorded by a clock that was behind, therefore clears nothing at once; a mark made by a clock that has
+ *      since gone back is dropped. The envelope's `at` is the sender's claim and plays no part. These are also listed
+ *      in `aged` (relay id → when it arrived): syncMail clears them only if the newest block's time agrees;
  *  (b) a letter this device has erased (30 days in the Bin; `ctx.erased`, by relay id).
  * A message that fails the envelope checks is refused, remembered and skipped from then on, and goes by rule (a), so
- * a newer wallet on another device still gets its chance at it. `seen` is the ledger to keep: the listed ids only.
+ * a newer wallet on another device still gets its chance at it. `seen` is the ledger to keep: an entry for every
+ * listed message this device has dealt with, so none is ever taken twice.
  *
- * Postage: a stamp pays for one letter. The first letter to show a stamp (`ctx.stamps`, by outpoint) keeps it; any
- * other letter showing it is unstamped. A stamp that reads right is stored as not checked yet (worth nothing so
- * far); recheckPostage, run by syncMail straight after, asks the network and the wallet.
+ * At most TAKE_MAX new letters are taken per fetch (pickNew: the user's own correspondents and stamped letters
+ * first); the others stay unlisted in the ledger and are taken by later fetches.
+ *
+ * Postage: a stamp pays for one letter. A letter showing a stamp that already paid for another (`ctx.stamps`, by
+ * outpoint) is unstamped. Any other stamp that reads right is stored as not checked yet (worth nothing so far);
+ * recheckPostage, run by syncMail straight after, asks the network and the wallet. Showing a stamp reserves nothing:
+ * only the letter it is found to pay for holds it, so a copy of someone's stamp cannot take it from their letter.
  */
 export const fetchMail = async (
   ctx: {
@@ -569,44 +720,62 @@ export const fetchMail = async (
     known: Set<string>;
     creditsUsed?: Set<string>;
     stamps?: ReadonlyMap<string, string>;
-    seen?: ReadonlyMap<string, number>;
+    seen?: RelaySeen;
     erased?: ReadonlySet<string>;
+    /** Senders the user deals with (contacts, trusted) and senders they blocked: who is taken first, who last. */
+    trusted?: (from: string) => boolean;
+    blocked?: (from: string) => boolean;
     now?: number;
   },
   relay: MailRelay,
-): Promise<{ items: Received[]; ack: string[]; seen: Map<string, number>; stamps: Map<string, string> }> => {
+): Promise<{ items: Received[]; ack: string[]; aged: Map<string, number>; seen: RelaySeen }> => {
   const now = ctx.now ?? Date.now();
   const creditsUsed = new Set(ctx.creditsUsed ?? []);
   const known = new Set(ctx.known);
-  const stamps = new Map(ctx.stamps ?? []);
   const msgs = await relay.list();
   const items: Received[] = [];
   const ack: string[] = [];
-  const seen = new Map<string, number>();
+  const aged = new Map<string, number>();
+  const seen: RelaySeen = new Map();
+  const cands: { m: RelayMessage; key: string; env: Envelope; at: number }[] = [];
   for (const m of msgs) {
-    const first = ctx.seen?.get(m.messageId);
-    // A first-seen time ahead of the clock (the clock was wrong then) starts again from now.
-    seen.set(m.messageId, Math.min(first ?? now, now));
-    if (first !== undefined) {
+    const key = relayKey(m.messageId);
+    const had = ctx.seen?.get(key);
+    if (had) {
       // Dealt with on an earlier fetch: nothing is decoded or checked again.
-      if (now - first >= RELAY_KEEP_MS || ctx.erased?.has(m.messageId)) ack.push(m.messageId);
+      // A first-seen time ahead of the clock (the clock was wrong then) starts again from now.
+      const first = Math.min(had.first, now);
+      const arrived = arrivedAt(first, m.created_at, now);
+      const old = now - arrived >= RELAY_KEEP_MS;
+      const due = !old ? 0 : had.due && had.due <= now ? had.due : now;
+      seen.set(key, { first, due });
+      if (ctx.erased?.has(m.messageId)) ack.push(m.messageId);
+      else if (due && now - due >= RELAY_CONFIRM_MS) {
+        ack.push(m.messageId);
+        aged.set(m.messageId, arrived);
+      }
       continue;
     }
     const env = decodeEnvelope(m.body);
-    // Not bMail, or the relay-authenticated sender is not who the envelope claims: refuse it.
-    if (!env || env.from !== String(m.sender).toLowerCase() || env.to !== ctx.me) continue;
-    // Stored already under another relay id (sent twice, or this device lost its ledger).
+    // Not bMail, or the relay-authenticated sender is not who the envelope claims: refuse it. Or stored already
+    // under another relay id (sent twice, or this device lost its ledger). Either way: remembered, not taken.
+    if (!env || env.from !== String(m.sender).toLowerCase() || env.to !== ctx.me || known.has(env.id))
+      seen.set(key, { first: now, due: 0 });
+    else cands.push({ m, key, env, at: typeof m.created_at === 'string' ? Date.parse(m.created_at) : NaN });
+  }
+  const rank = (env: Envelope) => (ctx.blocked?.(env.from) ? 3 : ctx.trusted?.(env.from) ? 0 : env.postage ? 1 : 2);
+  for (const { m, key, env } of pickNew(cands, rank, TAKE_MAX)) {
+    seen.set(key, { first: now, due: 0 });
+    // The same letter twice in one listing.
     if (known.has(env.id)) continue;
     known.add(env.id);
     let note: string | undefined;
     let unchecked = false;
     if (env.postage) {
-      const claim = stampOutpoint(env.postage);
       const fault = readStamp(env);
       if (typeof fault === 'string') note = fault;
-      else if ((stamps.get(claim) ?? env.id) !== env.id) note = STAMP_USED;
+      else if ((ctx.stamps?.get(stampOutpoint(env.postage)) ?? env.id) !== env.id) note = STAMP_USED;
       else {
-        stamps.set(claim, env.id);
         note = NOT_CHECKED;
         unchecked = true;
       }
@@ -628,12 +797,15 @@ export const fetchMail = async (
       ...(unchecked ? { recheck: { first: now, last: 0, tries: 0 } } : {}),
     });
   }
-  return { items, ack, seen, stamps };
+  return { items, ack, aged, seen };
 };
 
 /**
  * One refresh on this device: fetch, store what is new, remember what the relay listed and which stamps are used,
- * check the stamps not checked yet, then clear from the relay only what fetchMail found due.
+ * check the stamps not checked yet, then clear from the relay only what fetchMail found due (what is due by age,
+ * only when the time of the newest block the wallet knows says so too: chainTime). `me` is the account the
+ * refresh was started for: if the wallet is on another account by the time something would be stored, taken in or
+ * cleared, the refresh stops there.
  */
 export const syncMail = async (
   wallet: WalletInterface,
@@ -642,13 +814,14 @@ export const syncMail = async (
   now = Date.now(),
   net: StampNet = stampNet(),
 ): Promise<void> => {
+  if (!(await sameAccount(wallet, me))) return;
   const s = loadMail(me);
-  // Used stamps: the kept record, and every stored letter whose stamp counted or is still being checked.
+  // Used stamps: the kept record, and every stored letter whose stamp counted (letters from before the record).
   const used = loadStamps(me);
   for (const r of [...s.received].reverse())
-    if (r.env.postage && (r.verifiedSats > 0 || r.recheck) && !used.has(stampOutpoint(r.env.postage)))
+    if (r.env.postage && r.verifiedSats > 0 && !used.has(stampOutpoint(r.env.postage)))
       used.set(stampOutpoint(r.env.postage), r.id);
-  const { items, ack, seen, stamps } = await fetchMail(
+  const { items, ack, aged, seen } = await fetchMail(
     {
       me,
       sent: s.sent,
@@ -660,39 +833,62 @@ export const syncMail = async (
       stamps: used,
       seen: loadRelaySeen(me),
       erased: new Set(s.received.flatMap((r) => (r.erased && r.relayId ? [r.relayId] : []))),
+      trusted: (from) => isTrustedSender(s, from),
+      blocked: (from) => (s.blocked ?? []).includes(from),
       now,
     },
     relay,
   );
+  // The box that was listed is the wallet's current account's: it must still be the one this refresh is for.
+  if (!(await sameAccount(wallet, me))) return;
   updateMail(me, (x) => addReceived(x, items));
   // A letter that did not reach the store (storage full) is not remembered, so the next fetch takes it again.
   const have = new Set(loadMail(me).received.map((r) => r.id));
-  for (const i of items) if (!have.has(i.id) && i.relayId) seen.delete(i.relayId);
+  for (const i of items) if (!have.has(i.id) && i.relayId) seen.delete(relayKey(i.relayId));
   saveRelaySeen(me, seen);
-  saveStamps(me, stamps);
+  saveStamps(me, used);
   await recheckPostage(wallet, me, now, net);
-  await relay.ack(ack).catch(() => undefined);
+  if (!(await sameAccount(wallet, me))) return;
+  // The 30 days by this device's clock must also have passed by the chain's: without that answer nothing aged goes.
+  const chainNow = aged.size ? await chainTime(wallet).catch(() => undefined) : undefined;
+  const due = ack.filter((id) => {
+    const arrived = aged.get(id);
+    return arrived === undefined || (chainNow !== undefined && chainNow - arrived >= RELAY_KEEP_MS);
+  });
+  await relay.ack(due).catch(() => undefined);
 };
 
+/** The notifier reads at most this many stamps in one peek. */
+export const PEEK_CHECKS = 50;
 /**
  * Notifier peek (notify/engine.ts): list the bmail box WITHOUT acknowledging or internalizing anything, so the
- * bMail screen still receives every message. Postage is checked read-only. Mail this device already dealt with
- * (`skip`: stored letter ids, and the relay ids of its ledger) is passed over before any check.
+ * bMail screen still receives every message. Postage is checked read-only (the envelope and the key it pays; the
+ * network is not asked, so a notification's stamp is a claim until the letter is fetched). Mail this device already
+ * dealt with (`skip`: stored letter ids, and the relay ids of its ledger) is passed over before any check.
  */
 export const peekMail = async (
   wallet: WalletInterface,
   me: string,
-  skip: { known?: ReadonlySet<string>; seen?: ReadonlyMap<string, number> } = {},
+  skip: { known?: ReadonlySet<string>; seen?: RelaySeen; stamps?: ReadonlyMap<string, string> } = {},
   relay: MailRelay = relayOf(wallet),
 ): Promise<{ env: Envelope; sats: number }[]> => {
   const msgs = await relay.list();
   const out: { env: Envelope; sats: number }[] = [];
+  const shown = new Map(skip.stamps ?? []);
+  let checks = 0;
   for (const m of msgs) {
-    if (skip.seen?.has(m.messageId)) continue;
+    if (skip.seen?.has(relayKey(m.messageId))) continue;
     const env = decodeEnvelope(m.body);
     if (!env || env.from !== String(m.sender).toLowerCase() || env.to !== me) continue;
     if (skip.known?.has(env.id)) continue;
-    out.push({ env, sats: (await verifyPostage(wallet, env, false)).sats });
+    // A stamp costs a wallet call to read: PEEK_CHECKS of them a peek; the rest count as unstamped until fetched.
+    // One stamp, one letter here too: a stamp that paid for a stored letter, or shown earlier in this peek, is not
+    // counted again.
+    const claim = env.postage ? stampOutpoint(env.postage) : '';
+    const fresh = !!env.postage && (shown.get(claim) ?? env.id) === env.id;
+    const sats = fresh && checks++ < PEEK_CHECKS ? (await verifyPostage(wallet, env, false)).sats : 0;
+    if (sats > 0) shown.set(claim, env.id);
+    out.push({ env, sats });
   }
   return out;
 };

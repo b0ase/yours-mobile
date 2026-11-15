@@ -3,6 +3,7 @@
  * (plaintext copy, since the sealed copy is only readable by the recipient… and us, but we keep it simple),
  * read marks, contacts (people I wrote to) and my price to reach me.
  */
+import { Hash, Utils } from '@bsv/sdk';
 import type { Envelope, Sealed, SealedOrdinal } from './envelope';
 import { PENNY_POST_USD, type MailMeta } from './route';
 
@@ -100,9 +101,44 @@ export const subscribeMail = (l: () => void) => {
   };
 };
 
+/** At most this many received letters are stored. */
+export const RECEIVED_MAX = 1000;
+/** This many of the newest letters from senders the user has no dealings with are kept as any other mail is. */
+export const STRANGERS_KEPT = 200;
+/**
+ * Keep the store within RECEIVED_MAX without losing the user's own mail to a flood. What goes first, oldest first:
+ *  1. unread, unpaid letters from senders the user has no dealings with (not a contact, not trusted), neither pinned
+ *     nor archived, beyond the newest STRANGERS_KEPT of them: what a flood is made of;
+ *  2. deleted letters (the Bin, erased tombstones);
+ *  3. letters whose stamp is not checked yet (dropping one would leave its coin out of the wallet);
+ *  4. everything else, a stranger's new letter included: a full store still shows new mail and drops its oldest.
+ * A dropped letter cannot come back as new: the relay ledger still knows its relay message (loadRelaySeen).
+ */
+export const trimReceived = (s: MailState): Received[] => {
+  let over = s.received.length - RECEIVED_MAX;
+  if (over <= 0) return s.received;
+  let strangers = 0;
+  const rank = new Map<Received, number>();
+  for (const r of s.received) {
+    const mine = r.read || r.pinned || r.archived || r.verifiedSats > 0 || r.replyCredit;
+    if (r.recheck) rank.set(r, 2);
+    else if (r.deleted) rank.set(r, 1);
+    else if (mine || s.contacts.includes(r.from) || (s.trusted ?? []).includes(r.from)) rank.set(r, 3);
+    else rank.set(r, ++strangers > STRANGERS_KEPT ? 0 : 3);
+  }
+  const drop = new Set<Received>();
+  for (const level of [0, 1, 2, 3])
+    for (let i = s.received.length - 1; i >= 0 && over > 0; i--)
+      if (rank.get(s.received[i]) === level) {
+        drop.add(s.received[i]);
+        over--;
+      }
+  return s.received.filter((r) => !drop.has(r));
+};
+
 export const saveMail = (me: string, s: MailState, st: Store | null = ls()) => {
   try {
-    st?.setItem(key(me), JSON.stringify({ ...s, received: s.received.slice(0, 1000), sent: s.sent.slice(0, 1000) }));
+    st?.setItem(key(me), JSON.stringify({ ...s, received: trimReceived(s), sent: s.sent.slice(0, 1000) }));
   } catch {
     /* storage full: still works this session */
   }
@@ -241,37 +277,53 @@ export const savePending = (me: string, ids: string[], st: Store | null = ls()) 
 };
 
 /**
- * Mail stays on the relay this long after this device first saw it, so the user's other devices (phone, extension,
- * web) can fetch it too; only then does this device clear it from the relay (client.ts fetchMail).
+ * Mail stays on the relay this long after it arrived, so the user's other devices (phone, extension, web) can fetch
+ * it too; only then does this device clear it from the relay (client.ts fetchMail).
  */
 export const RELAY_KEEP_DAYS = 30;
 export const RELAY_KEEP_MS = RELAY_KEEP_DAYS * 24 * 60 * 60 * 1000;
-/** At most this many relay ids are remembered (the relay allows ids of up to 256 bytes). */
-export const RELAY_SEEN_MAX = 2000;
+/** A message is cleared only when two refreshes at least this far apart both found it old enough. */
+export const RELAY_CONFIRM_MS = 24 * 60 * 60 * 1000;
 /**
- * Relay message ids this device has already dealt with (stored, or refused) and when it first saw each (unix ms).
- * A listed id found here is skipped without decoding, verifying or internalizing anything again. Only ids the relay
- * still lists are kept, so it empties as mail is cleared. A Map, not an object: the sender chooses the relay id.
+ * The ledger keeps an entry for every message the relay lists, so nothing it lists is ever taken twice; this cap only
+ * guards the storage quota (about 30 bytes an entry). Over it, the longest-known entries are the ones kept.
+ */
+export const RELAY_SEEN_MAX = 20_000;
+/**
+ * The ledger's key for a relay message id: 96 bits of its SHA-256. The sender chooses the id (up to 256 bytes); the
+ * key is short, fixed in size and safe as a map key whatever the id is.
+ */
+export const relayKey = (messageId: string): string =>
+  Utils.toBase64(Hash.sha256(Utils.toArray(String(messageId), 'utf8')).slice(0, 12));
+/** `first`: when this device first saw the message. `due`: when it first found it old enough to clear (0: not yet). */
+export type RelaySeen = Map<string, { first: number; due: number }>;
+/**
+ * Relay messages this device has already dealt with (stored, or refused), by relayKey. A listed message found here
+ * is skipped without decoding or checking anything again. Only messages the relay still lists are kept, so it empties
+ * as mail is cleared. Stored as [key, first, due] in whole minutes.
  */
 const relaySeenKey = (me: string) => `bw-bmail-relay:${me}`;
-export const loadRelaySeen = (me: string, st: Store | null = ls()): Map<string, number> => {
+const MIN = 60_000;
+export const loadRelaySeen = (me: string, st: Store | null = ls()): RelaySeen => {
+  const out: RelaySeen = new Map();
   try {
     const j = JSON.parse(st?.getItem(relaySeenKey(me)) ?? '[]') as unknown;
-    const rows = Array.isArray(j) ? j : [];
-    return new Map(
-      rows.filter(
-        (x): x is [string, number] =>
-          Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'number' && Number.isFinite(x[1]),
-      ),
-    );
+    for (const x of Array.isArray(j) ? j : []) {
+      if (!Array.isArray(x) || typeof x[0] !== 'string' || !Number.isFinite(x[1]) || !Number.isFinite(x[2])) continue;
+      out.set(x[0], { first: x[1] * MIN, due: x[2] * MIN });
+    }
   } catch {
-    return new Map();
+    /* an unreadable ledger is an empty one: stored letters are still known by their own ids */
   }
+  return out;
 };
-/** Over the cap the longest-known ids are the ones kept, so a flood of new mail cannot restart their 30 days. */
-export const saveRelaySeen = (me: string, seen: Map<string, number>, st: Store | null = ls()) => {
+export const saveRelaySeen = (me: string, seen: RelaySeen, st: Store | null = ls()) => {
   try {
-    const rows = [...seen].sort((a, z) => a[1] - z[1]).slice(0, RELAY_SEEN_MAX);
+    const rows = [...seen]
+      .sort((a, z) => a[1].first - z[1].first)
+      .slice(0, RELAY_SEEN_MAX)
+      // Rounded so that neither time moves later: a rounded-up `due` could look like a clock that went back.
+      .map(([k, v]) => [k, Math.floor(v.first / MIN), Math.floor(v.due / MIN)]);
     st?.setItem(relaySeenKey(me), JSON.stringify(rows));
   } catch {
     /* ignore */

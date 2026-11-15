@@ -39,7 +39,7 @@ import { loadPrefs } from '../settings/prefs';
 import type { WalletInterface } from '@bsv/sdk';
 import { myKey, openMail, peekMail } from '../bmail/client';
 import { route } from '../bmail/route';
-import { loadMail, loadRelaySeen, savePending } from '../bmail/store';
+import { loadMail, loadRelaySeen, loadStamps, savePending } from '../bmail/store';
 import { fetchPeerBPhone } from '../calls/bphone';
 import { getFriends, isFriend as isCallFriend } from '../calls/friends';
 import { shortKey } from '../calls/machine';
@@ -477,7 +477,7 @@ async function bmail(m: Me, st: PollState, out: NotifyItem[]) {
   const known = new Set(mail.received.map((r) => r.id));
   const priceSats = usdToSats(mail.priceUsd, cachedExchangeRate()) ?? 0;
   const isFriend = (k: string) => isCallFriend(k) || mail.contacts.includes(k);
-  const peek = await peekMail(wallet, me, { known, seen: loadRelaySeen(me) });
+  const peek = await peekMail(wallet, me, { known, seen: loadRelaySeen(me), stamps: loadStamps(me) });
   const inbox = peek.filter(({ env, sats }) => {
     const replyCredit =
       !!env.usesReplyCredit &&
