@@ -6,8 +6,11 @@
  */
 
 export type AuthorBindingRecord = {
-  /** 'ok': the server linked `address` to `alias`. 'needs-name' / 'failed': it refused; see `at` for when. */
-  status: 'ok' | 'needs-name' | 'failed';
+  /**
+   * 'ok': the server linked `address` to `alias`. 'needs-name' / 'failed': it refused; see `at` for when.
+   * 'blocked': it refused for good (the address is linked to another name): never sent again for this pair.
+   */
+  status: 'ok' | 'needs-name' | 'failed' | 'blocked';
   /** The bWalletX name the claim was made for (lowercase, no domain). */
   alias: string;
   /** The posting address the claim was made for. */
@@ -45,4 +48,23 @@ export const writeAuthorBinding = (identityAddress: string, record: AuthorBindin
 export const authorNameSigned = (identityAddress: string | null | undefined) => {
   if (identityAddress && readAuthorBinding(identityAddress)?.status === 'needs-name')
     writeAuthorBinding(identityAddress, null);
+};
+
+const postedKey = (identityAddress: string) => `bwallet.feedPosted.${identityAddress}`;
+
+/** This account has published to the Feed from this device (set by every successful post). */
+export const hasPostedFlag = (identityAddress: string): boolean => {
+  try {
+    return localStorage.getItem(postedKey(identityAddress)) === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const markPosted = (identityAddress: string) => {
+  try {
+    if (localStorage.getItem(postedKey(identityAddress)) !== '1') localStorage.setItem(postedKey(identityAddress), '1');
+  } catch {
+    /* storage unavailable: the account's bSocial basket still says it has posted */
+  }
 };

@@ -80,6 +80,30 @@ export const blindHashAllowed = (caller: string) =>
   BLIND_HASH_SITES.some((site) => caller === site || caller.endsWith(`.${site}`));
 
 /**
+ * The posting key ([1,'sigma'], the BAP key that AIP-signs feed posts) signs Bitcoin Signed Messages, and a BSM digest
+ * is sha256(sha256(prefix ‖ message)). createSignature signs sha256(data), so `data` = the 32-byte inner hash gives
+ * exactly a BSM signature over a message the wallet never saw: the same blind signature as hashToDirectlySign, by
+ * the other door (review of the feed-author binding, 15 Nov 2026: a site holding the standing posting grant could
+ * sign a feed-author claim that hands the user's posting address to another name). So exactly 32 bytes of `data`
+ * under that protocol counts as a blind hash, under the same rule. Nothing legitimate sends it: @1sat/actions and
+ * @1sat/templates sign posts, SIGMA seals and BAP messages through hashToDirectlySign only, and a real post is never
+ * 32 bytes of digest.
+ */
+const BSM_INNER_HASH_LENGTH = 32;
+const isPostingProtocol = (args: object) => {
+  const p = (args as { protocolID?: unknown }).protocolID;
+  return Array.isArray(p) && p[0] === 1 && typeof p[1] === 'string' && p[1].trim().toLowerCase() === 'sigma';
+};
+/** The call asks for a signature over a digest the wallet cannot read (see above). */
+export const isBlindHashRequest = (args: object, method: string = 'createSignature'): boolean => {
+  if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return true;
+  // Only a signature can be replayed as a BSM signature; an HMAC over 32 bytes is no such thing.
+  if (method !== 'createSignature') return false;
+  const data = (args as { data?: unknown }).data;
+  return Array.isArray(data) && data.length === BSM_INNER_HASH_LENGTH && isPostingProtocol(args);
+};
+
+/**
  * A phone-paired originator ("<host>[.c<hex>].paired.invalid"). Its host is only what the relay read from an Origin
  * header, which any non-browser client can set; it names a site only when the site proved its origin at pairing.
  */
@@ -102,7 +126,11 @@ export const setProvenPairingCheck = (fn: (originator: string) => boolean) => {
 };
 
 /** Why this outside call must be refused, or null. Only data that names a site (read as text, or leniently) is checked. */
-export const crossSiteSignRefusal = (originator: string | undefined, args: unknown): string | null => {
+export const crossSiteSignRefusal = (
+  originator: string | undefined,
+  args: unknown,
+  method: string = 'createSignature',
+): string | null => {
   if (!originator || !args || typeof args !== 'object') return null;
   // b-Aware 25 Oct 2026 (yudhaekasaputra1, widiaaw382): the guard failed open on what it couldn't read. For an outside
   // caller it now fails closed: data that isn't a byte array, data over MAX_SIGN_DATA, and a caller whose host it
@@ -116,7 +144,7 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
   // forged-origin pairing get a login signature for the site it claimed. It now counts as no site at all: data naming
   // any site, and blind hashes, are refused; data naming no site signs as before.
   if (isPairedOriginator(originator) && !provenPairing(originator)) {
-    if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
+    if (isBlindHashRequest(args, method)) return BLIND_SIGN_REFUSAL;
     const { hosts: named, lenient, exhausted } = namedHosts(data, args as object);
     if (exhausted) return TOO_MUCH;
     return named.length
@@ -127,7 +155,7 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
   if (!caller) {
     // A caller with no parsable host (a single-label name, an extension id) can't be any site a message names: refuse
     // a blind hash or data that names a site; data naming no site signs as before.
-    if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined) return BLIND_SIGN_REFUSAL;
+    if (isBlindHashRequest(args, method)) return BLIND_SIGN_REFUSAL;
     const { hosts: named, lenient, exhausted } = namedHosts(data, args as object);
     if (exhausted) return TOO_MUCH;
     return named.length ? `${CROSS_SITE_REFUSAL} (${named[0]}${lenient ? `, ${NOT_TEXT}` : ''})` : null;
@@ -135,8 +163,8 @@ export const crossSiteSignRefusal = (originator: string | undefined, args: unkno
   // A bare hash can't be read, so it can't be checked: an outside caller must send the data itself. Our own
   // chat sites are the exception: bChatX AIP-signs every post over a BSM digest, which `data` can't stand in for
   // (owner, 25 Oct 2026: posting broke after the blind-sign refusal).
-  if ((args as { hashToDirectlySign?: unknown }).hashToDirectlySign !== undefined && !blindHashAllowed(caller))
-    return BLIND_SIGN_REFUSAL;
+  // The same goes for a 32-byte `data` under the posting protocol: a BSM digest by another door (isBlindHashRequest).
+  if (isBlindHashRequest(args, method) && !blindHashAllowed(caller)) return BLIND_SIGN_REFUSAL;
   // Text or not (b-Aware triage 13 Nov 2026), every site the data names must be the caller's: one matching field must
   // not launder another, and bytes that aren't valid text are read leniently rather than waved through.
   const { hosts, lenient, exhausted } = namedHosts(data, args as object);
@@ -161,7 +189,7 @@ export function guardCrossSiteSigning<T extends object>(manager: T, adminOrigina
         if (own) throw new Error(own);
       }
       if (originator !== adminOriginator) {
-        const refusal = crossSiteSignRefusal(originator, args);
+        const refusal = crossSiteSignRefusal(originator, args, method);
         if (refusal) throw new Error(refusal);
       }
       return (original as (a: unknown, o?: string) => Promise<unknown>).call(manager, args, originator);

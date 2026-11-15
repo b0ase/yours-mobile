@@ -529,14 +529,14 @@ export async function publish(
   if (res.tx) void ingest(res.tx);
   // Link this posting address to the account's $name on bChatX (authorBinding.ts). Fired after the post is out and
   // never awaited: it cannot delay or fail a post, and an account already linked costs one identity-key lookup.
-  void linkAuthor(ctx, aipAddressOf(signed));
+  void linkAuthor(ctx, signed);
   return res.txid;
 }
 
-/** ensureFeedAuthorBinding never throws; this also keeps a synchronous surprise away from publish(). */
-const linkAuthor = async (ctx: OneSatContext, postingAddress: string | null) => {
+/** Nothing in here can reach publish(): reading the post's address and the binding are both inside the try. */
+const linkAuthor = async (ctx: OneSatContext, signed: Script) => {
   try {
-    await ensureFeedAuthorBinding(ctx, { postingAddress });
+    await ensureFeedAuthorBinding(ctx, { posted: true, postingAddress: aipAddressOf(signed) });
   } catch {
     /* the binding is retried on the next Feed open or post */
   }

@@ -1722,9 +1722,9 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     setIdentitySetupHandler(() => new Promise<boolean>((resolve) => setSettingUp(() => resolve)));
     return () => setIdentitySetupHandler(null);
   }, []);
-  // Accounts that already have a posting profile: link its address to the $name on Feed open (authorBinding.ts).
-  // Silent; an account already linked, with no name, or with no posting profile sends nothing. Waits for the identity
-  // load (the wallet is open by then) and runs again when a posting profile is set up here.
+  // Accounts that have already posted: link the posting address to the $name on Feed open (authorBinding.ts). An
+  // account that has never posted sends nothing here (it is linked after its first post), nor does an agent account,
+  // a pot, or one with no name. Silent. Waits for the identity load (the wallet is open by then).
   useEffect(() => {
     if (!identity.loading) void ensureFeedAuthorBinding(apiContext);
   }, [apiContext, identity.loading, identity.isPublished]);

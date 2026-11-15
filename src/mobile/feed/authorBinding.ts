@@ -10,19 +10,38 @@
  * The server also needs the name's signed binding to give that identity key, and Sigma's BAP index to give that BAP
  * ID for the posting address.
  *
+ * ⚠ Only for accounts that post. The binding tells bChatX which name a posting address belongs to, so an account that
+ * has never posted is never bound: it is sent after a post, and on Feed open only when the account has posted before.
+ * Agent accounts and pots are never bound.
+ *
  * ⚠ Silent and never in a post's way. Both keys are the wallet's own, signing a statement about its own account, so
  * there is no prompt; the protocol is reserved (services/reservedProtocolList.ts) so no site can ask for one. Nothing
  * here throws: a post is never delayed or failed by it (feedApi.publish fires it and moves on).
  */
-import { computeBapId, resolveBapSigner, type OneSatContext } from '@1sat/actions';
+import { BSOCIAL_BASKET, computeBapId, resolveBapSigner, type OneSatContext } from '@1sat/actions';
 import { AIP } from '@1sat/templates';
 import { PublicKey, Utils } from '@bsv/sdk';
+import { isAgentAccount } from '../agents/agentAccounts';
+import { IS_EXTENSION } from '../extension';
 import { getPaymail } from '../names/accountName';
 import { bareName } from '../names/names';
 import { onSessionReset } from '../../utils/sessionCaches';
-import { readAuthorBinding, writeAuthorBinding, type AuthorBindingRecord } from './authorBindingState';
+import {
+  feedAuthorTransport,
+  retryAfterMs,
+  sendFeedAuthorClaim,
+  sendFeedAuthorClaimViaWorker,
+  type FeedAuthorAnswer,
+} from '../../services/feedAuthorRelay';
+import {
+  hasPostedFlag,
+  markPosted,
+  readAuthorBinding,
+  writeAuthorBinding,
+  type AuthorBindingRecord,
+} from './authorBindingState';
 
-export const FEED_AUTHOR_BINDING_API = 'https://www.bchatx.com/api/bitsign/feed/author-binding';
+export { FEED_AUTHOR_BINDING_API } from '../../services/feedAuthorRelay';
 export const FEED_AUTHOR_PROTOCOL: [2, string] = [2, 'bwallet feed author'];
 export const FEED_AUTHOR_KEY_ID = '1';
 
@@ -80,47 +99,65 @@ export async function signFeedAuthorClaim(ctx: OneSatContext, claim: FeedAuthorC
   };
 }
 
-/** ok: linked. retry-later: try again soon, quietly. needs-name: claim or re-sign the name first. failed: refused. */
-export type BindingOutcome = 'ok' | 'retry-later' | 'needs-name' | 'failed';
+/**
+ * ok: linked. retry-later: try again soon, quietly. needs-name: claim or re-sign the name first. failed: refused, may
+ * be tried again much later. blocked: refused for good (the address is linked to another name); never re-sent.
+ */
+export type BindingOutcome = 'ok' | 'retry-later' | 'needs-name' | 'failed' | 'blocked';
 
-/** What a server answer means for the wallet. */
+/** What a server answer means for the wallet. Read from the `code`, never from the status alone (409 has two). */
 export const bindingOutcome = (status: number, body: { ok?: unknown; code?: unknown } | null): BindingOutcome => {
   const code = typeof body?.code === 'string' ? body.code : '';
   if (status === 200 && body?.ok === true) return 'ok';
   if (code === 'name_binding_not_verified') return 'needs-name';
-  // 503 pki_unavailable / sigma_unavailable, any other 5xx, or rate limiting: the claim is fine, the moment isn't.
-  if (status >= 500 || status === 429) return 'retry-later';
-  // Sigma's BAP index reads the chain: a posting profile published a minute ago isn't in it yet.
-  if (code === 'bap_id_mismatch') return 'retry-later';
+  // 409: this posting address is already linked to a different identity key whose name still resolves to it. No
+  // retry can change that; support has to.
+  if (code === 'address_linked_to_another_name') return 'blocked';
+  // 409 bap_not_indexed: Sigma's BAP index reads the chain, and a posting profile published a minute ago isn't in it
+  // yet. Until the server says so by name it answers 401 bap_id_mismatch for the same case, so that waits too.
+  if (code === 'bap_not_indexed' || code === 'bap_id_mismatch') return 'retry-later';
+  // No answer, 503 pki_unavailable / sigma_unavailable, any other 5xx, or rate limiting: the claim is fine, the
+  // moment isn't.
+  if (status === 0 || status >= 500 || status === 429) return 'retry-later';
   return 'failed';
 };
 
-/** POST a signed claim. Never throws: no network is retry-later. */
+/** Send a signed claim the way this build must (services/feedAuthorRelay.ts). Never throws. */
 export async function postFeedAuthorBinding(
   body: FeedAuthorBody,
   f: typeof fetch = fetch,
-): Promise<{ outcome: BindingOutcome; code: string }> {
-  try {
-    const res = await f(FEED_AUTHOR_BINDING_API, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20_000),
-    });
-    const json = (await res.json().catch(() => null)) as { ok?: unknown; code?: unknown } | null;
-    return { outcome: bindingOutcome(res.status, json), code: typeof json?.code === 'string' ? json.code : '' };
-  } catch {
-    return { outcome: 'retry-later', code: 'network' };
-  }
+  transport: 'worker' | 'direct' = feedAuthorTransport(IS_EXTENSION),
+): Promise<{ outcome: BindingOutcome; code: string; answer: FeedAuthorAnswer }> {
+  const answer = transport === 'worker' ? await sendFeedAuthorClaimViaWorker(body) : await sendFeedAuthorClaim(body, f);
+  const code = typeof answer.body?.code === 'string' ? answer.body.code : answer.status === 0 ? 'network' : '';
+  return { outcome: bindingOutcome(answer.status, answer.body), code, answer };
 }
+
+/** Has this account published anything to the Feed from this wallet? Its bSocial basket holds every post it made. */
+const hasBsocialOutputs = async (ctx: OneSatContext): Promise<boolean> => {
+  try {
+    const r = await ctx.wallet.listOutputs({ basket: BSOCIAL_BASKET, limit: 1 });
+    return (r.totalOutputs ?? r.outputs.length) > 0;
+  } catch {
+    return false;
+  }
+};
 
 export type AuthorBindingDeps = {
   now: () => number;
   fetch: typeof fetch;
+  /** Send the signed claim (the extension goes through its service worker). */
+  post: (body: FeedAuthorBody, f: typeof fetch) => ReturnType<typeof postFeedAuthorBinding>;
   /** The account's cached bWalletX paymail ('' when it has none). */
   paymailFor: (identityAddress: string) => string;
   /** A paymail without our own domain (names.ts bareName); another domain's is returned whole. */
   bare: (paymail: string) => string;
+  /** An agent account or a pot (agents/agentAccounts.ts): never bound. */
+  isAgentOrPot: (identityAddress: string) => boolean;
+  /** This account has posted to the Feed from this wallet (the flag set at post time, else its bSocial basket). */
+  hasPosted: (ctx: OneSatContext, identityAddress: string) => Promise<boolean>;
+  /** Remember that this account has posted. */
+  markPosted: (identityAddress: string) => void;
   read: (identityAddress: string) => AuthorBindingRecord | null;
   write: (identityAddress: string, record: AuthorBindingRecord | null) => void;
   /** Run `fn` after `ms` (a quiet retry). */
@@ -130,14 +167,21 @@ export type AuthorBindingDeps = {
 const defaultDeps: AuthorBindingDeps = {
   now: () => Date.now(),
   fetch: (...a) => fetch(...a),
+  post: (body, f) => postFeedAuthorBinding(body, f),
   paymailFor: getPaymail,
   bare: bareName,
+  isAgentOrPot: isAgentAccount,
+  hasPosted: async (ctx, identityAddress) => hasPostedFlag(identityAddress) || (await hasBsocialOutputs(ctx)),
+  markPosted,
   read: readAuthorBinding,
   write: writeAuthorBinding,
   schedule: (fn, ms) => setTimeout(fn, ms),
 };
 
-/** Quiet retries after a retry-later answer: 1 min, 5 min, 30 min. After those, the next Feed open or post retries. */
+/**
+ * Quiet retries after a retry-later answer: 1 min, 5 min, 30 min (longer when the server's Retry-After says so).
+ * After those, the next Feed open or post retries, never sooner than the last delay: about one send per 30 minutes.
+ */
 export const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 30 * 60_000];
 /** A name the server found unsigned is asked about again after this long, or at once when the name sync signs it. */
 export const NEEDS_NAME_RETRY_MS = 24 * 60 * 60_000;
@@ -167,47 +211,74 @@ export type EnsureResult =
   | 'no-name'
   /** No posting profile published yet. */
   | 'no-identity'
+  /** The account has never posted to the Feed: nothing about it is sent. */
+  | 'not-posted'
+  /** An agent account or a pot: never bound. */
+  | 'excluded'
   /** A recent retry-later / refusal: not asked again yet. */
   | 'waiting'
-  /** The wallet could not sign just now (locked, switching accounts). */
+  /** The wallet could not sign just now (locked, switching accounts), or a retry's account is no longer the one open. */
   | 'unavailable';
 
 /** Has the server (as far as this device knows) linked exactly this name and posting address? */
 const linked = (r: AuthorBindingRecord | null, alias: string, address: string) =>
   r?.status === 'ok' && r.alias === alias && r.address === address;
 
-/** A refusal on record that is still too fresh to ask about again. */
-const refusedRecently = (r: AuthorBindingRecord | null, alias: string, address: string, now: number) => {
+/** A refusal on record for exactly this claim that must not be asked about again (yet, or ever). */
+const refused = (r: AuthorBindingRecord | null, alias: string, address: string, now: number) => {
   if (!r || r.status === 'ok' || r.alias !== alias || r.address !== address) return false;
+  if (r.status === 'blocked') return true;
   return now - r.at < (r.status === 'needs-name' ? NEEDS_NAME_RETRY_MS : FAILED_RETRY_MS);
 };
 
+export type EnsureOptions = {
+  /**
+   * The caller just published a post with this wallet (feedApi.publish): the account has posted, and
+   * `postingAddress` is the address on that post, so an account already linked is recognised without asking the
+   * wallet for anything but its identity key.
+   */
+  posted?: boolean;
+  postingAddress?: string | null;
+  /** A scheduled retry, for this account only: if the wallet has moved to another account, nothing is done. */
+  retryFor?: string;
+};
+
 /**
- * Link this account's posting address to its bWalletX name on bChatX, once. Called when the posting profile is set
- * up, on Feed open, and after each post; sent again only when the posting address or the name changed.
- *
- * `postingAddress` is the address the caller just saw on a signed post: with it, an account already linked is
- * recognised without asking the wallet for anything but its identity key. Never throws.
+ * Link this account's posting address to its bWalletX name on bChatX, once. Called after each post, and on Feed open
+ * (where it does nothing for an account that has never posted). Sent again only when the posting address or the name
+ * changed. Never throws.
  */
 export async function ensureFeedAuthorBinding(
   ctx: OneSatContext,
-  opts: { postingAddress?: string | null; retry?: boolean } = {},
+  opts: EnsureOptions = {},
   deps: Partial<AuthorBindingDeps> = {},
 ): Promise<EnsureResult> {
   const d = { ...defaultDeps, ...deps };
   try {
     const identityKey = (await ctx.wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();
     const identityAddress = PublicKey.fromString(identityKey).toAddress();
+    // The app has one wallet context, and it follows the account in use: a retry scheduled for account A must not
+    // sign and send for account B after a switch.
+    if (opts.retryFor !== undefined && opts.retryFor !== identityAddress) return 'unavailable';
+    if (d.isAgentOrPot(identityAddress)) return 'excluded';
+    if (opts.posted) d.markPosted(identityAddress);
     const alias = feedAuthorAlias(d.paymailFor(identityAddress), d.bare);
     if (!alias) return 'no-name';
-    if (opts.postingAddress && linked(d.read(identityAddress), alias, opts.postingAddress)) return 'already';
+    const retry = opts.retryFor !== undefined;
+    if (opts.postingAddress) {
+      const known = d.read(identityAddress);
+      if (linked(known, alias, opts.postingAddress)) return 'already';
+      if (known?.status === 'blocked' && refused(known, alias, opts.postingAddress, d.now())) return 'blocked';
+    }
 
     const s = sessions.get(identityAddress) ?? { attempts: 0, notBefore: 0, flight: null, epoch };
     sessions.set(identityAddress, s);
     if (s.flight) return await s.flight;
-    if (!opts.retry && d.now() < s.notBefore) return 'waiting';
+    if (!retry && d.now() < s.notBefore) return 'waiting';
 
     s.flight = (async (): Promise<EnsureResult> => {
+      // Privacy: an account that has never posted is not bound (a retry was scheduled by one that had).
+      if (!opts.posted && !retry && !(await d.hasPosted(ctx, identityAddress))) return 'not-posted';
       let postingAddress: string;
       try {
         const { signer } = await resolveBapSigner(ctx);
@@ -218,8 +289,14 @@ export async function ensureFeedAuthorBinding(
       }
       const record = d.read(identityAddress);
       if (linked(record, alias, postingAddress)) return 'already';
-      if (!opts.retry && refusedRecently(record, alias, postingAddress, d.now())) return 'waiting';
+      // A permanent refusal holds for a retry too; a timed one only for a new trigger.
+      if (refused(record, alias, postingAddress, d.now())) {
+        if (record?.status === 'blocked') return 'blocked';
+        if (!retry) return 'waiting';
+      }
 
+      // Every send is a fresh claim: the BAP ID is read again and the text carries a new time, so a retry never
+      // repeats an old body (the server's window is 10 minutes, and its index may have caught up meanwhile).
       const claim: FeedAuthorClaim = {
         alias,
         identityKey,
@@ -227,15 +304,17 @@ export async function ensureFeedAuthorBinding(
         postingAddress,
         timestamp: Math.trunc(d.now()),
       };
-      const { outcome, code } = await postFeedAuthorBinding(await signFeedAuthorClaim(ctx, claim), d.fetch);
+      const { outcome, code, answer } = await d.post(await signFeedAuthorClaim(ctx, claim), d.fetch);
       const at = d.now();
       if (outcome === 'retry-later') {
-        const delay = RETRY_DELAYS_MS[Math.min(s.attempts, RETRY_DELAYS_MS.length - 1)];
+        const step = RETRY_DELAYS_MS[Math.min(s.attempts, RETRY_DELAYS_MS.length - 1)];
+        // The server's Retry-After is a minimum, never a way to retry sooner.
+        const delay = Math.max(step, retryAfterMs(answer, at));
         s.notBefore = at + delay;
         if (s.attempts++ < RETRY_DELAYS_MS.length) {
           const mine = s.epoch;
           d.schedule(() => {
-            if (mine === epoch) void ensureFeedAuthorBinding(ctx, { retry: true }, deps);
+            if (mine === epoch) void ensureFeedAuthorBinding(ctx, { retryFor: identityAddress }, deps);
           }, delay);
         }
         return outcome;

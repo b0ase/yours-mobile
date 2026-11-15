@@ -262,6 +262,7 @@ import { withDefaultExpiry } from './services/grantExpiry';
 import { markPayeeMismatch, parsePayees, payeesAllowed } from './services/allowanceGuard';
 import { ADMIN_ORIGINATOR, initWallet, lastCloseSteps, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
+import { answerFeedAuthorRelay, FEED_AUTHOR_RELAY_ACTION } from './services/feedAuthorRelay';
 import { ROOM_PLAYING_ACTION, ROOM_QUERY_ACTION, ROOM_TAB_ACTION, parseRoomPlaying, roomTabOrigin } from './mobile/chat/gameRoomLive';
 import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
 import { pinnedProtocol, pinnedProtocolRefusal, PINNED_PROTOCOLS_VERSION, versionWithPins } from './services/pinnedProtocols';
@@ -2939,6 +2940,14 @@ if (isInServiceWorker) {
       const f = sender.id === chrome.runtime.id ? framePolicy(sender) : undefined;
       answer({ ok: !!f && f.ok && f.framed } as unknown as Parameters<CallbackResponse>[0]);
       return false;
+    }
+    // Feed-author binding (services/feedAuthorRelay.ts): the panel's signed claim is sent from here, because bChatX's
+    // CORS doesn't allow chrome-extension://. Only for the wallet's own pages, only to that one URL.
+    if (message?.action === FEED_AUTHOR_RELAY_ACTION) {
+      void answerFeedAuthorRelay(message, isExtensionSender(sender, chrome.runtime.id)).then((a) =>
+        answer(a as unknown as Parameters<CallbackResponse>[0]),
+      );
+      return true;
     }
     // Connected-site theme (mobile/theme/connectTheme.ts): the id comes from the page, the origin from Chrome.
     if (message?.action === 'bwxSiteTheme') {

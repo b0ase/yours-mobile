@@ -20,6 +20,7 @@ import {
   feedAuthorAlias,
   feedAuthorMessage,
   NEEDS_NAME_RETRY_MS,
+  postFeedAuthorBinding,
   resetAuthorBindingSession,
   RETRY_DELAYS_MS,
   signFeedAuthorClaim,
@@ -28,6 +29,7 @@ import {
 } from './authorBinding';
 import {
   authorNameSigned,
+  hasPostedFlag,
   readAuthorBinding,
   writeAuthorBinding,
   type AuthorBindingRecord,
@@ -97,15 +99,17 @@ const account = (seq = 1) => {
   const root = PrivateKey.fromRandom();
   const proto = new ProtoWallet(root);
   const counts: Counts = { listOutputs: 0, createSignature: 0, getPublicKey: 0 };
-  const state = { seq, actions: 0 };
+  const state = { seq, actions: 0, posts: 1 };
   const wallet = {
     getPublicKey: (a: Parameters<ProtoWallet['getPublicKey']>[0]) => (counts.getPublicKey++, proto.getPublicKey(a)),
     createSignature: (a: Parameters<ProtoWallet['createSignature']>[0]) => (
       counts.createSignature++,
       proto.createSignature(a)
     ),
-    listOutputs: async () => {
+    listOutputs: async (a: { basket: string }) => {
       counts.listOutputs++;
+      // The bSocial basket holds the account's own posts; the bap basket its ID records.
+      if (a.basket === 'bsocial') return { totalOutputs: state.posts, outputs: [] };
       const outputs = Array.from({ length: state.seq }, (_, i) => ({ tags: ['type:id', `seq:${i + 1}`] }));
       return { totalOutputs: outputs.length, outputs };
     },
@@ -140,6 +144,11 @@ const harness = (paymail = 'peytonmoon69@bwalletx.com') => {
     sent,
     timers,
     urls: [] as string[],
+    /** Identity addresses marked as agent accounts or pots. */
+    agents: new Set<string>(),
+    /** Identity addresses flagged "has posted" on this device. */
+    posted: new Set<string>(),
+    headers: {} as Record<string, string>,
     deps: {} as Partial<AuthorBindingDeps>,
   };
   h.deps = {
@@ -147,6 +156,11 @@ const harness = (paymail = 'peytonmoon69@bwalletx.com') => {
     paymailFor: () => h.paymail,
     // Outside a build the paymail domain is unset (names/config.ts), so say what "ours" is here.
     bare: (p) => p.replace(/@bwalletx\.com$/i, ''),
+    isAgentOrPot: (id) => h.agents.has(id),
+    markPosted: (id) => void h.posted.add(id),
+    hasPosted: async (ctx, id) =>
+      h.posted.has(id) || ((await ctx.wallet.listOutputs({ basket: 'bsocial', limit: 1 })).totalOutputs ?? 0) > 0,
+    post: (body, f) => postFeedAuthorBinding(body, f, 'direct'),
     read: (id) => store.get(id) ?? null,
     write: (id, r) => void (r ? store.set(id, r) : store.delete(id)),
     schedule: (fn, ms) => timers.push({ fn, ms }),
@@ -154,7 +168,7 @@ const harness = (paymail = 'peytonmoon69@bwalletx.com') => {
       h.urls.push(url);
       sent.push(JSON.parse(String(init.body)));
       const a = h.answers.length > 1 ? h.answers.shift()! : h.answers[0];
-      return new Response(JSON.stringify(a.body), { status: a.status });
+      return new Response(JSON.stringify(a.body), { status: a.status, headers: h.headers });
     }) as unknown as typeof fetch,
   };
   return h;
@@ -344,6 +358,12 @@ describe('server answers', () => {
     expect(bindingOutcome(429, null)).toBe('retry-later');
     // Sigma's index trails the chain: a profile published a minute ago isn't there yet.
     expect(bindingOutcome(401, { code: 'bap_id_mismatch' })).toBe('retry-later');
+    // 409 means two different things: read the code, never the status.
+    expect(bindingOutcome(409, { code: 'bap_not_indexed' })).toBe('retry-later');
+    expect(bindingOutcome(409, { code: 'address_linked_to_another_name' })).toBe('blocked');
+    expect(bindingOutcome(409, { code: 'something_new' })).toBe('failed');
+    expect(bindingOutcome(409, null)).toBe('failed');
+    expect(bindingOutcome(0, null)).toBe('retry-later');
     expect(bindingOutcome(401, { code: 'identity_signature_failed' })).toBe('failed');
     expect(bindingOutcome(401, { code: 'posting_signature_failed' })).toBe('failed');
     expect(bindingOutcome(400, { code: 'bad_request' })).toBe('failed');
@@ -645,5 +665,439 @@ describe('a post is never stopped by the binding', () => {
     await expect(publish(a.ctx, script(), 'Feed post', ['app:bWallet'])).rejects.toThrow('Insufficient funds');
     await settle();
     expect(asked).toBe(0);
+  });
+});
+
+// ── round 2 (independent review, 15 Nov 2026) ───────────────────────────────
+
+describe('only accounts that post are bound', () => {
+  test('Feed open on an account that never posted: nothing is signed or sent', async () => {
+    const a = account();
+    a.state.posts = 0;
+    const h = harness();
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('not-posted');
+    expect(a.counts.createSignature).toBe(0);
+    expect(h.sent.length).toBe(0);
+    expect(h.store.size).toBe(0);
+  });
+
+  test('Feed open on an account whose wallet holds Feed posts: bound', async () => {
+    const a = account();
+    a.state.posts = 3;
+    const h = harness();
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('ok');
+    expect(h.sent.length).toBe(1);
+  });
+
+  test('right after a first post: bound, and the account is remembered as one that posts', async () => {
+    const a = account();
+    a.state.posts = 0;
+    const h = harness();
+    h.answers = [answer(503, 'sigma_unavailable'), { status: 200, body: { ok: true } }];
+    expect(await ensureFeedAuthorBinding(a.ctx, { posted: true, postingAddress: a.postingAddress() }, h.deps)).toBe(
+      'retry-later',
+    );
+    expect(h.posted.has(a.identityAddress)).toBe(true);
+    // Next session's Feed open: the flag alone qualifies it (the basket here is still empty).
+    resetAuthorBindingSession();
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('ok');
+    expect(h.sent.length).toBe(2);
+  });
+
+  test('an agent account or a pot is never bound, on Feed open or after a post', async () => {
+    const a = account();
+    const h = harness();
+    h.agents.add(a.identityAddress);
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('excluded');
+    expect(await ensureFeedAuthorBinding(a.ctx, { posted: true, postingAddress: a.postingAddress() }, h.deps)).toBe(
+      'excluded',
+    );
+    expect(await ensureFeedAuthorBinding(a.ctx, { retryFor: a.identityAddress }, h.deps)).toBe('excluded');
+    expect(a.counts.createSignature).toBe(0);
+    expect(h.sent.length).toBe(0);
+    expect(h.posted.size).toBe(0);
+  });
+
+  describe('with this device’s own records', () => {
+    const real = globalThis.localStorage;
+    beforeEach(() => {
+      const m = new Map<string, string>();
+      globalThis.localStorage = {
+        getItem: (k: string) => m.get(k) ?? null,
+        setItem: (k: string, v: string) => void m.set(k, v),
+        removeItem: (k: string) => void m.delete(k),
+      } as unknown as Storage;
+    });
+    afterEach(() => {
+      globalThis.localStorage = real;
+    });
+    /** The harness, but with the real agent/pot check and the real "has posted" signal. */
+    const realSignals = () => {
+      const h = harness();
+      delete h.deps.isAgentOrPot;
+      delete h.deps.hasPosted;
+      delete h.deps.markPosted;
+      return h;
+    };
+
+    test('kind agent and kind pot (agents/agentAccounts.ts) are both excluded', async () => {
+      const [agent, pot, person] = [account(), account(), account()];
+      localStorage.setItem(
+        'bwallet.agentAccounts',
+        JSON.stringify({
+          [agent.identityAddress]: { identityAddress: agent.identityAddress, labels: [] },
+          [pot.identityAddress]: { identityAddress: pot.identityAddress, labels: [], kind: 'pot' },
+        }),
+      );
+      const h = realSignals();
+      expect(await ensureFeedAuthorBinding(agent.ctx, { posted: true }, h.deps)).toBe('excluded');
+      expect(await ensureFeedAuthorBinding(pot.ctx, { posted: true }, h.deps)).toBe('excluded');
+      expect(await ensureFeedAuthorBinding(person.ctx, {}, h.deps)).toBe('ok');
+      expect(h.sent.map((s) => s.identityKey)).toEqual([person.identityKey]);
+    });
+
+    test('has posted = the flag set at post time, else the wallet’s bSocial basket', async () => {
+      const h = realSignals();
+      const never = account();
+      never.state.posts = 0;
+      expect(await ensureFeedAuthorBinding(never.ctx, {}, h.deps)).toBe('not-posted');
+      expect(hasPostedFlag(never.identityAddress)).toBe(false);
+      // An older poster (no flag yet): the basket says so.
+      const older = account();
+      older.state.posts = 2;
+      expect(await ensureFeedAuthorBinding(older.ctx, {}, h.deps)).toBe('ok');
+      // A post sets the flag; from then on the basket isn't needed.
+      await ensureFeedAuthorBinding(never.ctx, { posted: true }, h.deps);
+      expect(hasPostedFlag(never.identityAddress)).toBe(true);
+      expect(hasPostedFlag(older.identityAddress)).toBe(false);
+    });
+
+    test('a basket the wallet can’t list counts as "not posted"', async () => {
+      const h = realSignals();
+      const a = account();
+      const list = a.wallet.listOutputs;
+      a.wallet.listOutputs = (args) => (args.basket === 'bsocial' ? Promise.reject(new Error('busy')) : list(args));
+      expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('not-posted');
+      expect(h.sent.length).toBe(0);
+    });
+  });
+});
+
+describe('a retry belongs to its own account', () => {
+  /** One app-wide wallet context that follows the account in use, as the app's does. */
+  const switching = (first: ReturnType<typeof account>) => {
+    const s = { current: first };
+    const wallet = {
+      getPublicKey: (a: never) => s.current.wallet.getPublicKey(a),
+      createSignature: (a: never) => s.current.wallet.createSignature(a),
+      listOutputs: (a: never) => s.current.wallet.listOutputs(a),
+    };
+    return { s, ctx: { wallet } as unknown as OneSatContext };
+  };
+
+  test('A gets a 503, the wallet switches to B, A’s timer fires: nothing is signed or sent for B', async () => {
+    const [a, b] = [account(), account()];
+    const app = switching(a);
+    const h = harness();
+    h.answers = [answer(503, 'sigma_unavailable'), { status: 200, body: { ok: true } }];
+    expect(await ensureFeedAuthorBinding(app.ctx, {}, h.deps)).toBe('retry-later');
+    app.s.current = b;
+    h.now += RETRY_DELAYS_MS[0];
+    h.timers[0].fn();
+    await settle();
+    expect(h.sent.length).toBe(1);
+    expect(h.sent[0].identityKey).toBe(a.identityKey);
+    expect(b.counts.createSignature).toBe(0);
+    expect(h.store.size).toBe(0);
+    expect(h.timers.length).toBe(1); // and A's retry did not reschedule itself onto B
+  });
+
+  test('the wallet is still on A when the timer fires: A is linked', async () => {
+    const [a, b] = [account(), account()];
+    const app = switching(a);
+    const h = harness();
+    h.answers = [answer(503, 'sigma_unavailable'), { status: 200, body: { ok: true } }];
+    await ensureFeedAuthorBinding(app.ctx, {}, h.deps);
+    app.s.current = b;
+    app.s.current = a;
+    h.now += RETRY_DELAYS_MS[0];
+    h.timers[0].fn();
+    await settle();
+    expect(h.sent.map((s) => s.identityKey)).toEqual([a.identityKey, a.identityKey]);
+    expect(h.store.get(a.identityAddress)?.status).toBe('ok');
+  });
+});
+
+describe('server codes from bit-sign #719 / #720', () => {
+  test('409 bap_not_indexed: retried, and Retry-After is a minimum (never a way to retry sooner)', async () => {
+    const a = account();
+    const h = harness();
+    h.answers = [answer(409, 'bap_not_indexed')];
+    h.headers = { 'retry-after': '600' };
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('retry-later');
+    expect(h.store.size).toBe(0);
+    expect(h.timers.map((t) => t.ms)).toEqual([600_000]);
+    h.now += 5 * 60_000;
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('waiting');
+    // A short Retry-After does not shorten the wallet's own spacing.
+    resetAuthorBindingSession();
+    const h2 = harness();
+    h2.answers = [answer(409, 'bap_not_indexed')];
+    h2.headers = { 'retry-after': '5' };
+    await ensureFeedAuthorBinding(a.ctx, {}, h2.deps);
+    expect(h2.timers.map((t) => t.ms)).toEqual([RETRY_DELAYS_MS[0]]);
+  });
+
+  test('401 bap_id_mismatch (the not-indexed answer until #719 is live): each retry reads the BAP ID again and signs a fresh claim', async () => {
+    const a = account();
+    const h = harness();
+    let rootKeyReads = 0;
+    const get = a.wallet.getPublicKey;
+    a.wallet.getPublicKey = (args) => (args.keyID === 'identity-0' && rootKeyReads++, get(args));
+    h.answers = [answer(401, 'bap_id_mismatch'), { status: 200, body: { ok: true } }];
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('retry-later');
+    expect(rootKeyReads).toBe(1);
+    expect(h.store.size).toBe(0);
+    h.now += RETRY_DELAYS_MS[0];
+    h.timers[0].fn();
+    await settle();
+    expect(rootKeyReads).toBe(2);
+    const [first, second] = h.sent;
+    expect(second.timestamp).toBe(first.timestamp + RETRY_DELAYS_MS[0]);
+    expect(second.identitySignature).not.toBe(first.identitySignature);
+    expect(second.postingSignature).not.toBe(first.postingSignature);
+    expect(serverShapeError(second, h.now)).toBeNull();
+    expect(bsmRecoversTo(feedAuthorMessage(second), second.postingSignature, second.postingAddress)).toBe(true);
+    expect(await identityVerifies(feedAuthorMessage(second), second.identitySignature, second.identityKey)).toBe(true);
+    expect(h.store.get(a.identityAddress)?.status).toBe('ok');
+  });
+
+  test('a mismatch that never clears: about one send per 30 minutes, no more', async () => {
+    const a = account();
+    const h = harness();
+    h.answers = [answer(401, 'bap_id_mismatch')];
+    await ensureFeedAuthorBinding(a.ctx, {}, h.deps);
+    for (let i = 0; i < RETRY_DELAYS_MS.length; i++) {
+      h.now += h.timers[i].ms;
+      h.timers[i].fn();
+      await settle();
+    }
+    const sentSoFar = h.sent.length;
+    // Posts and Feed opens over the next 29 minutes send nothing.
+    for (let m = 1; m < 30; m += 4) {
+      h.now += 4 * 60_000;
+      if (h.now - h.sent[sentSoFar - 1].timestamp >= RETRY_DELAYS_MS[2]) break;
+      expect(await ensureFeedAuthorBinding(a.ctx, { posted: true, postingAddress: a.postingAddress() }, h.deps)).toBe(
+        'waiting',
+      );
+    }
+    expect(h.sent.length).toBe(sentSoFar);
+    expect(h.timers.length).toBe(RETRY_DELAYS_MS.length);
+  });
+
+  test('409 address_linked_to_another_name: permanent. No timers, no re-send on Feed open or after posts', async () => {
+    const a = account();
+    const h = harness();
+    h.answers = [answer(409, 'address_linked_to_another_name')];
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
+    expect(h.timers.length).toBe(0);
+    expect(h.store.get(a.identityAddress)).toEqual({
+      status: 'blocked',
+      alias: 'peytonmoon69',
+      address: a.postingAddress(),
+      at: h.now,
+      code: 'address_linked_to_another_name',
+    });
+    // A year of Feed opens, posts and a stray retry: nothing more is signed or sent.
+    const signed = a.counts.createSignature;
+    for (const gap of [1_000, FAILED_RETRY_MS, NEEDS_NAME_RETRY_MS, 365 * 24 * 3600_000]) {
+      h.now += gap;
+      resetAuthorBindingSession();
+      expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('blocked');
+      expect(await ensureFeedAuthorBinding(a.ctx, { posted: true, postingAddress: a.postingAddress() }, h.deps)).toBe(
+        'blocked',
+      );
+      expect(await ensureFeedAuthorBinding(a.ctx, { retryFor: a.identityAddress }, h.deps)).toBe('blocked');
+    }
+    expect(h.sent.length).toBe(1);
+    expect(a.counts.createSignature).toBe(signed);
+    // The name sync signing the name does not lift it (that is for needs-name only).
+    expect(h.store.get(a.identityAddress)?.status).toBe('blocked');
+  });
+
+  test('the same status, the other code: 409 bap_not_indexed still retries', async () => {
+    const a = account();
+    const h = harness();
+    h.answers = [answer(409, 'bap_not_indexed'), { status: 200, body: { ok: true } }];
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('retry-later');
+    expect(h.timers.length).toBe(1);
+    h.now += h.timers[0].ms;
+    h.timers[0].fn();
+    await settle();
+    expect(h.sent.length).toBe(2);
+    expect(h.store.get(a.identityAddress)?.status).toBe('ok');
+  });
+
+  test('blocked is for that address and name: a new posting key is a new claim', async () => {
+    const a = account();
+    const h = harness();
+    h.answers = [answer(409, 'address_linked_to_another_name'), { status: 200, body: { ok: true } }];
+    await ensureFeedAuthorBinding(a.ctx, {}, h.deps);
+    a.state.seq = 2;
+    expect(await ensureFeedAuthorBinding(a.ctx, {}, h.deps)).toBe('ok');
+    expect(h.sent[1].postingAddress).toBe(a.postingAddress(2));
+  });
+
+  test('a blocked account still posts', async () => {
+    const a = account();
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ code: 'address_linked_to_another_name' }), {
+        status: 409,
+      })) as unknown as typeof fetch;
+    try {
+      const script = new Script().writeOpCode(0).writeOpCode(0x6a).writeBin(Utils.toArray('hello'));
+      expect(await publish(a.ctx, script, 'Feed post', ['app:bWallet'])).toBe('ab'.repeat(32));
+      await settle();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe('the forged claim (review finding A)', () => {
+  // A site holding the user's standing posting grant asks for a signature over 32 bytes of `data` under [1,'sigma'].
+  // The wallet signs sha256(data); with data = sha256(BSM prefix ‖ text) that is BSM.magicHash(text): a posting-key
+  // signature over a feed-author claim naming the ATTACKER's name and key for the VICTIM's posting address.
+  const forge = async () => {
+    const [victim, attacker] = [account(), account()];
+    const claim = {
+      alias: 'attacker',
+      identityKey: attacker.identityKey,
+      bapId: 's3JdX57uoLS6MQmYKf98BUMiSNf',
+      postingAddress: victim.postingAddress(),
+      timestamp: 1_763_200_000_000,
+    };
+    const text = feedAuthorMessage(claim);
+    const msg = Utils.toArray(text, 'utf8');
+    const w = new Utils.Writer();
+    const prefix = Utils.toArray('Bitcoin Signed Message:\n', 'utf8');
+    w.writeVarIntNum(prefix.length);
+    w.write(prefix);
+    w.writeVarIntNum(msg.length);
+    w.write(msg);
+    const { Hash } = await import('@bsv/sdk');
+    const inner = Hash.sha256(w.toArray());
+    expect(Utils.toHex(Hash.sha256(inner))).toBe(Utils.toHex(BSM.magicHash(msg)));
+    const siteArgs = { protocolID: [1, 'sigma'], keyID: 'identity-1', counterparty: 'self', data: inner };
+    /** What the server would be sent if the wallet signed `siteArgs`. */
+    const finish = (der: number[]) => {
+      const sig = Signature.fromDER(der);
+      const rec = sig.CalculateRecoveryFactor(victim.postingKey().toPublicKey(), new BigNumber(BSM.magicHash(msg)));
+      return Utils.toBase64(sig.toCompact(rec, true) as number[]);
+    };
+    return { victim, text, siteArgs, finish };
+  };
+  /** The victim's wallet behind the same guard the app installs (initWallet.ts guardCrossSiteSigning). */
+  const guarded = async (victim: ReturnType<typeof account>) => {
+    const { guardCrossSiteSigning } = await import('../../services/crossSiteSignGuard');
+    return guardCrossSiteSigning(
+      { createSignature: (args: never) => victim.wallet.createSignature(args) },
+      'wallet-admin',
+    ) as { createSignature: (a: unknown, o?: string) => Promise<{ signature: number[] }> };
+  };
+
+  test('the route is real: signed without the guard, the forged claim passes the server’s posting check', async () => {
+    const { victim, text, siteArgs, finish } = await forge();
+    const { signature } = await victim.wallet.createSignature(siteArgs as never);
+    expect(bsmRecoversTo(text, finish(Array.from(signature)), victim.postingAddress())).toBe(true);
+  });
+
+  test('through the wallet’s guard a site gets no such signature', async () => {
+    const { victim, siteArgs } = await forge();
+    const wallet = await guarded(victim);
+    for (const site of ['https://evil.example', 'evil.example', 'https://bwalletx.com', 'localhost:3000'])
+      await expect(wallet.createSignature(siteArgs, site)).rejects.toThrow(/hash the wallet cannot read/);
+    expect(victim.counts.createSignature).toBe(0);
+  });
+
+  test('the wallet’s own signing is untouched: the real binding still signs and verifies behind the guard', async () => {
+    const a = account();
+    const wallet = await guarded(a);
+    const ctx = {
+      wallet: {
+        ...a.wallet,
+        createSignature: (args: unknown) => wallet.createSignature(args, 'wallet-admin'),
+      },
+    } as unknown as OneSatContext;
+    const h = harness();
+    expect(await ensureFeedAuthorBinding(ctx, {}, h.deps)).toBe('ok');
+    const body = h.sent[0];
+    expect(bsmRecoversTo(feedAuthorMessage(body), body.postingSignature, a.postingAddress())).toBe(true);
+    expect(await identityVerifies(feedAuthorMessage(body), body.identitySignature, body.identityKey)).toBe(true);
+  });
+});
+
+describe('where the request is sent from', () => {
+  const body = {
+    alias: 'peytonmoon69',
+    identityKey: '02' + 'ab'.repeat(32),
+    bapId: 's3JdX57uoLS6MQmYKf98BUMiSNf',
+    postingAddress: '13XXTWWsTgwHZknqVMJ59Fcop49hxKToae',
+    timestamp: 1_763_200_000_000,
+    identitySignature: '30' + 'ab'.repeat(20),
+    postingSignature: 'A'.repeat(88),
+  };
+  const g = globalThis as { chrome?: unknown };
+  const realChrome = g.chrome;
+  afterEach(() => {
+    g.chrome = realChrome;
+  });
+
+  test('extension: handed to the service worker, never fetched from the panel', async () => {
+    const messages: unknown[] = [];
+    g.chrome = {
+      runtime: {
+        sendMessage: async (m: unknown) => (messages.push(m), { status: 200, body: { ok: true }, retryAfter: null }),
+      },
+    };
+    let fetched = 0;
+    const f = (async () => (fetched++, new Response('{}'))) as unknown as typeof fetch;
+    const r = await postFeedAuthorBinding(body, f, 'worker');
+    expect(r.outcome).toBe('ok');
+    expect(fetched).toBe(0);
+    expect(messages).toEqual([{ action: 'bwxFeedAuthorBinding', body }]);
+  });
+
+  test('web, iOS, Android: fetched directly, no message to a worker', async () => {
+    const messages: unknown[] = [];
+    g.chrome = { runtime: { sendMessage: async (m: unknown) => (messages.push(m), null) } };
+    const urls: string[] = [];
+    const f = (async (u: string) => (urls.push(u), new Response('{"ok":true}'))) as unknown as typeof fetch;
+    expect((await postFeedAuthorBinding(body, f, 'direct')).outcome).toBe('ok');
+    expect(urls).toEqual([FEED_AUTHOR_BINDING_API]);
+    expect(messages).toEqual([]);
+  });
+
+  test('the build decides: the extension flag picks the worker', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./authorBinding.ts', import.meta.url), 'utf8');
+    expect(src).toContain("transport: 'worker' | 'direct' = feedAuthorTransport(IS_EXTENSION)");
+    expect(src).toContain("import { IS_EXTENSION } from '../extension';");
+  });
+
+  test('a worker that does not answer is a quiet retry, not an error', async () => {
+    g.chrome = { runtime: { sendMessage: () => Promise.reject(new Error('Receiving end does not exist')) } };
+    const r = await postFeedAuthorBinding(body, fetch, 'worker');
+    expect(r.outcome).toBe('retry-later');
+  });
+
+  test('publish hands the signed script to linkAuthor: nothing after the broadcast runs outside its try', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./feedApi.ts', import.meta.url), 'utf8');
+    expect(src).toContain('void linkAuthor(ctx, signed);');
+    const link = src.slice(src.indexOf('const linkAuthor = async'));
+    expect(link.indexOf('try {')).toBeLessThan(link.indexOf('aipAddressOf(signed)'));
+    expect(src.split('aipAddressOf(').length - 1).toBe(1);
   });
 });

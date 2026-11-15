@@ -918,3 +918,79 @@ describe('polish: a URL followed by an email on the same line names only the URL
     expect(crossSiteSignRefusal('https://evil.com', { data: bytes(msg) })).toContain('good.com');
   });
 });
+
+// Review of the feed-author binding, 15 Nov 2026: createSignature signs sha256(data), and a Bitcoin Signed Message
+// digest is sha256(sha256(prefix ‖ message)). So 32 bytes of `data` under the posting protocol ([1,'sigma'], the key
+// that AIP-signs feed posts) is a BSM signature over a message the wallet never saw: hashToDirectlySign by another door.
+describe('32 bytes of data under the posting protocol is a blind hash', () => {
+  const posting = (data: number[], extra: object = {}) => ({
+    protocolID: [1, 'sigma'],
+    keyID: 'identity-1',
+    counterparty: 'self',
+    data,
+    ...extra,
+  });
+  const digest = rand(32, 7);
+
+  test('refused for an outside site, in any spelling of the protocol name', () => {
+    for (const site of ['evil.example', 'https://evil.example', 'https://app.evil.example:8443/x'])
+      expect(crossSiteSignRefusal(site, posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+    expect(crossSiteSignRefusal('evil.example', posting(digest, { protocolID: [1, ' SIGMA '] }))).toBe(
+      BLIND_SIGN_REFUSAL,
+    );
+    expect(crossSiteSignRefusal('evil.example', posting(digest, { keyID: 'identity-7' }))).toBe(BLIND_SIGN_REFUSAL);
+    expect(crossSiteSignRefusal('evil.example', posting(digest, { counterparty: undefined }))).toBe(BLIND_SIGN_REFUSAL);
+    // 32 bytes of readable text is still 32 bytes the wallet would hash once more into a BSM digest.
+    expect(crossSiteSignRefusal('evil.example', posting(bytes('a'.repeat(32))))).toBe(BLIND_SIGN_REFUSAL);
+  });
+
+  test('refused for a caller with no host and for a pairing that did not prove its site', () => {
+    expect(crossSiteSignRefusal('localhost', posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+    setProvenPairingCheck(() => false);
+    expect(crossSiteSignRefusal('bchatx.com.paired.invalid', posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+    setProvenPairingCheck(() => true);
+    expect(crossSiteSignRefusal('bchatx.com.paired.invalid', posting(digest))).toBeNull();
+    expect(crossSiteSignRefusal('evil.example.paired.invalid', posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+    setProvenPairingCheck(() => false);
+  });
+
+  test('our own chat sites keep it, exactly as they keep hashToDirectlySign', () => {
+    for (const site of ['bchatx.com', 'www.bchatx.com', 'chat.bwalletx.com', 'bit-sign.online']) {
+      expect(crossSiteSignRefusal(site, posting(digest))).toBeNull();
+      expect(crossSiteSignRefusal(site, { ...posting([]), data: undefined, hashToDirectlySign: digest })).toBeNull();
+    }
+    // A parent or a lookalike is not one of them.
+    for (const site of ['bwalletx.com', 'evilbchatx.com', 'bchatx.com.evil.example'])
+      expect(crossSiteSignRefusal(site, posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+  });
+
+  test('an outside site’s other data under the posting protocol is signed as before', () => {
+    for (const n of [1, 31, 33, 64, 200]) expect(crossSiteSignRefusal('app.example', posting(rand(n, n)))).toBeNull();
+    expect(
+      crossSiteSignRefusal('app.example', posting(bytes('A post of ordinary length, signed by its author.'))),
+    ).toBeNull();
+  });
+
+  test('32 bytes under any other protocol is signed as before', () => {
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [2, 'sigma'] }))).toBeNull();
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [1, 'sigmas'] }))).toBeNull();
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [2, 'my app'] }))).toBeNull();
+  });
+
+  test('through the guard: the site is refused before the wallet signs; the wallet itself and an HMAC are not', async () => {
+    const calls: string[] = [];
+    const m = guardCrossSiteSigning(
+      {
+        createSignature: async (_a: unknown, o?: string) => (calls.push(`sign:${o}`), { signature: [1] }),
+        createHmac: async (_a: unknown, o?: string) => (calls.push(`hmac:${o}`), { hmac: [1] }),
+      },
+      'wallet-admin',
+    ) as unknown as Record<'createSignature' | 'createHmac', (a: unknown, o?: string) => Promise<unknown>>;
+    await expect(m.createSignature(posting(digest), 'evil.example')).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    expect(calls).toEqual([]);
+    await m.createSignature(posting(digest), 'wallet-admin');
+    await m.createSignature(posting(rand(48, 3)), 'app.example');
+    await m.createHmac(posting(digest), 'app.example');
+    expect(calls).toEqual(['sign:wallet-admin', 'sign:app.example', 'hmac:app.example']);
+  });
+});
