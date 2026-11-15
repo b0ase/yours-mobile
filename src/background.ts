@@ -265,6 +265,12 @@ import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOr
 import { answerFeedAuthorRelay, FEED_AUTHOR_RELAY_ACTION } from './services/feedAuthorRelay';
 import { ROOM_PLAYING_ACTION, ROOM_QUERY_ACTION, ROOM_TAB_ACTION, parseRoomPlaying, roomTabOrigin } from './mobile/chat/gameRoomLive';
 import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
+import {
+  isReservedLabelProtocol,
+  reservedLabelRefusal,
+  RESERVED_LABEL_REFUSAL,
+  withoutReservedLabels,
+} from './services/reservedLabels';
 import { pinnedProtocol, pinnedProtocolRefusal, PINNED_PROTOCOLS_VERSION, versionWithPins } from './services/pinnedProtocols';
 import {
   DeferredEncrypts,
@@ -2240,6 +2246,15 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
     return Promise.reject(new Error(RESERVED_REFUSAL));
   }
+  // The wallet's own action labels (bMail's stamp record) are never offered to a site (services/reservedLabels.ts).
+  if (
+    request.type === 'protocol' &&
+    isReservedLabelProtocol(request.protocolID) &&
+    request.originator !== ADMIN_ORIGINATOR
+  ) {
+    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
+    return Promise.reject(new Error(RESERVED_LABEL_REFUSAL));
+  }
   // The wallet's own baskets (coins, ordinals, tokens, locks, names) are never offered to a site.
   if (request.type === 'basket' && isReservedBasket(request.basket) && request.originator !== ADMIN_ORIGINATOR) {
     accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
@@ -3095,6 +3110,8 @@ if (!(
     if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR) {
       const refusal =
         reservedProtocolRefusal(String(message?.action ?? ''), message?.params) ??
+        // The wallet's own action labels (services/reservedLabels.ts): refused the same way, before any sheet.
+        reservedLabelRefusal(String(message?.action ?? ''), message?.params) ??
         // Protocols pinned to their home site (services/pinnedProtocols.ts): a user's private archive keys.
         pinnedProtocolRefusal(
           String(message?.action ?? ''),
@@ -6012,7 +6029,9 @@ if (!(
             response.granted.protocolPermissions
               ? {
                   ...response.granted,
-                  protocolPermissions: withoutReservedProtocols(response.granted.protocolPermissions),
+                  protocolPermissions: withoutReservedLabels(
+                    withoutReservedProtocols(response.granted.protocolPermissions),
+                  ),
                 }
               : response.granted,
           ),
