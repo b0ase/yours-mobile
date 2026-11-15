@@ -182,7 +182,8 @@ const chipsFor = (r: Received, rate: number, friend: boolean): { kind: StampKind
     const pri = rate > 0 && (r.verifiedSats / 1e8) * rate > 0.015;
     out.push({
       kind: pri ? 'priority' : 'penny',
-      text: `${pri ? 'Priority' : 'Penny post'} ${money(r.verifiedSats, rate)}`,
+      // A stamp not in a block yet (client.ts settleConfirmations) says so until it is.
+      text: `${pri ? 'Priority' : 'Penny post'} ${money(r.verifiedSats, rate)}${r.settling ? ' · confirming' : ''}`,
     });
   } else if (friend) out.push({ kind: 'free' });
   else

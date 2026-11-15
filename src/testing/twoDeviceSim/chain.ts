@@ -222,7 +222,11 @@ export class FakeChain {
     const notFound = () => new Response('', { status: 404 });
     if (source === 'woc') {
       let m = /\/tx\/hash\/([0-9a-f]{64})$/.exec(url);
-      if (m) return this.has(m[1]) ? json({ txid: m[1], hash: m[1] }) : notFound();
+      if (m) {
+        const block = this.txs.get(m[1])?.block;
+        const mined = block ? { blockheight: block, confirmations: this.height - block + 1 } : {};
+        return this.has(m[1]) ? json({ txid: m[1], hash: m[1], ...mined }) : notFound();
+      }
       m = /\/tx\/([0-9a-f]{64})\/hex$/.exec(url);
       if (m) return this.has(m[1]) ? new Response(Utils.toHex(this.txs.get(m[1])!.raw)) : notFound();
       m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(url);

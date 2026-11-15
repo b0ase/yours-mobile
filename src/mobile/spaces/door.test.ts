@@ -275,7 +275,12 @@ describe('runDoor: the payment, the network and the account record (the real pos
       listActions: async (a: { labels: string[] }) => ({
         actions: [...account]
           .filter(([, labels]) => a.labels.some((l) => labels.has(l)))
-          .map(([txid, labels]) => ({ txid, status: 'completed', labels: [...labels] })),
+          .map(([txid, labels]) => ({
+            txid,
+            status: 'completed',
+            labels: [...labels],
+            outputs: [{ outputIndex: 0, basket: 'default', spendable: !spent.has(`${txid}_0`) }],
+          })),
       }),
       listOutputs: async () => {
         const outputs = [...account.keys()].filter((t) => !spent.has(`${t}_0`)).map((t) => ({ outpoint: `${t}.0` }));
@@ -330,7 +335,12 @@ describe('runDoor: the payment, the network and the account record (the real pos
     const { net } = network({ has: [p.txid] });
     expect((await open(h, net)).admitted).toBe(1);
     expect(tickets.length).toBe(1);
-    expect([...(h.account.get(p.txid) ?? [])]).toEqual([`bmail stamp ${p.txid}.0`, `bmail paid door ${r1.id}`]);
+    // The record: the payment's outpoint, what it was taken in for (this request, by content), and its ticket.
+    expect([...(h.account.get(p.txid) ?? [])]).toEqual([
+      `bmail stamp ${p.txid}.0`,
+      bmailClient.usedLabel(p, PAYER, `door ${r1.id} PENNY1 ${r1.ordAddress}`),
+      `bmail note ${p.txid}.0 ticket ${'d'.repeat(64)}`,
+    ]);
     expect(replies()).toMatchObject([{ ok: true }]);
     expect(acked).toEqual(['m1']);
   });
@@ -388,20 +398,90 @@ describe('runDoor: the payment, the network and the account record (the real pos
     expect(tickets.length).toBe(1);
   });
 
-  test('the very same request sent again to the other device: paid, but the ticket is left for the host to check', async () => {
+  test('the very same request sent again to the other device, synced: already admitted, nothing for the host to do', async () => {
+    const p = await payment();
+    const again = ask(p);
+    const phone = host();
+    const { net, state } = network({ has: [p.txid] });
+    inbox = [msg('m1', again)];
+    expect((await open(phone, net)).admitted).toBe(1);
+    state.spent.add(`${p.txid}_0`);
+    const desktop = host(phone.account, state.spent);
+    inbox.push(msg('m2', { ...again, at: NOW + 3_600_000 }));
+    const r = await open(desktop, net, NOW + 3_600_000);
+    expect(r).toMatchObject({ admitted: 0, check: 0, refused: 0, lastNote: 'Already admitted' });
+    expect(tickets.length).toBe(1);
+    expect(replies().at(-1)).toMatchObject({ ok: true, ticketTxid: 'd'.repeat(64) });
+    desktop.use();
+    expect(needsHandCheck(loadLedger(HOST), 'PENNY1')).toEqual([]);
+    expect(acked).toEqual(['m1', 'm2']);
+    // The same id asking for the ticket at another address is another request: the payment is used.
+    inbox.push(msg('m3', { ...again, ordAddress: '1BitcoinEaterAddressDontSendf59kuE' }));
+    expect(await open(desktop, net, NOW + 3_600_000)).toMatchObject({ admitted: 0, refused: 1 });
+    expect(tickets.length).toBe(1);
+  });
+
+  test('taken in for this request but no ticket on record (the first device stopped half-way): left for the host to check', async () => {
     const p = await payment();
     const again = ask(p);
     const phone = host();
     const { net } = network({ has: [p.txid] });
     inbox = [msg('m1', again)];
-    expect((await open(phone, net)).admitted).toBe(1);
+    phone.use();
+    // The phone takes the payment in, and the ticket send fails.
+    const first = await runDoor(phone.wallet, {
+      hostKey: HOST,
+      ticker: 'PENNY1',
+      priceSats: 20_000,
+      now: () => NOW,
+      net,
+      sendTicket: async () => {
+        throw new Error('broadcast failed');
+      },
+    });
+    expect(first.check).toBe(1);
     const desktop = host(phone.account);
     inbox.push(msg('m2', again));
     const r = await open(desktop, net);
     expect(r).toMatchObject({ admitted: 0, check: 1 });
-    expect(tickets.length).toBe(1);
+    expect(tickets).toEqual([]);
     desktop.use();
     expect(needsHandCheck(loadLedger(HOST), 'PENNY1').length).toBe(1);
+  });
+
+  test('a payment not in a block when the ticket went out is watched; dropped by the network, the host is told', async () => {
+    const p = await payment();
+    const h = host();
+    const { net, state } = network({ has: [p.txid] });
+    let status: 'mempool' | 'missing' | 'confirmed' = 'mempool';
+    const watched: StampNet = { ...net, status: async () => status };
+    inbox = [msg('m1', ask(p))];
+    expect((await open(h, watched)).admitted).toBe(1);
+    h.use();
+    expect(loadLedger(HOST)[p.txid].confirming).toBe(NOW);
+    expect(door.paymentsDropped(loadLedger(HOST), 'PENNY1')).toEqual([]);
+    // The sender's other spend of the same coins is mined instead.
+    status = 'missing';
+    void state;
+    await open(h, watched, NOW + 600_000);
+    h.use();
+    expect(door.paymentsDropped(loadLedger(HOST), 'PENNY1')).toEqual([]);
+    await open(h, watched, NOW + 1_200_000);
+    h.use();
+    expect(door.paymentsDropped(loadLedger(HOST), 'PENNY1').map((x) => x.txid)).toEqual([p.txid]);
+    expect(loadLedger(HOST)[p.txid]).toMatchObject({ status: 'sent', dropped: true });
+    expect(tickets.length).toBe(1);
+    // A payment that confirms is simply no longer watched.
+    const q = await payment();
+    const h2 = host();
+    status = 'mempool';
+    inbox = [msg('m2', ask(q))];
+    await open(h2, { ...network({ has: [q.txid] }).net, status: async () => status });
+    status = 'confirmed';
+    await open(h2, { ...net, status: async () => status }, NOW + 600_000);
+    h2.use();
+    expect(loadLedger(HOST)[q.txid].confirming).toBeUndefined();
+    expect(loadLedger(HOST)[q.txid].dropped).toBeUndefined();
   });
 
   test('a payment that paid for a bMail letter buys no ticket, spent or not; nor one already in the wallet', async () => {
@@ -410,14 +490,14 @@ describe('runDoor: the payment, the network and the account record (the real pos
     state.spent.add(`${spentStamp.txid}_0`);
     const h = host(new Map(), state.spent);
     for (const p of [stampOfALetter, spentStamp])
-      h.account.set(p.txid, new Set([`bmail stamp ${p.txid}.0`, bmailClient.usedLabel(`letter ${'ab'.repeat(16)}`)]));
+      h.account.set(p.txid, new Set([`bmail stamp ${p.txid}.0`, bmailClient.usedLabel(p, PAYER, 'letter abab')]));
     h.account.set(held.txid, new Set());
     inbox = [msg('m1', ask(stampOfALetter)), msg('m2', ask(spentStamp)), msg('m3', ask(held))];
     expect(await open(h, net)).toMatchObject({ admitted: 0, refused: 3 });
     expect(tickets).toEqual([]);
   });
 
-  test('the same payment as a door request and a bMail stamp, checked at the same moment: the ticket, no paid letter', async () => {
+  test('the same payment as a door request and a bMail stamp, checked at the same moment: a ticket or a paid letter, never both', async () => {
     const p = await payment();
     const h = host();
     const { net, state } = network({ has: [p.txid] });
@@ -446,9 +526,11 @@ describe('runDoor: the payment, the network and the account record (the real pos
     const [r] = await Promise.all([atDoor, mail]);
     h.use();
     const letter = loadMail(HOST).received[0];
-    expect(r.admitted).toBe(1);
-    expect(letter.verifiedSats).toBe(0);
-    expect(letter.verifyNote).toBe(bmailClient.STAMP_USED);
+    // Both took it in; the record holds both uses and the first in order is the only one paid: never both.
+    expect([r.admitted, letter.verifiedSats > 0 ? 1 : 0].sort()).toEqual([0, 1]);
+    expect(tickets.length).toBe(r.admitted);
+    if (!r.admitted) expect(r.refused).toBe(1);
+    else expect(letter.verifyNote).toBe(bmailClient.STAMP_USED);
   });
 
   test('a wallet that is locked for a moment refuses nothing and records nothing: the request is paid next pass', async () => {

@@ -32,6 +32,13 @@ export type Received = MailMeta & {
    * and checked again when it is opened (client.ts recheckLetter).
    */
   stampOpen?: number;
+  /**
+   * Paid by a stamp that was not in a block yet: when it was found paid, the last look for a confirmation, and when
+   * a look first found the network without it (client.ts settleConfirmations).
+   */
+  settling?: { since: number; last: number; doubt?: number };
+  /** The account's record of this letter's stamp is in the wallet (or cannot be): client.ts recordOldStamps. */
+  stampRecorded?: true;
   read?: boolean;
   /** Decrypted on open; kept locally so it opens instantly next time. */
   opened?: Sealed;
@@ -118,35 +125,41 @@ export const subscribeMail = (l: () => void) => {
 
 /** At most this many received letters are stored. */
 export const RECEIVED_MAX = 1000;
-/** This many of the newest letters from senders the user has no dealings with are kept as any other mail is, */
+/** This many of the newest letters from senders the user has no dealings with are kept as any other mail is. */
 export const STRANGERS_KEPT = 200;
-/** and this many of the newest letters whose stamp is still being checked. */
-export const UNCHECKED_KEPT = 200;
+/**
+ * A stamped letter still waiting for its first check: by the wallet alone, or, once the wallet found the stamp pays
+ * this account, by the network. Its coin may be on its way.
+ */
+export const isWaiting = (r: Received): boolean => !!r.recheck && r.recheck.last === 0 && r.recheck.doubt === undefined;
 /**
  * Keep the store within RECEIVED_MAX without losing the user's own mail to a flood. What goes first, oldest first:
  *  1. unread, unpaid letters from senders the user has no dealings with (not a contact, not trusted), neither pinned
  *     nor archived, beyond the newest STRANGERS_KEPT of them: what a flood is made of;
  *  2. deleted letters (the Bin, erased tombstones);
- *  3. letters whose stamp is not checked yet, beyond the newest UNCHECKED_KEPT of them (a flood of made-up stamps);
- *  4. everything else: a full store still shows new mail and drops its oldest. A letter whose stamp is being
- *     checked is here (money on its way is not dropped before unpaid mail), and so is a stranger's new letter.
+ *  3. letters whose stamp a check has already answered for and found wanting (not on the network, not paid to this
+ *     account) but not yet for good;
+ *  4. everything else: a full store still shows new mail and drops its oldest;
+ *  5. last of all, a letter whose stamp is still waiting for its first check (isWaiting): never before anything
+ *     else, because its coin may be real and nothing has looked yet. There are few of these: client.ts fetchMail
+ *     takes strangers' stamped letters in only while fewer than WAITING_MAX wait.
  * A dropped letter cannot come back as new: the relay ledger still knows its relay message (loadRelaySeen).
  */
 export const trimReceived = (s: MailState): Received[] => {
   let over = s.received.length - RECEIVED_MAX;
   if (over <= 0) return s.received;
   let strangers = 0;
-  let unchecked = 0;
   const rank = new Map<Received, number>();
   for (const r of s.received) {
     const mine = r.read || r.pinned || r.archived || r.verifiedSats > 0 || r.replyCredit;
-    if (r.recheck) rank.set(r, ++unchecked > UNCHECKED_KEPT ? 2 : 3);
+    if (isWaiting(r)) rank.set(r, 4);
+    else if (r.recheck) rank.set(r, r.recheck.doubt !== undefined || r.recheck.tries > 0 ? 2 : 3);
     else if (r.deleted) rank.set(r, 1);
     else if (mine || s.contacts.includes(r.from) || (s.trusted ?? []).includes(r.from)) rank.set(r, 3);
     else rank.set(r, ++strangers > STRANGERS_KEPT ? 0 : 3);
   }
   const drop = new Set<Received>();
-  for (const level of [0, 1, 2, 3])
+  for (const level of [0, 1, 2, 3, 4])
     for (let i = s.received.length - 1; i >= 0 && over > 0; i--)
       if (rank.get(s.received[i]) === level) {
         drop.add(s.received[i]);
