@@ -1,6 +1,6 @@
 import { executeTrackedAction, inscribe, type OneSatContext } from '@1sat/actions';
 import { Hash, PublicKey, Script, Transaction, Utils, type CreateActionArgs, type WalletInterface } from '@bsv/sdk';
-import { assertNameToPost } from '../feed/authorBinding';
+import { assertNameToPost, NameNeededError } from '../feed/authorBinding';
 import { publish } from '../feed/feedApi';
 import { fileToBase64, withFeeOutput } from '../mint/mint';
 import { LocationBlockedError, locationVerdict, type LocationVerdict } from './location';
@@ -302,8 +302,22 @@ export class RevealStoppedError extends Error {
   ) {
     super(cause instanceof Error ? cause.message : 'reveal failed');
     this.name = 'RevealStoppedError';
+    this.needsName = cause instanceof NameNeededError;
   }
+  /** It stopped on the name rule (feed/authorBinding.ts), not on a failure. */
+  needsName: boolean;
 }
+
+/**
+ * What the reveal sheet says when a batch stops. The name rule's own words end "Nothing was posted or paid", which is
+ * false once earlier items went out, so that case says how many were revealed and what the rest need.
+ */
+export const revealStoppedMessage = (e: unknown, total: number): string => {
+  const n = e instanceof RevealStoppedError ? e.done : 0;
+  if (e instanceof RevealStoppedError && e.needsName)
+    return `${n} of ${total} revealed. The rest need a $name before they can be made public, and stay private.`;
+  return `${n} of ${total} revealed. Stopped: ${e instanceof Error ? e.message : 'reveal failed'}. The rest stay private.`;
+};
 
 /**
  * "Reveal all": skips every item blocked for location metadata (nothing is sent for them) and reveals the rest one

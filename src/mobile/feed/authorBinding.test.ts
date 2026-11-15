@@ -21,6 +21,8 @@ import {
   feedAuthorMessage,
   BLOCKED_RETRY_MS,
   isAuthoredPost,
+  ACCOUNT_CHANGED_MESSAGE,
+  AccountChangedError,
   assertNameToPost,
   isNameChecked,
   linkAuthorAtUnlock,
@@ -45,9 +47,9 @@ import {
   type AuthorBindingRecord,
 } from './authorBindingState';
 import { lookupPaymailStateAt } from '../names/paymail';
-import { revealMedia } from '../private/privateMint';
+import { revealMany, revealMedia, RevealStoppedError, revealStoppedMessage } from '../private/privateMint';
 import { replyByName, tipDestinations } from './tipMessage';
-import { postAfterPaidSteps, publish } from './feedApi';
+import { oneAtATime, postAfterPaidSteps, publish } from './feedApi';
 
 // ── the server's checks (bit-sign), copied ───────────────────────────────────
 
@@ -1746,5 +1748,204 @@ describe('tip sheet: "Under their post" follows the name', () => {
     expect(line).toContain('Agent accounts and pots without a $name can’t post to the Feed.');
     expect(line).not.toContain('<button');
     expect(src).toContain('const agentOrPot = isAgentAccount(composerIdentity);');
+  });
+});
+
+// ── round 6 (final check, 15 Nov 2026) ──────────────────────────────────────
+
+describe('one post per tap, one account per pass', () => {
+  const real = { ...postNameGate };
+  const realFetch = globalThis.fetch;
+  let cached = new Map<string, string>();
+  let answer: () => Promise<{ state: 'none' } | { state: 'unknown' } | { state: 'name'; paymail: string }>;
+  beforeEach(() => {
+    cached = new Map();
+    answer = async () => ({ state: 'none' });
+    postNameGate.enabled = () => true;
+    postNameGate.paymailFor = (id) => cached.get(id) ?? '';
+    postNameGate.bare = (p) => p.replace(/@bwalletx\.com$/i, '');
+    postNameGate.lookup = () => answer();
+    postNameGate.remember = (id, p) => void cached.set(id, p);
+    globalThis.fetch = (async () => new Response('{}')) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    Object.assign(postNameGate, real);
+    globalThis.fetch = realFetch;
+  });
+  const script = () => new Script().writeOpCode(0).writeOpCode(0x6a).writeBin(Utils.toArray('hello'));
+  const POST = ['app:bWallet', 'type:post'];
+  const name = (a: ReturnType<typeof account>) => cached.set(a.identityAddress, 'peytonmoon69@bwalletx.com');
+  /** The composer's send(): the guard, the name check, the paid media, the post. */
+  const composer = (a: ReturnType<typeof account>) => {
+    const gate = { running: false };
+    const calls = { inscribe: 0, publish: 0 };
+    const send = () =>
+      oneAtATime(gate, () =>
+        postAfterPaidSteps(
+          a.ctx,
+          async () => (calls.inscribe++, [{ outpoint: `${'cd'.repeat(32)}_0`, mime: 'video/mp4' }]),
+          (_refs, pass) => (calls.publish++, publish(a.ctx, script(), 'Feed post', POST, undefined, undefined, pass)),
+        ),
+      );
+    return { gate, calls, send };
+  };
+
+  test('a double tap: the media is inscribed once and the post goes out once', async () => {
+    const a = account();
+    name(a);
+    const c = composer(a);
+    const [first, second] = [c.send(), c.send()]; // the same tick, before anything has been awaited
+    expect(await second).toBeUndefined();
+    expect(await first).toBe('ab'.repeat(32));
+    expect(c.calls).toEqual({ inscribe: 1, publish: 1 });
+    expect(a.state.actions).toBe(1);
+    // The next tap, after it finished, is a new post.
+    expect(await c.send()).toBe('ab'.repeat(32));
+    expect(c.calls).toEqual({ inscribe: 2, publish: 2 });
+    await settle();
+  });
+
+  test('a tap while the name is still being looked up is ignored too; a failed send frees the button', async () => {
+    const a = account();
+    let release!: (v: { state: 'unknown' }) => void;
+    answer = () => new Promise((r) => (release = r));
+    const c = composer(a);
+    const first = c.send();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await c.send()).toBeUndefined();
+    release({ state: 'unknown' });
+    expect(await first).toBe('ab'.repeat(32));
+    expect(c.calls).toEqual({ inscribe: 1, publish: 1 });
+    answer = async () => ({ state: 'none' });
+    await expect(c.send()).rejects.toBeInstanceOf(NameNeededError);
+    expect(c.gate.running).toBe(false);
+    await settle();
+  });
+
+  test('a lookup that never answers: the post goes out after the timeout', async () => {
+    const a = account();
+    answer = () => new Promise(() => undefined);
+    postNameGate.lookupTimeoutMs = 30;
+    const started = Date.now();
+    expect(await publish(a.ctx, script(), 'Feed post', POST)).toBe('ab'.repeat(32));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(25);
+    expect(a.state.actions).toBe(1);
+    await settle();
+  });
+
+  test('the live lookup itself is given 5 seconds, and its request is aborted then', async () => {
+    expect(real.lookupTimeoutMs).toBe(5000);
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./authorBinding.ts', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    expect(src).toContain('fetch(u, { ...i, signal: AbortSignal.timeout(postNameGate.lookupTimeoutMs) })');
+  });
+
+  test('a pass is used up by its post: a second post with it is checked afresh', async () => {
+    const a = account();
+    name(a);
+    const pass = await assertNameToPost(a.ctx);
+    expect(await publish(a.ctx, script(), 'Feed post', POST, undefined, undefined, pass)).toBe('ab'.repeat(32));
+    expect(isNameChecked(pass)).toBe(false);
+    cached.clear(); // the name is gone; the server says so too
+    await expect(publish(a.ctx, script(), 'Feed post', POST, undefined, undefined, pass)).rejects.toBeInstanceOf(
+      NameNeededError,
+    );
+    expect(a.state.actions).toBe(1);
+    await settle();
+  });
+
+  test('a pass for account A is not good for account B: the post is not sent as B, and the message is accurate', async () => {
+    const [a, b] = [account(), account()];
+    name(a);
+    name(b); // even a named B: the post was written, and its media paid for, as A
+    const pass = await assertNameToPost(a.ctx);
+    const err = await publish(b.ctx, script(), 'Feed post', POST, undefined, undefined, pass).catch((e) => e);
+    expect(err).toBeInstanceOf(AccountChangedError);
+    expect(err.message).toBe(ACCOUNT_CHANGED_MESSAGE);
+    expect(ACCOUNT_CHANGED_MESSAGE).toMatch(/account changed/i);
+    expect(ACCOUNT_CHANGED_MESSAGE).toMatch(/not sent/);
+    expect(ACCOUNT_CHANGED_MESSAGE).toMatch(/paid for and stays in your wallet/);
+    expect(ACCOUNT_CHANGED_MESSAGE).not.toMatch(/Nothing was posted or paid/);
+    expect(b.state.actions + a.state.actions).toBe(0);
+    expect(b.counts.createSignature).toBe(0);
+    // And that pass is spent: it can't be tried again as A either without a fresh check.
+    expect(isNameChecked(pass)).toBe(false);
+  });
+
+  test('the whole flow with a switch after the media is paid for: inscribed once, not posted, told accurately', async () => {
+    const [a, b] = [account(), account()];
+    name(a);
+    const s = { current: a };
+    const ctx = {
+      wallet: {
+        getPublicKey: (x: never) => s.current.wallet.getPublicKey(x),
+        createSignature: (x: never) => s.current.wallet.createSignature(x),
+        listOutputs: (x: never) => s.current.wallet.listOutputs(x),
+        createAction: () => s.current.wallet.createAction(),
+      },
+    } as unknown as OneSatContext;
+    let inscribed = 0;
+    const err = await postAfterPaidSteps(
+      ctx,
+      async () => {
+        inscribed++;
+        s.current = b;
+        return [];
+      },
+      (_r, pass) => publish(ctx, script(), 'Feed post', POST, undefined, undefined, pass),
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(AccountChangedError);
+    expect(inscribed).toBe(1);
+    expect(a.state.actions + b.state.actions).toBe(0);
+  });
+
+  test('the composer: guarded from its first statement, busy before the first await, identity in the name effect', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./FeedPage.tsx', import.meta.url), 'utf8').replace(/\s+/g, ' ');
+    expect(src).toContain('const send = () => oneAtATime(sending.current, async () => {');
+    const body = src.slice(src.indexOf('const send = () => oneAtATime(sending.current, async () => {'));
+    expect(body.indexOf("setBusy('Checking…');")).toBeGreaterThan(0);
+    expect(body.indexOf("setBusy('Checking…');")).toBeLessThan(body.indexOf('await '));
+    expect(body.slice(0, body.indexOf('return ( <Sheet'))).toContain("} finally { setBusy(''); }");
+    expect(src).toContain('}, [needsName, apiContext, composerIdentity]);');
+  });
+});
+
+describe('a batch reveal that stops on the name rule', () => {
+  const item = (n: number) => ({
+    outpoint: `${'ef'.repeat(32)}:${n}`,
+    kid: `k${n}`,
+    header: { mime: 'audio/mpeg', name: `${n}.mp3`, bytes: 3 },
+    file: new Uint8Array([1, 2, 3]),
+  });
+
+  test('two revealed, then no name: says how many went out and what the rest need, never "nothing was posted or paid"', async () => {
+    const a = account();
+    let n = 0;
+    const err = await revealMany(a.ctx, [item(0), item(1), item(2), item(3)] as never[], {
+      reveal: async () => {
+        if (++n > 2) throw new NameNeededError();
+        return { postTxid: 'ab'.repeat(32) };
+      },
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(RevealStoppedError);
+    expect(err.done).toBe(2);
+    expect(err.needsName).toBe(true);
+    const text = revealStoppedMessage(err, 4);
+    expect(text).toBe('2 of 4 revealed. The rest need a $name before they can be made public, and stay private.');
+    expect(text).not.toMatch(/Nothing was posted or paid/);
+  });
+
+  test('any other stop keeps its own words', () => {
+    const err = new RevealStoppedError(1, 3, new Error('Insufficient funds'));
+    expect(err.needsName).toBe(false);
+    expect(revealStoppedMessage(err, 3)).toBe('1 of 3 revealed. Stopped: Insufficient funds. The rest stay private.');
+    expect(revealStoppedMessage(new Error('boom'), 3)).toBe('0 of 3 revealed. Stopped: boom. The rest stay private.');
+  });
+
+  test('the reveal sheet uses it', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../private/PrivateVault.tsx', import.meta.url), 'utf8');
+    expect(src).toContain('setError(revealStoppedMessage(e, ok.length));');
   });
 });

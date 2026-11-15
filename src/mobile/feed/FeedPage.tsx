@@ -107,6 +107,7 @@ import {
   fetchTwetchPost,
   fetchThread,
   lockToPost,
+  oneAtATime,
   publish,
   postAfterPaidSteps,
   PostCancelledError,
@@ -917,7 +918,7 @@ const Composer = ({
     return () => {
       live = false;
     };
-  }, [needsName, apiContext]);
+  }, [needsName, apiContext, composerIdentity]);
   // An agent account or a pot is never linked to a name (authorBinding.ts), so it isn't steered to claim one.
   const agentOrPot = isAgentAccount(composerIdentity);
   const [naming, setNaming] = useState(false);
@@ -1003,62 +1004,67 @@ const Composer = ({
       return list.filter((i) => i.id !== id);
     });
 
-  const send = async () => {
-    setError('');
-    if (noName) return;
-    if (invalid) return setError(invalid);
-    if (safety().check({ texts: [text, ...items.map((i) => i.name)] }).blocked)
-      return setError("This can't be posted from bWallet.");
-    try {
-      const tags = [
-        'app:bWallet',
-        'type:post',
-        ...(input.quote ? [`quote:${input.quote}`] : []),
-        ...(input.replyTo ? [`context:tx`, `contextValue:${input.replyTo}`] : []),
-      ];
-      // The name is checked first, with the wallet that will sign, before any media is paid for; publish() gets
-      // the pass and does not check again (feedApi.postAfterPaidSteps).
-      const txid = await postAfterPaidSteps(
-        apiContext,
-        async () => {
-          // 1. Large video / audio → 1Sat ordinals (one wallet approval each), through the Mint inscribe path.
-          const refs: { outpoint: string; mime: string }[] = [];
-          for (const [n, i] of inscribed.entries()) {
-            setBusy(`Inscribing ${i.kind} ${n + 1}/${inscribed.length}…`);
-            const res = await inscribe.execute(apiContext, {
-              base64Content: fileToBase64(await i.file!.arrayBuffer()),
-              contentType: i.mime,
-              map: { app: FEED_APP, type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
-            });
-            if (!res.txid || res.error) throw new Error(res.error || 'Inscribing the media failed');
-            refs.push({ outpoint: `${res.txid}_0`, mime: i.mime });
-          }
-          return refs;
-        },
-        (refs, nameChecked) => {
-          // 2. The post: text, inline parts, and the ordinals by outpoint.
-          setBusy('Posting…');
-          return publish(
-            apiContext,
-            buildPostScript({ ...input, refs }),
-            replyTo ? 'Feed reply' : quote ? 'Feed quote' : 'Feed post',
-            tags,
-            undefined,
-            undefined,
-            nameChecked,
-          );
-        },
-      );
-      onPosted(txid);
-    } catch (e) {
-      if (e instanceof PostCancelledError) return;
-      // Nothing was signed or paid: show the way to a name in place of an error.
-      if (e instanceof NameNeededError) return setNoName(true);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy('');
-    }
-  };
+  // One send at a time, from its first statement (feedApi.oneAtATime): the name check is awaited before anything
+  // shows as busy on screen, and a double tap in that gap paid for the media twice and posted twice.
+  const sending = useRef({ running: false });
+  const send = () =>
+    oneAtATime(sending.current, async () => {
+      setError('');
+      if (noName) return;
+      if (invalid) return setError(invalid);
+      if (safety().check({ texts: [text, ...items.map((i) => i.name)] }).blocked)
+        return setError("This can't be posted from bWallet.");
+      setBusy('Checking…');
+      try {
+        const tags = [
+          'app:bWallet',
+          'type:post',
+          ...(input.quote ? [`quote:${input.quote}`] : []),
+          ...(input.replyTo ? [`context:tx`, `contextValue:${input.replyTo}`] : []),
+        ];
+        // The name is checked first, with the wallet that will sign, before any media is paid for; publish() gets
+        // the pass and does not check again (feedApi.postAfterPaidSteps).
+        const txid = await postAfterPaidSteps(
+          apiContext,
+          async () => {
+            // 1. Large video / audio → 1Sat ordinals (one wallet approval each), through the Mint inscribe path.
+            const refs: { outpoint: string; mime: string }[] = [];
+            for (const [n, i] of inscribed.entries()) {
+              setBusy(`Inscribing ${i.kind} ${n + 1}/${inscribed.length}…`);
+              const res = await inscribe.execute(apiContext, {
+                base64Content: fileToBase64(await i.file!.arrayBuffer()),
+                contentType: i.mime,
+                map: { app: FEED_APP, type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
+              });
+              if (!res.txid || res.error) throw new Error(res.error || 'Inscribing the media failed');
+              refs.push({ outpoint: `${res.txid}_0`, mime: i.mime });
+            }
+            return refs;
+          },
+          (refs, nameChecked) => {
+            // 2. The post: text, inline parts, and the ordinals by outpoint.
+            setBusy('Posting…');
+            return publish(
+              apiContext,
+              buildPostScript({ ...input, refs }),
+              replyTo ? 'Feed reply' : quote ? 'Feed quote' : 'Feed post',
+              tags,
+              undefined,
+              undefined,
+              nameChecked,
+            );
+          },
+        );
+        onPosted(txid);
+      } catch (e) {
+        if (e instanceof PostCancelledError) return;
+        // Nothing was signed or paid: show the way to a name in place of an error.
+        if (e instanceof NameNeededError) return setNoName(true);
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy('');
+      }
+    });
 
   return (
     <Sheet

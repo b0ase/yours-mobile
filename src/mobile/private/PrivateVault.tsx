@@ -6,7 +6,7 @@ import {
   listPrivateMedia,
   planReveal,
   revealMany,
-  RevealStoppedError,
+  revealStoppedMessage,
   REVEAL_LABEL,
   type PrivateItem,
 } from './privateMint';
@@ -97,10 +97,7 @@ export const RevealSheet = ({
       onDone();
       onClose();
     } catch (e) {
-      const n = e instanceof RevealStoppedError ? e.done : 0;
-      setError(
-        `${n} of ${ok.length} revealed. Stopped: ${e instanceof Error ? e.message : 'reveal failed'}. The rest stay private.`,
-      );
+      setError(revealStoppedMessage(e, ok.length));
       onDone();
     } finally {
       setBusy(false);

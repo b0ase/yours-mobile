@@ -82,8 +82,14 @@ export const postNameGate = {
   enabled: (): boolean => paymailEnabled(),
   paymailFor: (identityAddress: string): string => getPaymail(identityAddress),
   bare: (paymail: string): string => bareName(paymail),
-  /** The server's answer for an identity key (names/paymail.ts lookupPaymailState). */
-  lookup: (identityKey: string): Promise<PaymailLookup> => lookupPaymailState((u, i) => fetch(u, i), identityKey),
+  /** The server's answer for an identity key (names/paymail.ts lookupPaymailState). A hung request is aborted. */
+  lookup: (identityKey: string): Promise<PaymailLookup> =>
+    lookupPaymailState(
+      (u, i) => fetch(u, { ...i, signal: AbortSignal.timeout(postNameGate.lookupTimeoutMs) }),
+      identityKey,
+    ),
+  /** How long the live lookup may take before it counts as "couldn't tell" and the post goes ahead. */
+  lookupTimeoutMs: 5000,
   /** Put a name the server just gave back in the cache. */
   remember: (identityAddress: string, paymail: string): void => setPaymail(identityAddress, paymail),
 };
@@ -99,34 +105,74 @@ export class NameNeededError extends Error {
   }
 }
 
-/** Proof that the name check passed for a post about to be made. Only assertNameToPost makes one. */
+/**
+ * Proof that the name check passed for a post about to be made: for ONE account and ONE post. Only assertNameToPost
+ * makes one; it remembers the identity key it was made for and is used up by the publish it is handed to.
+ */
 export type NameChecked = { readonly nameChecked: true };
-const passes = new WeakSet<object>();
+const passes = new WeakMap<object, string>();
 export const isNameChecked = (t: unknown): t is NameChecked => typeof t === 'object' && t !== null && passes.has(t);
+
+/**
+ * The wallet moved to another account between the name check and the post. The post is not sent as the other
+ * account. Media inscribed on the way is paid for and stays in the wallet, so this never says "nothing was paid".
+ */
+export const ACCOUNT_CHANGED_MESSAGE =
+  'The account changed before this could be posted, so the post was not sent. Any media already added for it was paid for and stays in your wallet.';
+export class AccountChangedError extends Error {
+  constructor() {
+    super(ACCOUNT_CHANGED_MESSAGE);
+    this.name = 'AccountChangedError';
+  }
+}
+
+const identityKeyOf = async (ctx: OneSatContext) =>
+  (await ctx.wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();
+
+/** "Couldn't tell" after `ms`, so a lookup that never answers can't hold a post. */
+const orUnknown = (p: Promise<PaymailLookup>, ms: number): Promise<PaymailLookup> =>
+  new Promise((resolve) => {
+    const t = setTimeout(() => resolve({ state: 'unknown' }), ms);
+    p.then(
+      (r) => (clearTimeout(t), resolve(r)),
+      () => (clearTimeout(t), resolve({ state: 'unknown' })),
+    );
+  });
 
 /**
  * Refuse (NameNeededError) when the account `ctx` signs as has no bWalletX name; otherwise a pass to hand to
  * publish(). Call it BEFORE anything is paid (inscribing media, a reveal): publish() given the pass does not check
- * again, so a name that goes missing in between can never stop a post whose media is already paid for.
+ * the name again, so a name that goes missing in between can never stop a post whose media is already paid for.
  */
 export async function assertNameToPost(ctx: OneSatContext): Promise<NameChecked> {
+  const identityKey = await identityKeyOf(ctx);
   const pass: NameChecked = { nameChecked: true };
-  passes.add(pass);
-  if (!postNameGate.enabled()) return pass;
-  const identityKey = (await ctx.wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();
-  const identityAddress = PublicKey.fromString(identityKey).toAddress();
-  if (!needsNameToPost(postNameGate.paymailFor(identityAddress))) return pass;
-  const live = await postNameGate.lookup(identityKey).catch((): PaymailLookup => ({ state: 'unknown' }));
-  if (live.state === 'none') throw new NameNeededError();
-  if (live.state === 'name' && feedAuthorAlias(live.paymail, postNameGate.bare) !== null)
-    postNameGate.remember(identityAddress, live.paymail);
+  if (postNameGate.enabled()) {
+    const identityAddress = PublicKey.fromString(identityKey).toAddress();
+    if (needsNameToPost(postNameGate.paymailFor(identityAddress))) {
+      const live = await orUnknown(postNameGate.lookup(identityKey), postNameGate.lookupTimeoutMs);
+      if (live.state === 'none') throw new NameNeededError();
+      if (live.state === 'name' && feedAuthorAlias(live.paymail, postNameGate.bare) !== null)
+        postNameGate.remember(identityAddress, live.paymail);
+    }
+  }
+  passes.set(pass, identityKey);
   return pass;
 }
 
-/** feedApi.publish: a post or reply ('type:post') is checked here unless its caller already holds a pass. */
+/**
+ * feedApi.publish. With a pass: it must be for the account that is about to sign (else AccountChangedError: never
+ * post as another account), and it is used up here, so a second post is checked afresh. Without one, a post or reply
+ * ('type:post') is checked now.
+ */
 export async function assertNameForPost(ctx: OneSatContext, tags: readonly string[], pass?: unknown): Promise<void> {
-  if (!tags.includes('type:post') || isNameChecked(pass)) return;
-  await assertNameToPost(ctx);
+  if (isNameChecked(pass)) {
+    const madeFor = passes.get(pass);
+    passes.delete(pass);
+    if (madeFor !== (await identityKeyOf(ctx))) throw new AccountChangedError();
+    return;
+  }
+  if (tags.includes('type:post')) await assertNameToPost(ctx);
 }
 
 /** The posting address on an AIP-signed script (the push before the signature), for the cheap "already sent" check. */

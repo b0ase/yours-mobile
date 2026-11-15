@@ -559,6 +559,21 @@ export async function postAfterPaidSteps<T>(
   return post(await paidSteps(), nameChecked);
 }
 
+/**
+ * One run at a time (the composer's Post button): a second call while the first is still going returns undefined at
+ * once and runs nothing. `gate` is a plain object kept in a ref, so it holds from the first statement of the first
+ * call, before React has re-rendered a disabled button. A double tap can't pay for the media twice or post twice.
+ */
+export async function oneAtATime<T>(gate: { running: boolean }, run: () => Promise<T>): Promise<T | undefined> {
+  if (gate.running) return undefined;
+  gate.running = true;
+  try {
+    return await run();
+  } finally {
+    gate.running = false;
+  }
+}
+
 /** Nothing in here can reach publish(): reading the post's address and the binding are both inside the try. */
 const linkAuthor = async (ctx: OneSatContext, signed: Script, authored: boolean) => {
   try {
