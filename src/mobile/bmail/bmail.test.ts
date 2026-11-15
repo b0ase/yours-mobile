@@ -29,6 +29,9 @@ describe('envelope', () => {
     const e = env({ postage, replyPaidSats: 200, inReplyTo: 'cd'.repeat(16), usesReplyCredit: true });
     expect(decodeEnvelope(encodeEnvelope(e))).toEqual(e);
     expect(decodeEnvelope(JSON.parse(encodeEnvelope(e)))).toEqual(e);
+    const bound = env({ postage: { ...postage, bound: true } });
+    expect(decodeEnvelope(encodeEnvelope(bound))).toEqual(bound);
+    expect(decodeEnvelope({ ...env(), postage: { ...postage, bound: 'yes' } })?.postage).toEqual(postage);
   });
   test('rejects junk and bad fields', () => {
     expect(decodeEnvelope('not json')).toBeNull();

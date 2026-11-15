@@ -1,0 +1,347 @@
+/**
+ * bMail postage against the REAL wallet-toolbox: the two-device harness (src/testing/twoDeviceSim: two devices on one
+ * seed, device sync, a fake chain behind WhatsOnChain / ARC). What is checked here is money: a stamp shows as paid
+ * only when the network has it, once, and no device ever shows more than the chain holds because of a letter.
+ */
+import 'fake-indexeddb/auto';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { Beef, P2PKH, PrivateKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
+import { teardownSim, World } from '../../testing/twoDeviceSim/world';
+import { RECHECK_EVERY_MS, RECHECK_TRIES, STAMP_USED, syncMail, type MailRelay, type RelayMessage } from './client';
+import { BRC29_PROTOCOL, encodeEnvelope, stampPrefix, type Envelope, type Postage } from './envelope';
+import { route } from './route';
+import { loadMail } from './store';
+import { keepGlobals } from '../../testing/stubGlobals';
+
+keepGlobals('localStorage', 'fetch');
+// The Store client reads its API base once, when first loaded; every sim file sets the same value (twoDeviceSim.test).
+(globalThis as { __PAYMAIL_API__?: string }).__PAYMAIL_API__ ??= 'https://pay.store.test';
+
+const T = 120_000;
+let current: World | undefined;
+const realWarn = console.warn;
+const realLog = console.log;
+beforeAll(() => {
+  // Every lookup and broadcast bMail makes goes to the current fake chain, never the network.
+  globalThis.fetch = ((u: string, i?: RequestInit) =>
+    current ? current.chain.fetch(u, i) : Promise.resolve(new Response('', { status: 404 }))) as typeof fetch;
+  console.warn = (...a: unknown[]) => current?.log(...a);
+  console.log = (...a: unknown[]) => (current ? current.log(...a) : realLog(...a));
+});
+afterAll(() => {
+  console.warn = realWarn;
+  console.log = realLog;
+  teardownSim();
+});
+afterEach(async () => {
+  await current?.close();
+  current = undefined;
+});
+const world = async (seed: number) => (current = await World.open({ seed }));
+
+const SENDER = PrivateKey.fromRandom().toPublicKey().toString();
+let n = 0;
+const nextId = () => (++n).toString(16).padStart(32, '0');
+const rnd = (len: number) => [...crypto.getRandomValues(new Uint8Array(len))];
+
+/**
+ * A stamp of `sats` from SENDER to the wallet, funded by a mined coin. `mined`: in a block, with its proof. Else it is
+ * signed and never sent. `forId`: bound to that letter (envelope.ts `bound`).
+ */
+const stamp = async (w: World, sats: number, o: { mined?: boolean; forId?: string } = {}) => {
+  const derivationPrefix = o.forId ? stampPrefix(o.forId) : Utils.toBase64(rnd(8));
+  const derivationSuffix = Utils.toBase64(rnd(8));
+  const priv = w.kd.derivePrivateKey(BRC29_PROTOCOL, `${derivationPrefix} ${derivationSuffix}`, SENDER);
+  const k = PrivateKey.fromRandom();
+  const parent = new Transaction();
+  parent.addInput({
+    sourceTXID: Utils.toHex(rnd(32)),
+    sourceOutputIndex: 0,
+    unlockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()),
+    sequence: 0xffffffff,
+  });
+  parent.addOutput({ lockingScript: new P2PKH().lock(k.toAddress()), satoshis: sats + 50 });
+  const ptxid = parent.id('hex');
+  w.chain.accept(parent);
+  w.chain.height++;
+  w.chain.txs.get(ptxid)!.block = w.chain.height;
+  parent.merklePath = w.chain.merklePath(ptxid);
+  const tx = new Transaction();
+  tx.addInput({ sourceTransaction: parent, sourceOutputIndex: 0, unlockingScriptTemplate: new P2PKH().unlock(k) });
+  tx.addOutput({ lockingScript: new P2PKH().lock(priv.toPublicKey().toAddress()), satoshis: sats });
+  await tx.sign();
+  const txid = tx.id('hex');
+  // The output is the wallet's once the network has the transaction (the chain's own count of what the wallet holds).
+  w.chain.owned.set(`${txid}.0`, { sats });
+  if (o.mined) {
+    w.chain.accept(tx);
+    w.chain.height++;
+    w.chain.txs.get(txid)!.block = w.chain.height;
+    tx.merklePath = w.chain.merklePath(txid);
+  }
+  const beef = new Beef();
+  beef.mergeTransaction(tx);
+  const postage: Postage = {
+    txid,
+    sats,
+    outputIndex: 0,
+    beef: Utils.toHex(beef.toBinaryAtomic(txid)),
+    derivationPrefix,
+    derivationSuffix,
+    ...(o.forId ? { bound: true as const } : {}),
+  };
+  /** The sender spends the same funding coin elsewhere: a double spend of the stamp. */
+  const doubleSpend = async () => {
+    const other = new Transaction();
+    other.addInput({ sourceTransaction: parent, sourceOutputIndex: 0, unlockingScriptTemplate: new P2PKH().unlock(k) });
+    other.addOutput({ lockingScript: new P2PKH().lock(k.toAddress()), satoshis: sats });
+    await other.sign();
+    return w.chain.accept(other);
+  };
+  return { postage, doubleSpend, txid };
+};
+const me = (w: World) => w.kd.identityKey.toLowerCase();
+const letter = (w: World, postage: Postage, id = nextId()): Envelope => ({
+  t: 'bmail',
+  v: 1,
+  id,
+  from: SENDER.toLowerCase(),
+  to: me(w),
+  at: Date.now(),
+  sealed: 'c2VhbGVk',
+  postage,
+});
+const fakeRelay = () => {
+  const box: RelayMessage[] = [];
+  const relay: MailRelay = { list: async () => box.map((m) => ({ ...m })), ack: async () => undefined };
+  return {
+    relay,
+    post: (env: Envelope) =>
+      void box.push({ messageId: `relay-${env.id}`, sender: env.from, body: encodeEnvelope(env) }),
+  };
+};
+type Device = World['A'];
+const stores = new Map<string, Map<string, string>>();
+const sync = async (w: World, d: Device, r: { relay: MailRelay }, now = Date.now()) => {
+  const name = `${d.name}-${me(w)}`;
+  const mem = stores.get(name) ?? new Map<string, string>();
+  stores.set(name, mem);
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => void mem.set(k, v),
+  };
+  await syncMail(d.wallet as unknown as WalletInterface, me(w), r.relay, now);
+  return loadMail(me(w)).received;
+};
+const shown = async (w: World, d: Device) => (await w.view(d)).shown;
+const onChain = (w: World) => [...w.chain.unspent('bsv').values()].reduce((x, y) => x + y, 0);
+const box = (m: { verifiedSats: number; id: string; from: string; at: number }) =>
+  route(m, { isFriend: () => false, priceSats: 1000 });
+
+describe('bMail stamps on the real wallet', () => {
+  test(
+    'a mined stamp: paid, taken in once; a second fetch and the other device add nothing',
+    async () => {
+      const w = await world(21);
+      const s = await stamp(w, 5000, { mined: true });
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      const a = await sync(w, w.A, r);
+      expect(a[0].verifiedSats).toBe(5000);
+      expect(a[0].recheck).toBeUndefined();
+      expect(await shown(w, w.A)).toBe(5000);
+      await sync(w, w.A, r);
+      expect(await shown(w, w.A)).toBe(5000);
+      // The other device, before any device sync: paid there too; after the devices sync, one coin.
+      const b = await sync(w, w.B, r);
+      expect(b[0].verifiedSats).toBe(5000);
+      await w.settleAndCheck();
+      expect(await shown(w, w.A)).toBe(5000);
+      expect(await shown(w, w.B)).toBe(5000);
+    },
+    T,
+  );
+
+  test(
+    'one stamp, five letters: the first is paid, the other four are unstamped; the money came once',
+    async () => {
+      const w = await world(22);
+      const s = await stamp(w, 5000, { mined: true });
+      const r = fakeRelay();
+      for (let i = 0; i < 5; i++) r.post(letter(w, s.postage));
+      const got = await sync(w, w.A, r);
+      expect(got.map((m) => m.verifiedSats)).toEqual([5000, 0, 0, 0, 0]);
+      expect(got.slice(1).every((m) => m.verifyNote === STAMP_USED && box(m) === 'requests')).toBe(true);
+      expect(await shown(w, w.A)).toBe(5000);
+      // The same on the other device, which lists the box in the same order.
+      const b = await sync(w, w.B, r);
+      expect(b.map((m) => m.verifiedSats)).toEqual([5000, 0, 0, 0, 0]);
+    },
+    T,
+  );
+
+  test(
+    'a stamp bound to its letter pays for that letter, and not for another one',
+    async () => {
+      const w = await world(23);
+      const id = nextId();
+      const s = await stamp(w, 5000, { mined: true, forId: id });
+      const r = fakeRelay();
+      r.post(letter(w, s.postage)); // another letter shows it first
+      r.post(letter(w, s.postage, id));
+      const got = await sync(w, w.A, r);
+      expect(got.find((m) => m.id === id)?.verifiedSats).toBe(5000);
+      const other = got.find((m) => m.id !== id)!;
+      expect(other.verifiedSats).toBe(0);
+      expect(other.verifyNote).toBe('This stamp was made for another letter');
+      expect(await shown(w, w.A)).toBe(5000);
+    },
+    T,
+  );
+
+  test(
+    'a stamp that was signed and never sent: this wallet hands it to the network, then it is paid',
+    async () => {
+      const w = await world(24);
+      const s = await stamp(w, 5000);
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      expect(w.chain.has(s.txid)).toBe(false);
+      const got = await sync(w, w.A, r);
+      expect(w.chain.has(s.txid)).toBe(true);
+      expect(got[0].verifiedSats).toBe(5000);
+      expect(await shown(w, w.A)).toBe(5000);
+      expect(onChain(w)).toBe(5000);
+    },
+    T,
+  );
+
+  test(
+    'never sent and already double-spent: unpaid at once, nothing in the wallet',
+    async () => {
+      const w = await world(25);
+      const s = await stamp(w, 5000);
+      expect((await s.doubleSpend()).ok).toBe(true);
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      const t0 = Date.now();
+      let got = await sync(w, w.A, r, t0);
+      expect(got[0].verifiedSats).toBe(0);
+      expect(got[0].recheck).toBeUndefined();
+      expect(got[0].verifyNote).toContain('refused');
+      expect(box(got[0])).toBe('requests');
+      expect(await shown(w, w.A)).toBe(0);
+      expect(await w.statusOf('A', s.txid)).toEqual(await w.statusOf('A', 'f'.repeat(64)));
+      got = await sync(w, w.A, r, t0 + RECHECK_EVERY_MS);
+      expect(got[0].verifiedSats).toBe(0);
+      expect(await shown(w, w.A)).toBe(0);
+      expect(onChain(w)).toBe(0);
+    },
+    T,
+  );
+
+  test(
+    'never sent, broadcaster down on arrival, double-spent before the re-check: never paid, never a balance',
+    async () => {
+      const w = await world(26);
+      const s = await stamp(w, 5000);
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      w.fault('broadcast', '500', 1);
+      const t0 = Date.now();
+      let got = await sync(w, w.A, r, t0);
+      expect(got[0].verifiedSats).toBe(0);
+      expect(got[0].recheck?.tries).toBe(1);
+      expect(got[0].verifyNote).toContain('not checked yet');
+      expect(await shown(w, w.A)).toBe(0);
+      expect((await s.doubleSpend()).ok).toBe(true);
+      got = await sync(w, w.A, r, t0 + RECHECK_EVERY_MS);
+      expect(got[0].verifiedSats).toBe(0);
+      expect(got[0].recheck).toBeUndefined();
+      expect(box(got[0])).toBe('requests');
+      expect(w.chain.has(s.txid)).toBe(false);
+      expect(await shown(w, w.A)).toBe(0);
+      // The wallet's own sender has nothing of it to send later.
+      await w.sendWaiting('A');
+      expect(await shown(w, w.A)).toBe(0);
+      expect(await w.statusOf('A', s.txid)).toEqual(await w.statusOf('A', 'f'.repeat(64)));
+    },
+    T,
+  );
+
+  test(
+    'never sent and the network never answers: not checked, then unpaid for good after the last try; no balance',
+    async () => {
+      const w = await world(27);
+      const s = await stamp(w, 5000);
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      const t0 = Date.now();
+      let got: Awaited<ReturnType<typeof sync>> = [];
+      for (let i = 0; i < RECHECK_TRIES; i++) {
+        w.fault('broadcast', '500', 1);
+        got = await sync(w, w.A, r, t0 + i * RECHECK_EVERY_MS);
+        expect(await shown(w, w.A)).toBe(0);
+        expect(got[0].verifiedSats).toBe(0);
+      }
+      expect(got[0].recheck).toBeUndefined();
+      expect(got[0].verifyNote).toBe('Postage could not be checked');
+      // The network is back: the letter stays settled, nothing is taken in.
+      got = await sync(w, w.A, r, t0 + (RECHECK_TRIES + 1) * RECHECK_EVERY_MS);
+      expect(got[0].verifiedSats).toBe(0);
+      expect(await shown(w, w.A)).toBe(0);
+    },
+    T,
+  );
+
+  test(
+    'the lookups are down on arrival, then back: not checked yet, then paid once',
+    async () => {
+      const w = await world(28);
+      const s = await stamp(w, 5000, { mined: true });
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      w.fault('woc', '500', 4);
+      w.fault('arc', '500', 4);
+      w.fault('broadcast', '500', 2);
+      const t0 = Date.now();
+      let got = await sync(w, w.A, r, t0);
+      expect(got[0].recheck?.tries).toBe(1);
+      expect(await shown(w, w.A)).toBe(0);
+      w.chain.clearFaults();
+      got = await sync(w, w.A, r, t0 + RECHECK_EVERY_MS);
+      expect(got[0].verifiedSats).toBe(5000);
+      expect(got[0].recheck).toBeUndefined();
+      expect(box(got[0])).toBe('inbox');
+      expect(await shown(w, w.A)).toBe(5000);
+    },
+    T,
+  );
+
+  test(
+    'device A took the stamp and spent it; device B, not synced yet, fetches the letter: paid, and no coin added',
+    async () => {
+      const w = await world(29);
+      const s = await stamp(w, 50_000, { mined: true });
+      const r = fakeRelay();
+      r.post(letter(w, s.postage));
+      await sync(w, w.A, r);
+      await w.send('A', 20_000); // spends the stamp (A's only coin); the change comes back to A
+      const truth = onChain(w);
+      expect(await shown(w, w.A)).toBe(truth);
+      const b = await sync(w, w.B, r);
+      // The account was paid, so the letter is a paid letter; B holds no coin for it and shows nothing it cannot spend.
+      expect(b[0].verifiedSats).toBe(50_000);
+      expect(await shown(w, w.B)).toBe(0);
+      expect(await w.statusOf('B', s.txid)).toEqual(await w.statusOf('B', 'f'.repeat(64)));
+      // One ordinary device sync each (A pushes, B pulls and admits what it pulled): both equal the chain.
+      await w.sync('A');
+      await w.sync('B');
+      await w.admit(w.B);
+      expect(await shown(w, w.B)).toBe(truth);
+      expect(await shown(w, w.A)).toBe(truth);
+      await w.settleAndCheck();
+    },
+    T,
+  );
+});

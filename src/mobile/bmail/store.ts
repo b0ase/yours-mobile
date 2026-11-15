@@ -15,7 +15,7 @@ export type Received = MailMeta & {
    * The postage could not be checked yet (wallet or chain lookup unavailable): first and last try, unix ms. The letter
    * counts as unstamped meanwhile; client.ts recheckPostage tries again and settles it (paid, or unpaid for good).
    */
-  recheck?: { first: number; last: number };
+  recheck?: { first: number; last: number; tries: number };
   read?: boolean;
   /** Decrypted on open; kept locally so it opens instantly next time. */
   opened?: Sealed;
@@ -277,6 +277,37 @@ export const saveRelaySeen = (me: string, seen: Map<string, number>, st: Store |
     /* ignore */
   }
 };
+
+/** At most this many used stamps are remembered (the newest are kept). */
+export const STAMPS_MAX = 5000;
+/**
+ * Stamps already used: stamp outpoint ("txid.vout") → the id of the first letter that carried it. A stamp pays for
+ * one letter; any other letter showing the same stamp is unstamped. Kept apart from the relay ledger and the mail
+ * store, so it outlives a letter being cleared from the relay or dropped from a full store.
+ */
+const stampsKey = (me: string) => `bw-bmail-stamps:${me}`;
+export const loadStamps = (me: string, st: Store | null = ls()): Map<string, string> => {
+  try {
+    const j = JSON.parse(st?.getItem(stampsKey(me)) ?? '[]') as unknown;
+    const rows = Array.isArray(j) ? j : [];
+    return new Map(
+      rows.filter(
+        (x): x is [string, string] => Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'string',
+      ),
+    );
+  } catch {
+    return new Map();
+  }
+};
+export const saveStamps = (me: string, stamps: Map<string, string>, st: Store | null = ls()) => {
+  try {
+    st?.setItem(stampsKey(me), JSON.stringify([...stamps].slice(-STAMPS_MAX)));
+  } catch {
+    /* ignore */
+  }
+};
+/** The outpoint a letter's stamp claims. */
+export const stampOutpoint = (p: { txid: string; outputIndex: number }) => `${p.txid}.${p.outputIndex}`;
 
 /** Event the notifier / notification taps use to open the bMail screen. */
 export const OPEN_BMAIL_EVENT = 'bw-open-bmail';
