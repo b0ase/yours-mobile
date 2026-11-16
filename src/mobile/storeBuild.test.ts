@@ -1936,3 +1936,25 @@ describe('A7: a launch curve never reaches a store deploy', () => {
     );
   });
 });
+
+describe('A1, A5 leftovers the strengthened bundle check found', () => {
+  test('"Launch your tokens" mints nothing and opens no room in a store build (room text behind a literal flag)', () => {
+    const l = srcOf('./names/PersonalTokenLauncher.tsx');
+    expect(l).toMatch(
+      /const mintToken = async \(name = tokenName\) => \{\s*\/\/[^\n]*\n\s*if \(!PAID_FEATURES_ENABLED\) return;/,
+    );
+    expect(l).toMatch(
+      /if \(!TOKEN_ROOMS_ENABLED\) \{\s*setTokenMsg\(`\$\$\{l\.ticker\} minted\.`\);\s*return;\s*\}\s*setTokenMsg\(`\$\$\{l\.ticker\} minted\. Opening your room…`\);/,
+    );
+    expect(paidFeaturesEnabled(true)).toBe(false);
+    expect(tokenRoomsEnabled(true)).toBe(false);
+    expect(paidFeaturesEnabled(false)).toBe(true);
+    expect(tokenRoomsEnabled(false)).toBe(true);
+  });
+  test('the "not in Wallet › NFTs yet" note says selling only where names can be sold', () => {
+    const a = srcOf('./names/OpnsNameActions.tsx');
+    expect(a).toMatch(
+      /\{MARKET_ENABLED\s*\? 'It’s at your address\. Linking, selling and sending unlock once it shows in Wallet › NFTs\.'\s*: 'It’s at your address\. Linking and sending unlock once it shows in Wallet › NFTs\.'\}/,
+    );
+  });
+});
