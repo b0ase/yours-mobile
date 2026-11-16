@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { shareGate } from '../kyc/kyc';
 import { useKyc } from '../kyc/useKyc';
+import { INVESTOR_SELF_CERT_ENABLED } from '../kyc/config';
 import { useBshares } from './useBshares';
 import { mayOpenBshares } from './placement';
 
@@ -56,10 +57,12 @@ const SharesList = () => {
     return (
       <div className={`${box} p-5 text-center`}>
         <p className="text-base font-bold m-0 mb-1" style={{ color: 'var(--bw-text, #fff)' }}>
-          Become a registered investor
+          {INVESTOR_SELF_CERT_ENABLED ? 'Become a registered investor' : 'No shares yet'}
         </p>
         <p className="text-sm text-[#98A2B3] m-0 mb-4">
-          Verify your identity (KYC) and self-certify as an investor to apply to join share registers.
+          {INVESTOR_SELF_CERT_ENABLED
+            ? 'Verify your identity (KYC) and self-certify as an investor to apply to join share registers.'
+            : 'Verify your identity (KYC). When a company adds you to its share register, your holdings show here.'}
         </p>
         <div className="flex flex-wrap justify-center gap-2">
           <button
@@ -70,14 +73,16 @@ const SharesList = () => {
           >
             Verify identity
           </button>
-          <button
-            type="button"
-            onClick={() => handleSelect('settings', 'investor')}
-            className={btn}
-            style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: GOLD }}
-          >
-            Self-certify as investor
-          </button>
+          {INVESTOR_SELF_CERT_ENABLED && (
+            <button
+              type="button"
+              onClick={() => handleSelect('settings', 'investor')}
+              className={btn}
+              style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: GOLD }}
+            >
+              Self-certify as investor
+            </button>
+          )}
         </div>
       </div>
     );
