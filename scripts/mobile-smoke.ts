@@ -1,6 +1,6 @@
 /**
  * Mobile smoke test: drives the built mobile bundle in a phone-sized headless
- * Chrome through create → restart (locks) → unlock → receive.
+ * Chrome through create (lands unlocked) → reload (locks) → unlock → receive.
  *
  *   pnpm build:mobile && pnpm exec vite preview -c vite.config.mobile.ts --port 4780 &
  *   pnpm test:mobile-smoke [outDir]
@@ -52,6 +52,11 @@ try {
   const failedRequests: string[] = [];
   page.on('requestfailed', (req) => failedRequests.push(`${req.failure()?.errorText} ${req.url().slice(0, 160)}`));
   (globalThis as { __failedRequests?: string[] }).__failedRequests = failedRequests;
+  // And for "Failed to load resource: the server responded with a status of 404": which URL answered what.
+  page.on('response', (res) => {
+    if (res.status() >= 400)
+      failedRequests.push(`${res.status()} ${res.request().method()} ${res.url().slice(0, 160)}`);
+  });
   page.on('workercreated', (worker) => worker.on('console', watch('worker')));
 
   console.log('create wallet');
@@ -59,8 +64,9 @@ try {
   await waitText(page, 'Create New Wallet');
   await shot(page, '01-start');
   await clickText(page, 'Create New Wallet');
-  await page.locator('input[placeholder="Password"]').fill(password);
-  await page.locator('input[placeholder="Confirm password"]').fill(password);
+  // The two password boxes (placeholders as worded on the Create screen today).
+  await page.locator('input[placeholder="Master password"]').fill(password);
+  await page.locator('input[placeholder^="Master password again"]').fill(password);
   // "I've saved this password" (required since the onboarding redesign).
   const saved = await page.$('input[type="checkbox"]');
   if (saved) await saved.click();
@@ -73,13 +79,10 @@ try {
   await waitText(page, 'Receive', 120_000);
   await shot(page, '03-wallet');
 
-  console.log('reload (session kept → stays unlocked)');
-  await page.reload();
-  await waitText(page, 'Receive', 120_000);
-
-  console.log('restart app (session cleared → locked)');
-  // Process death: sessionStorage (chrome.storage.session) goes, native prefs stay.
-  await page.evaluate(() => sessionStorage.clear());
+  // The preview is not a native phone, so it runs as the web edition: the unlock key is held in memory only
+  // (src/mobile/hub.ts persistSession, since 25 Oct 2026) and any page reload locks, as it does on web.bwalletx.com.
+  // On a phone the session is mirrored to the WebView's sessionStorage and only goes when the app process dies.
+  console.log('reload (web edition: session is memory only → locked)');
   await page.reload();
   await page.locator('input[type="password"]').setTimeout(60_000).wait();
   await shot(page, '04-locked');
@@ -90,25 +93,35 @@ try {
 
   console.log('receive');
   await clickText(page, 'Receive');
-  await new Promise((r) => setTimeout(r, 1500));
-  await shot(page, '06-receive');
+  // Web edition: a wallet with no backup is asked to back up before it can receive (the keys live only in this
+  // browser), so a new wallet's Receive opens the backup step, not the address.
+  await waitText(page, 'You need one before you can receive money', 30_000);
+  await shot(page, '06-receive-backup-first');
+  await clickText(page, 'Remind me later');
+  await waitText(page, 'Receive', 30_000);
 
-  console.log('browser tab');
-  await page.locator('::-p-text(Browser)').setTimeout(30_000).click();
-  await waitText(page, 'Browse BSV apps', 30_000);
-  await shot(page, '06b-browser-tab');
+  console.log('apps page');
+  // The Browser tab became Apps, opened from the top bar in the phone layout (src/mobile/tabs/TopNav.tsx).
+  await page.locator('[aria-label="Apps"]').setTimeout(30_000).click();
+  await page.locator('input[placeholder="Search or enter address"]').setTimeout(30_000).wait();
+  await shot(page, '06b-apps');
 
   console.log('overlay window (chrome.tabs.create → sweep tool)');
   await page.evaluate(() => chrome.tabs.create({ url: chrome.runtime.getURL('sweep-tab.html') }));
   await page.waitForSelector('.yours-overlay iframe', { timeout: 30_000 });
-  const frame = await page
-    .waitForFrame((f) => f.url().includes('sweep-tab.html'), { timeout: 30_000 })
-    .then(
-      async (f) => (await f.waitForFunction(() => document.body.innerText.includes('Sweep'), { timeout: 60_000 }), f),
-    );
+  const frame = await page.waitForFrame((f) => f.url().includes('sweep-tab.html'), { timeout: 30_000 });
+  // The tool opens under the one-time beta notice ("Tap anywhere to continue"): tap it away, as a person would.
+  await frame.waitForFunction(() => /Tap anywhere to continue|Sweep/.test(document.body.innerText), {
+    timeout: 60_000,
+  });
+  if (await frame.evaluate(() => document.body.innerText.includes('Tap anywhere to continue')))
+    await frame.locator('::-p-text(Tap anywhere to continue)').click();
+  await frame.waitForFunction(() => document.body.innerText.includes('Sweep'), { timeout: 60_000 });
   // The overlay page has its own chrome and reaches the background worker.
   const reply = await frame.evaluate(() => chrome.runtime.sendMessage({ action: 'getVersion' }));
-  if (!JSON.stringify(reply).includes('yours-wallet')) throw new Error(`overlay bus reply: ${JSON.stringify(reply)}`);
+  // The version string was "yours-wallet …" before the rebrand; it is "bwallet-mobile-<version>; …" now.
+  if (!/"success":true/.test(JSON.stringify(reply)) || !/"version":"bwallet-/.test(JSON.stringify(reply)))
+    throw new Error(`overlay bus reply: ${JSON.stringify(reply)}`);
   await shot(page, '07-overlay');
   const windows = await page.evaluate(() => chrome.windows.getAll({ populate: true }));
   if (windows.length !== 1) throw new Error(`expected 1 overlay window, got ${windows.length}`);

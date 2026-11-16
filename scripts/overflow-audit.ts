@@ -265,8 +265,9 @@ try {
   await waitText(page, 'Create New Wallet');
   await measure(page, 'start');
   await clickByText(page, 'Create New Wallet');
-  await page.locator('input[placeholder="Password"]').fill(password);
-  await page.locator('input[placeholder="Confirm password"]').fill(password);
+  // The two password boxes (placeholders as worded on the Create screen today).
+  await page.locator('input[placeholder="Master password"]').fill(password);
+  await page.locator('input[placeholder^="Master password again"]').fill(password);
   await page.evaluate(() =>
     document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((c) => !c.checked && c.click()),
   );
