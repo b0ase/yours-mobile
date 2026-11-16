@@ -293,6 +293,7 @@ import {
 } from '../chat/openRooms';
 import { memberRooms } from '../chat/memberRooms';
 import PendingDocBanner from '../chat/PendingDocBanner';
+import StoreSignNotice from '../chat/StoreSignNotice';
 import DocSignButton from '../chat/DocSignButton';
 import { cardFileNames, docForMessage, signableDocs } from '../chat/signableDocs';
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
@@ -1093,6 +1094,7 @@ const Conversation = ({
         />
       )}
       {BUREAU_ENABLED && !peer && <PendingDocBanner room={room} inChat={(id) => roomDocs.byId.has(id)} />}
+      {!BUREAU_ENABLED && !peer && <StoreSignNotice room={room} />}
       <div
         ref={scroller}
         onScroll={onScroll}
