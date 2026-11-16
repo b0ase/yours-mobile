@@ -13,7 +13,7 @@ import { BALANCE_CARDS_ENABLED } from '../storeBuild';
 // between them (moved here from beside Swap, which gets its full width back).
 // Owner, 16 Oct 2026: [Addresses] [square] [Airdrops], content-sized and centred as a group (no flex-grow), all
 // h-12. Owner, 17 Oct 2026: Airdrops became Calendar (opens bCal, as the All cards sheet does), and the middle
-// All cards button is wider. Airdrops are still in bMail › Quarantine. The border colour is a theme variable: an inline hex beat every theme override, so White/Gold never changed it.
+// All cards button is wider (back to a square under 360 px: at 320 the row stuck out 24 px, overflow audit 16 Nov). Airdrops are still in bMail › Quarantine. The border colour is a theme variable: an inline hex beat every theme override, so White/Gold never changed it.
 const PILL = 'shrink-0 h-12 flex items-center gap-2 rounded-2xl px-4 border cursor-pointer';
 const LOOK = {
   background: 'var(--bw-surface)',
@@ -31,7 +31,7 @@ const AllCardsSquareImpl = () => (
     onClick={() => requestAllCards()}
     aria-label="All cards"
     title="All cards"
-    className="shrink-0 h-12 w-24 flex items-center justify-center rounded-2xl border cursor-pointer"
+    className="shrink-0 h-12 w-24 max-[359px]:w-12 flex items-center justify-center rounded-2xl border cursor-pointer"
     style={LOOK}
   >
     <Layers size={18} color="var(--bw-accent-hi)" aria-hidden="true" />

@@ -49,7 +49,9 @@ const probe = (OVERSCROLL_MAX: number) => {
     if (
       /(auto|scroll)/.test(s.overflowX) &&
       /(auto|scroll)/.test(s.overflowY) &&
-      !/overflow-x-(auto|scroll)/.test(el.getAttribute('class') ?? '')
+      !/overflow-x-(auto|scroll)/.test(el.getAttribute('class') ?? '') &&
+      // Swipe carousels set in CSS, not by class (the balance cards: .bw-bcar-track, scroll-snap-type x).
+      !/^x\b/.test(s.scrollSnapType)
     )
       scrollers.push(el);
   }
@@ -163,7 +165,9 @@ const clickByText = async (page: Page, text: string) => {
     ] as HTMLElement[];
     const el =
       els.find((e) => e.innerText?.trim().split('\n')[0].trim() === t) ??
-      els.find((e) => e.innerText?.trim().startsWith(t));
+      els.find((e) => e.innerText?.trim().startsWith(t)) ??
+      // The phone layout's page strip is set in capitals by CSS (WALLET · EXCHANGE · FEED · CHAT).
+      els.find((e) => e.innerText?.trim().split('\n')[0].trim().toLowerCase() === t.toLowerCase());
     el?.click();
     return !!el;
   }, text);
@@ -203,10 +207,36 @@ const acceptTerms = async (page: Page) => {
   });
   await sleep(1000);
 };
-const home = async (page: Page) => {
+let blankLoads = 0;
+const home = async () => {
+  const up = () =>
+    page.waitForFunction(
+      () => !!document.querySelector('input[type="password"]') || /Receive/.test(document.body.innerText),
+      { timeout: 40_000 },
+    );
   // A row may have navigated away (a bApp, an external page): start again from the app.
-  await page.goto(URL);
-  await waitText(page, 'Wallet', 120_000);
+  // Web edition (this preview, web.bwalletx.com): the unlock key is held in memory only, so every page load opens
+  // on the lock screen (src/mobile/hub.ts persistSession). The extension and phones keep the session and skip this.
+  try {
+    await page.goto(URL);
+    await up();
+  } catch {
+    // Seen in this preview (16 Nov 2026): now and then a load right after the last one never finishes and the page
+    // stays blank, with no boot notice either; loading it again in the same tab hangs too. Not explained yet. Said
+    // out loud here, and the app is opened in a new tab (the old one closed, as a person would).
+    const text = await page.evaluate(() => document.body.innerText.trim().slice(0, 80)).catch(() => '');
+    console.log(`  ! page still ${text ? `at "${text}"` : 'blank'} 40 s after loading: opening it in a new tab`);
+    blankLoads += 1;
+    await page.close().catch(() => undefined);
+    page = await openPage();
+    await page.goto(URL);
+    await up();
+  }
+  if (await page.$('input[type="password"]')) {
+    await page.locator('input[type="password"]').fill(password);
+    await page.keyboard.press('Enter');
+  }
+  await waitText(page, 'Receive', 120_000);
   await sleep(800);
   await clickByText(page, 'Wallet');
   await waitText(page, 'Receive', 60_000);
@@ -219,7 +249,8 @@ const rows = (page: Page) =>
       .map((b) => b.innerText.trim().split('\n')[0].trim())
       .filter(
         (t) =>
-          t.length > 1 && !['Wallet', 'Exchange', 'Market', 'Feed', 'Chat', 'Settings', 'Tools', 'About'].includes(t),
+          t.length > 1 &&
+          !['wallet', 'exchange', 'market', 'feed', 'chat', 'settings', 'tools', 'about'].includes(t.toLowerCase()),
       ),
   );
 
@@ -232,18 +263,27 @@ if (EXT) {
   );
   URL = `chrome-extension://${new globalThis.URL(sw.url()).hostname}/index.html`;
 }
-const page = await browser.newPage();
-await page.emulate({
-  viewport: { width: 390, height: HEIGHT, deviceScaleFactor: 1, isMobile: true, hasTouch: true },
-  userAgent:
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
-});
+const openPage = async () => {
+  const p = await browser.newPage();
+  await p.emulate({
+    viewport: { width: 390, height: HEIGHT, deviceScaleFactor: 1, isMobile: true, hasTouch: true },
+    userAgent:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
+  });
+  // A page that asks "Leave site?" would hold every later navigation in headless Chrome: answer it, and say so.
+  p.on('dialog', (d) => {
+    console.log(`  ! dialog (${d.type()}): ${d.message().slice(0, 80)}`);
+    void d.accept().catch(() => undefined);
+  });
+  return p;
+};
+let page = await openPage();
 const errors: string[] = [];
 const ONLY = process.env.STEPS ? new RegExp(process.env.STEPS, 'i') : null;
 const step = async (name: string, go: () => Promise<void>) => {
   if (ONLY && !ONLY.test(name)) return;
   try {
-    await home(page);
+    await home();
     await go();
     await measure(page, name);
     if (process.env.SHOTS) {
@@ -255,7 +295,9 @@ const step = async (name: string, go: () => Promise<void>) => {
     }
     console.log(`  ✓ ${name}`);
   } catch (e) {
-    errors.push(`${name}: ${e instanceof Error ? e.message : e}`);
+    // What the screen said when the step gave up: without it a stale step can't be told from a broken screen.
+    const text = await page.evaluate(() => document.body.innerText).catch(() => '');
+    errors.push(`${name}: ${e instanceof Error ? e.message : e}; screen: ${text.replace(/\s+/g, ' ').slice(0, 200)}`);
     console.log(`  ✗ ${name}: ${e instanceof Error ? e.message.slice(0, 120) : e}`);
   }
 };
@@ -265,8 +307,9 @@ try {
   await waitText(page, 'Create New Wallet');
   await measure(page, 'start');
   await clickByText(page, 'Create New Wallet');
-  await page.locator('input[placeholder="Password"]').fill(password);
-  await page.locator('input[placeholder="Confirm password"]').fill(password);
+  // The two password boxes (placeholders as worded on the Create screen today).
+  await page.locator('input[placeholder="Master password"]').fill(password);
+  await page.locator('input[placeholder^="Master password again"]').fill(password);
   await page.evaluate(() =>
     document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((c) => !c.checked && c.click()),
   );
@@ -277,7 +320,15 @@ try {
   await clickByText(page, 'Next');
   await waitText(page, 'Wallet Ready!', 120_000);
   await clickByText(page, 'Enter');
-  await waitText(page, 'Wallet', 120_000);
+  // "Wallet" is "WALLET" in the phone layout's strip; the home screen's Receive button says the wallet is open.
+  await waitText(page, 'Receive', 120_000);
+  // Web edition: the backup step comes up over a new wallet (BackupGate.tsx). Measure it, then leave it, or every
+  // later screen would be measured and clicked underneath it.
+  if (!EXT) {
+    await waitText(page, 'You need one before you can receive money', 30_000);
+    await measure(page, 'backup step (after create)');
+    await clickByText(page, 'Remind me later');
+  }
   await measure(page, 'landing');
 
   await step('wallet', async () => {});
@@ -326,6 +377,7 @@ try {
   await browser.close();
 }
 
+if (blankLoads) console.log(`\n${blankLoads} page load(s) stayed blank and were opened again in a new tab`);
 if (errors.length) console.log(`\n${errors.length} screen(s) not reached:\n  ${errors.join('\n  ')}`);
 if (found.size) {
   console.log(`\n${found.size} overflow(s):`);
