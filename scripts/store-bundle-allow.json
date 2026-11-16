@@ -212,16 +212,6 @@
       "reason": "Reviewed and allowed: receiving: the Receive screen says items sent unasked land in Wallet › Airdrops (16 Nov review: benign)."
     },
     {
-      "chunk": "index",
-      "match": "Exchange search",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Ask b bWeb add-on 'Exchange search' (bweb/bweb.ts); the 16 Nov review did not check it under own-key mode. Not traced."
-    },
-    {
-      "chunk": "index",
-      "match": "strategies on the Exchange",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Ask b bWeb add-on description (bweb/bweb.ts). Not traced."
-    },
-    {
       "chunk": "PortfolioScreen",
       "match": "vs market",
       "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio vs market (price tile): 'market' is the BSV price index, not a marketplace. Owner to confirm."

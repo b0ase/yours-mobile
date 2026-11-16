@@ -2267,3 +2267,29 @@ describe('A7.5: listings made elsewhere on the same seed read as state in a stor
       expect(storeBannedWord(t)).toBeNull();
   });
 });
+
+describe('A7.6: the Ask b "Exchange search" add-on is not offered in a store build, and a stored "on" is ignored', () => {
+  const code = `const b = await import('./src/mobile/bweb/bweb.ts');
+    const s = b.parseBWeb({ addOns: { names: true, exchange: true, bmail: false, feed: false } });
+    console.log(JSON.stringify({ ids: b.ADD_ON_IDS, labels: b.ADD_ONS.map((a) => a.label), on: b.enabledAddOns(s), ctx: b.bwebContext(s) }));`;
+  type R = { ids: string[]; labels: string[]; on: string[]; ctx: string };
+  test('store: not listed, not enabled, not in b instructions', () => {
+    for (const env of STORE_ENVS) {
+      const r = runA7<R>(code, env);
+      expect(r.ids).toEqual(['names', 'bmail', 'feed']);
+      expect(r.labels.join(' ')).not.toMatch(/exchange/i);
+      expect(r.on).toEqual(['names']);
+      expect(r.ctx).toContain('- Names:');
+      expect(r.ctx).not.toMatch(/exchange/i);
+    }
+  }, 60_000);
+  test('bWalletX: the add-on, its words and its place in the list are unchanged', () => {
+    const r = runA7<R>(code, {});
+    expect(r.ids).toEqual(['names', 'exchange', 'bmail', 'feed']);
+    expect(r.labels).toEqual(['Names', 'Exchange search', 'bMail drafting', 'Feed summaries']);
+    expect(r.on).toEqual(['names', 'exchange']);
+    expect(r.ctx).toContain(
+      '- Exchange search: help the user find tokens, apps and strategies on the Exchange (/m/exchange).',
+    );
+  }, 60_000);
+});
