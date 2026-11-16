@@ -118,16 +118,16 @@ export const checkIssuedCertificate = async (
   expect: { identityKey: string; certifiers: string[] },
 ): Promise<IssuedCertificate> => {
   const c = raw as Partial<IssuedCertificate> | null;
-  if (!c || typeof c !== 'object') throw new Error('bit-sign returned no certificate.');
+  if (!c || typeof c !== 'object') throw new Error('bChatX returned no certificate.');
   for (const k of ['type', 'serialNumber', 'subject', 'certifier', 'revocationOutpoint', 'signature'] as const) {
     if (typeof c[k] !== 'string' || !c[k]) throw new Error(`Certificate is missing ${k}.`);
   }
   if (!c.fields || typeof c.fields !== 'object' || !c.keyringForSubject || typeof c.keyringForSubject !== 'object') {
     throw new Error('Certificate has no fields.');
   }
-  if (c.type !== KYC_CERT_TYPE) throw new Error('Not a bit-sign KYC certificate.');
+  if (c.type !== KYC_CERT_TYPE) throw new Error('Not a bChatX identity certificate.');
   if (c.subject !== expect.identityKey) throw new Error('Certificate is for a different identity key.');
-  if (!expect.certifiers.includes(c.certifier as string)) throw new Error('Certificate is not signed by bit-sign.');
+  if (!expect.certifiers.includes(c.certifier as string)) throw new Error('Certificate is not signed by bChatX.');
   const ok = await new Certificate(
     c.type,
     c.serialNumber as string,
@@ -178,7 +178,7 @@ export const importKycCertificate = async (ctx: OneSatContext): Promise<KycSumma
   const handle = client.handle as string;
   const identityKey = await identityKeyOf(ctx);
   const certifiers = await refreshCertifiers(http);
-  if (!certifiers.length) throw new Error("Couldn't load bit-sign's certifier key. Check your connection.");
+  if (!certifiers.length) throw new Error("Couldn't load bChatX's certifier key. Check your connection.");
 
   const timestamp = new Date().toISOString();
   const signature = await signHex(ctx, kycRequestMessage(handle, identityKey, timestamp), KYC_REQUEST_PROTOCOL);
