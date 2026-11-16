@@ -1901,3 +1901,38 @@ describe('A5, A6: no selling words or listing on the names screens in a store bu
     );
   });
 });
+
+describe('A7: a launch curve never reaches a store deploy', () => {
+  test('curveMapScript refuses without curves; with them it is the same MAP script as before', async () => {
+    const { curveMapScript, curveMapFields } = await import('./curves/curveMap');
+    const { standardCurve } = await import('../lib/curves');
+    const curve = standardCurve();
+    expect(() => curveMapScript(curve, false)).toThrow('Not available in this edition');
+    const s = curveMapScript(curve, true);
+    expect(s.toASM().startsWith('OP_0 OP_RETURN')).toBe(true);
+    expect(s.chunks).toHaveLength(2 + 2 + curveMapFields(curve).length);
+    expect(curveMapScript(curve).toHex()).toBe(s.toHex()); // the default in this (bWalletX) test env
+  });
+  test('the default follows the build: refused in every store env, built in bWalletX', () => {
+    const code = `
+      const m = await import('./src/mobile/curves/curveMap.ts'); const l = await import('./src/lib/curves/curves.ts');
+      let r; try { r = m.curveMapScript(l.standardCurve()).toHex().slice(0, 4); } catch (e) { r = e.message; }
+      console.log(JSON.stringify(r));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as string;
+    for (const env of STORE_ENVS) expect(run(env)).toBe('Not available in this edition');
+    expect(run({})).toBe('006a');
+  }, 60_000);
+  test('both deploy paths build the curve output through curveMapScript, before the wallet call', () => {
+    expect(srcOf('./tickets/mintTicket.ts')).toContain(
+      'const withCurve = opts.curve ? withMapOutput(withFee, curveMapScript(opts.curve), CURVE_MAP_DESCRIPTION) : withFee;',
+    );
+    expect(srcOf('./names/claimPersonal.ts')).toContain(
+      'input.curve ? withMapOutput(ctx, curveMapScript(input.curve), CURVE_MAP_DESCRIPTION) : ctx',
+    );
+  });
+});
