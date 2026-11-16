@@ -2570,8 +2570,11 @@ if (isInServiceWorker) {
         // An envelope sheet asked under the old account must not be answered on the new one.
         failPendingStreamGrants();
         dropWalletContext('switchAccount');
-        chromeStorageService = new ChromeStorageService();
-        await chromeStorageService.getAndSetStorage();
+        // Loaded before it replaces the old one: a message handled while this read is in flight used to meet a service
+        // with no storage yet and throw "Storage is not initialized." (seen on the web wallet's Enter, 16 Nov 2026).
+        const loaded = new ChromeStorageService();
+        await loaded.getAndSetStorage();
+        chromeStorageService = loaded;
         console.log('[background] switchAccount: storage loaded, initializing wallet');
         await initializeWallet();
         console.log('[background] switchAccount: wallet initialized successfully');
