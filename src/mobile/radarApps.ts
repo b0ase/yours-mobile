@@ -1,4 +1,4 @@
-import { MARKET_ENABLED } from './storeBuild';
+import { GAMES_ENABLED, MARKET_ENABLED } from './storeBuild';
 import { MARKET_APPS } from './exchangeAppsX';
 import r_lamint from './brand/apps/radar/lamint.png';
 import r_authsig from './brand/apps/radar/authsig.png';
@@ -134,7 +134,8 @@ export const RADAR_GROUPS: { id: RadarGroup; label: string }[] = [
   // { id: 'buy', label: 'Buy BSV' },
   { id: 'explore', label: 'Explorers' },
   { id: 'learn', label: 'Learn' },
-  { id: 'games', label: 'Games' },
+  // bWalletX only: a store build has no Games (GAMES_ENABLED).
+  ...(GAMES_ENABLED ? [{ id: 'games' as const, label: 'Games' }] : []),
 ];
 
 /** Where an app was discovered: BSVRadar (bsvradar.com) or the Metanet Apps overlay (metanetapps.com). */
@@ -319,13 +320,23 @@ const BSVRADAR_APPS: Omit<RadarApp, 'source'>[] = [
     icon: r_who_i_am,
   },
   { name: 'Wonkerly', url: 'https://wonkerly.com/', desc: 'Tolerate with style', group: 'media', icon: r_wonkerly },
-  {
-    name: 'ZedVibe',
-    url: 'https://zedvibe.org',
-    desc: 'Pay per second music streaming with gamified rev share',
-    group: 'media',
-    icon: r_zedvibe_music_streaming,
-  },
+  // Revenue share. bWalletX only: not in a store bundle even as data (literal env check;
+  // storeBuild.ts STORE_BANNED_WORDS, storeBuild.test.ts).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'ZedVibe',
+          url: 'https://zedvibe.org',
+          desc: 'Pay per second music streaming with gamified rev share',
+          group: 'media' as const,
+          icon: r_zedvibe_music_streaming,
+        },
+      ]
+    : []),
   {
     name: 'Indelible.one',
     url: 'https://indelible.one/',
@@ -432,13 +443,23 @@ const BSVRADAR_APPS: Omit<RadarApp, 'source'>[] = [
     group: 'tools',
     icon: r_timestampedio,
   },
-  {
-    name: 'ToDo',
-    url: 'https://todo.metanet.app',
-    desc: 'Create and complete TODO items, with a reward',
-    group: 'tools',
-    icon: r_todo,
-  },
+  // Paid rewards. bWalletX only: not in a store bundle even as data (literal env check;
+  // storeBuild.ts STORE_BANNED_WORDS, storeBuild.test.ts).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'ToDo',
+          url: 'https://todo.metanet.app',
+          desc: 'Create and complete TODO items, with a reward',
+          group: 'tools' as const,
+          icon: r_todo,
+        },
+      ]
+    : []),
   {
     name: 'UNISOT',
     url: 'https://unisot.com',
@@ -460,13 +481,23 @@ const BSVRADAR_APPS: Omit<RadarApp, 'source'>[] = [
     group: 'money',
     icon: r_casheio,
   },
-  {
-    name: 'DXS',
-    url: 'https://dxs.app',
-    desc: 'Earn Bitcoins on Brokerless Trading Platform',
-    group: 'money',
-    icon: r_dxs,
-  },
+  // A trading platform. bWalletX only: not in a store bundle even as data (literal env check;
+  // storeBuild.ts STORE_BANNED_WORDS, storeBuild.test.ts).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'DXS',
+          url: 'https://dxs.app',
+          desc: 'Earn Bitcoins on Brokerless Trading Platform',
+          group: 'money' as const,
+          icon: r_dxs,
+        },
+      ]
+    : []),
   {
     name: 'PaiyBit',
     url: 'https://www.paiybit.com',
@@ -907,4 +938,5 @@ export const RADAR_APPS: RadarApp[] = [
   ...OWNER_APPS,
   ...[...MARKET_APPS, ...BSVRADAR_APPS, ...BUY_APPS].map((a): RadarApp => ({ ...a, source: 'bsvradar' })),
   ...METANET_APPS,
-];
+  // Store build: no games, ours or anyone's (GAMES_ENABLED), so none of the 'games' tiles is in the list.
+].filter((a) => GAMES_ENABLED || a.group !== 'games');

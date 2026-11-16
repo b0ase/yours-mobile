@@ -19,11 +19,27 @@ describe('games catalogue', () => {
     expect(new Set(TOKENBLASTER_GAMES.map((g) => g.img)).size).toBe(18);
     expect(new Set(TOKENBLASTER_GAMES.map((g) => g.url)).size).toBe(18);
   });
-  test('store build: no real-money or TokenBlaster games', () => {
+  test('store build: only our own games marked storeSafe, and none is marked today', () => {
     const all: Game[] = [...GAMES, ...TOKENBLASTER_GAMES];
-    const store = gamesFor(all, true);
-    expect(store.some((g) => g.realMoney || g.source === 'tokenblaster')).toBe(false);
-    expect(store.length).toBeGreaterThan(0);
+    expect(all.length).toBeGreaterThan(20);
+    expect(gamesFor(all, true)).toEqual([]);
     expect(gamesFor(all, false)).toHaveLength(all.length);
+    // The rule itself: ours + storeSafe + not real money. Third-party titles never pass, whatever they are marked.
+    const g = (over: Partial<Game>): Game => ({
+      name: 'x',
+      url: 'https://x.example',
+      desc: 'x',
+      source: 'b0ase',
+      ...over,
+    });
+    const rows = [
+      g({ name: 'ours, checked', storeSafe: true }),
+      g({ name: 'ours, unchecked' }),
+      g({ name: 'ours, real money', storeSafe: true, realMoney: true }),
+      g({ name: 'theirs', source: 'third-party', storeSafe: true }),
+      g({ name: 'arcade', source: 'tokenblaster', storeSafe: true }),
+    ];
+    expect(gamesFor(rows, true).map((x) => x.name)).toEqual(['ours, checked']);
+    expect(gamesFor(rows, false)).toHaveLength(5);
   });
 });

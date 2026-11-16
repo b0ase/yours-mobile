@@ -16,6 +16,7 @@ import type { Fetch } from './names';
 import { sendBsv } from '../../utils/guardedSendBsv';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { usdToSats } from '../money/money';
+import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 
 /**
  * Several names per wallet, one main (owner, 15 Oct 2026). bit-sign is where a name is paid for
@@ -112,7 +113,10 @@ export async function addExtraName(
   f: Fetch,
   alias: string,
   approved: ExtraNameFee | { sats: number; to: string } | null,
+  store: boolean = STORE_BUILD,
 ): Promise<string> {
+  // A store build adds free names only: nothing is ever paid for a name there (storeBuild.ts paidNamesEnabled).
+  if (store && approved) throw new Error(STORE_NAME_NOTE);
   // A priced name: pay exactly what the user confirmed, through the normal wallet send (its approval sheet), to
   // the server's fee address, then add the name with that txid as the receipt.
   if (approved && 'direct' in approved && approved.direct) {
@@ -132,6 +136,7 @@ export async function addExtraName(
   } catch (e) {
     const pay = e instanceof ChatApiError && e.status === 402 ? parsePaymentRequired(e.data) : null;
     if (!pay) throw e;
+    if (store) throw new Error(STORE_NAME_NOTE);
     checkNamePayment(pay, approved);
     const r = await ctx.wallet.createAction({
       description: `Name ${alias}`,

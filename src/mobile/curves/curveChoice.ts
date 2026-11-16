@@ -1,6 +1,14 @@
 import { DEFAULT_SUPPLY, standardCurve, type Curve } from '../../lib/curves';
 
-export const PERMANENT_NOTE = 'This curve is permanent once you launch. Nobody, you included, can change it later.';
+// Launch curves are bWalletX only (storeBuild.ts CURVE_COINS_ENABLED; a store build swaps the picker for an empty
+// stand-in and mints with no curve), so the wording here is not in a store bundle: literal env checks.
+const NO_CURVES: boolean =
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play';
+export const PERMANENT_NOTE = NO_CURVES
+  ? ''
+  : 'This curve is permanent once you launch. Nobody, you included, can change it later.';
 export const STANDARD_SUPPLY = String(DEFAULT_SUPPLY);
 
 /** The one standard launch (owner, 23 Oct 2026): Standard climb, straight, early tier on, 12-month burn. */
@@ -8,6 +16,7 @@ export const defaultCurve = (): Curve => standardCurve();
 
 /** Why the curve blocks review (null = fine). Every curve launch is the whole 1,000,000,000 supply. */
 export const curveProblem = (curve: Curve, accepted: boolean, tokenSupply: number): string | null => {
+  if (NO_CURVES) return null;
   if (tokenSupply !== curve.supply)
     return `Every launch is ${curve.supply.toLocaleString('en-US')} tokens, all on the curve. Set the supply to that.`;
   if (!accepted) return 'Tick "permanent" under the launch curve to go on.';

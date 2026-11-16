@@ -11,6 +11,7 @@
  */
 import { Utils } from '@bsv/sdk';
 import type { HistoryRow, LocalInfo, RawTx } from './txHistory';
+import { MARKET_APP_NAME } from '../storeBuild';
 
 export type Category = 'payment' | 'token' | 'nft' | 'game' | 'subscription' | 'app' | 'social' | 'lock';
 
@@ -275,7 +276,7 @@ export const inWalletAppOf = (local: LocalInfo | undefined): string | undefined 
   if (
     /^(Purchase \d+ tokens? for|Purchase ordinal|Fund OrdLock purchase|List (ordinal|OpNS)|Cancel .*listing)/i.test(d)
   )
-    return '1sat.market';
+    return MARKET_APP_NAME;
   return undefined;
 };
 

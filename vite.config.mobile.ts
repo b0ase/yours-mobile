@@ -61,6 +61,16 @@ if (STORE_CHANNEL) {
     __dirname,
     'src/mobile/games/gamesCatalogX.store.ts',
   );
+  // Launch curve picker (its presets, fair-launch and "if all sell" text): a store build mints with no curve.
+  MOBILE_SWAPS[resolve(__dirname, 'src/mobile/curves/CurvePicker.tsx')] = resolve(
+    __dirname,
+    'src/mobile/curves/CurvePicker.store.tsx',
+  );
+  // Example trading strategies (agents are bWalletX only): not in the store bundle, not even as data.
+  MOBILE_SWAPS[resolve(__dirname, 'src/mobile/strategies/examples/index.ts')] = resolve(
+    __dirname,
+    'src/mobile/strategies/examples/index.store.ts',
+  );
   // TERRORNODE hero on the bApps page: not in the store bundle, art included.
   MOBILE_SWAPS[resolve(__dirname, 'src/mobile/games/TerrornodeHeroX.tsx')] = resolve(
     __dirname,

@@ -20,6 +20,7 @@ import { CurvePicker } from '../curves/CurvePicker';
 import { ListAfterMint } from '../sell/ListAfterMint';
 import { STANDARD_SUPPLY, curveProblem } from '../curves/curveChoice';
 import { DEFAULT_PRESET, maxPrice, standardCurve, usd, type Curve, type PresetId } from '../../lib/curves';
+import { CURVE_COINS_ENABLED, STORE_BUILD, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 /**
  * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
@@ -97,7 +98,8 @@ export const TokenMint = ({
     const err =
       validateToken(form) ??
       (hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) ? RETURNS_BLOCK : null) ??
-      curveProblem(curve, curveOk, supplyNum);
+      // A store build mints a plain token: no launch curve, nothing to accept (CURVE_COINS_ENABLED).
+      (CURVE_COINS_ENABLED ? curveProblem(curve, curveOk, supplyNum) : null);
     setError(err ?? '');
     if (!err) setConfirming(true);
   };
@@ -114,15 +116,17 @@ export const TokenMint = ({
         icon: iconOutpoint,
         feeSats: cost.feeSats,
         ...(map ? { map } : {}),
-        curve,
+        curve: CURVE_COINS_ENABLED ? curve : null,
       });
       void showOnWallet(chromeStorageService, token.tokenId);
       setConfirming(false);
       notifyMinted();
+      // A store build has no token rooms (TOKEN_ROOMS_ENABLED): no room is opened or offered for the new token.
       if (onMinted) {
-        void openTokenRoom(apiContext, token).catch(() => null);
+        if (TOKEN_ROOMS_ENABLED) void openTokenRoom(apiContext, token).catch(() => null);
         return onMinted(token);
       }
+      if (!TOKEN_ROOMS_ENABLED) return setDone({ token, room: null });
       setBusy('Opening the room…');
       // A just-deployed token may not be indexed yet; opening the room from Chat also creates it.
       const room = await openTokenRoom(apiContext, token).catch(() => null);
@@ -151,9 +155,11 @@ export const TokenMint = ({
       <div className="flex flex-col gap-3 text-sm">
         <p>
           ${token.ticker} is minted: {Number(token.supply).toLocaleString()} in your wallet.{' '}
-          {done.room
-            ? `The room "${token.name}" is open.`
-            : 'Set up its room (Settings › My tokens) to list it in other wallets and the Market and open its chat.'}
+          {!TOKEN_ROOMS_ENABLED
+            ? ''
+            : done.room
+              ? `The room "${token.name}" is open.`
+              : 'Set up its room (Settings › My tokens) to list it in other wallets and the Market and open its chat.'}
         </p>
         <p className="text-xs" style={{ color: '#999' }}>
           Token id
@@ -167,15 +173,22 @@ export const TokenMint = ({
         >
           {token.tokenId} <ExternalLink size={12} />
         </a>
-        <ListAfterMint tokenId={token.tokenId} symbol={token.ticker} dec={token.decimals} curve={curve} />
-        <button
-          type="button"
-          onClick={() => go('chat', token)}
-          className="h-11 rounded-xl font-bold border-0 cursor-pointer"
-          style={primary}
-        >
-          Open its room
-        </button>
+        <ListAfterMint
+          tokenId={token.tokenId}
+          symbol={token.ticker}
+          dec={token.decimals}
+          curve={CURVE_COINS_ENABLED ? curve : null}
+        />
+        {TOKEN_ROOMS_ENABLED && (
+          <button
+            type="button"
+            onClick={() => go('chat', token)}
+            className="h-11 rounded-xl font-bold border-0 cursor-pointer"
+            style={primary}
+          >
+            Open its room
+          </button>
+        )}
         <button
           type="button"
           onClick={() => go('bsv')}
@@ -278,21 +291,23 @@ export const TokenMint = ({
         </p>
       )}
 
-      <CurvePicker
-        curve={curve}
-        onChange={setCurve}
-        accepted={curveOk}
-        onAccept={setCurveOk}
-        tokenSupply={supplyNum}
-        onUseStandardSupply={() => set('supply')(STANDARD_SUPPLY)}
-      />
+      {CURVE_COINS_ENABLED && (
+        <CurvePicker
+          curve={curve}
+          onChange={setCurve}
+          accepted={curveOk}
+          onAccept={setCurveOk}
+          tokenSupply={supplyNum}
+          onUseStandardSupply={() => set('supply')(STANDARD_SUPPLY)}
+        />
+      )}
 
       <p className="text-xs" style={{ color: '#bbb' }}>
         Estimated network fee: {money(cost.networkSats, exchangeRate)}
         {cost.txCount > 1 ? ' (2 transactions: icon + token)' : ''}
         {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Total ≈{' '}
-        {moneyWithSats(cost.totalSats, exchangeRate)}. Its room and Market listing can be set up later (Settings › My
-        tokens).
+        {moneyWithSats(cost.totalSats, exchangeRate)}.
+        {STORE_BUILD ? '' : ' Its room and Market listing can be set up later (Settings › My tokens).'}
       </p>
       {error && (
         <div className="flex flex-col gap-1.5">
@@ -323,7 +338,9 @@ export const TokenMint = ({
         lineItems={[
           // SendConfirmation truncates labels over 16 characters: keep them short.
           { address: `$${form.ticker.trim()}`.slice(0, 16), amount: `${form.supply.trim() || '0'} tokens` },
-          { address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` },
+          ...(CURVE_COINS_ENABLED
+            ? [{ address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` }]
+            : []),
           ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
           { address: 'Network fee', amount: `${money(cost.networkSats, exchangeRate)}` },
           ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }] : []),

@@ -2,11 +2,13 @@ import { BGamesHero } from './games/BGamesHero';
 import { TerrornodeHero } from './games/TerrornodeHeroX';
 import {
   BSPACES_ENABLED,
+  GAMES_ENABLED,
   MARKET_ENABLED,
   STORE_BUILD,
   TOKENBLASTER_ENABLED,
   appsTileShown,
   radarGroupShown,
+  storeLinkShown,
 } from './storeBuild';
 import { TAB_TAP } from './tabs/tabs';
 import { createPortal } from 'react-dom';
@@ -151,17 +153,22 @@ const DEAD_HOSTS = new Set(['taleofshua.com']);
 
 // Third-party apps (Apps › Other apps). Our own live in ./bapps.ts.
 const apps = [
-  // 1sat.market/market answers 307 with no Location (24 Oct 2026); the site root loads.
-  { name: '1Sat Market', link: 'https://1sat.market/', icon: undefined as string | undefined },
-  { name: '1satsocial', link: 'https://1satsocial.online', icon: app_onesatsocialIcon },
+  // 1sat.market/market answers 307 with no Location (24 Oct 2026); the site root loads. A marketplace, so bWalletX
+  // only: not in a store bundle even as data (MARKET_ENABLED, App Review 3.1.5(iii)).
+  ...(MARKET_ENABLED
+    ? [{ name: '1Sat Market', link: 'https://1sat.market/', icon: undefined as string | undefined }]
+    : []),
+  // Token-holder group chats: bWalletX only, like token rooms.
+  ...(MARKET_ENABLED ? [{ name: '1satsocial', link: 'https://1satsocial.online', icon: app_onesatsocialIcon }] : []),
   { name: 'Treechat', link: 'https://treechat.com', icon: app_treechatIcon },
   { name: 'Twetch', link: 'https://twetch.com', icon: app_twetchIcon },
   { name: 'Tempo', link: 'https://tempomusic.net', icon: app_tempoIcon },
   ...featuredApps
     .filter((a) => a.link && a.name && !DEAD_HOSTS.has(new URL(a.link).hostname))
     .filter((a) => new URL(a.link).hostname !== 'yours.org')
-    // Haste pays leaderboard prizes, so the store edition leaves it out (as in the games catalogue).
-    .filter((a) => !STORE_BUILD || new URL(a.link).hostname !== 'hastearcade.com')
+    // Haste pays leaderboard prizes and Take It NFT is a marketplace, so the store edition leaves them out
+    // (storeBuild.ts STORE_HIDDEN_LINK_HOSTS).
+    .filter((a) => storeLinkShown(a.link))
     .map((a) => ({ name: a.name, link: a.link, icon: a.icon })),
 ];
 
@@ -318,7 +325,7 @@ const RADAR_SECTIONS = RADAR_GROUPS.filter((g) => radarGroupShown(g.id))
   }))
   .filter((g) => g.tiles.length > 0);
 // Games get their own page (owner, 5 Oct 2026), from the bGames catalogue (games/gamesCatalog.ts), grouped
-// by source; Other apps shows the rest. Store build: gamesFor drops TokenBlaster and real-money games.
+// by source; Other apps shows the rest. Store build: no Games page at all (GAMES_ENABLED), gamesFor is empty.
 const RADAR_ICONS = new Map(RADAR_APPS.map((a) => [bareHost(a.url), a.icon]));
 const GAME_SECTIONS = GAME_SOURCES.map((s) => ({
   label: s.label,
@@ -604,7 +611,10 @@ const writeFavourites = (urls: string[]) => {
 };
 
 // Home-screen pages, swiped left/right (CSS scroll-snap); the switch tracks the page.
-const PAGES = ['Home', 'bApps', 'Other apps', 'Games'] as const;
+// Store build: no Games page (GAMES_ENABLED).
+const PAGES: readonly string[] = GAMES_ENABLED
+  ? ['Home', 'bApps', 'Other apps', 'Games']
+  : ['Home', 'bApps', 'Other apps'];
 const PAGE_KEY = 'bwallet:apps-page';
 
 const readPage = () => {
@@ -693,7 +703,7 @@ const BrowserPage = ({
   }, [sections, reduceScroll]);
   const [info, setInfo] = useState<Tile | null>(null);
   const [page, setPage] = useState(() =>
-    only === 'home' ? 0 : only === 'games' ? 3 : only === 'apps' ? 1 : readPage(),
+    only === 'home' ? 0 : only === 'games' && GAMES_ENABLED ? 3 : only === 'apps' || only === 'games' ? 1 : readPage(),
   );
   // Apps › Add app: the user's own sites, saved to the wallet (apps/userApps.ts).
   const userApps = useUserApps();
@@ -818,7 +828,10 @@ const BrowserPage = ({
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const url = normaliseUrl(address);
-    if (!url) return setError('Enter a web address, like 1sat.market');
+    if (!url)
+      return setError(
+        MARKET_ENABLED ? 'Enter a web address, like 1sat.market' : 'Enter a web address, like whatsonchain.com',
+      );
     go(url);
   };
 
@@ -1056,7 +1069,7 @@ const BrowserPage = ({
       {appScreens.screens.map((x, i) => (
         <div key={i} data-apps-section={i} className="flex flex-col gap-3">
           {/* The Games section opens with the bGames hero (owner, 11 Oct 2026). */}
-          {/^games$/i.test(screenTitle(x, i).trim()) && <BGamesHero top={false} />}
+          {GAMES_ENABLED && /^games$/i.test(screenTitle(x, i).trim()) && <BGamesHero top={false} />}
           {/^(music|media)$/i.test(screenTitle(x, i).trim()) && (
             <Suspense fallback={<div className="-mx-4" style={{ height: 200, background: 'var(--bw-bg)' }} />}>
               <VexVoidHero />
@@ -1168,7 +1181,7 @@ const BrowserPage = ({
         </>
       );
     }
-    if (i === 3) {
+    if (GAMES_ENABLED && i === 3) {
       return (
         <>
           {GAME_SECTIONS.filter((g) => notHome(g.tiles).length).map((g) => (
@@ -1247,7 +1260,7 @@ const BrowserPage = ({
               {header}
               {only === 'home' ? (
                 pageBody(0)
-              ) : only === 'games' ? (
+              ) : GAMES_ENABLED && only === 'games' ? (
                 <>
                   <BGamesHero />
                   {pageBody(3)}

@@ -39,7 +39,7 @@ import { setAgentDraft } from '../agent/handoff';
 import { openAgentCreate } from '../agents/agentCreate';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { routeFor } from '../tabs/tabs';
-import { GREETING_CARDS_ENABLED, isBWalletX, STORE_BUILD } from '../storeBuild';
+import { DOMAIN_MINT_ENABLED, GREETING_CARDS_ENABLED, isBWalletX, STORE_BUILD } from '../storeBuild';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
@@ -570,7 +570,7 @@ export const MintSheet = ({
                 ? 'Mint tickets'
                 : step === 'token'
                   ? 'Mint a token'
-                  : step === 'domain'
+                  : DOMAIN_MINT_ENABLED && step === 'domain'
                     ? 'Tokenise a domain'
                     : step === 'card'
                       ? 'Greeting card'
@@ -628,7 +628,7 @@ export const MintSheet = ({
               <TokenMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
             )}
 
-            {step === 'domain' && CHOICES.has('token') && (
+            {DOMAIN_MINT_ENABLED && step === 'domain' && CHOICES.has('token') && (
               <DomainMint
                 exchangeRate={exchangeRate}
                 onBack={() => setStep('choose')}
@@ -1157,14 +1157,19 @@ const MINT_TILES: MintTile[] = [
     when: () => CHOICES.has('token'),
     step: 'token',
   },
-  {
-    id: 'domain',
-    icon: <LinkIcon size={18} />,
-    title: 'A domain',
-    sub: 'Prove you own it, then tokenise it',
-    when: () => CHOICES.has('token'),
-    step: 'domain',
-  },
+  // bWalletX only (DOMAIN_MINT_ENABLED): not in a store build, not even as text.
+  ...(DOMAIN_MINT_ENABLED
+    ? [
+        {
+          id: 'domain',
+          icon: <LinkIcon size={18} />,
+          title: 'A domain',
+          sub: 'Prove you own it, then tokenise it',
+          when: () => CHOICES.has('token'),
+          step: 'domain' as const,
+        },
+      ]
+    : []),
   {
     id: 'contract',
     icon: <FileSignature size={18} />,

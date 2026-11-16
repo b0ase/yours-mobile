@@ -26,7 +26,7 @@ import {
 import type { HandlesInfo } from '../chat/api';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
-import { PAID_FEATURES_ENABLED } from '../storeBuild';
+import { PAID_FEATURES_ENABLED, STORE_NAME_NOTE, paidNameBlocked } from '../storeBuild';
 import { PROVIDER, actionText, confirmText, nameActions } from './nameActions';
 
 const f = (u: string, i?: RequestInit) => fetch(u, i);
@@ -116,6 +116,8 @@ export const WalletNames = () => {
       } catch (e) {
         return setError(e instanceof Error ? e.message : 'Could not get the price');
       }
+      // A store build offers only free names: no price, no sheet, no payment.
+      if (paidNameBlocked(fee)) return setError(STORE_NAME_NOTE);
       setNameFee(fee);
       if (fee) return setFeeConfirm(true);
     }

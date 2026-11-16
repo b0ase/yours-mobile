@@ -11,7 +11,13 @@ import { TICKET_BLOCKED, isTicker, ticketCost, type TicketCost } from '../ticket
  * but no `type=ticket` MAP tag. Pure helpers; nothing here signs or broadcasts.
  */
 
-export const TOKEN_COPY = 'Create a BSV-21 token. Every token has a room for its holders.';
+// Store build: no token rooms (storeBuild.ts tokenRoomsEnabled), so the line does not promise one. Literal env check.
+export const TOKEN_COPY =
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+    ? 'Create a BSV-21 token.'
+    : 'Create a BSV-21 token. Every token has a room for its holders.';
 export const DEFAULT_TOKEN_SUPPLY = '1000000';
 export const MAX_DECIMALS = 18;
 /** BSV-21 amounts are u64. */

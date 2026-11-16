@@ -102,10 +102,16 @@ const net: StampNet = {
 };
 
 /** A stamp of `sats` to the account (or to the key `to`): a signed payment with a mined parent, as Atomic BEEF. */
+// One funding key for every stamp: deriving a fresh key's address cost about 1.5 ms a stamp, a third of the time
+// the 400-letter flood below took. Each stamp still spends its own parent (a different amount each time), so every
+// stamp is its own, properly signed transaction: the wallet does read the signatures of the stamps it rechecks.
+const FUNDER = PrivateKey.fromRandom();
+const FUNDER_LOCK = new P2PKH().lock(FUNDER.toAddress());
+let stampSeq = 0;
 const stamp = async (sats: number, o: { sent?: boolean; to?: PrivateKey } = {}): Promise<Postage> => {
-  const k = PrivateKey.fromRandom();
+  const k = FUNDER;
   const parent = new Transaction();
-  parent.addOutput({ lockingScript: new P2PKH().lock(k.toAddress()), satoshis: sats + 100 });
+  parent.addOutput({ lockingScript: FUNDER_LOCK, satoshis: sats + 100 + ++stampSeq });
   parent.merklePath = tscToMerklePath(parent.id('hex'), 0, [], 900_000);
   const tx = new Transaction();
   tx.addInput({ sourceTransaction: parent, sourceOutputIndex: 0, unlockingScriptTemplate: new P2PKH().unlock(k) });
@@ -694,7 +700,11 @@ describe('bMail postage that could not be checked on arrival', () => {
     // The flood is worked off 5 letters a refresh (two refreshes so far).
     expect(c.calls.internalize).toBe(1);
     expect(mail(c).filter((m) => m.from === EVE && (m.recheck?.last ?? 0) > 0).length).toBe(2 * RECHECK_PER_SENDER);
-  });
+    // The flood really was 400 different stamps; only the ones worked off so far are in the mailbox.
+    expect(bad.size).toBe(400);
+    expect(mail(c).filter((m) => m.from === EVE).length).toBe(2 * RECHECK_PER_SENDER);
+    // 426 signed stamps: about 1.5 s alone. The limit is explicit so a loaded machine cannot fail it at 5 s.
+  }, 30_000);
 
   test('a wallet that cannot derive the key yet (locked) leaves the stamp unchecked, not bad', async () => {
     const r = fakeRelay();

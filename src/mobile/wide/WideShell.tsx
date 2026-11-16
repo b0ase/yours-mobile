@@ -28,6 +28,7 @@ import {
   BTRUST_ENABLED,
   PEOPLE_LABEL,
   SPACES_LABEL,
+  GAMES_ENABLED,
 } from '../storeBuild';
 import { badgeLabel, badgeText } from '../tabs/tabBadges';
 import { useTabBadges } from '../tabs/useTabBadges';
@@ -248,7 +249,7 @@ const WideShell = ({ children }: { children: ReactNode }) => {
         { id: 'feed', label: 'bChatX Feed', icon: I.feed, to: '/m/feed', badge: unread.feed },
         { id: 'media', label: 'bMusic', icon: I.media, to: '/m/media', hidden: BSPACES_ENABLED },
         { id: 'apps', label: 'bApps', icon: I.apps, to: '/m/apps' },
-        { id: 'games', label: 'bGames', icon: I.games, to: '/m/games' },
+        { id: 'games', label: 'bGames', icon: I.games, to: '/m/games', hidden: !GAMES_ENABLED },
       ],
     },
     // The bApps (owner, 18 Oct 2026): each opens its in-wallet page, else its room under /chat/bapps. Not in a store build.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
-import { MARKET_ENABLED } from '../storeBuild';
+import { MARKET_ENABLED, pneeRowShown } from '../storeBuild';
 import { useNavigate } from 'react-router-dom';
 import { routeFor } from '../tabs/tabs';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -90,42 +90,45 @@ export const DefaultTokenCards = ({ onSendToken, onReceive, onChat }: Props = {}
 
   return (
     <>
-      <CoinRow id="pnee">
-        <TokenSwipe
-          id="pnee"
-          noArchive
-          label="PNEEs"
-          pinned={rows.pinned.includes('pnee')}
-          onSend={() => PNEE_TOKEN_ID && onSendToken?.(PNEE_TOKEN_ID)}
-          onReceive={() => onReceive?.()}
-          onChat={() => onChat?.()}
-          onLock={pneeLock ? () => navigate(pneeLock) : undefined}
-        >
-          <AssetRow
-            icon={PNEE_ICON}
-            ticker="PNEEs · USD¢"
-            balance={pnee}
-            decimals={PNEE_DECIMALS}
-            usdBalance={pnee}
-            showPointer={false}
-            subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
-            // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
-            // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
-            action={
-              PNEE_TOKEN_ID && MARKET_ENABLED
-                ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/exchange') }
-                : undefined
-            }
-            // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
-            // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
-            secondaryAction={
-              MARKET_ENABLED
-                ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
-                : undefined
-            }
-          />
-        </TokenSwipe>
-      </CoinRow>
+      {/* Store build: only for someone who holds PNEEs (storeBuild.ts pneeRowShown). */}
+      {pneeRowShown(pnee) && (
+        <CoinRow id="pnee">
+          <TokenSwipe
+            id="pnee"
+            noArchive
+            label="PNEEs"
+            pinned={rows.pinned.includes('pnee')}
+            onSend={() => PNEE_TOKEN_ID && onSendToken?.(PNEE_TOKEN_ID)}
+            onReceive={() => onReceive?.()}
+            onChat={() => onChat?.()}
+            onLock={pneeLock ? () => navigate(pneeLock) : undefined}
+          >
+            <AssetRow
+              icon={PNEE_ICON}
+              ticker="PNEEs · USD¢"
+              balance={pnee}
+              decimals={PNEE_DECIMALS}
+              usdBalance={pnee}
+              showPointer={false}
+              subline={indexed === 0 && pending > 0 ? sub('Indexing · can send once indexed') : undefined}
+              // Get PNEEs on the right, like Get MNEE, once the token exists (Exchange › Bonds lists notes and vaults).
+              // Store build: no Market, so nothing to get PNEEs from, and no backing (minting against a vault) either.
+              action={
+                PNEE_TOKEN_ID && MARKET_ENABLED
+                  ? { label: 'Get PNEEs', onClick: () => navigate(routeFor('market') ?? '/m/exchange') }
+                  : undefined
+              }
+              // Back PNEEs: a round lock icon (owner, 10 Oct 2026; the text button covered "USD¢"). Opens the Lock screen
+              // in Back PNEEs mode: how much BSV to lock, then the Back PNEEs flow.
+              secondaryAction={
+                MARKET_ENABLED
+                  ? { label: BACK_PNEE_LABEL, icon: <Lock size={18} />, onClick: () => navigate(BACK_PNEE_ROUTE) }
+                  : undefined
+              }
+            />
+          </TokenSwipe>
+        </CoinRow>
+      )}
       {/* Held tokens already have a row in the token list below (with the issuer badge): only show it here at 0. */}
       {link && !(mine && mine.amount > 0) && (
         <CoinRow id={link.tokenId}>
