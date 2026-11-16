@@ -12,13 +12,15 @@
  *  1. BANNED: exact text (case-sensitive) searched in every text file of the bundle.
  *  2. Words: STORE_BANNED_WORDS (src/mobile/storeBuild.ts, read from the source so there is one list), case-
  *     insensitive, over the UI strings of every JS chunk: JSX children (a split child like ["Set up $",t,"'s room"] is
- *     joined first) and title / sub / label / aria-label / placeholder / description … literals. A hit that has to
- *     stay goes in scripts/store-bundle-allow.json with its reason; an entry without a reason fails the check.
+ *     joined first), title / sub / label / aria-label / placeholder / description / reason / error … literals, and
+ *     sentence-like error messages (new X("…"), super("…")), setter arguments (setMsg("…")) and ternary branches.
+ *     A hit that has to stay goes in scripts/store-bundle-allow.json with its reason; an entry without a reason
+ *     fails the check.
  * Add to BANNED when a gate is added.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Exact text (case-sensitive) that must not be anywhere in a store bundle. */
 export const BANNED = [
@@ -118,7 +120,7 @@ export const BANNED = [
   'Indexed by 1Sat',
   'prepaid deposit with the 1Sat',
   // A7 (CTO decisions, 16 Nov 2026): the bWalletX wording of the A6 follow-ups, which a store build words differently
-  // or leaves out. ('Listed for sale' alone is not here: bRadio's "Listed for sale — cancel the listing" still is.)
+  // or leaves out.
   'Reward, e.g.',
   'lock the reward',
   'back this post',
@@ -137,6 +139,25 @@ export const BANNED = [
   'Trading and sending need',
   'offer to sell them for you',
   'rooms and swaps work',
+  // A8 (CTO decisions, 16 Nov 2026). S1: the token page's market-sales chart (wallet/TokenPriceChart.tsx).
+  'No market sales yet',
+  'No sales in this range',
+  ' sales`',
+  // S2: Ask b's room and bounty ideas, and the Market / Tickets screens in b's button list.
+  'Open my personal room',
+  'Why did a room disappear?',
+  'Post a bounty in a room',
+  'Invite a friend to your room',
+  '/m/market,',
+  '/m/tickets,',
+  // S3: bRadio and NFT burn ("Listed elsewhere" in a store build), and every other "Listed for sale".
+  'Listed for sale',
+  // S5: wording the widened pass 2 found in setter calls and ternaries.
+  'link it and sell it',
+  'identity key or sell it',
+  'What they sell',
+  'is on sale for',
+  ' · Play to earn',
   // A9 (coordinator, 16 Nov 2026): the investor self-certification placeholders must not ship. Removed in
   // fix/hide-investor-status (cb3949e9); never allowlist these.
   'LEGAL REVIEW',
@@ -154,16 +175,39 @@ export const storeBannedWords = (src = readFileSync(join(HERE, '../src/mobile/st
 };
 
 const STR = String.raw`"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|\x60(?:[^\x60\\]|\\.)*\x60`;
-const UI_KEYS = String.raw`children|title|sub|subtitle|label|"aria-label"|placeholder|description|desc|text|body|hint|note|cta|heading|caption|blurb|tagline|message|alt|summary|detail|intro|empty`;
+const UI_KEYS = String.raw`children|title|sub|subtitle|label|"aria-label"|placeholder|description|desc|text|body|hint|note|cta|heading|caption|blurb|tagline|message|alt|summary|detail|intro|empty|reason|error|msg|warning`;
 const UI_PROP = new RegExp(String.raw`(?:^|[{,\s])(?:${UI_KEYS}):\s*(${STR})`, 'g');
+/**
+ * Strings that reach the screen without a UI key (review S5): the message of `new <Name>(…)` / `super(…)` (errors
+ * shown with e.message), the only argument of a state setter (setMsg / setNote / setError; minified to a one- or
+ * two-letter name), and both literal branches of a ternary. Read only when they look like a sentence (a space and two
+ * letters), so ids and class names are not.
+ */
+const MSG_SOURCES = [
+  new RegExp(String.raw`(?:\bnew [\w$.]+|\bsuper)\(\s*(${STR})`, 'g'),
+  new RegExp(String.raw`(?<![\w$.])(?:set[A-Z][\w$]*|[\w$]{1,2})\(\s*(${STR})\s*\)`, 'g'),
+  new RegExp(String.raw`\?\s*(${STR})\s*:\s*(${STR})?`, 'g'),
+];
+const sentence = (s) => /[A-Za-z]{2}/.test(s) && /\s/.test(s);
 
 /**
- * The UI strings in a minified JS chunk: UI_KEYS literals, and the direct string children of every children:[…]
- * array joined with " … " (a split child like ["Set up $",t,"'s room"]; nested elements are read on their own).
+ * The UI strings in a minified JS chunk: UI_KEYS literals; the direct string children of every children:[…]
+ * array joined with " … " (a split child like ["Set up $",t,"'s room"]; nested elements are read on their own);
+ * and sentence-like MSG_SOURCES (error messages, setter arguments, ternary branches).
  */
 export const uiStrings = (js) => {
   const out = [];
   for (const m of js.matchAll(UI_PROP)) out.push(m[1].slice(1, -1));
+  const seen = new Set(out);
+  for (const re of MSG_SOURCES)
+    for (const m of js.matchAll(re))
+      for (const g of m.slice(1)) {
+        const t = g?.slice(1, -1);
+        if (t && sentence(t) && !seen.has(t)) {
+          seen.add(t);
+          out.push(t);
+        }
+      }
   const lit = new RegExp(STR, 'g');
   for (const m of js.matchAll(/children:\[/g)) {
     const parts = [];
@@ -268,7 +312,22 @@ export const scan = (dir, banned = BANNED) => {
   return hits;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * True when this file is the script node was asked to run. Node runs the main module from its real path, so the
+ * argument is resolved through symlinks and turned into a file URL (spaces → %20, % → %25) before comparing. The
+ * old `file://${argv[1]}` test failed open: run through a symlink, or from a path with a space or %, the check
+ * printed nothing and exited 0 (review S4).
+ */
+export const isMain = (url = import.meta.url, argv1 = process.argv[1]) => {
+  if (!argv1) return false;
+  try {
+    return url === pathToFileURL(realpathSync(argv1)).href;
+  } catch {
+    return false;
+  }
+};
+
+if (isMain()) {
   const dir = process.argv[2] ?? 'build-mobile';
   const hits = scan(dir);
   const words = scanWords(dir);
