@@ -183,6 +183,24 @@ export const storeMarketVerdict = async (args: unknown, deps: StoreMarketDeps): 
   return { refuse: false, kind: kinds[0] ?? 'unknown' };
 };
 
+/** No wallet lookup: the page side has no wallet. Only a site coin missing from the BEEF needs one, and then the
+ * wallet-side backstop (guardStoreMarketActions) looks it up. */
+const NO_HELD_LOOKUP: StoreMarketDeps = { assetOutpoints: async () => new Set<string>() };
+
+/**
+ * THE store check, used by both callers so they can't disagree: why a store build refuses this site createAction, or
+ * null. mobile/dappBrowser.ts handleSiteCall calls it with no deps BEFORE the device-owner prompt (Face ID), so a
+ * store user is never asked for Face ID only to be refused (CTO, A9). guardStoreMarketActions (initWallet.ts) calls it
+ * again with the wallet's asset-basket lookup as the backstop for every site entry point.
+ */
+export const storeMarketRefusal = async (
+  args: unknown,
+  deps: StoreMarketDeps = NO_HELD_LOOKUP,
+): Promise<StoreMarketWhy | null> => {
+  const verdict = await storeMarketVerdict(args, deps);
+  return verdict.refuse ? verdict.why : null;
+};
+
 /** Every coin in the wallet's asset baskets, read page by page from the base wallet (a failure throws). */
 export const walletAssetOutpoints =
   (wallet: Pick<WalletInterface, 'listOutputs'>) => async (): Promise<Set<string>> => {
@@ -205,7 +223,7 @@ export const walletAssetOutpoints =
 type AnyFn = (...args: unknown[]) => Promise<unknown>;
 
 /**
- * Wrap the site wallet (in place, like the other guards): a site's createAction goes through storeMarketVerdict first,
+ * Wrap the site wallet (in place, like the other guards): a site's createAction goes through storeMarketRefusal first,
  * and a refusal throws STORE_MARKET_REFUSAL without calling into the wallet. The wallet's own calls pass straight on.
  */
 export function guardStoreMarketActions<T extends object>(
@@ -217,9 +235,9 @@ export function guardStoreMarketActions<T extends object>(
   if (typeof create !== 'function') return wallet;
   w.createAction = async (args: unknown, originator?: unknown) => {
     if (originator !== deps.adminOriginator) {
-      const verdict = await storeMarketVerdict(args, deps);
-      if (verdict.refuse) {
-        console.warn(`[store] refused a site's ${verdict.why} action from ${String(originator)}`);
+      const why = await storeMarketRefusal(args, deps);
+      if (why) {
+        console.warn(`[store] refused a site's ${why} action from ${String(originator)}`);
         throw new Error(STORE_MARKET_REFUSAL);
       }
     }
