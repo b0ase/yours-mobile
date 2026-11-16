@@ -2149,3 +2149,27 @@ describe('A7.2: Feed lock is "Lock BSV on this post" in a store build, with no b
     expect(storeBannedWord('Locking backs a post; it earns nothing.')).toBe('earns');
   });
 });
+
+describe('A7.3, A7.4: bMint says "keep it or send it" and Media "mint or receive" in a store build', () => {
+  test('both lines pick their words with the literal MARKET_ENABLED; bWalletX keeps its words', () => {
+    expect(srcOf('./bmint/Studio.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'It sits in your vault as yours: keep it, send it or sell it\.'\s*: 'It sits in your vault as yours: keep it or send it\.'\}/,
+    );
+    expect(srcOf('./media/MediaSection.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Music, video and pictures you buy or mint live here and play from here\.'\s*: 'Music, video and pictures you mint or receive live here and play from here\.'\}/,
+    );
+  });
+  test('the store lines pass the store word list; the bWalletX lines are the ones the A6 check flagged', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    expect(storeBannedWord('It sits in your vault as yours: keep it or send it.')).toBeNull();
+    expect(storeBannedWord('Music, video and pictures you mint or receive live here and play from here.')).toBeNull();
+    expect(storeBannedWord('It sits in your vault as yours: keep it, send it or sell it.')).toBe('sell');
+    expect(storeBannedWord('Music, video and pictures you buy or mint live here and play from here.')).toBe('buy');
+  });
+  test('the literal flag gives the store line in every store env and the bWalletX line otherwise', () => {
+    const code = `const s = await import('./src/mobile/storeBuild.ts');
+      console.log(JSON.stringify(s.MARKET_ENABLED ? 'keep it, send it or sell it' : 'keep it or send it'));`;
+    for (const env of STORE_ENVS) expect(runA7<string>(code, env)).toBe('keep it or send it');
+    expect(runA7<string>(code, {})).toBe('keep it, send it or sell it');
+  }, 60_000);
+});

@@ -212,16 +212,6 @@
       "reason": "Reviewed and allowed: receiving: the Receive screen says items sent unasked land in Wallet › Airdrops (16 Nov review: benign)."
     },
     {
-      "chunk": "BmintPage",
-      "match": "keep it, send it or sell it",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): bMint Studio intro ('Keep it'). Not traced to a gate."
-    },
-    {
-      "chunk": "BsvWallet",
-      "match": "you buy or mint live here",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Media empty state (media/MediaSection.tsx). Not traced to a gate."
-    },
-    {
       "chunk": "NftLibraryPage",
       "match": "for sale",
       "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): NFT library: an NFT already listed (from another wallet or an old OrdLock v1 listing) is labelled as listed. State, not an offer; not reworded."
