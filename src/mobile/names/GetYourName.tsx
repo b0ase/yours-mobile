@@ -39,7 +39,7 @@ import { opnsTreeFor } from './opnsTree';
 import { sweepDeadMints } from './opnsTxStatus';
 import { moneyNow } from '../money/money';
 import { buyOpnsListing } from './opnsBuy';
-import { NRT_ENABLED, PAID_FEATURES_ENABLED, STORE_NAME_NOTE, paidNameBlocked } from '../storeBuild';
+import { MARKET_ENABLED, NRT_ENABLED, PAID_FEATURES_ENABLED, STORE_NAME_NOTE, paidNameBlocked } from '../storeBuild';
 
 /**
  * Settings → Identity → "Make your name payable" (rendered under the profile name).
@@ -239,7 +239,7 @@ export const GetYourName = ({
     try {
       if (p.kind === 'bind') await bind(p);
       else if (p.kind === 'mint') await registerNew(p.name);
-      else {
+      else if (MARKET_ENABLED) {
         await buyOpnsListing(apiContext, p.outpoint, p.name, p.price);
         setMsg(`You bought ${p.name}. Binding it to your identity…`);
         const mine = (await refreshOwned()).find((o) => o.name === p.name);
@@ -539,9 +539,10 @@ export const GetYourName = ({
                 <b style={{ color: fg }}>{result.name}</b> is taken
                 {result.owner ? ` (owner ${result.owner.slice(0, 8)}…)` : ''}.
                 {owned.some((o) => o.name === result.name) ? ' You own it — use it below.' : ''}
-                {result.listing ? ` For sale: ${moneyNow(result.listing.price)}.` : ''}
+                {MARKET_ENABLED && result.listing ? ` For sale: ${moneyNow(result.listing.price)}.` : ''}
               </p>
-              {result.listing && !owned.some((o) => o.name === result.name) && (
+              {/* Buying a listed name is bWalletX only (MARKET_ENABLED); a store build shows it as taken. */}
+              {MARKET_ENABLED && result.listing && !owned.some((o) => o.name === result.name) && (
                 <button
                   type="button"
                   disabled={busy}

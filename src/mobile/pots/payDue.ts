@@ -10,7 +10,7 @@
  */
 import { appendAgentLog, checkAgentSpend } from '../agents/agentAccounts';
 import { serialSpend } from '../agents/spendQueue';
-import { SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import { SUBSCRIPTIONS_ENABLED, PNEE_POTS_ENABLED } from '../storeBuild';
 import { isPaused } from '../config/killSwitch';
 import {
   MAX_CATCH_UP,
@@ -33,6 +33,11 @@ import {
   type Subscription,
 } from './pots';
 import { PayeeReviewError, type PayeeDestination } from './payeeBinding';
+
+// PNEE pots are bWalletX only (storeBuild.ts PNEE_POTS_ENABLED): the wording is not in a store bundle.
+const PNEE_NO_SEND = PNEE_POTS_ENABLED
+  ? 'PNEE payments can’t be sent from this device'
+  : 'This payment can’t be sent from this device';
 
 export type PayDeps = {
   /**
@@ -183,7 +188,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
     const units = pnee ? amountPnee(s.amount) : null;
     const sats = pnee ? null : amountSats(s.amount, deps.bsvUsd);
     if (pnee && (units === null || !deps.signPnee || !deps.broadcastPnee)) {
-      out.push(fail(s, 'PNEE payments can’t be sent from this device', deps));
+      out.push(fail(s, PNEE_NO_SEND, deps));
       continue;
     }
     if (!pnee && sats === null) {
@@ -268,7 +273,7 @@ async function settlePending(s: Subscription, p: PendingPayment, deps: PayDeps, 
   if (await paused(deps)) return { id: s.id, ok: false, reason: 'Spending is paused' };
   try {
     if (p.unit === 'PNEE') {
-      if (!deps.broadcastPnee) throw new Error('PNEE payments can’t be sent from this device');
+      if (!deps.broadcastPnee) throw new Error(PNEE_NO_SEND);
       await deps.broadcastPnee(p.rawTx);
     } else await deps.broadcast(p.rawTx);
   } catch (e) {

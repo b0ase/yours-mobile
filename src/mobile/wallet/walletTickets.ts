@@ -17,6 +17,7 @@
 import type { Holding, TokenRoomLookup } from '../chat/tokenRooms';
 import { amountLabel, atLeast, formatRaw, normOutpoint, tokenKey } from '../chat/tokenRooms';
 import type { Ticket } from '../tickets/tickets';
+import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 export type TicketSource = 'personal' | 'ticket' | 'named' | 'room';
 
@@ -160,7 +161,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   personal: 'Your token',
   ticket: 'Ticket',
   named: 'Personal room',
-  room: 'Token room',
+  room: TOKEN_ROOMS_ENABLED ? 'Token room' : 'Room',
 };
 
 // ── the Tokens-list mark: ids of held tickets, remembered across launches ──

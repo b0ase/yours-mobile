@@ -165,6 +165,7 @@ import {
   STORE_ROOM_NOTE,
   marketLabel,
   tokenRoomsEnabled,
+  TOKEN_ROOMS_ENABLED,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
 import { LoungeCard } from '../chat/LoungeCard';
@@ -954,7 +955,7 @@ const Conversation = ({
               <Info size={20} color={GOLD} />
             </button>
           )}
-          {onMarket && (
+          {MARKET_ENABLED && onMarket && (
             <button
               onClick={onMarket}
               className="p-2 rounded-full active:opacity-60"
@@ -1046,7 +1047,9 @@ const Conversation = ({
             peer
               ? 'Direct message'
               : entry
-                ? 'Token room'
+                ? TOKEN_ROOMS_ENABLED
+                  ? 'Token room'
+                  : 'Room'
                 : openRoom
                   ? `${openRoom.visibility === 'public' ? 'Public' : 'Invite-only'} room${openRoom.closed ? ' · closed' : ''}`
                   : `Room · $${room.ticker}`
@@ -2537,7 +2540,10 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
           <Lock size={12} color={MUTED} className="shrink-0" />
         </div>
         <div className="text-[13px] line-clamp-2" style={{ color: MUTED }}>
-          {s.msg || 'Not open yet. Setting up lists it in other wallets and the Market and opens this room.'}
+          {s.msg ||
+            (TOKEN_ROOMS_ENABLED
+              ? 'Not open yet. Setting up lists it in other wallets and the Market and opens this room.'
+              : '')}
         </div>
         {s.needs && s.freeNote && (
           <div className="text-[12px] font-semibold" style={{ color: GOLD }}>
@@ -2552,7 +2558,7 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
           className="shrink-0 rounded-full px-3 py-1.5 text-xs font-bold disabled:opacity-40"
           style={{ background: GOLD, color: '#1a1300' }}
         >
-          {setupLabel(s.total.totalSats, s.rate, 'Set up your room')}
+          {setupLabel(s.total.totalSats, s.rate, TOKEN_ROOMS_ENABLED ? 'Set up your room' : undefined)}
         </button>
       )}
       {s.sheet}
@@ -3659,7 +3665,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             </ul>
 
             {/* Token rooms: full build only. The store build hides the section entirely (storeBuild.ts). */}
-            {ROOMS && !bappsView && (
+            {TOKEN_ROOMS_ENABLED && ROOMS && !bappsView && (
               <>
                 <ListLabel>Token rooms</ListLabel>
                 {entries === null && <SkeletonRows count={3} label="Loading token rooms" />}

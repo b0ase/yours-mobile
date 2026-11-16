@@ -9,6 +9,7 @@ import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS, SI
 const alsoOurs = (): string[] => [...(LEGACY_PAYMAIL_DOMAINS ?? []), ...(SIBLING_PAYMAIL_DOMAINS ?? [])];
 import { isPlaceholderName } from './handlePrompt';
 import { compressedKey, keyAddress, knownKeyLabel, parsePubKey, shortKey } from './pubkeyRecipient';
+import { STORE_BUILD } from '../storeBuild';
 
 /**
  * "Send to a name": classify what the user typed in a recipient box and resolve it to
@@ -648,7 +649,11 @@ export type Availability =
   | { status: 'invalid'; name: string; reason: string };
 
 /** Read-only OpNS availability: origin exists → taken; else the mine tree's nearest parent. */
-export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Availability> => {
+export const checkOpnsAvailability = async (
+  f: Fetch,
+  raw: string,
+  store: boolean = STORE_BUILD,
+): Promise<Availability> => {
   const name = raw.trim().toLowerCase().replace(/^@/, '');
   if (!OPNS_RE.test(name)) return { status: 'invalid', name, reason: 'Letters, numbers and - only' };
   const o = await tryJson<Outpoint>(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
@@ -662,8 +667,11 @@ export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Avai
     );
     const price = Number(latest?.data?.list?.price);
     const latestOutpoint = str(latest?.outpoint);
+    // A store build never learns of a listing: a taken name is just taken there (no price, no Buy).
     const listing =
-      price > 0 && !latest?.spend && latestOutpoint ? { outpoint: latestOutpoint.replace('_', '.'), price } : undefined;
+      !store && price > 0 && !latest?.spend && latestOutpoint
+        ? { outpoint: latestOutpoint.replace('_', '.'), price }
+        : undefined;
     return {
       status: 'taken',
       name,

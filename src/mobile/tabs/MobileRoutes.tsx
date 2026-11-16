@@ -20,6 +20,7 @@ import {
   BTRUST_ENABLED,
   RELEASES_ENABLED,
   GAMES_ENABLED,
+  TOKEN_ROOMS_ENABLED,
 } from '../storeBuild';
 
 /** Mobile-only tab routes, mounted by vite.config.mobile.ts at /m/* in App.tsx. */
@@ -176,7 +177,8 @@ const MobileRoutes = () => (
         <Route path="lock/verify" element={<LockVerify />} />
         <Route path="nfts" element={<NftLibraryPage />} />
         <Route path="nfts/:outpoint" element={<NftLibraryPage />} />
-        <Route path="tickets" element={<TicketsPage />} />
+        {/* Tickets are for token rooms, which a store build does not have: an old link lands on the wallet. */}
+        <Route path="tickets" element={TOKEN_ROOMS_ENABLED ? <TicketsPage /> : <Navigate to="/bsv-wallet" replace />} />
         {/* Credits (b-only prepaid credits) retired 12 Nov 2026: old links land on the wallet. */}
         <Route path="credits" element={<Navigate to="/bsv-wallet" replace />} />
         <Route path="my-names" element={<MyNamesPage />} />

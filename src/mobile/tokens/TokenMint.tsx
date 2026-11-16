@@ -11,7 +11,7 @@ import { requestChatRoom } from '../chat/nav';
 import { checkSize, formatBytes, iconFile, notifyMinted, wocTxUrl } from '../mint/mint';
 import { inscribeIcon } from '../tickets/mintTicket';
 import { MAX_ICON_BYTES, TICKET_BLOCKED, suggestTicker } from '../tickets/tickets';
-import { deployToken, openTokenRoom, type MintedToken } from './mintToken';
+import { curveForDeploy, deployToken, openRoomAfterMint, type MintedToken } from './mintToken';
 import { TOKEN_COPY, emptyTokenForm, tokenCost, validateToken, type TokenForm } from './token';
 import { money, moneyWithSats } from '../money/money';
 import { RETURNS_BLOCK, RETURNS_WARNING, hasReturnsWording } from './returnsWording';
@@ -116,20 +116,20 @@ export const TokenMint = ({
         icon: iconOutpoint,
         feeSats: cost.feeSats,
         ...(map ? { map } : {}),
-        curve: CURVE_COINS_ENABLED ? curve : null,
+        curve: curveForDeploy(curve),
       });
       void showOnWallet(chromeStorageService, token.tokenId);
       setConfirming(false);
       notifyMinted();
       // A store build has no token rooms (TOKEN_ROOMS_ENABLED): no room is opened or offered for the new token.
       if (onMinted) {
-        if (TOKEN_ROOMS_ENABLED) void openTokenRoom(apiContext, token).catch(() => null);
+        void openRoomAfterMint(apiContext, token);
         return onMinted(token);
       }
       if (!TOKEN_ROOMS_ENABLED) return setDone({ token, room: null });
       setBusy('Opening the room…');
       // A just-deployed token may not be indexed yet; opening the room from Chat also creates it.
-      const room = await openTokenRoom(apiContext, token).catch(() => null);
+      const room = await openRoomAfterMint(apiContext, token);
       setDone({ token, room });
     } catch (e) {
       setConfirming(false);

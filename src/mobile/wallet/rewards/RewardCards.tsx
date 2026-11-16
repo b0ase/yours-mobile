@@ -1,6 +1,7 @@
 import { Gamepad2, Send, ShoppingCart, Tag, Trophy } from 'lucide-react';
 import { tokenIconUrl } from '../../tokens/officialTokens';
 import { earnLabel, formatAmount, unlockLine, type Reward } from './rewards';
+import { MARKET_ENABLED } from '../../storeBuild';
 
 const GOLD = 'var(--bw-accent-hi)';
 
@@ -55,7 +56,9 @@ export const RewardCards = ({ rewards, showUnlock, showEarn, onSend, onEarn, onB
               {unlock && <p className="text-base text-white m-0">{unlock}</p>}
               <p className="text-sm text-[#98A2B3] m-0">
                 Earned by playing.{' '}
-                {onBuy || onSell ? 'Send it, sell it, or buy more from players.' : 'You can send it to a friend.'}
+                {MARKET_ENABLED && (onBuy || onSell)
+                  ? 'Send it, sell it, or buy more from players.'
+                  : 'You can send it to a friend.'}
               </p>
               <div className="flex flex-wrap gap-2">
                 {showEarn && r.earnUrl && (
@@ -77,15 +80,15 @@ export const RewardCards = ({ rewards, showUnlock, showEarn, onSend, onEarn, onB
                 >
                   <Send size={16} /> Send
                 </button>
-                {onBuy && (
+                {MARKET_ENABLED && onBuy && (
                   <button
                     type="button"
-                    aria-label={`Buy ${r.symbol} from players`}
+                    aria-label={MARKET_ENABLED ? `Buy ${r.symbol} from players` : undefined}
                     onClick={() => onBuy(r)}
                     className={SECONDARY}
                     style={{ background: 'var(--bw-surface)', borderColor: '#3a2f0c', color: GOLD }}
                   >
-                    <ShoppingCart size={16} /> Buy from players
+                    <ShoppingCart size={16} /> {MARKET_ENABLED ? 'Buy from players' : ''}
                   </button>
                 )}
                 {onSell && BigInt(r.amountRaw || '0') > 0n && (

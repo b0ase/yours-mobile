@@ -1,6 +1,7 @@
 import { LockingScript, OP, Utils } from '@bsv/sdk';
 import { MAP_PREFIX } from '../names/personalToken';
 import { curveCommitment, type Curve } from '../../lib/curves';
+import { CURVE_COINS_ENABLED } from '../storeBuild';
 
 /**
  * The launch curve on the deploy tx: one extra 0-sat MAP SET output
@@ -23,4 +24,5 @@ export function curveMapScript(c: Curve): LockingScript {
 /** Rough output size for fee estimates. */
 export const curveMapBytes = (c: Curve): number => 60 + curveMapFields(c).reduce((n, x) => n + x.length + 2, 0);
 
-export const CURVE_MAP_DESCRIPTION = 'bWallet launch curve (MAP)';
+// Launch curves are bWalletX only (storeBuild.ts CURVE_COINS_ENABLED): the wording is not in a store bundle.
+export const CURVE_MAP_DESCRIPTION = CURVE_COINS_ENABLED ? 'bWallet launch curve (MAP)' : '';

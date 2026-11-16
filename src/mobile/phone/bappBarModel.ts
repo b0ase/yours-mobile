@@ -16,7 +16,8 @@ export type BarSlot = 'wallet' | 'exchange' | 'feed' | 'chat';
 export const BAR_SLOTS: readonly BarSlot[] = ['wallet', 'exchange', 'feed', 'chat'];
 export const SLOT_LABELS: Record<BarSlot, string> = {
   wallet: 'Wallet',
-  exchange: 'Exchange',
+  // A store build has no Exchange (MARKET_ENABLED): the label is not in its bundle.
+  exchange: MARKET_ENABLED ? 'Exchange' : '',
   feed: 'Feed',
   chat: 'Chat',
 };

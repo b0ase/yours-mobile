@@ -125,7 +125,10 @@ const useHub = (owner: boolean) => {
     {
       id: 'names',
       title: 'Get your name',
-      sub: 'Search, buy or claim a name on Bitcoin. From $1',
+      // A store build has no priced or listed names (MARKET_ENABLED): claiming only.
+      sub: MARKET_ENABLED
+        ? 'Search, buy or claim a name on Bitcoin. From $1'
+        : 'Search for a name on Bitcoin and claim it',
       to: '/m/names',
     },
     {

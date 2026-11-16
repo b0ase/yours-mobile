@@ -14,7 +14,7 @@ import { signedInClient, kycClient } from '../kyc/kycWallet';
 import type { ChatRoom } from '../chat/messages';
 import { roomNameProblem, type OpenVisibility } from '../chat/openRooms';
 import { getPaymail } from '../names/accountName';
-import { NRT_ENABLED } from '../storeBuild';
+import { NRT_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 import { myRooms, roomPath, slugPart, subRoomProblem } from './nrt';
 
 const TicketsPanel = NRT_ENABLED ? lazy(() => import('./TicketsPanel')) : null;
@@ -170,7 +170,13 @@ export const YouPage = () => {
               key={r.ticker}
               icon="#"
               title={r.name || r.ticker}
-              sub={(r.metadata as { tokenGate?: unknown } | null)?.tokenGate ? 'Token room' : 'No token needed'}
+              sub={
+                (r.metadata as { tokenGate?: unknown } | null)?.tokenGate
+                  ? TOKEN_ROOMS_ENABLED
+                    ? 'Token room'
+                    : 'Room'
+                  : 'No token needed'
+              }
               onClick={() => (NRT_ENABLED ? setView({ v: 'tickets', room: r }) : navigate('/m/chat'))}
             />
           ))}

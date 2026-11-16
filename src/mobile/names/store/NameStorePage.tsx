@@ -1097,7 +1097,7 @@ const BuySheet = (p: {
           {p.verb === 'Sell' ? (
             <>
               <Chip>Asking price, paid to you</Chip>
-              <Chip>On the Exchange until it sells</Chip>
+              <Chip>{MARKET_ENABLED ? 'On the Exchange until it sells' : ''}</Chip>
               <Chip>Take it off sale any time</Chip>
               <Chip>Plus a small network fee</Chip>
             </>

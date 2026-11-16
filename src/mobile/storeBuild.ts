@@ -162,7 +162,7 @@ export const storeLinkShown = (url: string, store = STORE_BUILD): boolean => {
  * a new entry cannot bring one back. (bwallet.space's page has its own, wider list: scripts/store-site.py.)
  */
 export const STORE_BANNED_WORDS: RegExp =
-  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\bticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token/i;
+  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\b(?:gets|is|her|his|their|its) (?:a |own )?ticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token/i;
 /** The banned wording in `text`, or null. */
 export const storeBannedWord = (text: string): string | null => STORE_BANNED_WORDS.exec(text)?.[0] ?? null;
 
@@ -443,10 +443,10 @@ export const handleCardText = (hasName: boolean): string =>
       ? 'Your personal token and a chat room only holders can enter.'
       : 'A free handle people can pay, plus your own chat room.';
 export const MY_TOKENS_DESC = STORE_BUILD
-  ? "Tokens this account has minted: list the ones that aren't listed yet"
+  ? "Tokens this account has minted: index the ones other wallets can't see yet"
   : "This account's tokens and their rooms: set up the ones that aren't listed yet";
 export const MY_TOKENS_NOTE = STORE_BUILD
-  ? 'Listing a token shows it in other wallets and the Market. You confirm the price before anything is sent.'
+  ? 'Indexing a token lets other wallets see it. You confirm the price before anything is sent.'
   : 'Setting up a token’s room lists it in other wallets and the Market and opens its chat room. You confirm the price before anything is sent.';
 export const B_AGENT_DESC = STORE_BUILD ? 'Use your own AI key' : 'b, or use your own AI key';
 export const SUBSCRIPTIONS_DESC = STORE_BUILD

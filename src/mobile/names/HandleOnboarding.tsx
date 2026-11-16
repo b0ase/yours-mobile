@@ -184,7 +184,7 @@ export const HandleOnboarding = () => {
         style={{ background: 'var(--bw-surface)', border: '1px solid var(--bw-line, #3a2f0c)' }}
         onClick={() => setLaunching(true)}
         role="button"
-        aria-label="Launch your tokens"
+        aria-label={PAID_FEATURES_ENABLED ? 'Launch your tokens' : undefined}
         data-testid="launch-tokens-card"
       >
         <span
@@ -195,7 +195,7 @@ export const HandleOnboarding = () => {
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
-            {importSym ? handleCardTitle(true, importSym) : 'Launch your tokens'}
+            {importSym ? handleCardTitle(true, importSym) : PAID_FEATURES_ENABLED ? 'Launch your tokens' : ''}
           </div>
           <div className="text-[11px]" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
             Optional: a personal token on your own launch curve. Your rooms are free without one.

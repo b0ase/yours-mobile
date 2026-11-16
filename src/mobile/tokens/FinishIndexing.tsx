@@ -2,6 +2,7 @@ import { Sparkles } from 'lucide-react';
 import { money } from '../money/money';
 import { dismissRoomSetup } from './roomSetup';
 import { useRoomSetup } from './useRoomSetup';
+import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 /**
  * "Set up $X's room": for a token this wallet minted whose room isn't set up yet (1Sat indexing
@@ -37,13 +38,15 @@ export const FinishIndexing = ({
       <div className="flex items-center gap-2">
         <Sparkles size={15} color="var(--bw-accent-hi)" />
         <span className="text-sm font-bold" style={{ color: 'var(--bw-accent-hi)' }}>
-          Set up ${ticker}'s room
+          {TOKEN_ROOMS_ENABLED ? `Set up $${ticker}'s room` : `Index $${ticker}`}
         </span>
       </div>
       <p className="text-[11px] m-0" style={{ color: '#98A2B3' }}>
-        Setting up lists ${ticker} in other wallets and the Market and opens its chat room. One payment of about{' '}
-        {money(s.total.totalSats, s.rate)}, most of which is a prepaid deposit with the 1Sat indexer, not a fee: it
-        stays as ${ticker}'s balance there and pays for its transfers.
+        {TOKEN_ROOMS_ENABLED
+          ? `Setting up lists $${ticker} in other wallets and the Market and opens its chat room.`
+          : `Indexing lets other wallets see $${ticker}.`}{' '}
+        One payment of about {money(s.total.totalSats, s.rate)}, most of which is a prepaid deposit with the 1Sat
+        indexer, not a fee: it stays as ${ticker}'s balance there and pays for its transfers.
       </p>
       {s.needs && s.freeNote && (
         <p className="text-[11px] font-semibold m-0" style={{ color: 'var(--bw-accent-hi)' }}>
@@ -59,7 +62,7 @@ export const FinishIndexing = ({
             className="flex-1 h-10 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
             style={{ background: 'var(--bw-accent-hi)', color: '#000' }}
           >
-            {`Set up · ${money(s.total.totalSats, s.rate)}`}
+            {`${TOKEN_ROOMS_ENABLED ? 'Set up' : 'Index'} · ${money(s.total.totalSats, s.rate)}`}
           </button>
           {dismissible && (
             <button
