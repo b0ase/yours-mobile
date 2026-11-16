@@ -22,6 +22,10 @@ import { fileURLToPath } from 'node:url';
 
 /** Exact text (case-sensitive) that must not be anywhere in a store bundle. */
 export const BANNED = [
+  // Investor self-certification placeholders (A9: hidden in every edition, 16 Nov 2026).
+  'LEGAL REVIEW',
+  'Placeholder for the FPO',
+  'Qualify as an investor',
   // Markets, exchanges and their tiles
   '1sat.market',
   '1Sat Market',

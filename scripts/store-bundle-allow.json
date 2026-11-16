@@ -182,21 +182,6 @@
       "reason": "Not shown in a store build: agent-account trading text (agents/agentTrade.ts); AgentConversation runs actions only when MARKET_ENABLED."
     },
     {
-      "chunk": "index",
-      "match": "sophisticated investor",
-      "reason": "Owner decision pending: A9, investor self-certification and its [LEGAL REVIEW] placeholder (kyc/). Not built or removed in A6 by instruction."
-    },
-    {
-      "chunk": "index",
-      "match": "Investor status",
-      "reason": "Owner decision pending: A9, Settings › Identity › Investor status after KYC. Not built or removed in A6 by instruction."
-    },
-    {
-      "chunk": "index",
-      "match": "Qualify as an investor",
-      "reason": "Owner decision pending: A9, Settings › Identity › Qualify as an investor after KYC. Not built or removed in A6 by instruction."
-    },
-    {
       "chunk": "AirdropNft",
       "match": "airdrop",
       "reason": "Reviewed and allowed: receiving: items sent unasked land in Wallet › Airdrops; nothing is bought, sold or earned (16 Nov review: benign)."
