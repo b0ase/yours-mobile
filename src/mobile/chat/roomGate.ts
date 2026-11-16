@@ -1,3 +1,4 @@
+import { GAMES_ENABLED } from '../storeBuild';
 import type { TokenGate } from './tokenRooms';
 
 /**
@@ -68,9 +69,12 @@ function whole(raw: string, dec: number): string {
   return frac ? `${s.slice(0, -dec)}.${frac}` : s.slice(0, -dec);
 }
 
-/** "Hold 1 $TERRORNODE to join · Play to earn" (the play line only for a room with its own site). */
+/**
+ * "Hold 1 $TERRORNODE to join · Play to earn" (the play line only for a room with its own site). Games are bWalletX
+ * only, so a store build never adds the play line (round A8, S5).
+ */
 export function lockedLine(gate: TokenGate, hasSite: boolean): string {
-  return `Hold ${whole(gate.minRaw, gate.dec)} $${gate.symbol} to join${hasSite ? ' · Play to earn' : ''}`;
+  return `Hold ${whole(gate.minRaw, gate.dec)} $${gate.symbol} to join${GAMES_ENABLED && hasSite ? ' · Play to earn' : ''}`;
 }
 
 /** The token's on-chain icon for a BSV-21 gate: its deploy outpoint's _0 output on ORDFS. Null for anything else. */

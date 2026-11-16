@@ -36,7 +36,8 @@ const STORE_BOTTOM_BAR = `Bottom bar, left to right: Wallet · bApps · b · Fee
 const TICKETS_LINE = `
 - Tickets: tokens that get you into a room. Send one ticket to invite someone.`;
 const MINT_LINE = `- Mint: the Mint button creates an NFT from a photo, video, song or document, or "Start a room" mints a ticket token (name, supply, optional event date and price). The cost (network fee, plus any clearly labelled mint fee) is shown before confirming.`;
-const STORE_MINT_LINE = `- Mint: the Mint button creates an NFT from a photo, video, song or document, or a token with a fixed supply that goes to your own wallet. The cost is shown before you confirm.`;
+// Store edition: NFTs only, no fungible tokens (storeBuild.ts FUNGIBLE_MINT_ENABLED; round A8, S8).
+const STORE_MINT_LINE = `- Mint: the Mint button creates an NFT from a photo, video, song or document. The cost is shown before you confirm.`;
 const NAMES_PARA = `Names and handles: claim a free name from the Wallet "Get your $name" card. You get the paymail name@bwalletx.com (inside bWallet it shows just as "name"; other wallets need the full address) and a personal token $NAME that opens your personal room in Chat. Hold the $NAME token to enter that room; send someone one $NAME token to invite them. Personal tokens are social/access only. Only the token linked to the name shows a check mark (✓); others with the same ticker are not the real one.`;
 const STORE_NAMES_PARA = `Names and handles: claim a free name from the Wallet "Get your $name" card. You get the paymail name@bwalletx.com (inside bWallet it shows just as "name"; other wallets need the full address), so people can pay you by name from any paymail wallet.`;
 const CHAT_PARA = `Chat: token rooms. You get a room for each token or ticket you hold at or above the room minimum; it goes away if you no longer hold enough. To invite someone, send them the room's token. Rooms can have bounties and calls.`;

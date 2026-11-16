@@ -73,7 +73,8 @@ describe('storeBuild', () => {
     expect(tokenRoomsEnabled(false)).toBe(true);
     expect(paidFeaturesEnabled(true)).toBe(false);
     expect(paidFeaturesEnabled(false)).toBe(true);
-    expect(mintChoicesFor(true)).toEqual(['token', 'media']);
+    // S8 (CTO + CEO, 16 Nov 2026): no fungible token minting in a store build.
+    expect(mintChoicesFor(true)).toEqual(['media']);
     expect(mintChoicesFor(false)).toEqual(['ticket', 'token', 'media']);
   });
 
@@ -581,13 +582,11 @@ describe('Free Spaces in the store edition (owner, 10 Oct 2026)', () => {
     for (const r of [token, openButGated]) expect(roomSpacesAllowed(r, true)).toBe(false);
     for (const r of [lounge, open, token]) expect(roomSpacesAllowed(r, false)).toBe(true);
   });
-  test('token rooms point store users to bWalletX or bchatx.com', async () => {
+  test('token rooms say only "Not available in this edition" in a store build, naming no app or site (S9)', async () => {
     const { storeTokenSpaceNote, STORE_ROOM_NOTE } = await import('./storeBuild');
-    expect(storeTokenSpaceNote('SATOSHI')).toBe(
-      'This room is for $SATOSHI holders. Open it in bWalletX or on bchatx.com.',
-    );
-    expect(storeTokenSpaceNote()).toContain('token holders');
-    expect(STORE_ROOM_NOTE).toContain('bchatx.com');
+    expect(storeTokenSpaceNote('SATOSHI')).toBe('Not available in this edition');
+    expect(storeTokenSpaceNote()).toBe('Not available in this edition');
+    expect(STORE_ROOM_NOTE).toBe('Not available in this edition');
   });
 });
 
@@ -1837,7 +1836,11 @@ describe('A2: Ask b describes the store edition as it is', () => {
         'This edition is a wallet: it does not buy, sell or trade, and it has no Market or Exchange.',
       );
       expect(g).toContain('Chat: Chatrooms, DMs and Calls.');
-      expect(g).toContain('or a token with a fixed supply that goes to your own wallet.');
+      // S8: NFTs only in a store build.
+      expect(g).toContain(
+        '- Mint: the Mint button creates an NFT from a photo, video, song or document. The cost is shown before you confirm.',
+      );
+      expect(g).not.toMatch(/fixed supply/);
       expect(g).toContain('b agent: use your own AI provider key');
       expect(g).toContain("say there's no charge to talk to b");
     }

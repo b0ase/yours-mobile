@@ -49,7 +49,7 @@ import { cleanNote, noteOutput, withExtraOutput } from '../mobile/airdrops/note'
 import { celebrateSend } from './sent/sent';
 import { P2PKH } from '@bsv/sdk';
 import { maxOverlayFee, withTokenSendGuard, type OverlayFee } from '../mobile/wallet/send/tokenFee';
-import { HOLDER_DROP_ENABLED } from '../mobile/storeBuild';
+import { HOLDER_DROP_ENABLED, MARKET_ENABLED } from '../mobile/storeBuild';
 import { tokenIconUrl } from '../mobile/tokens/officialTokens';
 
 // Issuer tools › Airdrop to holders: bWalletX only, a lazy chunk the store build drops (storeBuild.ts).
@@ -82,8 +82,11 @@ type Bsv21Recipient = {
   amountInput: string;
 };
 
-// Lazy: the chart sits below the form and has its own chunk (shared with the Home and wallet charts).
-const PriceChart = lazy(() => import('../mobile/wallet/PriceChart').then((m) => ({ default: m.PriceChart })));
+// Lazy: the chart sits below the form and has its own chunk. A token's market-sales chart is bWalletX only
+// (MARKET_ENABLED is a literal, so a store build drops the TokenPriceChart chunk; round A8, S1).
+const TokenPriceChart = MARKET_ENABLED
+  ? lazy(() => import('../mobile/wallet/TokenPriceChart').then((m) => ({ default: m.TokenPriceChart })))
+  : null;
 const WARN = '#F79009';
 
 /** Overlay status of the token, for the pill beside the token ID. */
@@ -750,13 +753,16 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
           </div>
 
           {/* Market chart */}
-          <Show when={!!token.info.id}>
-            <div className="mx-4 mb-5 rounded-2xl p-4" style={{ background: row }}>
-              <Suspense fallback={<div style={{ height: 140 }} />}>
-                <PriceChart tokenId={token.info.id} />
-              </Suspense>
-            </div>
-          </Show>
+          {/* bWalletX only; the comment above is vite.config.mobile.ts's anchor for TokenLinks, which both editions keep. */}
+          {MARKET_ENABLED && TokenPriceChart && (
+            <Show when={!!token.info.id}>
+              <div className="mx-4 mb-5 rounded-2xl p-4" style={{ background: row }}>
+                <Suspense fallback={<div style={{ height: 140 }} />}>
+                  <TokenPriceChart tokenId={token.info.id} />
+                </Suspense>
+              </div>
+            </Show>
+          )}
 
           {/* Pay to index (any holder), only when the 1Sat overlay says it's needed */}
           <Show when={!!token.info.id}>

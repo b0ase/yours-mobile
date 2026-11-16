@@ -239,7 +239,11 @@ export const TOKEN_ROOMS_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
-export const STORE_ROOM_NOTE = 'This room is for token holders. Open it in bWalletX or on bchatx.com.';
+/**
+ * What a store build says for a token room (shown only when token rooms are off). It names no other app or site
+ * (CTO + CEO, 16 Nov 2026, review S9): an excluded feature is simply not available here.
+ */
+export const STORE_ROOM_NOTE = STORE_NAME_NOTE;
 
 /**
  * bSpaces (docs/BSPACES-PLAN.md), the full set: Spaces in token rooms, the Spaces home and its tile,
@@ -289,9 +293,8 @@ export const roomSpacesAllowed = (
   store = STORE_BUILD,
 ): boolean => !store || (FREE_SPACES_ENABLED && isOpenRoom(room));
 
-/** What a store build says where a token room's Space would be. */
-export const storeTokenSpaceNote = (symbol?: string | null) =>
-  `This room is for ${symbol ? `$${symbol}` : 'token'} holders. Open it in bWalletX or on bchatx.com.`;
+/** What a store build says where a token room's Space would be: no app or site named (S9). */
+export const storeTokenSpaceNote = (_symbol?: string | null) => STORE_NAME_NOTE;
 
 /**
  * bPhone paid calls (docs/BPHONE-PLAN.md): charging to receive a call, the directory of people who
@@ -307,10 +310,23 @@ export const PAID_CALLS_ENABLED: boolean = !(
 );
 export const paidCallsEnabled = (store = STORE_BUILD) => !store;
 
-/** Wallet › Mint choices: tokens and media in a store build (no bCorp fee); no chatroom tickets. */
+/**
+ * Fungible token minting (a BSV-21 deploy: Mint › A token or memecoin, tickets, a domain token, the personal token,
+ * the coin launcher, a bMovies claim): bWalletX only (CTO + CEO, 16 Nov 2026, review S8). A store build mints only
+ * non-fungible items (pictures, music, video, documents, 3D, bAvatars). deployBsv21 (tickets/mintTicket.ts) and
+ * deployPersonalToken (names/claimPersonal.ts) refuse in a store build. Literal env check so Rollup drops the
+ * TokenMint and TicketMint steps and their Mint tiles from a store bundle.
+ */
+export const FUNGIBLE_MINT_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+export const fungibleMintEnabled = (store = STORE_BUILD) => !store;
+
+/** Wallet › Mint choices: media only in a store build (no tokens, no chatroom tickets; S8). */
 export type MintChoice = 'ticket' | 'token' | 'media';
-export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] =>
-  store ? ['token', 'media'] : ['ticket', 'token', 'media'];
+export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] => (store ? ['media'] : ['ticket', 'token', 'media']);
 
 /**
  * Paid token indexing ("Index $X · $n", the 1Sat indexer deposit; in bWalletX "Set up $X's room"): bWalletX only.

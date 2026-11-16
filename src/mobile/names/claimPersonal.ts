@@ -13,7 +13,7 @@ import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api'
 import { walletSigner } from '../chat/signer';
 import { proveHoldings } from '../chat/holdings';
 import { requestRoomByTicker } from '../chat/segmentNav';
-import { PAID_FEATURES_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
+import { PAID_FEATURES_ENABLED, STORE_BUILD, STORE_NAME_NOTE, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 import {
   bsv20TakenError,
   bsv20TickExists,
@@ -104,7 +104,11 @@ export async function deployPersonalToken(
     /** Launch curve, committed on the deploy tx as its own MAP output; fixed from then on. */
     curve?: Curve | null;
   },
+  store = STORE_BUILD,
 ): Promise<PersonalLink> {
+  // Fungible token minting is bWalletX only (storeBuild.ts FUNGIBLE_MINT_ENABLED; S8): refused before any lookup,
+  // sponsor request or wallet call.
+  if (store) throw new Error(STORE_NAME_NOTE);
   const ticker = personalTicker(input.name);
   if (!ticker) throw new Error('That name cannot be a token ticker');
   // One personal token per identity: another device may already have made it (the link is per device).

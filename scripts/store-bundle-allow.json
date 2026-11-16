@@ -52,11 +52,6 @@
       "reason": "Reviewed and allowed: b-Aware bug-bounty payout address field."
     },
     {
-      "chunk": "OpnsMintPage",
-      "match": "buy … taken",
-      "reason": "False positive: Code ids ('buy', 'taken') compared inside a children expression, not text."
-    },
-    {
       "chunk": "prompt-tab",
       "match": "groupedPermission",
       "reason": "False positive: A list of prompt kind ids (code), not text."
@@ -132,16 +127,6 @@
       "reason": "Not shown in a store build: Mint tile with when: () => isBWalletX()."
     },
     {
-      "chunk": "MintButton",
-      "match": "shown in the Market",
-      "reason": "Not shown in a store build: TicketMint: the Ticket step needs CHOICES.has('ticket'); mintChoicesFor leaves 'ticket' out of a store build."
-    },
-    {
-      "chunk": "MintButton",
-      "match": "Its room and Market listing",
-      "reason": "Not shown in a store build: TicketMint: the Ticket step needs CHOICES.has('ticket'); mintChoicesFor leaves 'ticket' out of a store build."
-    },
-    {
       "chunk": "ChatPage",
       "match": "put tickets on sale",
       "reason": "Not shown in a store build: the token room set-up sheet opens only for a token room entry (open.entry), and openEntry refuses token rooms in a store build (ROOMS)."
@@ -157,11 +142,6 @@
       "reason": "Not shown in a store build: BuySheet's default verb; the only store caller passes verb=\"Get\" (the Sell sheet is behind MARKET_ENABLED)."
     },
     {
-      "chunk": "PriceChart",
-      "match": "No market sales yet",
-      "reason": "Not shown in a store build: PriceChart is used only by the Exchange's TradeView (no Exchange in a store build)."
-    },
-    {
       "chunk": "SendBsv21View",
       "pattern": "^ ?Trade$",
       "reason": "Not shown in a store build: the upstream 1Sat Trade button is patched to className=\"hidden\" in every mobile build (vite.config.mobile.ts)."
@@ -169,17 +149,17 @@
     {
       "chunk": "sessions",
       "match": "Selling from chat",
-      "reason": "Not shown in a store build: agent-account trading text (agents/agentTrade.ts); AgentConversation runs actions only when MARKET_ENABLED."
+      "reason": "Unreachable in a store build: agent-account trading text (agents/agentTrade.ts) in the sessions chunk through CLI pairing (pair/agentPairing → runAgentAction). CliPairConfirm offers no trade scope when !MARKET_ENABLED, so checkGrant refuses buy and strategy_load with SCOPE, and agentPairing refuses both itself in a store build (A8, S6)."
     },
     {
       "chunk": "sessions",
       "match": "Paper buy",
-      "reason": "Not shown in a store build: agent-account trading text (agents/agentTrade.ts); AgentConversation runs actions only when MARKET_ENABLED."
+      "reason": "Unreachable in a store build: agent-account trading text (agents/agentTrade.ts) in the sessions chunk through CLI pairing (pair/agentPairing → runAgentAction). CliPairConfirm offers no trade scope when !MARKET_ENABLED, so checkGrant refuses buy and strategy_load with SCOPE, and agentPairing refuses both itself in a store build (A8, S6)."
     },
     {
       "chunk": "sessions",
       "match": "Buy failed",
-      "reason": "Not shown in a store build: agent-account trading text (agents/agentTrade.ts); AgentConversation runs actions only when MARKET_ENABLED."
+      "reason": "Unreachable in a store build: agent-account trading text (agents/agentTrade.ts) in the sessions chunk through CLI pairing (pair/agentPairing → runAgentAction). CliPairConfirm offers no trade scope when !MARKET_ENABLED, so checkGrant refuses buy and strategy_load with SCOPE, and agentPairing refuses both itself in a store build (A8, S6)."
     },
     {
       "chunk": "AirdropNft",
@@ -220,6 +200,76 @@
       "chunk": "background",
       "match": "Swap ${",
       "reason": "Unreachable in a store build: p2p swap action description 'Swap <ref>' (mobile/p2p/swap/swapActions.ts), created only by window.CWI.swap. A store build is the phone app only; there handleSiteCall (mobile/dappBrowser.ts) refuses bwxSwap* ('Unsupported request'); the swap bridge is the Chrome extension's content.ts. Checked in round A7 (storeBuild.test.ts A7.10)."
+    },
+    {
+      "chunk": "*",
+      "pattern": "\\bindex \\$\\{",
+      "reason": "False positive: 'index ${n}' is a position (an input, output, page or array index) in @bsv/sdk, @1sat, wallet-toolbox and pdf.js error text. The banned form is 'Index $TICKER' (paid indexing)."
+    },
+    {
+      "chunk": "*",
+      "pattern": "[Ee]xchange-?[Rr]ates?|exchangerate",
+      "reason": "False positive: the BSV-to-fiat exchange rate (the price used to show balances in dollars) in rate-service error text (wallet-toolbox, utils/wallet). No exchange is offered."
+    },
+    {
+      "chunk": "*",
+      "match": "hosts are backing off",
+      "reason": "False positive: @bsv/sdk LookupResolver retry text ('hosts are backing off'), not backing in the funding sense."
+    },
+    {
+      "chunk": "*",
+      "match": "Cannot buy BSV-20 token listing through ordinal purchase",
+      "reason": "Library text: @1sat/actions purchase guard error. Thrown only inside a purchase; a store build has no Market, and buyOpnsListing and the agent buy action refuse (A8, S6)."
+    },
+    {
+      "chunk": "*",
+      "pattern": "^OrdLockV2[:.]",
+      "reason": "Library text: @1sat/templates OrdLock v2 contract builder errors (seller, payout and index name the contract's script slots). Thrown only while a listing transaction is being built or checked; technical text, not an offer."
+    },
+    {
+      "chunk": "background",
+      "pattern": "^(?:Buy (?:“\\$\\{\\w+\\}”|collectable|asset)|List \\$\\{\\w+\\} for sale|List on marketplace lock)$",
+      "reason": "Library text: @1sat/permission-module enrichIntent, which names what a connected site's createAction would do so the approval sheet can show it. The wallet itself starts no purchase or listing; a site's request is described as it is so the user can refuse it (listed for the owner in store-gates-a8.md)."
+    },
+    {
+      "chunk": "background",
+      "pattern": "^(?:the (?:swap|offer|seller|price|contract) |not a swap offer$|unknown swap call$|output 0 must pay the seller|Swap stopped before signing|Swaps are only available in bChatX$|the 1Sat indexer is not validating this token|indexing fee is more than shown$)",
+      "reason": "Unreachable in a store build: p2p swap contract checks (mobile/p2p/swap/*, services/swapSite.ts), run only for window.CWI.swap calls. On the phone handleSiteCall refuses bwxSwapOffer / Accept / Release (A7.10 test)."
+    },
+    {
+      "chunk": "prompt-tab",
+      "pattern": "^(?:Pay and swap|Swap \\$\\{[^}]+\\} for \\$\\{)",
+      "reason": "Unreachable in a store build: the swap request sheet (pages/requests/swapSheetText.ts) opens only for a window.CWI.swap call, which handleSiteCall refuses on the phone (A7.10 test)."
+    },
+    {
+      "chunk": "sessions",
+      "pattern": "^(?:the seller is not paid$|seller payout is |the listing payout does not match its price$|marketplace fee is more than shown$|indexing fee does not match the sheet$|indexing fee \\$\\{\\w+\\} sats is more than)",
+      "reason": "Unreachable in a store build: purchase checks (p2p/verify.ts verifyPurchaseArgs / verifyOrdinalPurchaseArgs) run only inside a purchase. In the store bundle their one caller is the agent buy path (agents/agentTrade.ts), which agentPairing refuses in a store build (A8, S6) and CliPairConfirm never grants (no trade scope)."
+    },
+    {
+      "chunk": "index",
+      "pattern": "[Pp]ayouts?\\b",
+      "reason": "Reviewed and allowed: Lock form errors and plan text (locks/). Payouts are the user's own locked BSV paid back to them on a schedule, as on LockScreen."
+    },
+    {
+      "chunk": "index",
+      "pattern": "^Backing [Uu]p",
+      "reason": "False positive: 'Backing up' (wallet backups to a USB key or to all accounts)."
+    },
+    {
+      "chunk": "index",
+      "match": "token airdrop",
+      "reason": "Reviewed and allowed: receiving: the bMail pointer says items sent unasked wait in Quarantine (airdrops/inbox.ts); nothing is bought, sold or earned."
+    },
+    {
+      "chunk": "BsvWallet",
+      "match": "Play to earn more",
+      "reason": "Not shown in a store build: Wallet › Rewards card text (rewards.ts earnLabel); the list is empty in a store build (see Rewards)."
+    },
+    {
+      "chunk": "LockScreen",
+      "match": "Backing ${",
+      "reason": "Not shown in a store build: the artist-lock label is set only when backArtist is set, and backArtist needs ARTIST_PROGRAMME_ENABLED, which is false in a store build (LockScreen.tsx). The pot name says 'Locked for' in a store build (pots.ts)."
     }
   ]
 }

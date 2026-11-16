@@ -47,6 +47,10 @@ import { paymailEnabled } from './paymail';
 import { getPersonalLink, onPersonalChange, personalKey } from './personalToken';
 import { handlePaymail, nameBavatarUri, nameChips, nameIntro, nameOrigin, tokenblasterLaunchUrl } from './nameCard';
 
+// After adopting a name: no selling in a store build. Module level (not inside the try below), so Rollup folds the
+// literal flag and a store bundle drops the bWalletX words (round A8, S5).
+const ADOPTED_NEXT = MARKET_ENABLED ? 'You can link your identity key or sell it.' : 'You can link your identity key.';
+
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
 // registerOpns = self-transfer of the 1-sat name ordinal + MAP (GetYourName REGISTER_FEE_ESTIMATE_SATS).
@@ -191,7 +195,7 @@ export const OpnsNameActions = ({
       const r = await adoptOpnsNft(apiContext.wallet, outpoint, name);
       if ('error' in r) throw new Error(r.error);
       setOwned({ name, id: r.id, published: false });
-      setMsg(`${name} is in your Names now. You can link your identity key or sell it.`);
+      setMsg(`${name} is in your Names now. ${ADOPTED_NEXT}`);
       syncAccountNames(apiContext, identityAddress, { force: true }).catch(() => undefined);
     } catch (e) {
       setMsg(e instanceof Error ? `Not moved: ${e.message}` : 'Not moved. Nothing changed.');
@@ -301,7 +305,9 @@ export const OpnsNameActions = ({
               owned === undefined
                 ? 'Checking your names…'
                 : canAdopt
-                  ? 'This name came in with your NFTs. Add it to your Names list first, then link it and sell it. Adding is free: no transaction, nothing sent.'
+                  ? MARKET_ENABLED
+                    ? 'This name came in with your NFTs. Add it to your Names list first, then link it and sell it. Adding is free: no transaction, nothing sent.'
+                    : 'This name came in with your NFTs. Add it to your Names list first, then link it. Adding is free: no transaction, nothing sent.'
                   : 'This name came in with your NFTs, not into your Names list, so the wallet can’t sign it yet. It can be added to Names once it shows in Wallet › NFTs.'
             }
             action={

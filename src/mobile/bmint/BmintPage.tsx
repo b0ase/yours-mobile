@@ -42,7 +42,8 @@ const NotesShowcase = BMINT_NOTES_ENABLED ? lazy(() => import('./notes/NotesShow
 const MakeNotePage = USER_NOTES_ENABLED ? lazy(() => import('./make/MakeNotePage')) : null;
 
 // OpNS names (names/OpnsMintPage.tsx, its own chunk) renders inside the shell at /m/bmint/opns.
-const OpnsMintPage = lazy(() => import('../names/OpnsMintPage'));
+// The bulk minter lists names for sale as they mint: bWalletX only (MARKET_ENABLED; S8), so a store build drops it.
+const OpnsMintPage = MARKET_ENABLED ? lazy(() => import('../names/OpnsMintPage')) : null;
 // Name store (/m/bmint/store, public /bmint/store): every OpNS name for sale. bWalletX only (market rules).
 const OpnsStorePage = MARKET_ENABLED ? lazy(() => import('../names/OpnsStorePage')) : null;
 const BavatarMintSheet = lazy(() => import('../bavatar/BavatarMintSheet'));
@@ -335,7 +336,8 @@ const useOwner = () => {
 /** The bulk OpNS minter: agent accounts, the studio owner and the owner's handle (owner, 14 Oct 2026). */
 const useBulkMint = (owner: boolean) => {
   const { chromeStorageService } = useServiceContext();
-  return canBulkMint(chromeStorageService.getCurrentAccountObject()?.account?.addresses?.identityAddress, owner);
+  const can = canBulkMint(chromeStorageService.getCurrentAccountObject()?.account?.addresses?.identityAddress, owner);
+  return MARKET_ENABLED && can;
 };
 
 export const BmintPage = () => {
@@ -369,7 +371,7 @@ export const BmintPage = () => {
           <Routes>
             {Notes && <Route path="notes" element={<Notes />} />}
             {MakeNotePage && <Route path="make" element={<MakeNotePage />} />}
-            <Route path="opns" element={bulk ? <OpnsMintPage /> : <Navigate to="/m/names" replace />} />
+            <Route path="opns" element={bulk && OpnsMintPage ? <OpnsMintPage /> : <Navigate to="/m/names" replace />} />
             {OpnsStorePage && <Route path="store" element={<OpnsStorePage />} />}
             <Route path="mint/:type" element={<MintOpen owner={owner} />} />
             <Route path="check" element={<CheckPage />} />

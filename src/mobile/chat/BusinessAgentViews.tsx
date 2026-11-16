@@ -9,7 +9,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import type { RoomLook } from './roomLook';
-import { BIZ_AGENT_ACCOUNT_ENABLED } from '../storeBuild';
+import { BIZ_AGENT_ACCOUNT_ENABLED, MARKET_ENABLED } from '../storeBuild';
 import { createPortal } from 'react-dom';
 import { sendBsv } from '../../utils/guardedSendBsv';
 import { Bot, Plus, Trash2, X } from 'lucide-react';
@@ -677,7 +677,9 @@ export const BusinessSheet = ({
               style={tab === t ? { background: GOLD, color: '#1a1300' } : { border: `1px solid ${LINE}`, color: MUTED }}
             >
               {t === 'about'
-                ? 'What they sell'
+                ? MARKET_ENABLED
+                  ? 'What they sell'
+                  : 'What they offer'
                 : t === 'setup'
                   ? 'Set up'
                   : t === 'agent'

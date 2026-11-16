@@ -337,7 +337,9 @@ export const NameStorePage = () => {
     try {
       await listOpnsName(apiContext, id, sats);
       setOwned((m) => new Map(m).set(n, { id, listedSats: sats }));
-      setMsg(`${n} is on sale for ${fmtUsd(usd)}. Buyers pay you directly; take it off sale any time.`);
+      // listOpnsName refuses in a store build, so this line is bWalletX only (literal, dropped from a store bundle).
+      if (MARKET_ENABLED)
+        setMsg(`${n} is on sale for ${fmtUsd(usd)}. Buyers pay you directly; take it off sale any time.`);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : `Couldn't list ${n}`);
     } finally {

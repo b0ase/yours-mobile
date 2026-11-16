@@ -39,7 +39,14 @@ import { setAgentDraft } from '../agent/handoff';
 import { openAgentCreate } from '../agents/agentCreate';
 import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { routeFor } from '../tabs/tabs';
-import { DOMAIN_MINT_ENABLED, GREETING_CARDS_ENABLED, isBWalletX, STORE_BUILD } from '../storeBuild';
+import {
+  DOMAIN_MINT_ENABLED,
+  FUNGIBLE_MINT_ENABLED,
+  GREETING_CARDS_ENABLED,
+  isBWalletX,
+  MARKET_ENABLED,
+  STORE_BUILD,
+} from '../storeBuild';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
@@ -566,9 +573,9 @@ export const MintSheet = ({
           >
             {step === 'choose'
               ? chooserTitle(view)
-              : step === 'ticket'
+              : FUNGIBLE_MINT_ENABLED && step === 'ticket'
                 ? 'Mint tickets'
-                : step === 'token'
+                : FUNGIBLE_MINT_ENABLED && step === 'token'
                   ? 'Mint a token'
                   : DOMAIN_MINT_ENABLED && step === 'domain'
                     ? 'Tokenise a domain'
@@ -620,11 +627,11 @@ export const MintSheet = ({
               </Suspense>
             )}
 
-            {step === 'ticket' && CHOICES.has('ticket') && (
+            {FUNGIBLE_MINT_ENABLED && step === 'ticket' && CHOICES.has('ticket') && (
               <TicketMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
             )}
 
-            {step === 'token' && CHOICES.has('token') && (
+            {FUNGIBLE_MINT_ENABLED && step === 'token' && CHOICES.has('token') && (
               <TokenMint exchangeRate={exchangeRate} onBack={() => setStep('choose')} onClose={onClose} />
             )}
 
@@ -877,7 +884,8 @@ export const MintSheet = ({
                         onChange={(e) => setEditions(e.target.value.replace(/\D/g, ''))}
                       />
                     </label>
-                    {kindSel === 'music' && (
+                    {/* A sale price is bWalletX only: a store build mints with no price (S8). */}
+                    {MARKET_ENABLED && kindSel === 'music' && (
                       <input
                         className={input}
                         style={{ ...inputStyle, maxWidth: 170 }}
@@ -1141,22 +1149,27 @@ const MINT_TILES: MintTile[] = [
     when: () => true,
     media: { accept: 'text/html', label: 'an HTML page' },
   },
-  {
-    id: 'tickets',
-    icon: <Ticket size={18} />,
-    title: 'Tickets & passes',
-    sub: 'Entry to your chatroom, event or site',
-    when: () => CHOICES.has('ticket'),
-    step: 'ticket',
-  },
-  {
-    id: 'coin',
-    icon: <Coins size={18} />,
-    title: 'A token or memecoin',
-    sub: 'Your own token, fixed supply',
-    when: () => CHOICES.has('token'),
-    step: 'token',
-  },
+  // Fungible tokens (tickets, coins) are bWalletX only (FUNGIBLE_MINT_ENABLED; S8): not in a store build, not even as text.
+  ...(FUNGIBLE_MINT_ENABLED
+    ? [
+        {
+          id: 'tickets',
+          icon: <Ticket size={18} />,
+          title: 'Tickets & passes',
+          sub: 'Entry to your chatroom, event or site',
+          when: () => CHOICES.has('ticket'),
+          step: 'ticket' as const,
+        },
+        {
+          id: 'coin',
+          icon: <Coins size={18} />,
+          title: 'A token or memecoin',
+          sub: 'Your own token, fixed supply',
+          when: () => CHOICES.has('token'),
+          step: 'token' as const,
+        },
+      ]
+    : []),
   // bWalletX only (DOMAIN_MINT_ENABLED): not in a store build, not even as text.
   ...(DOMAIN_MINT_ENABLED
     ? [
