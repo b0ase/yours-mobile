@@ -1711,3 +1711,83 @@ describe('F4: shared modules load where import.meta.env is undefined (plain tsx 
     }
   });
 });
+
+// ── Sixth round (16 Nov 2026): the review of round five, findings A1 to A7 ────────────────────────────────────
+describe('A1: Settings › Identity mints no personal token and opens no room in a store build', () => {
+  const link = {
+    name: 'alice',
+    ticker: 'ALICE',
+    tokenId: 'b'.repeat(64) + '_0',
+    supply: '1000000',
+    roomTicker: null,
+  } as never;
+  const trap = () => {
+    const hit = { n: 0 };
+    const p = new Proxy({}, { get: () => ((hit.n += 1), () => Promise.reject(new Error('reached'))) }) as never;
+    return { hit, p };
+  };
+  test('bindMintsToken: never in a store build; in bWalletX exactly the old tick / token-only rule', async () => {
+    const { bindMintsToken } = await import('./names/claimPersonal');
+    for (const tokenOnly of [undefined, false, true])
+      for (const withToken of [false, true])
+        for (const linked of [false, true])
+          for (const name of ['alice', ''])
+            expect(bindMintsToken({ tokenOnly, withToken, linked, name }, false)).toBe(false);
+    // bWalletX: the tick (no link yet, a name that makes a ticker) or the token-only button.
+    expect(bindMintsToken({ withToken: true, linked: false, name: 'alice' }, true)).toBe(true);
+    expect(bindMintsToken({ withToken: true, linked: true, name: 'alice' }, true)).toBe(false);
+    expect(bindMintsToken({ withToken: false, linked: false, name: 'alice' }, true)).toBe(false);
+    expect(bindMintsToken({ withToken: true, linked: false, name: '' }, true)).toBe(false);
+    expect(bindMintsToken({ tokenOnly: true, withToken: false, linked: true, name: '' }, true)).toBe(true);
+  });
+  test('openPersonalRoom / retryPersonalRoom: a store build returns null before the wallet or the server', async () => {
+    const { openPersonalRoom, retryPersonalRoom } = await import('./names/claimPersonal');
+    const ctx = trap();
+    const client = trap();
+    expect(await openPersonalRoom(ctx.p, '1Id', link, client.p, false)).toBeNull();
+    expect(await retryPersonalRoom(ctx.p, '1Id', client.p, false)).toBeNull();
+    expect(ctx.hit.n + client.hit.n).toBe(0);
+    // bWalletX: the room is opened on the server (startTokenRoom) and its ticker returned, as before.
+    const asked: unknown[] = [];
+    const fake = { handle: undefined, startTokenRoom: async (...a: unknown[]) => (asked.push(a), 'ALICE') } as never;
+    expect(await openPersonalRoom(ctx.p, '1IdX', link, fake, true)).toBe('ALICE');
+    expect(asked).toHaveLength(1);
+    expect((asked[0] as unknown[])[0]).toBe(`bsv21:${'b'.repeat(64)}_0`);
+  });
+  test('the defaults follow the build: off in every store env, on in bWalletX', () => {
+    const code = `
+      const c = await import('./src/mobile/names/claimPersonal.ts');
+      const trap = new Proxy({}, { get: () => { throw new Error('reached'); } });
+      const room = await c.openPersonalRoom(trap, '1Id', { name: 'alice', ticker: 'ALICE', tokenId: 'x_0' }, trap)
+        .catch((e) => 'threw:' + e.message);
+      console.log(JSON.stringify({ mint: c.bindMintsToken({ withToken: true, linked: false, name: 'alice' }), room }));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as { mint: boolean; room: unknown };
+    for (const env of STORE_ENVS) expect(run(env)).toEqual({ mint: false, room: null });
+    const x = run({});
+    expect(x.mint).toBe(true);
+    expect(String(x.room)).toMatch(/^threw:/); // bWalletX goes on to the server (the trap)
+  }, 60_000);
+  test('the tick, the approval line, the room messages and Chat’s retry sit behind literal flags', () => {
+    const g = srcOf('./names/GetYourName.tsx');
+    expect(g).toContain('{PAID_FEATURES_ENABLED && !link && !NRT_ENABLED && (');
+    expect(g).toContain('if (PAID_FEATURES_ENABLED && t && mintsToken(p.name, p.tokenOnly)) {');
+    expect(g).toContain('if (mintsToken(n.name, n.tokenOnly)) await mintPersonal(n.name);');
+    expect(g).toContain('bindMintsToken({ tokenOnly, withToken, linked: !!link, name })');
+    expect(g).toMatch(
+      /if \(TOKEN_ROOMS_ENABLED\) \{\s*setMsg\(`\$\$\{l\.ticker\} minted — [^`]*Opening your room…`\);/,
+    );
+    expect(g).toContain('{PAID_FEATURES_ENABLED && handleName && personalTicker(handleName) && (');
+    // Every other mint-and-open path: no bare check left.
+    expect(g).not.toMatch(/withToken && !link && !!personalTicker/);
+    const c = srcOf('./tabs/ChatPage.tsx');
+    expect(c).toMatch(/if \(TOKEN_ROOMS_ENABLED && identityAddress\)\s*void retryPersonalRoom\(/);
+    expect(c.match(/retryPersonalRoom\(/g)).toHaveLength(2); // the other one is inside {ROOMS && …}
+    // The Wallet home "Launch your tokens" card (PersonalTokenLauncher) only opens behind PAID_FEATURES_ENABLED.
+    expect(srcOf('./names/HandleOnboarding.tsx')).toMatch(/PAID_FEATURES_ENABLED && !hasRoom \? \(/);
+  });
+});
