@@ -2114,3 +2114,38 @@ describe('A7.1: chat commissions say "payment" in a store build, and the form is
     expect(s).not.toMatch(/export function CommissionForm/);
   });
 });
+
+describe('A7.2: Feed lock is "Lock BSV on this post" in a store build, with no backing words', () => {
+  const f = () => srcOf('./feed/FeedPage.tsx');
+  test('the title, button label, intro and note pick their words with the literal MARKET_ENABLED', () => {
+    const s = f();
+    expect(s).toContain("const LOCK_TITLE = MARKET_ENABLED ? 'Lock BSV to back this post' : 'Lock BSV on this post';");
+    expect(s).toContain('aria-label={LOCK_TITLE}');
+    expect(s).toContain('<Sheet title={LOCK_TITLE} onClose={onClose}>');
+    expect(s.match(/Lock BSV to back this post/g)).toHaveLength(1); // only in the bWalletX branch
+    // The note: bWalletX's sentence unchanged; the store says the coins stay yours and locking shows support.
+    expect(s).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Locking backs a post; it earns nothing\.'\s*: 'Locking shows support for the post\. The coins stay yours\.'\}/,
+    );
+    // The intro: bWalletX "Back <name>'s post with your own coins", the store "Lock your own coins on <name>'s post".
+    const intro =
+      /\{MARKET_ENABLED \? \(\s*<p[^>]*>\s*Back <AuthorName[\s\S]*?<\/p>\s*\) : \(\s*<p[^>]*>([\s\S]*?)<\/p>\s*\)\}/.exec(
+        s,
+      );
+    expect(intro).not.toBeNull();
+    const store = intro![1].replace(/\s+/g, ' ');
+    expect(store).toContain('Lock your own coins on <AuthorName name={post.author.name} className="" /> \'s post.');
+    expect(store).not.toMatch(/\bback/i);
+  });
+  test('the store words pass the store word list; the bWalletX words are the ones the A6 check flagged', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Lock BSV on this post',
+      'Locking shows support for the post. The coins stay yours.',
+      "Lock your own coins on … 's post. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows how much is locked on it.",
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+    expect(storeBannedWord('Lock BSV to back this post')).toBe('back this');
+    expect(storeBannedWord('Locking backs a post; it earns nothing.')).toBe('earns');
+  });
+});

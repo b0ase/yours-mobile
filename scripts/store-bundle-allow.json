@@ -212,16 +212,6 @@
       "reason": "Reviewed and allowed: receiving: the Receive screen says items sent unasked land in Wallet › Airdrops (16 Nov review: benign)."
     },
     {
-      "chunk": "FeedTab",
-      "match": "back this post",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Feed › lock BSV on a post (the guide calls it locking behind a post). The coins stay the user's; 'back' may read as funding."
-    },
-    {
-      "chunk": "FeedTab",
-      "match": "Locking backs a",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Feed lock sheet explanation; the coins stay the user's; 'backs' may read as funding."
-    },
-    {
       "chunk": "BmintPage",
       "match": "keep it, send it or sell it",
       "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): bMint Studio intro ('Keep it'). Not traced to a gate."
