@@ -40,7 +40,10 @@ export const FindTokensButton = ({ style, onFound }: { style?: React.CSSProperti
     <motion.button
       whileTap={{ scale: 0.98 }}
       onClick={busy ? undefined : run}
-      className="flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-left cursor-pointer outline-none transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
+      // `relative`: the screen-reader line below is position:absolute. Against an ancestor outside the wallet's
+      // scroller it escaped the scroller's clip and made the whole app scroll ~380 px into blank space (overflow
+      // audit, 16 Nov 2026; the same fault as the Settings toggles, mobile.css `label:has(> .sr-only)`).
+      className="relative flex items-center gap-3 w-full px-4 py-3 rounded-xl border text-left cursor-pointer outline-none transition-colors duration-150 bg-[var(--bw-surface)] hover:bg-[#1f2128]"
       style={style}
     >
       {busy ? (
