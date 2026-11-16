@@ -212,16 +212,6 @@
       "reason": "Reviewed and allowed: receiving: the Receive screen says items sent unasked land in Wallet › Airdrops (16 Nov review: benign)."
     },
     {
-      "chunk": "ChatPage",
-      "match": "the reward",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): chat commissions (/commission): a poster locks a payment for a job. A payment for work, not a prize; owner to confirm the wording."
-    },
-    {
-      "chunk": "ChatPage",
-      "match": "Reward, e.g.",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): chat commissions (/commission) amount field. A payment for work, not a prize; owner to confirm the wording."
-    },
-    {
       "chunk": "FeedTab",
       "match": "back this post",
       "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Feed › lock BSV on a post (the guide calls it locking behind a post). The coins stay the user's; 'back' may read as funding."

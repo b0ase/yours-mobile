@@ -7,6 +7,7 @@
  * The server never holds keys. No disputes or vote mode in this version.
  */
 import type { RoleKey, WireProposal } from '../locks/tokenEscrow';
+import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 /**
  * ⚠ NO NEW COMMISSIONS (escrow ruling §6, 15 Nov 2026). A commission locks its reward in a script where one key is
@@ -152,7 +153,14 @@ export function cardAction(
     if (!createEnabled) return { kind: 'wait', label: COMMISSIONS_PAUSED };
     if (c.assignee && c.assignee === me && !e?.pubkeys.some((k) => k.role === 'deliverer'))
       return { kind: 'deliverer-key' };
-    if (!poster) return { kind: 'wait', label: 'Waiting for the poster to lock the reward' };
+    if (!poster)
+      return {
+        kind: 'wait',
+        // Store wording (CTO decision 1, 16 Nov 2026): a payment for work, never a "reward".
+        label: TOKEN_ROOMS_ENABLED
+          ? 'Waiting for the poster to lock the reward'
+          : 'Waiting for the poster to lock the payment',
+      };
     if (c.assignee && !e?.pubkeys.some((k) => k.role === 'deliverer'))
       return { kind: 'wait', label: `Waiting for $${c.assignee} to sign the terms` };
     return { kind: 'fund' };

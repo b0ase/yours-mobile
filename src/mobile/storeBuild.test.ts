@@ -2070,3 +2070,47 @@ describe('A8 (owner, 16 Nov 2026): no paid indexing anywhere in a store build', 
     );
   }, 60_000);
 });
+
+/**
+ * Round A7 (CTO decisions, 16 Nov 2026): the store build's wording for the A6 follow-ups. bWalletX keeps its words and
+ * behaviour; each test runs the store envs and bWalletX in child processes (the literal flags are read at import).
+ */
+const runA7 = <T>(code: string, env: Record<string, string>): T => {
+  const r = Bun.spawnSync(['bun', '-e', code], {
+    env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+  });
+  const out = r.stdout.toString().trim().split('\n').pop() ?? '';
+  if (!out) throw new Error(r.stderr.toString());
+  return JSON.parse(out) as T;
+};
+
+describe('A7.1: chat commissions say "payment" in a store build, and the form is not there', () => {
+  const code = `
+    const React = await import('react'); const { renderToStaticMarkup } = await import('react-dom/server');
+    const c = await import('./src/mobile/chat/CommissionCard.tsx'); const m = await import('./src/mobile/chat/commissions.ts');
+    const html = renderToStaticMarkup(React.createElement(c.CommissionComposer, { ticker: 'T', client: {}, initial: { assignee: null, draft: 'x' }, onClose() {}, onPosted() {}, createEnabled: true }));
+    const d = { commission: { status: 'draft', created_by: 'alice', assignee: null }, escrow: null, proposals: [], entries: [] };
+    console.log(JSON.stringify({ html, wait: m.cardAction(d, 'bob', 0, new Date(), true) }));`;
+  test('store: /commission shows only the pause line even when creating is on; the card waits for a "payment"', () => {
+    for (const env of STORE_ENVS) {
+      const r = runA7<{ html: string; wait: { label?: string } }>(code, env);
+      expect(r.html).toContain('data-commissions-paused');
+      expect(r.html).not.toMatch(/reward/i);
+      expect(r.wait).toEqual({ kind: 'wait', label: 'Waiting for the poster to lock the payment' });
+    }
+  }, 60_000);
+  test('bWalletX: the form and its words are unchanged', () => {
+    const r = runA7<{ html: string; wait: { label?: string } }>(code, {});
+    expect(r.html).toContain('placeholder="Reward, e.g. 10M"');
+    expect(r.html).not.toContain('data-commissions-paused');
+    expect(r.wait).toEqual({ kind: 'wait', label: 'Waiting for the poster to lock the reward' });
+  }, 60_000);
+  test('the form sits behind the literal TOKEN_ROOMS_ENABLED, so Rollup drops it from a store bundle', () => {
+    const s = srcOf('./chat/CommissionCard.tsx');
+    expect(s).toContain(
+      'if (TOKEN_ROOMS_ENABLED && (props.createEnabled ?? COMMISSIONS_CREATE_ENABLED))\n    return <CommissionForm {...props} createEnabled />;',
+    );
+    expect(s.match(/<CommissionForm\b/g)).toHaveLength(1);
+    expect(s).not.toMatch(/export function CommissionForm/);
+  });
+});

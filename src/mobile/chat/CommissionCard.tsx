@@ -21,6 +21,7 @@ import {
   type CommissionDetail,
 } from './commissions';
 import { acceptRelease, broadcastSettlement, escrowPubKey, fundEscrow, signTerms } from '../locks/tokenEscrowApi';
+import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
 import { partnerAddress } from '../placement/partnership/actions';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -288,10 +289,13 @@ type ComposerProps = {
 
 /**
  * What /commission opens. While new commissions are paused (escrow ruling §6) that is one calm line and a Close:
- * no form, nothing to submit, whatever the room says about its arbiter key.
+ * no form, nothing to submit, whatever the room says about its arbiter key. A store build never shows the form: a
+ * commission pays in the room's token and token rooms are off there (TOKEN_ROOMS_ENABLED, a literal, so Rollup drops
+ * CommissionForm and its wording from the store bundle; CTO decision 1, 16 Nov 2026).
  */
 export function CommissionComposer(props: ComposerProps) {
-  if (props.createEnabled ?? COMMISSIONS_CREATE_ENABLED) return <CommissionForm {...props} createEnabled />;
+  if (TOKEN_ROOMS_ENABLED && (props.createEnabled ?? COMMISSIONS_CREATE_ENABLED))
+    return <CommissionForm {...props} createEnabled />;
   return (
     <div
       className="fixed inset-0 z-[110] flex items-end justify-center"
