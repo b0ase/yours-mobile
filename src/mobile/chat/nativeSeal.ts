@@ -1029,6 +1029,16 @@ export function accountHandles(resp: unknown): string[] {
   return [...out];
 }
 
+/**
+ * Why the account's other names could not be loaded, for the seal page (never swallowed: a block bound to another of
+ * your names would otherwise just look missing).
+ */
+export function namesLoadError(e: unknown): string {
+  const status = (e as { status?: unknown } | null)?.status;
+  const code = typeof status === 'number' && status > 0 ? ` (${status})` : '';
+  return `Couldn't load your other names${code}, so blocks for them can't be shown here. Try again in a moment.`;
+}
+
 export function myFields(fields: SigField[], myHandles: string[], signedIds: Set<string>): SigField[] {
   const mine = new Set(myHandles.map((h) => h.replace(/^\$/, '').toLowerCase()).filter(Boolean));
   return fields.filter(

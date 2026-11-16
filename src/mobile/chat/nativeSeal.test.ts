@@ -7,6 +7,7 @@ import {
   NativeSealError,
   inertHtml,
   accountHandles,
+  namesLoadError,
   fetchSignedCopy,
   myFields,
   nativeRoomSteps,
@@ -882,5 +883,22 @@ describe('the fee: the sheet shows what the document costs, and the seal never p
     expect(e.message).toBe(SEAL_TOO_BIG_MESSAGE);
     expect(asked).toBe(false);
     expect(log.some((l) => /^(sign|pay)/.test(l))).toBe(false);
+  });
+});
+
+describe('the seal page never hides why your other names are missing (P0, 16 Nov 2026)', () => {
+  test('names inside a 503 body still count (the server listed them with fee_unavailable)', () => {
+    const body = {
+      error: 'Extra names are not switched on yet.',
+      code: 'fee_unavailable',
+      handles: [{ handle: 'b0asex' }, { handle: 'boase' }],
+      primary: 'boase',
+    };
+    expect(accountHandles(body).sort()).toEqual(['b0asex', 'boase']);
+  });
+  test('the reason names the status', () => {
+    expect(namesLoadError({ status: 503 })).toContain('(503)');
+    expect(namesLoadError(new Error('offline'))).toContain("Couldn't load your other names");
+    expect(namesLoadError({ status: 0 })).not.toContain('(0)');
   });
 });

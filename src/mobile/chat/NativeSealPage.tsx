@@ -33,6 +33,7 @@ import {
   inertHtml,
   fetchSignedCopy,
   accountHandles,
+  namesLoadError,
   myFields,
   nativeRoomSteps,
   nativeSignAndSeal,
@@ -318,16 +319,34 @@ export const NativeSealPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
   // Every handle on this account counts (accountHandles): a block bound to $boase is yours when you sign in as $b0asex.
+  // A failed list is never swallowed (P0, 16 Nov 2026: a 503 from the server hid the $boase block and the page only said
+  // "no signature block"): names in an error body still count, a 401 signs in again once, and anything else is shown.
   const [handles, setHandles] = useState<string[]>([]);
+  const [namesError, setNamesError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     void (async () => {
+      const list = async (c: BchatClient) => accountHandles(await c.request('GET', '/api/bitsign/me/handles'));
       try {
-        const c = await client();
-        const r = await c.request('GET', '/api/bitsign/me/handles');
-        if (live) setHandles(accountHandles(r));
-      } catch {
-        /* the session handle alone still works */
+        let names: string[];
+        try {
+          names = await list(await client());
+        } catch (e) {
+          if (!(e instanceof ChatApiError)) throw e;
+          const fromBody = accountHandles(e.data);
+          if (fromBody.length) names = fromBody;
+          else if (e.status === 401) {
+            const s = await new BchatClient(defaultHttp(isNative)).signIn(walletSigner(apiContext));
+            saveSession(s);
+            names = await list(new BchatClient(defaultHttp(isNative), s));
+          } else throw e;
+        }
+        if (live) {
+          setHandles(names);
+          setNamesError(null);
+        }
+      } catch (e) {
+        if (live) setNamesError(namesLoadError(e));
       }
     })();
     return () => {
@@ -643,7 +662,10 @@ export const NativeSealPage = () => {
           </div>
         )}
         {phase.k === 'ready' && doc && mine.length === 0 && (
-          <p className="text-[14px]">This document has no signature block for ${me}.</p>
+          <>
+            <p className="text-[14px]">This document has no signature block for ${me}.</p>
+            {namesError && <p className="text-[13px] opacity-80">{namesError}</p>}
+          </>
         )}
         {showPad && (
           <SignaturePad
