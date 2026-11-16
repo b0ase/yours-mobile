@@ -1,0 +1,325 @@
+{
+  "_doc": "Pass 2 of scripts/store-bundle-check.mjs: a UI string in the STORE build that has a STORE_BANNED_WORDS word is allowed only if it contains `match` (case-sensitive) or matches the regex `pattern` in a chunk named `chunk` (file name without Vite's hash; '*' = any). Every entry needs a reason. 'FOLLOW-UP' entries are reachable in a store build, or not traced to a gate, and still need a wording decision.",
+  "allow": [
+    {
+      "chunk": "LockScreen",
+      "match": "payout",
+      "reason": "Reviewed and allowed: Pots and locks pay the user's own locked BSV back to them on a schedule. No third party, no return, no prize."
+    },
+    {
+      "chunk": "LockScreen",
+      "match": "Payout",
+      "reason": "Reviewed and allowed: Pots and locks pay the user's own locked BSV back to them on a schedule (chart title)."
+    },
+    {
+      "chunk": "YouPage",
+      "match": "comes back the same",
+      "reason": "False positive: 'it all comes back the same' (restore from the 12 words), not 'back' in the sense of funding."
+    },
+    {
+      "chunk": "index",
+      "match": "backing up",
+      "reason": "False positive: 'backing up your data' (wallet storage backups)."
+    },
+    {
+      "chunk": "background",
+      "match": "Backing up",
+      "reason": "False positive: 'Backing up \"<account>\"' (backup progress)."
+    },
+    {
+      "chunk": "index",
+      "match": "AirDrop it",
+      "reason": "False positive: Apple AirDrop, as a way to save the encrypted backup file."
+    },
+    {
+      "chunk": "index",
+      "match": "b-Aware",
+      "reason": "Reviewed and allowed: b-Aware is the security disclosure programme; its 'rewards' are bug bounties for reporting vulnerabilities, not prizes or returns."
+    },
+    {
+      "chunk": "index",
+      "match": "reward address",
+      "reason": "Reviewed and allowed: b-Aware bug-bounty payout address (security disclosure programme)."
+    },
+    {
+      "chunk": "index",
+      "match": "The reward will go to whoever holds it",
+      "reason": "Reviewed and allowed: b-Aware bug-bounty payout address warning."
+    },
+    {
+      "chunk": "index",
+      "match": "Reward address",
+      "reason": "Reviewed and allowed: b-Aware bug-bounty payout address field."
+    },
+    {
+      "chunk": "OpnsMintPage",
+      "match": "buy … taken",
+      "reason": "False positive: Code ids ('buy', 'taken') compared inside a children expression, not text."
+    },
+    {
+      "chunk": "prompt-tab",
+      "match": "groupedPermission",
+      "reason": "False positive: A list of prompt kind ids (code), not text."
+    },
+    {
+      "chunk": "*",
+      "match": "Marketplace address for fees",
+      "reason": "Library text, not UI: @1sat/actions tool schema descriptions (agent/MCP action metadata), never rendered."
+    },
+    {
+      "chunk": "*",
+      "match": "Marketplace fee rate",
+      "reason": "Library text, not UI: @1sat/actions tool schema descriptions (agent/MCP action metadata), never rendered."
+    },
+    {
+      "chunk": "*",
+      "match": "Marketplace fee address",
+      "reason": "Library text, not UI: @1sat/actions tool schema descriptions (agent/MCP action metadata), never rendered."
+    },
+    {
+      "chunk": "*",
+      "match": "Purchase BSV21 tokens from the marketplace",
+      "reason": "Library text, not UI: @1sat/actions tool description (action metadata), never rendered."
+    },
+    {
+      "chunk": "*",
+      "match": "List an ordinal for sale on the global orderbook",
+      "reason": "Library text, not UI: @1sat/actions tool description (action metadata), never rendered."
+    },
+    {
+      "chunk": "*",
+      "match": "List an OpNS name for sale",
+      "reason": "Library text, not UI: @1sat/actions tool description (action metadata), never rendered."
+    },
+    {
+      "chunk": "BsvWallet",
+      "pattern": "^ ?Sell(?: \\$\\{[\\w.]+\\}| in lots \\(each lot is one listing, bought whole\\)| … tickets … \\$\\$\\{[\\w.]+\\})?$",
+      "reason": "Not shown in a store build: the Sell sheet renders only when SELL_ENABLED (sell/useSellSheet.tsx), the token tray's Sell only with onSell (left out where listing is off), and Tickets is not a store Wallet view."
+    },
+    {
+      "chunk": "BsvWallet",
+      "match": "Selling all avoids it",
+      "reason": "Not shown in a store build: Sell sheet text; the sheet renders only when SELL_ENABLED (sell/useSellSheet.tsx)."
+    },
+    {
+      "chunk": "BsvWallet",
+      "match": "Buyers pay a 5% indexing fee",
+      "reason": "Not shown in a store build: Sell sheet text; the sheet renders only when SELL_ENABLED (sell/useSellSheet.tsx)."
+    },
+    {
+      "chunk": "BsvWallet",
+      "pattern": "^ ?Rewards$",
+      "reason": "Not shown in a store build: Wallet › Rewards lists tokens only from the TokenBlaster list (TOKENBLASTER_ENABLED) and the no-curve ids (empty in store builds), and RewardCards renders nothing for an empty list."
+    },
+    {
+      "chunk": "BsvWallet",
+      "match": "Earned by playing",
+      "reason": "Not shown in a store build: Wallet › Rewards card text; the list is empty in a store build (see Rewards)."
+    },
+    {
+      "chunk": "MintButton",
+      "match": "Trading strategies",
+      "reason": "Not shown in a store build: Mint tile with when: () => isBWalletX()."
+    },
+    {
+      "chunk": "MintButton",
+      "match": "Package a strategy others can buy",
+      "reason": "Not shown in a store build: Mint tile with when: () => isBWalletX()."
+    },
+    {
+      "chunk": "MintButton",
+      "match": "your agent trades from",
+      "reason": "Not shown in a store build: Mint tile with when: () => isBWalletX()."
+    },
+    {
+      "chunk": "MintButton",
+      "match": "shown in the Market",
+      "reason": "Not shown in a store build: TicketMint: the Ticket step needs CHOICES.has('ticket'); mintChoicesFor leaves 'ticket' out of a store build."
+    },
+    {
+      "chunk": "MintButton",
+      "match": "Its room and Market listing",
+      "reason": "Not shown in a store build: TicketMint: the Ticket step needs CHOICES.has('ticket'); mintChoicesFor leaves 'ticket' out of a store build."
+    },
+    {
+      "chunk": "ChatPage",
+      "match": "put tickets on sale",
+      "reason": "Not shown in a store build: the token room set-up sheet opens only for a token room entry (open.entry), and openEntry refuses token rooms in a store build (ROOMS)."
+    },
+    {
+      "chunk": "ChatPage",
+      "match": "see the room and buy",
+      "reason": "Not shown in a store build: token room join panel (entry.gate); token rooms are refused in a store build (ROOMS / STORE_ROOM_NOTE)."
+    },
+    {
+      "chunk": "NameStorePage",
+      "pattern": "^Buy …(?: … for)? ?$",
+      "reason": "Not shown in a store build: BuySheet's default verb; the only store caller passes verb=\"Get\" (the Sell sheet is behind MARKET_ENABLED)."
+    },
+    {
+      "chunk": "PriceChart",
+      "match": "No market sales yet",
+      "reason": "Not shown in a store build: PriceChart is used only by the Exchange's TradeView (no Exchange in a store build)."
+    },
+    {
+      "chunk": "SendBsv21View",
+      "pattern": "^ ?Trade$",
+      "reason": "Not shown in a store build: the upstream 1Sat Trade button is patched to className=\"hidden\" in every mobile build (vite.config.mobile.ts)."
+    },
+    {
+      "chunk": "sessions",
+      "match": "Selling from chat",
+      "reason": "Not shown in a store build: agent-account trading text (agents/agentTrade.ts); AgentConversation runs actions only when MARKET_ENABLED."
+    },
+    {
+      "chunk": "sessions",
+      "match": "Paper buy",
+      "reason": "Not shown in a store build: agent-account trading text (agents/agentTrade.ts); AgentConversation runs actions only when MARKET_ENABLED."
+    },
+    {
+      "chunk": "sessions",
+      "match": "Buy failed",
+      "reason": "Not shown in a store build: agent-account trading text (agents/agentTrade.ts); AgentConversation runs actions only when MARKET_ENABLED."
+    },
+    {
+      "chunk": "index",
+      "match": "sophisticated investor",
+      "reason": "Owner decision pending: A9, investor self-certification and its [LEGAL REVIEW] placeholder (kyc/). Not built or removed in A6 by instruction."
+    },
+    {
+      "chunk": "index",
+      "match": "Investor status",
+      "reason": "Owner decision pending: A9, Settings › Identity › Investor status after KYC. Not built or removed in A6 by instruction."
+    },
+    {
+      "chunk": "index",
+      "match": "Qualify as an investor",
+      "reason": "Owner decision pending: A9, Settings › Identity › Qualify as an investor after KYC. Not built or removed in A6 by instruction."
+    },
+    {
+      "chunk": "AirdropNft",
+      "match": "airdrop",
+      "reason": "Reviewed and allowed: receiving: items sent unasked land in Wallet › Airdrops; nothing is bought, sold or earned (16 Nov review: benign)."
+    },
+    {
+      "chunk": "BMailPage",
+      "match": "airdrop",
+      "reason": "Reviewed and allowed: receiving: bMail shows and filters items sent unasked; nothing is bought, sold or earned (16 Nov review: benign)."
+    },
+    {
+      "chunk": "BsvWallet",
+      "match": "airdrop",
+      "reason": "Reviewed and allowed: receiving: the Receive screen says items sent unasked land in Wallet › Airdrops (16 Nov review: benign)."
+    },
+    {
+      "chunk": "ChatPage",
+      "match": "the reward",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): chat commissions (/commission): a poster locks a payment for a job. A payment for work, not a prize; owner to confirm the wording."
+    },
+    {
+      "chunk": "ChatPage",
+      "match": "Reward, e.g.",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): chat commissions (/commission) amount field. A payment for work, not a prize; owner to confirm the wording."
+    },
+    {
+      "chunk": "FeedTab",
+      "match": "back this post",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Feed › lock BSV on a post (the guide calls it locking behind a post). The coins stay the user's; 'back' may read as funding."
+    },
+    {
+      "chunk": "FeedTab",
+      "match": "Locking backs a",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Feed lock sheet explanation; the coins stay the user's; 'backs' may read as funding."
+    },
+    {
+      "chunk": "BmintPage",
+      "match": "keep it, send it or sell it",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): bMint Studio intro ('Keep it'). Not traced to a gate."
+    },
+    {
+      "chunk": "BsvWallet",
+      "match": "you buy or mint live here",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Media empty state (media/MediaSection.tsx). Not traced to a gate."
+    },
+    {
+      "chunk": "NftLibraryPage",
+      "match": "for sale",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): NFT library: an NFT already listed (from another wallet or an old OrdLock v1 listing) is labelled as listed. State, not an offer; not reworded."
+    },
+    {
+      "chunk": "index",
+      "match": "Listed for sale on RelayX",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): RelayX NFT recovery (NPG): shows NFTs a user listed on RelayX so they can recover them. State, not an offer."
+    },
+    {
+      "chunk": "index",
+      "match": "listed for sale on RelayX",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): RelayX words check (NPG recovery). State, not an offer."
+    },
+    {
+      "chunk": "index",
+      "match": "Your listing sold",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): notification for a sale of a listing made elsewhere on the same seed (notify/engine.ts). Not traced to a store gate."
+    },
+    {
+      "chunk": "index",
+      "match": "listing cancelled",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): history labels for past listing events on the same seed (wallet/historyEvents.ts)."
+    },
+    {
+      "chunk": "dappBrowser",
+      "match": "When a listing of yours sells",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): notification category 'Sales' (notify/notify.ts). Not traced to a store gate."
+    },
+    {
+      "chunk": "index",
+      "match": "Exchange search",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Ask b bWeb add-on 'Exchange search' (bweb/bweb.ts); the 16 Nov review did not check it under own-key mode. Not traced."
+    },
+    {
+      "chunk": "index",
+      "match": "strategies on the Exchange",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Ask b bWeb add-on description (bweb/bweb.ts). Not traced."
+    },
+    {
+      "chunk": "PortfolioScreen",
+      "match": "vs market",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio vs market (price tile): 'market' is the BSV price index, not a marketplace. Owner to confirm."
+    },
+    {
+      "chunk": "PortfolioScreen",
+      "match": "Market prices",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio screen price error: 'market prices' = BSV price data. Owner to confirm."
+    },
+    {
+      "chunk": "PortfolioScreen",
+      "match": "with no market price here",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio total note: 'market price' = BSV/token price data. Owner to confirm."
+    },
+    {
+      "chunk": "PairSheet",
+      "match": "Trading and sending need an agent account",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): CLI pairing notice (pair/CliPairConfirm.tsx). Not traced to a store gate."
+    },
+    {
+      "chunk": "background",
+      "match": "offer to sell them for you",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): a third-party site's token-balance permission prompt (services/siteTokens.ts) states what the site says it wants. The wallet sells nothing."
+    },
+    {
+      "chunk": "background",
+      "match": "Swap offer closed",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): p2p swap action description (mobile/p2p/swap/swapActions.ts); only created by the swap flow. Not traced to a store gate."
+    },
+    {
+      "chunk": "background",
+      "match": "Swap ${",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): p2p swap action description (mobile/p2p/swap/swapActions.ts). Not traced to a store gate."
+    },
+    {
+      "chunk": "prompt-tab",
+      "match": "rooms and swaps work",
+      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Prove holdings prompt from bChatX (pages/requests/ProveHoldingsRequest.tsx). Not traced to a store gate."
+    }
+  ]
+}
