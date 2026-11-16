@@ -39,7 +39,7 @@ import { ONESAT, bsv21, tokenOutputTags, tokenSpends } from '../mobile/market/la
 import { canonicalInputs, canonicalOutpoint } from './canonicalOutpoint';
 import { everyOutput } from './everyOutput';
 import { randomIdTag } from './tokenSendHeal';
-import { APP_NAME, MARKET_ENABLED } from '../mobile/storeBuild';
+import { APP_NAME, MARKET_ENABLED, SITE_MARKET_ACTIONS_ENABLED, STORE_NAME_NOTE } from '../mobile/storeBuild';
 
 /**
  * What the token-balance sheet says a site wants. Store wording (CTO decision 9, 16 Nov 2026): reading the balance
@@ -610,6 +610,8 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
         if (asked !== 'ordinal') throw new Error("keyID must be 'ordinal' for an ordinal receive key");
         mint = (ms) => `ordinal-${ms}`;
       } else if (asked === 'deploy') {
+        // Store edition (A10, R2): a site may not have the wallet deploy a fungible token, so it gets no deploy key.
+        if (!SITE_MARKET_ACTIONS_ENABLED) throw new Error(STORE_NAME_NOTE);
         mint = (ms) => `deploy-${ms}`;
       } else {
         const tokenId = asked.replace('.', '_');

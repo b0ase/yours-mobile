@@ -5,8 +5,8 @@
  * manager with every guard), and every site call reaches the wallet through that object: the in-app dApp browser and
  * bApp frames (mobile/dappBrowser.ts handleSiteCall → background createAction → walletForSiteRequest), deep links
  * (they only open a page in the dApp browser, mobile/browse/browseLink.ts), phone-paired sites and the extension's
- * content script. Only createAction is gated: a listing, purchase or cancel is a createAction, and nothing a site
- * asks for later (signAction, createSignature) can sign one without it.
+ * content script. createAction is gated (a listing, purchase or cancel is a createAction, and nothing a site asks for
+ * later, signAction or createSignature, can sign one without it), and since A10 internalizeAction too (6 below).
  *
  * In a store build (SITE_MARKET_ACTIONS_ENABLED false) a site's createAction is refused with STORE_NAME_NOTE, before
  * any inner guard, sheet or permission module runs and before anything is signed, when:
@@ -19,11 +19,23 @@
  *     would need to read is not in the request's BEEF. "Touches 1Sat assets": an ordinal, BSV-20 / BSV-21 or
  *     inscription script on an output or a spent input, an output into the ordinal / token / OpNS baskets, or a
  *     "p <scheme>" label or basket (the ones that hand the action to the asset modules).
+ * Round A10 (review R1, R2):
+ *  4. A fungible token deploy or mint is judged output by output (and on every input read from the BEEF), whatever
+ *     the module calls the whole action: BSV-21 deploy+mint / deploy+auth / mint / auth, BSV-20 deploy / mint, and
+ *     any other bsv-20 content that is not a plain transfer or burn ('token-mint').
+ *  5. Every spent coin is judged. A coin the BEEF does not carry in full (txid-only with trustSelf 'known', or left
+ *     out) is read where the wallet itself reads it, from the wallet's storage (deps.inputScript, the backstop only):
+ *     an OrdLock, a token deploy or mint, or any other 1Sat asset there is refused, and so is a coin whose script
+ *     can't be found (fails closed). A coin from one of the wallet's asset baskets is refused whether or not the site
+ *     put its transaction in the BEEF.
+ *  6. internalizeAction is gated too (storeInternalizeRefusal): a site may not have the wallet take in an OrdLock, a
+ *     token deploy or mint, or anything into the site-token deploy key (siteTokens.ts item 6). That is how a site
+ *     would stage a listing in the wallet's storage for (5).
  * Everything else (a plain payment, the document seal's OP_RETURN, sign-in and message signing, which are not
  * createAction at all) goes on to the wallet exactly as before. bWalletX never wraps the wallet with this
  * (initWallet.ts), so its sites still get the module's purchase and listing sheets.
  */
-import { Beef, Script, type WalletInterface } from '@bsv/sdk';
+import { Beef, Script, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import { BSV20, BSV21, Inscription, OrdLock, OrdLockV2 } from '@1sat/templates';
 import { ONESAT_ASSET_BASKETS, parseOneInputLabel } from '@1sat/types';
 import { STORE_NAME_NOTE } from '../mobile/storeBuild';
@@ -43,25 +55,58 @@ const ASSET_OUTPUT_BASKETS = new Set(['1sat', 'bsv21', 'bsv20', 'opns', 'p 1sat 
 /** Every basket the wallet keeps 1Sat assets in: a site spending a coin from one is an asset action. */
 export const ASSET_INPUT_BASKETS: readonly string[] = [...ONESAT_ASSET_BASKETS, 'p 1sat bsv21'];
 
-export type StoreMarketWhy = 'purchase' | 'listing' | 'cancel-listing' | 'ordlock' | 'held-asset' | 'unclassified';
+export type StoreMarketWhy =
+  | 'purchase'
+  | 'listing'
+  | 'cancel-listing'
+  | 'ordlock'
+  | 'token-mint'
+  | 'held-asset'
+  | 'unclassified';
 export type StoreMarketVerdict = { refuse: false; kind: string } | { refuse: true; why: StoreMarketWhy };
 export type StoreMarketDeps = {
   /** Canonical outpoints ('txid.vout') of every coin in the wallet's asset baskets. Throwing refuses (fails closed). */
   assetOutpoints: () => Promise<Set<string>>;
+  /**
+   * The locking script (hex) of a spent coin the request's BEEF does not carry in full, read where the wallet reads it
+   * (storedInputScript). null or throwing refuses (fails closed). Absent on the page side, which has no wallet.
+   */
+  inputScript?: (outpoint: string) => Promise<string | null>;
 };
 
 type Output = { lockingScript?: unknown; basket?: unknown; tags?: unknown; satoshis?: unknown };
 type Input = { outpoint?: unknown };
 type Args = { labels?: unknown; outputs?: unknown; inputs?: unknown; inputBEEF?: unknown };
 
-type ScriptKind = 'ordlock' | 'asset' | 'plain' | 'unreadable';
-/** What a locking script is, for this gate: the marketplace lock, a 1Sat asset, or anything else. */
+type ScriptKind = 'ordlock' | 'mint' | 'asset' | 'plain' | 'unreadable';
+
+/** The ord envelope (OP_0 OP_IF "ord") and the content type every BSV-20 and BSV-21 token inscription carries. */
+const ORD_ENVELOPE = '0063036f7264';
+const TOKEN_CONTENT = 'application/bsv-20';
+/** Token ops that only move supply that already exists. Every other op creates supply or the right to mint it. */
+const TOKEN_MOVES = new Set(['transfer', 'burn']);
+const latin1 = new TextDecoder('latin1');
+
+/**
+ * A fungible token deploy or mint (A10, R2): an ord envelope with bsv-20 content (any case) that does not decode as a
+ * plain BSV-21 or BSV-20 transfer or burn. So BSV-21 deploy+mint, deploy+auth, mint and auth, BSV-20 deploy and mint,
+ * and bsv-20 content the decoders can't read all count (fails closed).
+ */
+const tokenCreation = (s: Script, hex: string): boolean => {
+  if (!hex.toLowerCase().includes(ORD_ENVELOPE)) return false;
+  if (!latin1.decode(Uint8Array.from(s.toBinary())).toLowerCase().includes(TOKEN_CONTENT)) return false;
+  const t = BSV21.decode(s) ?? BSV20.decode(s);
+  return !t || !TOKEN_MOVES.has(String(t.tokenData.op).toLowerCase());
+};
+
+/** What a locking script is, for this gate: the marketplace lock, a token deploy or mint, a 1Sat asset, or other. */
 export const scriptKind = (hex: unknown): ScriptKind => {
   if (hex === undefined || hex === '') return 'plain';
   if (typeof hex !== 'string') return 'unreadable';
   try {
     const s = Script.fromHex(hex);
     if (OrdLock.isOrdLock(s) || OrdLockV2.isOrdLockV2(s)) return 'ordlock';
+    if (tokenCreation(s, hex)) return 'mint';
     if (BSV21.decode(s) || BSV20.decode(s) || Inscription.decode(s)) return 'asset';
     return 'plain';
   } catch {
@@ -119,6 +164,7 @@ export const storeMarketVerdict = async (args: unknown, deps: StoreMarketDeps): 
     if (Array.isArray(o?.tags) && o.tags.some(listingTag)) return refuse('ordlock');
     const kind = scriptKind(o?.lockingScript);
     if (kind === 'ordlock') return refuse('ordlock');
+    if (kind === 'mint') return refuse('token-mint');
     if (kind === 'asset') touches = true;
     if (kind === 'unreadable') unreadable = true;
     const b = normBasket(o?.basket);
@@ -147,21 +193,40 @@ export const storeMarketVerdict = async (args: unknown, deps: StoreMarketDeps): 
     }
     const kind = sourceKind(op);
     if (kind === 'ordlock') return refuse('ordlock');
+    if (kind === 'mint') return refuse('token-mint');
     if (kind === null) unread.push(op);
     else if (kind === 'asset') touches = true;
     else if (kind === 'unreadable') unreadable = true;
   }
   // A coin the module was told to spend from outside (purchase of a listing) must be in the BEEF to be read.
   if (external.some((op) => unread.includes(op))) return refuse('unclassified');
-  if (unread.length) {
+  // A coin from one of the wallet's asset baskets, whether or not the site also put its transaction in the BEEF (A10).
+  const coins = spent.filter((op): op is string => op !== null);
+  if (coins.length) {
     let held: Set<string>;
     try {
       held = await deps.assetOutpoints();
     } catch {
       return refuse('unclassified');
     }
-    if (unread.some((op) => held.has(op))) return refuse('held-asset');
+    if (coins.some((op) => held.has(op))) return refuse('held-asset');
   }
+  // A coin the BEEF does not carry in full: the wallet reads its script from its own storage (wallet-toolbox
+  // validateRequiredInputs, txid-only with trustSelf 'known' or left out), so the backstop reads it there too (A10, R1).
+  if (deps.inputScript)
+    for (const op of unread) {
+      let hex: string | null;
+      try {
+        hex = await deps.inputScript(op);
+      } catch {
+        return refuse('unclassified');
+      }
+      const kind = hex === null ? 'unreadable' : scriptKind(hex);
+      if (kind === 'ordlock') return refuse('ordlock');
+      if (kind === 'mint') return refuse('token-mint');
+      if (kind === 'asset') return refuse('held-asset');
+      if (kind === 'unreadable') return refuse('unclassified');
+    }
 
   // The module's own classification, of the request as sent and as the inner guards hand it on.
   const kinds: string[] = [];
@@ -220,28 +285,107 @@ export const walletAssetOutpoints =
     return out;
   };
 
+/** Where the wallet reads a spent coin's script when the BEEF does not carry it: its own output row, else the raw tx. */
+export type StoredScripts = {
+  outputScript: (txid: string, vout: number) => Promise<ArrayLike<number> | string | null | undefined>;
+  rawTx: (txid: string) => Promise<ArrayLike<number> | null | undefined>;
+};
+
+/**
+ * deps.inputScript for the backstop, in wallet-toolbox's order (resolveInputScript): the wallet's own output row for
+ * the outpoint, else the stored raw transaction (getProvenOrRawTx, which a txid-only BEEF entry reads). null when
+ * neither has it: the gate then refuses.
+ */
+export const storedInputScript =
+  (r: StoredScripts) =>
+  async (outpoint: string): Promise<string | null> => {
+    const [txid, v] = outpoint.split('.');
+    const vout = Number(v);
+    const own = await r.outputScript(txid, vout);
+    if (own !== null && own !== undefined && own.length > 0)
+      return typeof own === 'string' ? own : Utils.toHex(Array.from(own));
+    const raw = await r.rawTx(txid);
+    if (!raw || raw.length === 0) return null;
+    return Transaction.fromBinary(Array.from(raw)).outputs[vout]?.lockingScript.toHex() ?? null;
+  };
+
+type InternalizeOutput = { outputIndex?: unknown; insertionRemittance?: { customInstructions?: unknown } };
+
+/** The site-token deploy receive key (siteTokens.ts item 6: keyID 'deploy-<ms>') named in an insertion's record. */
+const deployKeyRecord = (ci: unknown): boolean => {
+  if (typeof ci !== 'string') return false;
+  try {
+    const keyID = (JSON.parse(ci) as { keyID?: unknown })?.keyID;
+    return typeof keyID === 'string' && /^\s*deploy\b/i.test(keyID);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Store build, a site's internalizeAction (A10, R1 + R2): why it is refused, or null. Each output the site asks the
+ * wallet to take in is read from the transaction: an OrdLock (a listing staged in the wallet's storage), a token
+ * deploy or mint, or a record naming the site-token deploy key is refused. So is a transaction or output the gate
+ * can't read (fails closed). Anything else (a payment, a token or ordinal delivery) goes on as before.
+ */
+export const storeInternalizeRefusal = (args: unknown): StoreMarketWhy | null => {
+  if (!args || typeof args !== 'object') return null;
+  const a = args as { tx?: unknown; outputs?: unknown };
+  const outputs = Array.isArray(a.outputs) ? (a.outputs as InternalizeOutput[]) : [];
+  if (outputs.length === 0) return null;
+  let tx: Transaction;
+  try {
+    tx = Transaction.fromAtomicBEEF(Array.from(a.tx as ArrayLike<number>));
+  } catch {
+    return 'unclassified';
+  }
+  for (const o of outputs) {
+    if (deployKeyRecord(o?.insertionRemittance?.customInstructions)) return 'token-mint';
+    const out = typeof o?.outputIndex === 'number' ? tx.outputs[o.outputIndex] : undefined;
+    if (!out) return 'unclassified';
+    const kind = scriptKind(out.lockingScript.toHex());
+    if (kind === 'ordlock') return 'ordlock';
+    if (kind === 'mint') return 'token-mint';
+    if (kind === 'unreadable') return 'unclassified';
+  }
+  return null;
+};
+
 type AnyFn = (...args: unknown[]) => Promise<unknown>;
 
 /**
  * Wrap the site wallet (in place, like the other guards): a site's createAction goes through storeMarketRefusal first,
- * and a refusal throws STORE_MARKET_REFUSAL without calling into the wallet. The wallet's own calls pass straight on.
+ * and its internalizeAction through storeInternalizeRefusal; a refusal throws STORE_MARKET_REFUSAL without calling into
+ * the wallet. The wallet's own calls pass straight on.
  */
 export function guardStoreMarketActions<T extends object>(
   wallet: T,
   deps: StoreMarketDeps & { adminOriginator: string },
 ): T {
-  const w = wallet as T & { createAction?: AnyFn };
+  const w = wallet as T & { createAction?: AnyFn; internalizeAction?: AnyFn };
   const create = w.createAction;
-  if (typeof create !== 'function') return wallet;
-  w.createAction = async (args: unknown, originator?: unknown) => {
-    if (originator !== deps.adminOriginator) {
-      const why = await storeMarketRefusal(args, deps);
-      if (why) {
-        console.warn(`[store] refused a site's ${why} action from ${String(originator)}`);
-        throw new Error(STORE_MARKET_REFUSAL);
+  if (typeof create === 'function')
+    w.createAction = async (args: unknown, originator?: unknown) => {
+      if (originator !== deps.adminOriginator) {
+        const why = await storeMarketRefusal(args, deps);
+        if (why) {
+          console.warn(`[store] refused a site's ${why} action from ${String(originator)}`);
+          throw new Error(STORE_MARKET_REFUSAL);
+        }
       }
-    }
-    return create.call(wallet, args, originator);
-  };
+      return create.call(wallet, args, originator);
+    };
+  const internalize = w.internalizeAction;
+  if (typeof internalize === 'function')
+    w.internalizeAction = async (args: unknown, originator?: unknown) => {
+      if (originator !== deps.adminOriginator) {
+        const why = storeInternalizeRefusal(args);
+        if (why) {
+          console.warn(`[store] refused a site's ${why} internalize from ${String(originator)}`);
+          throw new Error(STORE_MARKET_REFUSAL);
+        }
+      }
+      return internalize.call(wallet, args, originator);
+    };
   return wallet;
 }

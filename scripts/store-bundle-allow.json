@@ -281,17 +281,17 @@
     {
       "chunk": "BavatarMintSheet",
       "match": " · bWalletX ",
-      "reason": "On-chain id, not app wording: a bAvatar's inscribed name is '$handle · bWalletX #n' (mintBavatar.ts bavatarLabel), and pictureSource.ts isBavatarItem finds the collection by exactly that text. A store-minted bAvatar named '· bWallet #n' would drop out of the collection. Kept for the owner to decide (store-gates-a9.md)."
+      "reason": "On-chain name (A10, R4): mintBavatar.ts bavatarLabel '$handle · bWalletX #n' is the inscription's MAP name, and pictureSource.ts isBavatarItem finds the collection by exactly that text, so a store-minted bAvatar named '· bWallet #n' would drop out of it. Not on the mint sheet: since A10 its title line and image alt show APP_NAME ('$handle · bWallet #n', BavatarMintSheet.tsx shownLabel). Shown: as the item's name wherever the wallet lists the user's NFTs (the on-chain name). Owner decision (collection name), store-gates-a10.md."
     },
     {
       "chunk": "BavatarMintSheet",
       "match": "fill=\"#f1ead9\">bWalletX ",
-      "reason": "On-chain content, not app wording: the bAvatar artwork's caption 'bWalletX #n', inscribed into the SVG with the name above (mintBavatar.ts). Same collection identity as the name. Kept for the owner to decide (store-gates-a9.md)."
+      "reason": "Inscribed artwork (A10, R4): the caption 'bWalletX #n' drawn into the bAvatar SVG (mintBavatar.ts bavatarMintSvg), which is the on-chain content itself. Shown: as part of the picture, in the mint sheet's preview and wherever the bAvatar image appears (NFTs, avatar). It is not separate app wording; changing it changes the collection's art. Owner decision (collection name), store-gates-a10.md."
     },
     {
       "chunk": "BavatarMintSheet",
       "pattern": "^bWalletX$",
-      "reason": "On-chain metadata, not app wording: the bAvatar edition field ('Founding 1,000' or 'bWalletX', mintBavatar.ts) written into the inscription's MAP. Same collection identity as the name. Kept for the owner to decide (store-gates-a9.md)."
+      "reason": "On-chain metadata only (A10, R4): the bAvatar edition field ('Founding 1,000' or 'bWalletX', mintBavatar.ts) written into the inscription's MAP. Not shown: no screen in src reads a bAvatar's edition (the sheet's 'Founding 1,000' line is its own text); an outside explorer showing MAP fields would. Same collection identity as the name. Owner decision, store-gates-a10.md."
     },
     {
       "chunk": "bwalletx-glyph",

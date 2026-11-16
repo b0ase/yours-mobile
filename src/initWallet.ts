@@ -127,7 +127,7 @@ import { createInFlight, makeBackupPush, type InFlight } from './services/pushVi
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
 import { ENVELOPES_ENABLED, SITE_MARKET_ACTIONS_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
-import { guardStoreMarketActions, walletAssetOutpoints } from './services/storeMarketGate';
+import { guardStoreMarketActions, storedInputScript, walletAssetOutpoints } from './services/storeMarketGate';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
 import {
   clearLearnedOwnBackends,
@@ -1260,13 +1260,28 @@ export const initWallet = async (
   );
   // Store edition, outermost of all: a site's purchase, listing or cancelled listing (as @1sat/permission-module
   // classifies it), any OrdLock action, and any 1Sat-asset action the module can't classify are refused with "Not
-  // available in this edition" before any sheet or signature (services/storeMarketGate.ts, CTO + CEO A9). bWalletX
-  // never wraps it (SITE_MARKET_ACTIONS_ENABLED is a literal, so Rollup drops the gate there).
+  // available in this edition" before any sheet or signature (services/storeMarketGate.ts, CTO + CEO A9), and so are a
+  // token deploy or mint and a site's internalizeAction of a listing or deploy (A10). bWalletX never wraps it
+  // (SITE_MARKET_ACTIONS_ENABLED is a literal, so Rollup drops the gate there).
   const wallet = SITE_MARKET_ACTIONS_ENABLED
     ? siteWallet
     : guardStoreMarketActions(siteWallet, {
         adminOriginator: ADMIN_ORIGINATOR,
         assetOutpoints: walletAssetOutpoints(baseWallet),
+        // A spent coin the site's BEEF does not carry in full is read where the toolbox reads it (A10, R1): this
+        // account's output row, else the stored raw tx. Straight from the active provider, never through the locks.
+        inputScript: storedInputScript({
+          outputScript: async (txid, vout) => {
+            if (!storage.isActiveStorageProvider()) return undefined;
+            const { userId } = await storage.getAuth();
+            const sp = storage.getActive() as unknown as {
+              findOutputs: (a: { partial: object }) => Promise<{ lockingScript?: number[] }[]>;
+            };
+            const rows = await sp.findOutputs({ partial: { userId, txid, vout } });
+            return rows.length === 1 ? rows[0].lockingScript : undefined;
+          },
+          rawTx: localRawTx,
+        }),
       });
   // Upgrade migration (C1): grants a site already holds for a reserved protocol are removed. Idempotent.
   await revokeReservedProtocolGrants(permissionStore, ADMIN_ORIGINATOR)
