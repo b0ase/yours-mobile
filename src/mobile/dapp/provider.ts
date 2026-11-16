@@ -11,7 +11,7 @@ import { CustomListenerName, type RequestEventDetail, type RequestParams } from 
 import { CWI } from '../../cwi';
 import { announceWallet } from '../../brand/discovery';
 import { CONFIRM_USER_CALL, LAST_VERIFICATION_CALL } from '../siteGate';
-import { SUBSCRIPTIONS_ENABLED, appNameFor, isBWalletX } from '../storeBuild';
+import { APP_NAME, SUBSCRIPTIONS_ENABLED, isBWalletX } from '../storeBuild';
 import { isBitsignAction } from '../pair/bitsignCalls';
 import { BCHAT_ORIGINS } from '../../services/bchatOrigin';
 import bIcon from '../../../assets/bwallet-ext/icon128.png?inline';
@@ -166,6 +166,6 @@ if ((BCHAT_ORIGINS as readonly string[]).includes(location.origin))
 
 // Discovery (wallet-connect spec §3): the in-app browser has exactly one wallet; say which.
 announceWallet(
-  { name: appNameFor(), icon: isBWalletX() ? bxIcon : bIcon, rdns: 'space.bwallet.mobile', kind: 'in-app' },
+  { name: APP_NAME, icon: isBWalletX() ? bxIcon : bIcon, rdns: 'space.bwallet.mobile', kind: 'in-app' },
   CWI,
 );
