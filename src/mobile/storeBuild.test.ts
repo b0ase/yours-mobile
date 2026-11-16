@@ -1388,3 +1388,75 @@ describe('every fee to bCorp goes through bcorpFeeAddress, so a store build char
     expect(c).toMatch(/const loadCharge = useCallback\(\(\) => \{\s*if \(!ROOMS \|\| !entryKey\) return;/);
   });
 });
+
+// ── Third round (16 Nov 2026): launch curves and example strategies are not in a store bundle ──────────────────
+describe('launch curves and example trading strategies are bWalletX only', () => {
+  const read = (env: Record<string, string>) => {
+    const code = `
+      const c = await import('./src/lib/curves/curves.ts'); const t = await import('./src/mobile/tokens/token.ts');
+      const s = await import('./src/mobile/storeBuild.ts');
+      console.log(JSON.stringify({ curves: s.CURVE_COINS_ENABLED, blurbs: Object.values(c.PRESETS).map((p) => p.blurb),
+        labels: Object.values(c.PRESETS).map((p) => p.label), copy: t.TOKEN_COPY }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as { curves: boolean; blurbs: string[]; labels: string[]; copy: string };
+  };
+  test('store build: no curve coins, no preset wording, no promise of a room', () => {
+    for (const env of STORE_ENVS) {
+      const t = read(env);
+      expect(t.curves).toBe(false);
+      expect(t.blurbs).toEqual(['', '', '']);
+      expect(t.copy).toBe('Create a BSV-21 token.');
+    }
+  });
+  test('bWalletX build: the presets and the token line are what they were', () => {
+    const t = read({});
+    expect(t.curves).toBe(true);
+    expect(t.blurbs).toEqual([
+      '1¢ to 19¢. $100M if all sell.',
+      '1¢ to $1.99. $1B if all sell.',
+      '1¢ to $19.99. $10B if all sell.',
+    ]);
+    expect(t.labels).toEqual(['Standard', 'Big', 'Huge']);
+    expect(t.copy).toBe('Create a BSV-21 token. Every token has a room for its holders.');
+  });
+  test('Mint a token: a store build shows no curve picker, checks no curve, and deploys with no curve', () => {
+    const m = srcOf('./tokens/TokenMint.tsx');
+    expect(m).toMatch(/\{CURVE_COINS_ENABLED && \(\s*<CurvePicker/);
+    expect(m).toContain('(CURVE_COINS_ENABLED ? curveProblem(curve, curveOk, supplyNum) : null);');
+    expect(m).toContain('curve: CURVE_COINS_ENABLED ? curve : null,');
+    expect(m).toContain('curve={CURVE_COINS_ENABLED ? curve : null}');
+    expect(m).toMatch(/\.\.\.\(CURVE_COINS_ENABLED\s*\? \[\{ address: 'Curve \(fixed\)'/);
+    expect(m).toContain(
+      "{STORE_BUILD ? '' : ' Its room and Market listing can be set up later (Settings › My tokens).'}",
+    );
+    // The picker is used nowhere else a store build reaches without the flag.
+    expect(m.match(/<CurvePicker/g)).toHaveLength(1);
+  });
+  test('the picker and the example strategies are swapped for empty stand-ins in store builds', async () => {
+    const v = readFileSync(new URL('../../vite.config.mobile.ts', import.meta.url), 'utf8');
+    expect(v).toMatch(
+      /MOBILE_SWAPS\[resolve\(__dirname, 'src\/mobile\/curves\/CurvePicker\.tsx'\)\] = resolve\(\s*__dirname,\s*'src\/mobile\/curves\/CurvePicker\.store\.tsx'/,
+    );
+    expect(v).toMatch(
+      /MOBILE_SWAPS\[resolve\(__dirname, 'src\/mobile\/strategies\/examples\/index\.ts'\)\] = resolve\(\s*__dirname,\s*'src\/mobile\/strategies\/examples\/index\.store\.ts'/,
+    );
+    const picker = srcOf('./curves/CurvePicker.store.tsx');
+    expect(picker).not.toMatch(/Fair launch|if all sell|\$\d|permanent/i);
+    expect(picker).toContain('export const CurvePicker = (');
+    expect(picker.match(/\}\) => null;/g)).toHaveLength(2);
+    expect(picker).toContain('export const CurveChart = (');
+    const st = await import('./strategies/examples/index.store');
+    expect(st.EXAMPLE_STRATEGIES).toEqual([]);
+    expect(st.EXAMPLE_FILES).toEqual({});
+    expect(srcOf('./strategies/examples/index.store.ts')).not.toMatch(/\.json|Buy|MNEE/);
+    // bWalletX keeps the real ones: the full picker and all eight examples.
+    expect(srcOf('./curves/CurvePicker.tsx')).toContain('Fair launch: max');
+    const real = await import('./strategies/examples');
+    expect(real.EXAMPLE_STRATEGIES).toHaveLength(8);
+    expect(JSON.stringify(real.EXAMPLE_FILES)).toContain('Buy MNEE in $5 steps');
+    // Same exports, so the stand-ins type-check wherever the real files are imported.
+    expect(Object.keys(st).sort()).toEqual(Object.keys(real).sort());
+  });
+});

@@ -272,19 +272,37 @@ export const PRESETS: Record<PresetId, Preset> = {
   standard: {
     id: 'standard',
     label: 'Standard',
-    blurb: '1¢ to 19¢. $100M if all sell.',
+    // Shown in the launch curve picker, which a store build does not have: not in its bundle (literal env check).
+    blurb:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? ''
+        : '1¢ to 19¢. $100M if all sell.',
     curve: makeCurve({ preset: 'standard', ceilingRaiseUsd: 100_000_000 }),
   },
   big: {
     id: 'big',
     label: 'Big',
-    blurb: '1¢ to $1.99. $1B if all sell.',
+    // Shown in the launch curve picker, which a store build does not have: not in its bundle (literal env check).
+    blurb:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? ''
+        : '1¢ to $1.99. $1B if all sell.',
     curve: makeCurve({ preset: 'big', ceilingRaiseUsd: 1_000_000_000 }),
   },
   huge: {
     id: 'huge',
     label: 'Huge',
-    blurb: '1¢ to $19.99. $10B if all sell.',
+    // Shown in the launch curve picker, which a store build does not have: not in its bundle (literal env check).
+    blurb:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? ''
+        : '1¢ to $19.99. $10B if all sell.',
     curve: makeCurve({ preset: 'huge', ceilingRaiseUsd: 10_000_000_000 }),
   },
 };

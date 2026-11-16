@@ -20,6 +20,7 @@ import { CurvePicker } from '../curves/CurvePicker';
 import { ListAfterMint } from '../sell/ListAfterMint';
 import { STANDARD_SUPPLY, curveProblem } from '../curves/curveChoice';
 import { DEFAULT_PRESET, maxPrice, standardCurve, usd, type Curve, type PresetId } from '../../lib/curves';
+import { CURVE_COINS_ENABLED, STORE_BUILD } from '../storeBuild';
 
 /**
  * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
@@ -97,7 +98,8 @@ export const TokenMint = ({
     const err =
       validateToken(form) ??
       (hasReturnsWording(`${form.name ?? ''} ${form.description ?? ''}`) ? RETURNS_BLOCK : null) ??
-      curveProblem(curve, curveOk, supplyNum);
+      // A store build mints a plain token: no launch curve, nothing to accept (CURVE_COINS_ENABLED).
+      (CURVE_COINS_ENABLED ? curveProblem(curve, curveOk, supplyNum) : null);
     setError(err ?? '');
     if (!err) setConfirming(true);
   };
@@ -114,7 +116,7 @@ export const TokenMint = ({
         icon: iconOutpoint,
         feeSats: cost.feeSats,
         ...(map ? { map } : {}),
-        curve,
+        curve: CURVE_COINS_ENABLED ? curve : null,
       });
       void showOnWallet(chromeStorageService, token.tokenId);
       setConfirming(false);
@@ -167,7 +169,12 @@ export const TokenMint = ({
         >
           {token.tokenId} <ExternalLink size={12} />
         </a>
-        <ListAfterMint tokenId={token.tokenId} symbol={token.ticker} dec={token.decimals} curve={curve} />
+        <ListAfterMint
+          tokenId={token.tokenId}
+          symbol={token.ticker}
+          dec={token.decimals}
+          curve={CURVE_COINS_ENABLED ? curve : null}
+        />
         <button
           type="button"
           onClick={() => go('chat', token)}
@@ -278,21 +285,23 @@ export const TokenMint = ({
         </p>
       )}
 
-      <CurvePicker
-        curve={curve}
-        onChange={setCurve}
-        accepted={curveOk}
-        onAccept={setCurveOk}
-        tokenSupply={supplyNum}
-        onUseStandardSupply={() => set('supply')(STANDARD_SUPPLY)}
-      />
+      {CURVE_COINS_ENABLED && (
+        <CurvePicker
+          curve={curve}
+          onChange={setCurve}
+          accepted={curveOk}
+          onAccept={setCurveOk}
+          tokenSupply={supplyNum}
+          onUseStandardSupply={() => set('supply')(STANDARD_SUPPLY)}
+        />
+      )}
 
       <p className="text-xs" style={{ color: '#bbb' }}>
         Estimated network fee: {money(cost.networkSats, exchangeRate)}
         {cost.txCount > 1 ? ' (2 transactions: icon + token)' : ''}
         {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Total ≈{' '}
-        {moneyWithSats(cost.totalSats, exchangeRate)}. Its room and Market listing can be set up later (Settings › My
-        tokens).
+        {moneyWithSats(cost.totalSats, exchangeRate)}.
+        {STORE_BUILD ? '' : ' Its room and Market listing can be set up later (Settings › My tokens).'}
       </p>
       {error && (
         <div className="flex flex-col gap-1.5">
@@ -323,7 +332,9 @@ export const TokenMint = ({
         lineItems={[
           // SendConfirmation truncates labels over 16 characters: keep them short.
           { address: `$${form.ticker.trim()}`.slice(0, 16), amount: `${form.supply.trim() || '0'} tokens` },
-          { address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` },
+          ...(CURVE_COINS_ENABLED
+            ? [{ address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` }]
+            : []),
           ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
           { address: 'Network fee', amount: `${money(cost.networkSats, exchangeRate)}` },
           ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }] : []),
