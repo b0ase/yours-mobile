@@ -503,3 +503,119 @@ describe('A10 R6: pass 3 reads the app name in any casing; the lowercase CLI / p
     expect(s).toContain('    const m = productNameHit(text);');
   });
 });
+
+describe('A11 R7–R9: inscription envelopes are read chunk by chunk, every one, by their content type', () => {
+  /** The same script with the envelope's "ord" pushed another way (OP_PUSHDATA1 / 2 / 4). */
+  const ordAs = (hex: string, push: string) => {
+    expect(hex.startsWith('0063036f7264')).toBe(true);
+    return `0063${push}6f7264${hex.slice(12)}`;
+  };
+  const PD1 = '4c03';
+  const PD2 = '4d0300';
+  const PD4 = '4e03000000';
+  const tokenEnvelope = (json: string, type = 'application/bsv-20', tag = '51') =>
+    `0063036f7264${tag}${new Script().writeBin(Utils.toArray(type, 'utf8')).toHex()}00${new Script()
+      .writeBin(Utils.toArray(json, 'utf8'))
+      .toHex()}68`;
+  const deployJson = '{"p":"bsv-20","op":"deploy+mint","sym":"MEME","amt":"1000000000","dec":"0"}';
+  const transferEnvelope = BSV21.transfer(TOKEN, 10n).lock().toHex();
+
+  test('the reviewer’s PUSHDATA1 / PUSHDATA2 probes are refused as token-mint (page check and backstop)', async () => {
+    for (const push of [PD1, PD2, PD4]) {
+      const PROBES = [
+        [out(image, { basket: '1sat' }), out(ordAs(deployTb, push))],
+        [out(p2pkh(me), { basket: '1sat' }), out(ordAs(deploy21, push))],
+        [out(p2pkh(me), { basket: '1sat' }), out(ordAs(mint20, push))],
+      ];
+      for (const outputs of PROBES) {
+        const args = { description: 'x', outputs };
+        expect(await storeMarketRefusal(args)).toBe('token-mint');
+        expect(await storeMarketRefusal(args, staged)).toBe('token-mint');
+        const { wallet, calls } = backstop(staged);
+        await expect(wallet.createAction(args, SITE)).rejects.toThrow(STORE_MARKET_REFUSAL);
+        expect(calls).toEqual([]);
+      }
+    }
+  });
+  test('the decoders read the PUSHDATA1 form as a deploy+mint (why it matters)', () => {
+    expect(BSV21.decode(Script.fromHex(ordAs(deploy21, PD1)))?.tokenData.op).toBe('deploy+mint');
+  });
+  test('two envelopes in one output, a transfer first and then a deploy+mint: token-mint', async () => {
+    const two = transferEnvelope + tokenEnvelope(deployJson) + p2pkh(me);
+    expect(BSV21.decode(Script.fromHex(two))?.tokenData.op).toBe('transfer'); // the first envelope only
+    expect(scriptKind(two)).toBe('mint');
+    expect(await storeMarketRefusal({ description: 'x', outputs: [out(image, { basket: '1sat' }), out(two)] })).toBe(
+      'token-mint',
+    );
+  });
+  test('field 1 pushed as a number, and a content type with parameters or in capitals, still count', () => {
+    expect(scriptKind(tokenEnvelope(deployJson, 'application/bsv-20', '0101') + p2pkh(me))).toBe('mint');
+    expect(scriptKind(tokenEnvelope(deployJson, 'Application/BSV-20; charset=utf-8'))).toBe('mint');
+  });
+  test('a text or HTML inscription that mentions application/bsv-20 passes (R9)', async () => {
+    for (const type of ['text/plain', 'text/html', 'text/markdown']) {
+      const post = buildInscriptionScript(
+        lockTo(me),
+        Utils.toArray('How tokens work: application/bsv-20 is the type, {"op":"deploy+mint"}', 'utf8'),
+        type,
+      ).toHex();
+      expect(scriptKind(post)).toBe('asset');
+      expect(await storeMarketRefusal({ description: 'Post', outputs: [out(post, { basket: '1sat' })] })).toBeNull();
+    }
+    // A bsv-20 content type on another field (not field 1) is not the content type either.
+    const extra = new Script().writeBin(Utils.toArray('application/bsv-20', 'utf8')).toHex();
+    const other = tokenEnvelope(deployJson, 'text/plain').replace(/^(0063036f7264.*?)00/, `$1${'59'}${extra}00`);
+    expect(other).toContain(`59${extra}`);
+    expect(scriptKind(other)).toBe('asset');
+  });
+  test('a transfer, an image and a plain script keep their kind; a two-transfer output is not a mint', () => {
+    expect(scriptKind(transfer21(me))).toBe('asset');
+    expect(scriptKind(ordAs(transfer21(me), PD1))).toBe('asset');
+    expect(scriptKind(transferEnvelope + transferEnvelope + p2pkh(me))).toBe('asset');
+    expect(scriptKind(image)).toBe('asset');
+    expect(scriptKind(p2pkh(me))).toBe('plain');
+  });
+  test('a malformed envelope (truncated push, no OP_ENDIF, field without a value) is refused as unclassified', async () => {
+    const noEnd = tokenEnvelope(deployJson).slice(0, -2);
+    const truncated = '0063036f7264514c05ab';
+    const noValue = '0063036f726451';
+    for (const bad of [noEnd, truncated, noValue]) {
+      expect(scriptKind(bad)).toBe('unreadable');
+      expect(await storeMarketRefusal({ description: 'x', outputs: [out(bad)] })).toBe('unclassified');
+    }
+    const { ordEnvelopes } = await import('../services/storeMarketGate');
+    expect(ordEnvelopes(Script.fromHex(transferEnvelope + tokenEnvelope(deployJson))).length).toBe(2);
+  });
+  test('every A10 probe is still refused', async () => {
+    for (const [, outputs] of R2_PROBES)
+      expect(await storeMarketRefusal({ description: 'x', ...(outputs as object) })).toBe('token-mint');
+    for (const args of [BUY_TXID_ONLY, BUY_NO_BEEF, BUY_NO_BEEF_FOO])
+      expect(await storeMarketRefusal(args, staged)).toBe('ordlock');
+  });
+  const code = `const m = await import('./src/mobile/dappBrowser.ts');
+    const face = []; const sent = [];
+    m.__setSiteGateForTests({ check: async (_o, c) => { face.push(c); return 'biometric'; }, lastVerification: () => null }, () => 5000);
+    m.initDappBrowser(() => ({ runtime: { sendMessage: async (msg) => { sent.push(msg.action); return { success: true, data: { txid: 'ab' } }; } } }));
+    const args = { description: 'x', outputs: [{ lockingScript: '${p2pkh(me)}', satoshis: 1, basket: '1sat' }, { lockingScript: '${ordAs(deploy21, PD1)}', satoshis: 1 }] };
+    const r = await m.handleSiteCall('https://www.bchatx.com', 'https://www.bchatx.com/r', 'createAction', args);
+    console.log(JSON.stringify({ r, face, sent }));`;
+  test('store: the PUSHDATA1 launch is refused before Face ID; bWalletX: Face ID then the wallet, as before', () => {
+    for (const env of STORE_ENVS)
+      expect(run(code, env)).toEqual({
+        r: { success: false, error: 'Not available in this edition' },
+        face: [],
+        sent: [],
+      });
+    expect(run(code, {})).toEqual({
+      r: { success: true, data: { txid: 'ab' } },
+      face: ['createAction'],
+      sent: ['createAction'],
+    });
+  }, 90_000);
+  test('the parser has no byte search left (R9)', () => {
+    const s = srcOf('../services/storeMarketGate.ts');
+    expect(s).not.toContain("'0063036f7264'");
+    expect(s).not.toContain('latin1');
+    expect(s).toContain('export const ordEnvelopes = (s: Script): Envelope[] => {');
+  });
+});
