@@ -1356,3 +1356,35 @@ describe('store wording and data, second round', () => {
     expect(mods.find((m) => m[1] === 'showcase')?.[4]).toBe('false');
   });
 });
+
+describe('every fee to bCorp goes through bcorpFeeAddress, so a store build charges none', () => {
+  test('the OpNS per-name service fee: no address in a store build, whatever the env says', async () => {
+    const { opnsFeeAddress, serviceFeeUsd } = await import('./names/opnsBatch');
+    expect(opnsFeeAddress('1FeeAddress', true)).toBe('');
+    expect(opnsFeeAddress('1FeeAddress', false)).toBe('1FeeAddress');
+    expect(opnsFeeAddress('', false)).toBe('');
+    expect(serviceFeeUsd(3, opnsFeeAddress('1FeeAddress', true))).toBe(0);
+    expect(serviceFeeUsd(3, opnsFeeAddress('1FeeAddress', false))).toBe(3);
+    expect(srcOf('./names/opnsBatch.ts')).toContain(
+      "export const OPNS_FEE_ADDRESS: string = opnsFeeAddress(import.meta.env?.VITE_OPNS_FEE_ADDRESS ?? '');",
+    );
+  });
+  test('the build-time fee addresses (mint, market, sell, room setup) are all read through bcorpFeeAddress', () => {
+    expect(srcOf('./mint/mint.ts')).toMatch(/const configured = bcorpFeeAddress\(typeof __MINT_FEE_ADDRESS__/);
+    expect(srcOf('./market/fee.ts')).toMatch(/const configured = bcorpFeeAddress\(typeof __MARKET_FEE_ADDRESS__/);
+    expect(srcOf('./sell/sell.ts')).toMatch(/const feeAddress = bcorpFeeAddress\(typeof __MARKET_FEE_ADDRESS__/);
+    expect(srcOf('./tokens/roomSetup.ts')).toContain('const a = bcorpFeeAddress(address, store);');
+    // The only other reader of a fee define: our own service payees, data only behind SUBSCRIPTIONS_ENABLED.
+    expect(srcOf('./pots/pots.ts')).toMatch(
+      /ownServicePayees = \(\): readonly ServicePayee\[\] =>\s*SUBSCRIPTIONS_ENABLED\s*\?/,
+    );
+    // No other file reads a *_FEE_ADDRESS define.
+    const readers = ['./mint/mint.ts', './market/fee.ts', './sell/sell.ts', './tokens/roomSetup.ts', './pots/pots.ts'];
+    for (const f of readers) expect(srcOf(f)).toMatch(/__[A-Z_]+_FEE_ADDRESS__/);
+  });
+  test('a room charges per message only where token rooms are (not in a store build)', () => {
+    const c = srcOf('./tabs/ChatPage.tsx');
+    expect(c).toContain('const ROOMS = tokenRoomsEnabled();');
+    expect(c).toMatch(/const loadCharge = useCallback\(\(\) => \{\s*if \(!ROOMS \|\| !entryKey\) return;/);
+  });
+});
