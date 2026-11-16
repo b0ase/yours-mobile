@@ -101,6 +101,8 @@ export const isSpecOpBasket = (basket: unknown): boolean => {
 
 export const isReservedBasket = (basket: unknown): boolean => {
   if (typeof basket !== 'string') return false;
+  // Not plain ASCII: a database that compares text without accents could read it as one of the names below.
+  if (!/^[\x20-\x7e]*$/.test(basket)) return true;
   const b = basket.trim().toLowerCase();
   if (!b) return false;
   return RESERVED.has(b) || b.startsWith('admin') || b.startsWith('bwalletx.') || isSpecOpBasket(b);

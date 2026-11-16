@@ -157,6 +157,31 @@ describe('the real initWallet wiring', () => {
     expect(mine.actions).toEqual([]);
   });
 
+  // Review 15 Nov 2026: the toolbox reads a 64-hex label as a command; this one, with 'abort', aborts every held action.
+  test('a special-operation name is refused to a site as a label, a tag or a basket, and so is a name that is not ASCII', async () => {
+    const NOSEND = 'ac6b20a3bb320adafecd637b25c84b792ad828d3aa510d05dc841481f664277d';
+    const BALANCE = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8';
+    for (const originator of [SITE, undefined]) {
+      await expect(ctx.wallet.listActions({ labels: [NOSEND, 'abort'] } as never, originator)).rejects.toThrow(
+        RESERVED_LABEL_REFUSAL,
+      );
+      await expect(
+        ctx.wallet.listActions({ labels: [` ${NOSEND.toUpperCase()} `, 'abort'] } as never, originator),
+      ).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(ctx.wallet.createAction(pay([NOSEND]) as never, originator)).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(ctx.wallet.listOutputs({ basket: 'my app', tags: [BALANCE] } as never, originator)).rejects.toThrow(
+        RESERVED_LABEL_REFUSAL,
+      );
+      await expect(ctx.wallet.listOutputs({ basket: BALANCE } as never, originator)).rejects.toThrow(/reserved/);
+      await expect(ctx.wallet.listOutputs({ basket: 'd\u00e9fault' } as never, originator)).rejects.toThrow(/reserved/);
+      await expect(ctx.wallet.createAction(pay(['d\u00e9fault']) as never, originator)).rejects.toThrow(/plain ASCII/);
+    }
+    // The wallet itself may still run the operation (its own held-action review does).
+    const { ADMIN_ORIGINATOR } = await import('./initWallet');
+    const own = await ctx.wallet.listActions({ labels: [NOSEND] } as never, ADMIN_ORIGINATOR);
+    expect(own.actions).toEqual([]);
+  });
+
   test('G2 holds on the real wallet, and the 1sat module probe answers with the fixed key', async () => {
     await expect(
       ctx.wallet.getPublicKey({ protocolID: [1, 'P 1sat'], keyID: 'x', counterparty: 'self' } as never, SITE),

@@ -2,11 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import { guardLabelsOnSpend } from './labelsOnSpend';
-import { guardReservedBaskets } from './reservedBaskets';
+import { guardReservedBaskets, isReservedBasket } from './reservedBaskets';
 import {
   guardReservedLabels,
   isReservedLabel,
   isReservedLabelProtocol,
+  isSpecOpName,
+  RESERVED_NAME_REFUSAL,
+  TAG_METHODS,
   LABEL_METHODS,
   RESERVED_LABEL_PREFIXES,
   RESERVED_LABEL_REFUSAL,
@@ -29,7 +32,9 @@ const PAID = `bmail paid ${TXID}.0 ${'cd'.repeat(20)}`;
 describe('reserved action labels', () => {
   // Changing the list is a security decision: bump RESERVED_LABELS_VERSION and this test together.
   test('the list is pinned', () => {
-    expect(RESERVED_LABELS_VERSION).toBe(1);
+    expect(RESERVED_LABELS_VERSION).toBe(2);
+    // v2: special-operation names (any 64-hex label or tag) and names that are not printable ASCII.
+    expect(TAG_METHODS).toEqual(['listOutputs', 'createAction', 'internalizeAction']);
     expect(RESERVED_LABEL_PREFIXES).toEqual(['bmail']);
     expect(LABEL_METHODS).toEqual(['createAction', 'internalizeAction', 'listActions']);
   });
@@ -196,6 +201,100 @@ describe('reserved action labels', () => {
     expect(await revokeReservedLabelGrants(store as never, ADMIN)).toBe(1);
     expect(grants.length).toBe(3);
     expect(await revokeReservedLabelGrants(store as never, ADMIN)).toBe(0);
+  });
+
+  // The toolbox reads some 64-hex names as commands, not names (its "special operations"): on listActions the label
+  // ac6b… with 'abort' aborts every held (noSend) action, the wallet's own included; 97d4… with 'unfail' requeues
+  // failed ones; on listOutputs a 64-hex tag or basket rewrites the query. No site may send one.
+  describe('special-operation names and names that are not plain ASCII', () => {
+    const NOSEND = 'ac6b20a3bb320adafecd637b25c84b792ad828d3aa510d05dc841481f664277d';
+    const FAILED = '97d4eb1e49215e3374cc2c1939a7c43a55e95c7427bf2d45ed63e3b4e0c88153';
+    const REVIEW = 'a496e747fc3ad5fabdd4ae8f91184e71f87539bd3d962aa2548942faaaf0047a';
+    const BALANCE = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8';
+
+    test("the toolbox's own special-operation names are all 64-hex names, and every one is refused", async () => {
+      const { sdk } = await import('@bsv/wallet-toolbox-client');
+      const names = Object.entries(sdk as unknown as Record<string, unknown>)
+        .filter(([k, v]) => k.startsWith('specOp') && typeof v === 'string')
+        .map(([, v]) => v as string);
+      expect(names.length).toBeGreaterThanOrEqual(7);
+      for (const n of [...names, NOSEND, FAILED, REVIEW, BALANCE]) {
+        expect(isSpecOpName(n)).toBe(true);
+        expect(isSpecOpName(` ${n.toUpperCase()} `)).toBe(true);
+        expect(isReservedLabel(n)).toBe(true);
+        expect(isReservedLabelProtocol([1, `action label ${n}`])).toBe(true);
+      }
+      expect(isSpecOpName('ab'.repeat(31))).toBe(false);
+      expect(isSpecOpName(`${NOSEND}0`)).toBe(false);
+    });
+
+    test('abort-all and its kin: refused on every label method, and as a tag', () => {
+      expect(reservedLabelRefusal('listActions', { labels: [NOSEND, 'abort'] })).toContain(RESERVED_LABEL_REFUSAL);
+      expect(reservedLabelRefusal('listActions', { labels: [FAILED.toUpperCase(), 'unfail'] })).toContain(
+        RESERVED_LABEL_REFUSAL,
+      );
+      expect(reservedLabelRefusal('createAction', { labels: [REVIEW] })).toContain(RESERVED_LABEL_REFUSAL);
+      expect(reservedLabelRefusal('internalizeAction', { labels: [NOSEND] })).toContain(RESERVED_LABEL_REFUSAL);
+      expect(reservedLabelRefusal('listOutputs', { basket: 'my app', tags: [BALANCE] })).toContain(
+        RESERVED_LABEL_REFUSAL,
+      );
+      expect(reservedLabelRefusal('createAction', { outputs: [{ tags: ['ok'] }, { tags: [BALANCE] }] })).toContain(
+        RESERVED_LABEL_REFUSAL,
+      );
+      expect(
+        reservedLabelRefusal('internalizeAction', {
+          outputs: [{ insertionRemittance: { basket: 'b', tags: [BALANCE] } }],
+        }),
+      ).toContain(RESERVED_LABEL_REFUSAL);
+      // The control words alone are ordinary labels: they do nothing without the special-operation name.
+      expect(reservedLabelRefusal('listActions', { labels: ['abort', 'unfail'] })).toBeNull();
+      expect(reservedLabelRefusal('listOutputs', { basket: 'my app', tags: ['release', 'all'] })).toBeNull();
+    });
+
+    test('a label or tag that is not printable ASCII is refused (it could fold onto a reserved name in a database)', () => {
+      for (const odd of ['bmáil stamp x', 'ｂmail x', 'tok​ens', 'a\tb', 'emoji 🙂', 'défault'])
+        for (const args of [{ labels: [odd] }, { outputs: [{ tags: [odd] }] }])
+          expect(reservedLabelRefusal('createAction', args)).toContain(RESERVED_NAME_REFUSAL);
+      expect(reservedLabelRefusal('listOutputs', { basket: 'x', tags: ['défault'] })).toContain(RESERVED_NAME_REFUSAL);
+      expect(isReservedLabelProtocol([1, 'action label défault'])).toBe(true);
+      for (const fine of ['tokenblaster', 'Game Round #12 (final)', 'a_b-c.d:e/f', 'action time from 1763000000000'])
+        expect(reservedLabelRefusal('createAction', { labels: [fine], outputs: [{ tags: [fine] }] })).toBeNull();
+    });
+
+    test('a basket that is not printable ASCII is reserved, as a special-operation basket already is', () => {
+      for (const b of ['défault', 'ｄefault', '1sat​', 'bsv21\t']) expect(isReservedBasket(b)).toBe(true);
+      expect(isReservedBasket(BALANCE)).toBe(true);
+      expect(isReservedBasket('my app basket')).toBe(false);
+    });
+
+    test('the guard: a site is refused before the wallet is reached; the wallet itself is not', async () => {
+      const { m, calls } = mock();
+      const w = guardReservedLabels(m, ADMIN) as unknown as Wallet;
+      await expect(w.listActions({ labels: [NOSEND, 'abort'] }, SITE)).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(w.createAction({ labels: [REVIEW] }, SITE)).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(w.createAction({ outputs: [{ tags: [BALANCE] }] }, undefined)).rejects.toThrow(
+        RESERVED_LABEL_REFUSAL,
+      );
+      await expect(w.listOutputs({ basket: 'my app', tags: [BALANCE] }, SITE)).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(w.listOutputs({ basket: 'my app', tags: ['défault'] }, SITE)).rejects.toThrow(RESERVED_NAME_REFUSAL);
+      await expect(w.ensureLabelAccess({ originator: SITE, label: NOSEND })).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(
+        w.ensureProtocolPermission({ originator: SITE, protocolID: [1, `action label ${NOSEND}`] }),
+      ).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      expect(calls).toEqual([]);
+      await w.listActions({ labels: [NOSEND] }, ADMIN);
+      await w.listOutputs({ basket: 'my app', tags: ['fine'] }, SITE);
+      expect(calls.length).toBe(1);
+    });
+
+    test('labelsOnSpend never puts one on a payment sheet: it is refused', async () => {
+      const { m } = mock();
+      const deps = { adminOriginator: ADMIN, normalize: (o: string) => o };
+      const w = guardLabelsOnSpend(guardReservedLabels(m, ADMIN), deps) as unknown as Wallet;
+      await expect(w.ensureLabelAccess({ originator: SITE, label: NOSEND, usageType: 'apply' })).rejects.toThrow(
+        RESERVED_LABEL_REFUSAL,
+      );
+    });
   });
 
   // Where the guard sits. Every outside caller (the extension's content script, the phone's in-app browser, bApp
