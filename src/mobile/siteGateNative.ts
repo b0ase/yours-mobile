@@ -1,6 +1,7 @@
 /**
  * The phone's side of the site gate (siteGate.ts): the YoursNative deviceOwnerAuth prompt and the Settings switch.
- * Phones only; the web wallet, Desktop and the extension never gate (docs/BIOMETRIC-GATE.md).
+ * The site gate runs on phones only; the web wallet, Desktop and the extension never gate (docs/BIOMETRIC-GATE.md).
+ * nativeAuth answers 'unavailable' off a phone, so the seal's approval (chat/sealApproval.ts) asks for the wallet password.
  */
 import { canDeviceOwnerAuth } from './deviceOwnerAuth';
 import { loadPrefs } from './settings/prefs';
