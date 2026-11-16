@@ -307,10 +307,23 @@ export const PAID_CALLS_ENABLED: boolean = !(
 );
 export const paidCallsEnabled = (store = STORE_BUILD) => !store;
 
-/** Wallet › Mint choices: tokens and media in a store build (no bCorp fee); no chatroom tickets. */
+/**
+ * Fungible token minting (a BSV-21 deploy: Mint › A token or memecoin, tickets, a domain token, the personal token,
+ * the coin launcher, a bMovies claim): bWalletX only (CTO + CEO, 16 Nov 2026, review S8). A store build mints only
+ * non-fungible items (pictures, music, video, documents, 3D, bAvatars). deployBsv21 (tickets/mintTicket.ts) and
+ * deployPersonalToken (names/claimPersonal.ts) refuse in a store build. Literal env check so Rollup drops the
+ * TokenMint and TicketMint steps and their Mint tiles from a store bundle.
+ */
+export const FUNGIBLE_MINT_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+export const fungibleMintEnabled = (store = STORE_BUILD) => !store;
+
+/** Wallet › Mint choices: media only in a store build (no tokens, no chatroom tickets; S8). */
 export type MintChoice = 'ticket' | 'token' | 'media';
-export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] =>
-  store ? ['token', 'media'] : ['ticket', 'token', 'media'];
+export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] => (store ? ['media'] : ['ticket', 'token', 'media']);
 
 /**
  * Paid token indexing ("Index $X · $n", the 1Sat indexer deposit; in bWalletX "Set up $X's room"): bWalletX only.

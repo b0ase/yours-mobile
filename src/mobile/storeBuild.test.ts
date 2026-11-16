@@ -73,7 +73,8 @@ describe('storeBuild', () => {
     expect(tokenRoomsEnabled(false)).toBe(true);
     expect(paidFeaturesEnabled(true)).toBe(false);
     expect(paidFeaturesEnabled(false)).toBe(true);
-    expect(mintChoicesFor(true)).toEqual(['token', 'media']);
+    // S8 (CTO + CEO, 16 Nov 2026): no fungible token minting in a store build.
+    expect(mintChoicesFor(true)).toEqual(['media']);
     expect(mintChoicesFor(false)).toEqual(['ticket', 'token', 'media']);
   });
 
@@ -1837,7 +1838,11 @@ describe('A2: Ask b describes the store edition as it is', () => {
         'This edition is a wallet: it does not buy, sell or trade, and it has no Market or Exchange.',
       );
       expect(g).toContain('Chat: Chatrooms, DMs and Calls.');
-      expect(g).toContain('or a token with a fixed supply that goes to your own wallet.');
+      // S8: NFTs only in a store build.
+      expect(g).toContain(
+        '- Mint: the Mint button creates an NFT from a photo, video, song or document. The cost is shown before you confirm.',
+      );
+      expect(g).not.toMatch(/fixed supply/);
       expect(g).toContain('b agent: use your own AI provider key');
       expect(g).toContain("say there's no charge to talk to b");
     }

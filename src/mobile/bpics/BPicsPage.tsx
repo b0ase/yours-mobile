@@ -1345,7 +1345,8 @@ const MintPicSheet = ({ onClose, onMinted }: { onClose: () => void; onMinted: (m
                     </>
                   ) : (
                     <span className="text-xs" style={{ color: MUTED }}>
-                      Choose a picture to see the price.
+                      {/* "cost" in a store build: no price wording on a mint there (S8). */}
+                      {MARKET_ENABLED ? 'Choose a picture to see the price.' : 'Choose a picture to see the cost.'}
                     </span>
                   )}
                 </div>

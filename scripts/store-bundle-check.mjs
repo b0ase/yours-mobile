@@ -158,6 +158,15 @@ export const BANNED = [
   'What they sell',
   'is on sale for',
   ' · Play to earn',
+  // S8 (CTO + CEO, 16 Nov 2026): no fungible token minting; NFT mints with no price or sale wording.
+  'A token or memecoin',
+  'Your own token, fixed supply',
+  'Mint tickets',
+  'Mint a token',
+  'Original price (sats)',
+  'Choose a picture to see the price',
+  'Mint names in bulk',
+  'list at tier prices',
   // A9 (coordinator, 16 Nov 2026): the investor self-certification placeholders must not ship. Removed in
   // fix/hide-investor-status (cb3949e9); never allowlist these.
   'LEGAL REVIEW',

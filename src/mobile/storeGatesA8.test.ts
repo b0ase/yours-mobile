@@ -334,3 +334,100 @@ describe('S6: allowlist reasons for the agent trading text name the real gate', 
       expect(s.find((a) => a.match === m)?.reason).toContain('CliPairConfirm offers no trade scope');
   });
 });
+
+describe('S8 (CTO + CEO, 16 Nov 2026): no fungible token minting in a store build', () => {
+  // A context whose every property access is counted and rejects: a refusal must come before the wallet is asked.
+  const trap = () => {
+    const seen = { n: 0 };
+    const ctx = new Proxy({}, { get: () => ((seen.n += 1), () => Promise.reject(new Error('reached the wallet'))) });
+    return { ctx: ctx as never, seen };
+  };
+  const opts = { symbol: 'TEST', amount: '10', decimals: 0, icon: null, feeSats: 0 };
+  test('deployBsv21 refuses in a store build before the wallet, fee or curve is touched; bWalletX goes on', async () => {
+    const { deployBsv21 } = await import('./tickets/mintTicket');
+    const s = trap();
+    expect(deployBsv21(s.ctx, opts, true)).rejects.toThrow('Not available in this edition');
+    expect(s.seen.n).toBe(0);
+    const x = trap();
+    await expect(deployBsv21(x.ctx, opts, false)).rejects.toThrow();
+    expect(x.seen.n).toBeGreaterThan(0);
+  });
+  test('deployPersonalToken refuses in a store build before any lookup; bWalletX reaches its own checks', async () => {
+    const { deployPersonalToken } = await import('./names/claimPersonal');
+    const s = trap();
+    const input = { identityAddress: '1A', name: '', supply: '10' };
+    await expect(deployPersonalToken(s.ctx, input, true)).rejects.toThrow('Not available in this edition');
+    expect(s.seen.n).toBe(0);
+    await expect(deployPersonalToken(trap().ctx, input, false)).rejects.toThrow('That name cannot be a token ticker');
+  });
+  test('the default is the edition flag, and every BSV-21 deploy in the app goes through these two', () => {
+    expect(srcOf('./tickets/mintTicket.ts')).toContain(
+      '  store = STORE_BUILD,\n): Promise<string> {\n  // Fungible token minting is bWalletX only',
+    );
+    expect(srcOf('./tickets/mintTicket.ts')).toMatch(
+      /\n {2}if \(store\) throw new Error\(STORE_NAME_NOTE\);\n {2}const withFee =/,
+    );
+    expect(srcOf('./names/claimPersonal.ts')).toMatch(
+      / {2}store = STORE_BUILD,\n\): Promise<PersonalLink> \{\n(?: {2}\/\/[^\n]*\n)+ {2}if \(store\) throw new Error\(STORE_NAME_NOTE\);\n {2}const ticker =/,
+    );
+    // deployBsv21Mint (the @1sat deploy) is called only inside those two functions.
+    const grep = Bun.spawnSync(['grep', '-rln', '--exclude=*.test.ts', 'deployBsv21Mint.execute', 'src'], {
+      cwd: ROOT,
+    }).stdout.toString();
+    expect(grep.trim().split('\n').sort()).toEqual([
+      'src/mobile/names/claimPersonal.ts',
+      'src/mobile/tickets/mintTicket.ts',
+    ]);
+  });
+  const code = `const s = await import('./src/mobile/storeBuild.ts'); const g = await import('./src/mobile/agent/guide.ts');
+    console.log(JSON.stringify({ choices: s.mintChoicesFor(), flag: s.FUNGIBLE_MINT_ENABLED, fn: s.fungibleMintEnabled(),
+      mint: g.BWALLET_GUIDE.split('\\n').find((l) => l.startsWith('- Mint:')) }));`;
+  test('store: Mint offers media only, and Ask b describes NFTs only', () => {
+    for (const env of STORE_ENVS)
+      expect(run(code, env)).toEqual({
+        choices: ['media'],
+        flag: false,
+        fn: false,
+        mint: '- Mint: the Mint button creates an NFT from a photo, video, song or document. The cost is shown before you confirm.',
+      });
+  }, 60_000);
+  test('bWalletX: tickets, tokens and media, and its Mint line, unchanged', () => {
+    expect(run(code, {})).toEqual({
+      choices: ['ticket', 'token', 'media'],
+      flag: true,
+      fn: true,
+      mint: '- Mint: the Mint button creates an NFT from a photo, video, song or document, or "Start a room" mints a ticket token (name, supply, optional event date and price). The cost (network fee, plus any clearly labelled mint fee) is shown before confirming.',
+    });
+  }, 60_000);
+  test('the Mint sheet drops the token and ticket steps, tiles and titles with the literal flag', () => {
+    const m = srcOf('./mint/MintButton.tsx');
+    expect(m).toContain("{FUNGIBLE_MINT_ENABLED && step === 'token' && CHOICES.has('token') && (");
+    expect(m).toContain("{FUNGIBLE_MINT_ENABLED && step === 'ticket' && CHOICES.has('ticket') && (");
+    expect(m).toContain(": FUNGIBLE_MINT_ENABLED && step === 'ticket'\n                ? 'Mint tickets'");
+    expect(m).toMatch(
+      /\.\.\.\(FUNGIBLE_MINT_ENABLED\s*\? \[\s*\{\s*id: 'tickets',[\s\S]*?id: 'coin',[\s\S]*?\]\s*: \[\]\),/,
+    );
+  });
+  test('NFT mints carry no price or sale wording in a store build', () => {
+    expect(srcOf('./mint/MintButton.tsx')).toContain("{MARKET_ENABLED && kindSel === 'music' && (");
+    expect(srcOf('./bpics/BPicsPage.tsx')).toContain(
+      "{MARKET_ENABLED ? 'Choose a picture to see the price.' : 'Choose a picture to see the cost.'}",
+    );
+    expect(srcOf('./mint/ServiceBrand.tsx')).toContain("else if (MINT_PREVIEWS_ENABLED && id === 'sell')");
+    const b = srcOf('./bmint/BmintPage.tsx');
+    expect(b).toContain("const OpnsMintPage = MARKET_ENABLED ? lazy(() => import('../names/OpnsMintPage')) : null;");
+    expect(b).toContain('  return MARKET_ENABLED && can;');
+  });
+  test('the fungible-mint and NFT price wording is banned in a store bundle', () => {
+    for (const s of [
+      'A token or memecoin',
+      'Your own token, fixed supply',
+      'Mint tickets',
+      'Original price (sats)',
+      'Choose a picture to see the price',
+      'Mint names in bulk',
+      'list at tier prices',
+    ])
+      expect(BANNED).toContain(s);
+  });
+});
