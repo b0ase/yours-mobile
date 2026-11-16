@@ -227,16 +227,6 @@
       "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio total note: 'market price' = BSV/token price data. Owner to confirm."
     },
     {
-      "chunk": "PairSheet",
-      "match": "Trading and sending need an agent account",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): CLI pairing notice (pair/CliPairConfirm.tsx). Not traced to a store gate."
-    },
-    {
-      "chunk": "background",
-      "match": "offer to sell them for you",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): a third-party site's token-balance permission prompt (services/siteTokens.ts) states what the site says it wants. The wallet sells nothing."
-    },
-    {
       "chunk": "background",
       "match": "Swap offer closed",
       "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): p2p swap action description (mobile/p2p/swap/swapActions.ts); only created by the swap flow. Not traced to a store gate."
@@ -245,11 +235,6 @@
       "chunk": "background",
       "match": "Swap ${",
       "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): p2p swap action description (mobile/p2p/swap/swapActions.ts). Not traced to a store gate."
-    },
-    {
-      "chunk": "prompt-tab",
-      "match": "rooms and swaps work",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Prove holdings prompt from bChatX (pages/requests/ProveHoldingsRequest.tsx). Not traced to a store gate."
     }
   ]
 }

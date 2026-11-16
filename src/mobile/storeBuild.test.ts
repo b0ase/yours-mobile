@@ -2293,3 +2293,48 @@ describe('A7.6: the Ask b "Exchange search" add-on is not offered in a store bui
     );
   }, 60_000);
 });
+
+describe('A7.8, A7.9, A7.11: pairing, site token balance and prove-holdings sheets in a store build', () => {
+  test('site token balance sheet: reading the balance only in a store build; bWalletX word for word', () => {
+    const code = `const t = await import('./src/services/siteTokens.ts'); console.log(JSON.stringify(t.balanceAccessText('example.com', '$TEST')));`;
+    for (const env of STORE_ENVS)
+      expect(runA7<string>(code, env)).toBe(
+        'example.com wants to see your $TEST balance. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+      );
+    expect(runA7<string>(code, {})).toBe(
+      'example.com wants to see your $TEST balance, so it can offer to sell them for you. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+    );
+    expect(srcOf('../services/siteTokens.ts')).toContain('description: balanceAccessText(site, name),');
+  }, 60_000);
+  test('prove holdings: "so the site can check what you hold" in a store build; bWalletX keeps rooms and swaps', () => {
+    const code = `const React = await import('react'); const { renderToStaticMarkup } = await import('react-dom/server');
+      const p = await import('./src/pages/requests/ProveHoldingsRequest.tsx');
+      const { ThemeProvider } = await import('./src/contexts/providers/ThemeProvider.tsx');
+      const page = React.createElement(p.ProveHoldingsRequestPage, { request: { originator: 'bchatx.com', requestID: 'r1' }, onResponse() {} });
+      console.log(JSON.stringify(renderToStaticMarkup(React.createElement(ThemeProvider, null, page))));`;
+    for (const env of STORE_ENVS) {
+      const html = runA7<string>(code, env);
+      expect(html).toContain(
+        'bchatx.com can then see which wallet addresses hold your tokens, so the site can check what you hold. Your wallet signs a message for each one. Nothing is spent.',
+      );
+      expect(html).not.toMatch(/swap|rooms/i);
+    }
+    expect(runA7<string>(code, {})).toContain(
+      'bchatx.com can then see which wallet addresses hold your tokens, so your rooms and swaps work. Your wallet signs a message for each one. Nothing is spent.',
+    );
+  }, 60_000);
+  test('CLI pairing: "Sending needs an agent account" in a store build, by the literal MARKET_ENABLED', () => {
+    expect(srcOf('./pair/CliPairConfirm.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Trading and sending need an agent account \(Settings › Agents\)\. Turn on Mint NFTs to pair this account for minting only\.'\s*: 'Sending needs an agent account \(Settings › Agents\)\. Turn on Mint NFTs to pair this account for minting only\.'\}/,
+    );
+  });
+  test('the store lines pass the store word list', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Sending needs an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for minting only.',
+      'x wants to see your $T balance. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+      'x can then see which wallet addresses hold your tokens, so the site can check what you hold.',
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+  });
+});

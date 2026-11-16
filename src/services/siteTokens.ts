@@ -39,6 +39,16 @@ import { ONESAT, bsv21, tokenOutputTags, tokenSpends } from '../mobile/market/la
 import { canonicalInputs, canonicalOutpoint } from './canonicalOutpoint';
 import { everyOutput } from './everyOutput';
 import { randomIdTag } from './tokenSendHeal';
+import { MARKET_ENABLED } from '../mobile/storeBuild';
+
+/**
+ * What the token-balance sheet says a site wants. Store wording (CTO decision 9, 16 Nov 2026): reading the balance
+ * only, with no "offer to sell" (MARKET_ENABLED is a literal, so bWalletX's sentence is not in a store bundle).
+ */
+export const balanceAccessText = (site: string, name: string): string =>
+  MARKET_ENABLED
+    ? `${site} wants to see your ${name} balance, so it can offer to sell them for you. It sees how many you hold and where, nothing else. It cannot move them without asking you.`
+    : `${site} wants to see your ${name} balance. It sees how many you hold and where, nothing else. It cannot move them without asking you.`;
 
 /** The receive-key request protocol (a name only: the key answered is a wallet token key, see above). */
 export const SITE_TOKEN_RECEIVE: WalletProtocol = [1, 'bwalletx token receive'];
@@ -564,7 +574,7 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
             baskets: [
               {
                 basket: name,
-                description: `${site} wants to see your ${name} balance, so it can offer to sell them for you. It sees how many you hold and where, nothing else. It cannot move them without asking you.`,
+                description: balanceAccessText(site, name),
                 scope: 'token',
                 value: tokenId,
               },
