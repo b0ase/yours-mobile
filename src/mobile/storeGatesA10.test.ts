@@ -466,3 +466,40 @@ describe('A10 R4: the bAvatar mint sheet shows APP_NAME; the on-chain name is un
     for (const r of [name, art, edition]) expect(r.reason).not.toContain('not app wording:');
   });
 });
+
+describe('A10 R6: pass 3 reads the app name in any casing; the lowercase CLI / protocol spelling is let through', () => {
+  test('other casings of the app name fail; domains, ids and the lowercase spelling pass', async () => {
+    // @ts-expect-error plain .mjs script, no type declarations
+    const { productNameHit, PRODUCT_NAME_IDS } = await import('../../scripts/store-bundle-check.mjs');
+    const hit = (t: string) => (productNameHit(t) as RegExpMatchArray | null)?.[0] ?? null;
+    for (const [t, m] of [
+      ['Unlock bWalletX first', 'bWalletX'],
+      ['UNLOCK BWALLETX', 'BWALLETX'],
+      ['open bwalletX now', 'bwalletX'],
+      ['Open BWalletX', 'BWalletX'],
+      // Every match is read: a CLI spelling first does not hide the app name after it.
+      ['Run `bwalletx login`, then open bWalletX', 'bWalletX'],
+    ])
+      expect(hit(t)).toBe(m);
+    for (const t of [
+      'Run `bwalletx login` again.',
+      'npx bwalletx serve',
+      'bwalletx token receive',
+      'bwalletx.trust-site',
+      'bwalletx://space/',
+      'https://www.npmjs.com/package/bwalletx',
+      'https://web.bwalletx.com/x',
+      'support@bwalletx.com',
+      'BWALLETX.COM',
+      'bWalletXRequest',
+      'bWallet',
+    ])
+      expect(hit(t)).toBeNull();
+    expect([...PRODUCT_NAME_IDS]).toEqual(['bwalletx']);
+  });
+  test('scanProductName uses it', () => {
+    const s = readFileSync(new URL('../../scripts/store-bundle-check.mjs', import.meta.url), 'utf8');
+    expect(s).toContain('export const PRODUCT_NAME = /(?<![\\w@.-])bwalletx(?![\\w-]|\\.com)/i;');
+    expect(s).toContain('    const m = productNameHit(text);');
+  });
+});

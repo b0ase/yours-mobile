@@ -21,7 +21,8 @@
  *     fails: every string, template part and JSX text of every JS chunk (read with TypeScript's parser) and the text
  *     of every HTML / JSON / SVG / manifest file. Domains and paymails (bwalletx.com, web.bwalletx.com, @bwalletx.com)
  *     never match; anything else that has to stay (an on-chain id, a signed protocol text) goes in the allowlist's
- *     "productName" list with its reason.
+ *     "productName" list with its reason. Any casing counts (A10); only the lowercase CLI / protocol spelling
+ *     "bwalletx" is let through (PRODUCT_NAME_IDS).
  */
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
@@ -276,10 +277,21 @@ export const loadAllow = (path = join(HERE, 'store-bundle-allow.json')) => {
 };
 
 /**
- * Pass 3: the app named "bWalletX". Not a domain or paymail (followed by ".com", or preceded by "@", "." or "-"), and
- * not part of a longer identifier (bWalletXRequest).
+ * Pass 3: the app named "bWalletX", in any casing (A10, R6: "BWALLETX" or "bwalletX" fail too). Not a domain or
+ * paymail (followed by ".com", or preceded by "@", "." or "-"), and not part of a longer identifier (bWalletXRequest).
  */
-export const PRODUCT_NAME = /(?<![\w@.-])bWalletX(?![\w-]|\.com)/;
+export const PRODUCT_NAME = /(?<![\w@.-])bwalletx(?![\w-]|\.com)/i;
+/**
+ * Spellings pass 3 lets through: the all-lowercase "bwalletx" is the CLI command and npm package (`bwalletx login`,
+ * `npx bwalletx serve`), and the protocol, storage and scheme ids ('bwalletx token receive', bwalletx.trust-site,
+ * bwalletx://space/). The app name is never written that way. Any other casing is the app name and fails.
+ */
+export const PRODUCT_NAME_IDS = new Set(['bwalletx']);
+/** The first match in `text` that names the app (every match is read, not only the first), or null. */
+export const productNameHit = (text) => {
+  for (const m of text.matchAll(new RegExp(PRODUCT_NAME.source, 'gi'))) if (!PRODUCT_NAME_IDS.has(m[0])) return m;
+  return null;
+};
 
 /** scripts/store-bundle-allow.json "productName": [{ chunk, match | pattern, reason }], checked as loadAllow checks. */
 export const loadNameAllow = (path = join(HERE, 'store-bundle-allow.json')) => {
@@ -321,7 +333,7 @@ export const scanProductName = async (dir, allow = loadNameAllow()) => {
   const hits = [];
   const used = new Set();
   const check = (file, text) => {
-    const m = PRODUCT_NAME.exec(text);
+    const m = productNameHit(text);
     if (!m) return;
     const chunk = chunkName(file);
     const ok = allow.findIndex((a) => (a.chunk === '*' || a.chunk === chunk) && a.test(text));
