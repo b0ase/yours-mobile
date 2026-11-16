@@ -63,7 +63,7 @@ export const IdentityVerification = () => {
       const m = e instanceof Error ? e.message : 'Import failed';
       setMsg(
         /verification first|not_verified/i.test(m)
-          ? 'bit-sign has no approved verification for you yet. Finish Veriff first.'
+          ? 'bChatX has no approved verification for you yet. Finish Veriff first.'
           : m,
       );
     } finally {
@@ -81,7 +81,7 @@ export const IdentityVerification = () => {
       setMsg(
         c.synced
           ? `Signed. Valid until ${day(c.expiresAt)}.`
-          : `Signed and saved on this device (valid until ${day(c.expiresAt)}). bit-sign did not record it yet.`,
+          : `Signed and saved on this device (valid until ${day(c.expiresAt)}). bChatX did not record it yet.`,
       );
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Signing failed');
@@ -113,12 +113,12 @@ export const IdentityVerification = () => {
         <p className="text-[11px]" style={{ color: gray }}>
           {kyc.country ? `Country ${kyc.country}` : 'Country not recorded'} ·{' '}
           {kyc.over18 === 'true' ? 'Over 18' : kyc.over18 === 'false' ? 'Under 18' : 'Age not recorded'} · Expires{' '}
-          {day(kyc.expiresAt)}. Certified by bit-sign; you choose which fields to reveal to an app.
+          {day(kyc.expiresAt)}. Certified by bChatX; you choose which fields to reveal to an app.
         </p>
       ) : (
         <>
           <p className="text-[11px]" style={{ color: gray }}>
-            Verify once with bit-sign (Veriff), then import a certificate into this wallet. It holds only verified,
+            Verify once with bChatX (Veriff), then import a certificate into this wallet. It holds only verified,
             over-18, country and level, never your name or document.
           </p>
           <div className="flex gap-2">
@@ -171,7 +171,7 @@ export const IdentityVerification = () => {
               </p>
               <p className="text-[11px]" style={{ color: gray }}>
                 Choose the category that applies to you. You sign the statement with your identity key; it is valid for
-                12 months. bit-sign records what you signed but does not verify it.
+                12 months. bChatX records what you signed but does not verify it.
               </p>
               {statements === null && <Loader2 size={14} className="animate-spin" color={gray} />}
               {statements?.map((s) => (
@@ -204,7 +204,7 @@ export const IdentityVerification = () => {
                   </label>
                   {choice.placeholder && (
                     <p className="text-[11px]" style={{ color: '#F97066' }}>
-                      bit-sign's current statements couldn't be loaded, so this placeholder can't be signed. Try again
+                      bChatX's current statements couldn't be loaded, so this placeholder can't be signed. Try again
                       when you're online.
                     </p>
                   )}
