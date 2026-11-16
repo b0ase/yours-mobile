@@ -56,7 +56,14 @@ export const ACCOUNT_DATA_VERSION = 2;
 export const DEFAULT_STORAGE_REMOTE_URL = 'https://wallet.1sat.app';
 
 /** bWalletX support (Settings > Support). */
-export const SUPPORT_EMAIL_URL = 'mailto:support@bwalletx.com?subject=bWalletX%20support';
+// The app's name in the subject: mobile/storeBuild.ts APP_NAME, written out here with the optional chain (see the top).
+const SUPPORT_APP_NAME =
+  import.meta.env?.VITE_STORE_BUILD === '1' ||
+  import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env?.VITE_CHANNEL === 'android-play'
+    ? 'bWallet'
+    : 'bWalletX';
+export const SUPPORT_EMAIL_URL = `mailto:support@bwalletx.com?subject=${SUPPORT_APP_NAME}%20support`;
 
 /** Account service (`/account/status`) for the default storage provider. */
 export const DEFAULT_ACCOUNT_URL = 'https://accounts.1sat.app';

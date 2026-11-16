@@ -12,6 +12,7 @@
  * The same goes for the toolbox's special-operation names (isSpecOpName), as a label or as an output tag, and for
  * any label or tag that is not plain ASCII (isOddName).
  */
+import { APP_NAME } from '../mobile/storeBuild';
 
 /** Bumped whenever RESERVED_LABEL_PREFIXES changes (reservedLabels.test.ts pins the list against it). */
 export const RESERVED_LABELS_VERSION = 2;
@@ -23,7 +24,7 @@ export const RESERVED_LABELS_VERSION = 2;
  */
 export const RESERVED_LABEL_PREFIXES: readonly string[] = ['bmail'];
 
-export const RESERVED_LABEL_REFUSAL = 'This label is reserved for bWalletX itself';
+export const RESERVED_LABEL_REFUSAL = `This label is reserved for ${APP_NAME} itself`;
 
 const norm = (label: unknown): string => (typeof label === 'string' ? label.trim().toLowerCase() : '');
 

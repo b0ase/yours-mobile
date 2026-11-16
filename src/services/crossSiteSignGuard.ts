@@ -30,6 +30,7 @@ import {
   type SighashRefusal,
 } from './pendingSighash';
 import { pinnedProtocol } from './pinnedProtocols';
+import { APP_NAME } from '../mobile/storeBuild';
 
 // The readers live in signDataScan.ts (review 13 Nov 2026); re-exported for existing callers and tests.
 export { bareHost, boundHosts, normaliseKey } from './signDataScan';
@@ -87,9 +88,9 @@ export const BLIND_SIGN_REFUSAL = 'Sites cannot ask for a signature over a hash 
  */
 /** A pending transaction of the site's own, signed with a protocol it was never granted. */
 export const UNGRANTED_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. To sign an input of your own pending transaction, ask for this protocol's permission first (getPublicKey with the same protocolID and counterparty), then sign`;
-export const UNPAID_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. This action takes nothing from the wallet, so no payment was shown for it; bWalletX signs an input of a pending transaction only when the user approved a payment for that transaction`;
+export const UNPAID_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. This action takes nothing from the wallet, so no payment was shown for it; ${APP_NAME} signs an input of a pending transaction only when the user approved a payment for that transaction`;
 export const SCOPE_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. Only SIGHASH_ALL|FORKID (0x41) signatures of a pending transaction's input are accepted`;
-export const SCRIPT_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. bWalletX can't read which key this input's locking script needs (P2PKH, an inscription then P2PKH, or PushDrop)`;
+export const SCRIPT_SIGHASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. ${APP_NAME} can't read which key this input's locking script needs (P2PKH, an inscription then P2PKH, or PushDrop)`;
 export const DATA_HASH_REFUSAL = `${BLIND_SIGN_REFUSAL}. 32 bytes of data is treated as a hash: sign it as an input of your own pending transaction (createAction first), or change its length`;
 const SIGHASH_REFUSALS: Record<SighashRefusal, string> = {
   ungranted: UNGRANTED_SIGHASH_REFUSAL,
@@ -99,7 +100,7 @@ const SIGHASH_REFUSALS: Record<SighashRefusal, string> = {
 };
 /** The user said no to a coin of theirs leaving through a site's action. */
 export const COIN_SPEND_DENIED = 'You said no: this coin was not signed for';
-export const COIN_SPEND_UNASKABLE = "bWalletX couldn't ask you about this coin, so it was not signed";
+export const COIN_SPEND_UNASKABLE = `${APP_NAME} couldn't ask you about this coin, so it was not signed`;
 
 /**
  * Our own sites that sign BSM digests (AIP posts, boost sighashes, escrow arbiter digests) through hashToDirectlySign.

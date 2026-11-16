@@ -13,6 +13,7 @@ import {
   type ThemeOfferResult,
 } from '../mobile/theme/themeOffer';
 import type { ThemePack } from '../mobile/theme/themePack';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export { isThemeOfferAction } from './themeOfferAction';
 
@@ -37,7 +38,7 @@ export async function runThemeOffer(
 ): Promise<ThemeOfferSiteResult> {
   const site = offerSite(origin);
   if (!site || !origin || !topFrame)
-    return { success: false, error: 'Theme offers are only open to bWalletX family sites', code: 'ORIGIN' };
+    return { success: false, error: `Theme offers are only open to ${APP_NAME} family sites`, code: 'ORIGIN' };
   const pack = parseThemeOffer(params, site);
   if (!pack)
     return {

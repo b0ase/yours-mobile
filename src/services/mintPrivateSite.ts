@@ -21,6 +21,7 @@ import {
   type MintPrivateResult,
   type RequestStore,
 } from '../mobile/private/privateMint';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export { MINT_PRIVATE_ACTION, isMintPrivateAction, MINT_PRIVATE_CAPS, MINT_PRIVATE_CODES } from './mintPrivateAction';
 
@@ -199,7 +200,7 @@ async function runOne(deps: Parameters<typeof runSiteMintPrivate>[0]): Promise<S
   try {
     const req = (deps.params ?? {}) as { source?: unknown; requestId?: unknown; items?: unknown; sequence?: unknown };
     if (typeof req !== 'object') throw new MintPrivateError('BAD_REQUEST', 'Bad request.');
-    if (!identityKey) throw new MintPrivateError('BAD_REQUEST', 'Unlock bWalletX first.');
+    if (!identityKey) throw new MintPrivateError('BAD_REQUEST', `Unlock ${APP_NAME} first.`);
     const seq = parseSequence(req.sequence);
     const reqKey = `${originator}|${identityKey}|${String(req.requestId)}`;
     const { store, flush } = await kvRequestStore(kv, reqKey);

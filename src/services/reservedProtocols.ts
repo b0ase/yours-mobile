@@ -14,6 +14,7 @@
 
 import { normalizeOriginator } from '@1sat/wallet';
 import { pinnedAllowed, pinnedProtocolRefusal, PINNED_REFUSAL } from './pinnedProtocols';
+import { APP_NAME } from '../mobile/storeBuild';
 
 type Protocol = readonly [number, string];
 
@@ -51,7 +52,7 @@ export const isReservedProtocol = (protocolID: unknown): boolean => {
   return !!p && RESERVED_HASHES.has(protocolHash(p));
 };
 
-export const RESERVED_REFUSAL = 'This protocol is reserved for bWalletX itself';
+export const RESERVED_REFUSAL = `This protocol is reserved for ${APP_NAME} itself`;
 /**
  * Codes sent with a refusal so a site can show its own message instead of parsing ours (owner, 28 Oct 2026).
  * A site that wants to sign a user in uses protocol [2, 'bwallet sign in'] (docs/SIGN-IN-WITH-BWALLETX.md).
@@ -60,9 +61,8 @@ export const RESERVED_PROTOCOL_CODE = 'ERR_RESERVED_PROTOCOL';
 export const PROTOCOL_REFUSED_CODE = 'ERR_PROTOCOL_REFUSED';
 export const refusalCode = (refusal: string): string =>
   refusal.startsWith(RESERVED_REFUSAL) ? RESERVED_PROTOCOL_CODE : PROTOCOL_REFUSED_CODE;
-export const LEVEL0_SIGN_REFUSAL =
-  'Level-0 keys are shared by every app and are never asked about; bWalletX does not sign with them for apps';
-export const HISTORY_REFUSAL = 'Name at least one label: bWalletX does not share your whole history with apps';
+export const LEVEL0_SIGN_REFUSAL = `Level-0 keys are shared by every app and are never asked about; ${APP_NAME} does not sign with them for apps`;
+export const HISTORY_REFUSAL = `Name at least one label: ${APP_NAME} does not share your whole history with apps`;
 
 /** BRC-114 time-range labels (toolbox parseBrc114ActionTimeLabels): they filter by time, not by label. */
 const isTimeLabel = (l: unknown) =>
@@ -74,15 +74,13 @@ export const listActionsNamesNoLabel = (args: unknown): boolean => {
   return !Array.isArray(labels) || labels.filter((l) => !isTimeLabel(l)).length === 0;
 };
 
-export const RAW_HASH_REFUSAL =
-  'Signing a raw hash with these keys could move your money; bWalletX refuses it for apps';
+export const RAW_HASH_REFUSAL = `Signing a raw hash with these keys could move your money; ${APP_NAME} refuses it for apps`;
 /**
  * b-Aware G2 (Hulk, 31 Oct 2026): a protocol name starting "p " is handed to the asset permission module before the
  * manager's protocol check, and the module passes key operations straight to the base wallet (no sheet, no grant).
  * Only createSignature keeps a check there (the module's commitment from an approved payment, or its own sheet).
  */
-export const P_MODULE_PROTOCOL_REFUSAL =
-  'bWalletX does not use its asset-module keys for apps, except to sign a payment';
+export const P_MODULE_PROTOCOL_REFUSAL = `${APP_NAME} does not use its asset-module keys for apps, except to sign a payment`;
 /** Exactly the names the toolbox routes to a permission module (delegateToPModuleIfNeeded: startsWith("p ")). */
 const routesToPModule = (name: string) => name.startsWith('p ');
 /**

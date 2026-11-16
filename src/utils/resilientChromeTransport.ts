@@ -11,6 +11,7 @@
  *   answer is an error, not a TypeError.
  */
 import { NOT_DELIVERED } from './sendErrors';
+import { APP_NAME } from '../mobile/storeBuild';
 
 type Send = (message: unknown, cb: (response: unknown) => void) => void;
 type Runtime = { id?: string; lastError?: { message?: string }; sendMessage: Send };
@@ -64,7 +65,7 @@ export const makeResilientTransport =
   ) =>
   async (action: string, params: unknown): Promise<unknown> => {
     const rt = getRuntime();
-    if (!rt?.sendMessage) throw err('Extension context invalidated: reopen bWalletX', false);
+    if (!rt?.sendMessage) throw err(`Extension context invalidated: reopen ${APP_NAME}`, false);
     try {
       return await once(rt, action, params);
     } catch (e) {

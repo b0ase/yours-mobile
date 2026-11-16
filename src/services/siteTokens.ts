@@ -39,7 +39,7 @@ import { ONESAT, bsv21, tokenOutputTags, tokenSpends } from '../mobile/market/la
 import { canonicalInputs, canonicalOutpoint } from './canonicalOutpoint';
 import { everyOutput } from './everyOutput';
 import { randomIdTag } from './tokenSendHeal';
-import { MARKET_ENABLED } from '../mobile/storeBuild';
+import { APP_NAME, MARKET_ENABLED } from '../mobile/storeBuild';
 
 /**
  * What the token-balance sheet says a site wants. Store wording (CTO decision 9, 16 Nov 2026): reading the balance
@@ -59,8 +59,8 @@ export const ORDINAL_BASKET = '1sat';
 const TOKEN_BASKETS = new Set(['bsv21', 'p 1sat bsv21']);
 
 export const RECEIVE_ONLY_REFUSAL = 'bwalletx token receive is for getPublicKey only';
-export const BAD_DELIVERY_REFUSAL = 'bWalletX takes a token into your wallet only to a receive key it gave this site';
-export const SITE_SPENDS_REFUSAL = 'bWalletX signs its own token inputs; a site may not supply them';
+export const BAD_DELIVERY_REFUSAL = `${APP_NAME} takes a token into your wallet only to a receive key it gave this site`;
+export const SITE_SPENDS_REFUSAL = `${APP_NAME} signs its own token inputs; a site may not supply them`;
 export const SELL_REJECTED = 'You said no: nothing was signed';
 export const LIST_REJECTED = 'You said no: this site cannot see that balance';
 export const DEPLOY_NEEDS_TXID =

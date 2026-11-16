@@ -29,9 +29,9 @@
  *
  * Pure apart from the injected deps. Tested in storageFailover.test.ts.
  */
+import { APP_NAME } from '../mobile/storeBuild';
 
-export const REMOTE_FAILING_MESSAGE =
-  "bWalletX's online storage (wallet.1sat.app) is failing for your account. Switch to This device in Settings › Storage.";
+export const REMOTE_FAILING_MESSAGE = `${APP_NAME}'s online storage (wallet.1sat.app) is failing for your account. Switch to This device in Settings › Storage.`;
 
 export const STORAGE_FAILOVER_CODE = 'WERR_STORAGE_REMOTE_FAILING';
 

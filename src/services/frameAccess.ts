@@ -16,6 +16,7 @@
  */
 
 import { familySite } from '../mobile/theme/themeSites';
+import { APP_NAME } from '../mobile/storeBuild';
 
 const bareHost = (h: string): string =>
   h
@@ -37,7 +38,7 @@ export type FramePolicy =
   | { ok: true; framed: true; frameHost: string; topHost: string }
   | { ok: false; error: string };
 
-export const FRAME_REFUSED = 'bWalletX only works inside a secure (https) site';
+export const FRAME_REFUSED = `${APP_NAME} only works inside a secure (https) site`;
 
 const httpsHost = (raw: string | undefined | null): string | null => {
   if (!raw || raw === 'null') return null;
