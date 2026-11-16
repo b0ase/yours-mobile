@@ -48,3 +48,9 @@ export const docToOffer = (room: Pick<ChatRoom, 'metadata'>, fromPush: string | 
   if (fromPush && ID_RE.test(fromPush)) return fromPush;
   return pendingDocOf(room)?.id ?? null;
 };
+
+/** Store builds (no Review & sign in rooms): the room's bChatX page for its pending document, or null (StoreSignNotice.tsx). */
+export const storeSignLink = (room: Pick<ChatRoom, 'ticker' | 'metadata'>): string | null => {
+  const doc = pendingDocOf(room);
+  return doc ? signDocUrl(room.ticker, doc.id) : null;
+};
