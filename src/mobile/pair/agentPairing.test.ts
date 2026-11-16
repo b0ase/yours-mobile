@@ -159,3 +159,51 @@ describe('paired CLI spends: Stop all, Stop, pause and the daily cap', () => {
     expect(await callCode(g, 'send', { to: '1B', usd: 1 }, deps())).toBe('PAUSED');
   });
 });
+
+describe('round A8, S6: a store build refuses the agent buy and strategy_load actions itself', () => {
+  beforeEach(() => {
+    mem.clear();
+    markAgentAccount('1A', []);
+  });
+  // A context whose wallet throws if touched: a refusal must come before anything is read or signed.
+  const untouchable = new Proxy({} as OneSatContext, {
+    get: () => {
+      throw new Error('wallet touched');
+    },
+  });
+  const deps = (): AgentDeps => ({
+    ctx: untouchable,
+    currentId: '1A',
+    bsvUsd: async () => {
+      throw new Error('price read');
+    },
+    feeRate: () => 100,
+  });
+  const outcome = async (action: string, params: unknown, store: boolean) => {
+    const g = makeGrant('1A', 'trader', ['trade'], 7, Date.now());
+    try {
+      await handleAgentCall(g, action, params, deps(), store);
+      return 'OK';
+    } catch (e) {
+      return e instanceof AgentCallError ? `${e.code}: ${e.message}` : `other: ${(e as Error).message}`;
+    }
+  };
+  test('store: buy and strategy_load are refused with SCOPE and the store note, even with a trade grant', async () => {
+    expect(await outcome('buy', { tokenId: 'x_0', usd: 1 }, true)).toBe('SCOPE: Not available in this edition');
+    expect(await outcome('strategy_load', { strategy: {} }, true)).toBe('SCOPE: Not available in this edition');
+    // Other actions are not refused by this check (the grant still decides).
+    expect(await outcome('strategy_show', {}, true)).toBe('OK');
+  });
+  test('bWalletX: the same calls go past the refusal to their own checks', async () => {
+    // buy reaches the price read (the spend path); strategy_load reaches the strategy parser.
+    expect(await outcome('buy', { tokenId: 'x_0', usd: 1 }, false)).not.toContain('Not available in this edition');
+    expect(await outcome('strategy_load', { strategy: {} }, false)).toMatch(/^INVALID: /);
+  });
+  test('the default is the edition flag (STORE_BUILD), so the phone app needs no extra argument', async () => {
+    const src = await Bun.file(new URL('./agentPairing.ts', import.meta.url)).text();
+    expect(src).toContain('  deps: AgentDeps,\n  store = STORE_BUILD,\n): Promise<unknown> {');
+    expect(src).toContain(
+      "if (store && STORE_REFUSED_AGENT_ACTIONS.includes(action)) throw new AgentCallError('SCOPE', STORE_NAME_NOTE);\n  checkGrant(",
+    );
+  });
+});

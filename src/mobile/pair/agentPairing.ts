@@ -11,6 +11,7 @@ import { listOrdinals, type OneSatContext } from '@1sat/actions';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { checkSize, estimateCost, isMintableType, notifyMinted, validateForm, type Collection } from '../mint/mint';
 import { mintMedia } from '../mint/mintMedia';
+import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 import {
   checkMintBudget,
   MintLimitError,
@@ -169,13 +170,20 @@ const asCollection = (v: unknown): Collection => {
   return { kind: 'none' };
 };
 
+/** Agent actions a store build refuses outright: buying tokens and loading trading strategies (round A8, S6). */
+export const STORE_REFUSED_AGENT_ACTIONS: readonly string[] = ['buy', 'strategy_load'];
+
 /** Run one paired-CLI call on the phone. */
 export async function handleAgentCall(
   grant: AgentGrant,
   action: string,
   params: unknown,
   deps: AgentDeps,
+  store = STORE_BUILD,
 ): Promise<unknown> {
+  // A store build has no trading: refused before the grant, the account or the wallet is read. (CliPairConfirm also
+  // offers no trade scope there, so checkGrant would refuse these with SCOPE; this does not depend on that.)
+  if (store && STORE_REFUSED_AGENT_ACTIONS.includes(action)) throw new AgentCallError('SCOPE', STORE_NAME_NOTE);
   checkGrant(grant, action, deps.currentId);
   const p = (params && typeof params === 'object' ? params : {}) as P;
   const id = grant.agentId;
