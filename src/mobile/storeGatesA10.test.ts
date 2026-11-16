@@ -434,3 +434,35 @@ describe('A10 editions: store refuses before Face ID; bWalletX unchanged', () =>
     );
   });
 });
+
+describe('A10 R4: the bAvatar mint sheet shows APP_NAME; the on-chain name is unchanged', () => {
+  const sheet = () => srcOf('./bavatar/BavatarMintSheet.tsx');
+  test('the title line and image alt use the shown label, built from APP_NAME', () => {
+    const s = sheet();
+    expect(s).toContain(
+      'const shownLabel = (handle: string, n: number) => `$${handle} · ${APP_NAME} ${bavatarNumber(n)}`;',
+    );
+    expect(s).toContain("alt={mine ? shownLabel(mine.handle, mine.number) : 'Your bAvatar'}");
+    expect(s).toContain('<div style={{ fontSize: 18, fontWeight: 600 }}>{shownLabel(mine.handle, mine.number)}</div>');
+    expect(s).not.toContain('bavatarLabel(');
+  });
+  const code = `const s = await import('./src/mobile/storeBuild.ts'); const b = await import('./src/mobile/bavatar/mintBavatar.ts');
+    console.log(JSON.stringify({ shown: '$alice · ' + s.APP_NAME + ' ' + b.bavatarNumber(7), chain: b.bavatarLabel('alice', 7) }));`;
+  test('store: the sheet reads "bWallet"; the inscription name stays "bWalletX" (isBavatarItem matches it)', () => {
+    for (const env of STORE_ENVS)
+      expect(run(code, env)).toEqual({ shown: '$alice · bWallet #007', chain: '$alice · bWalletX #007' });
+  }, 60_000);
+  test('bWalletX: the sheet text is the same as before (equal to the on-chain label)', () => {
+    expect(run(code, {})).toEqual({ shown: '$alice · bWalletX #007', chain: '$alice · bWalletX #007' });
+  }, 30_000);
+  test('allowlist entries 1–3 say what is shown and what is on chain', async () => {
+    // @ts-expect-error plain .mjs script, no type declarations
+    const { loadNameAllow } = await import('../../scripts/store-bundle-check.mjs');
+    const [name, art, edition] = loadNameAllow() as { reason: string }[];
+    expect(name.reason).toContain('Not on the mint sheet');
+    expect(name.reason).toContain('Shown: as the item’s name'.replace('’', "'"));
+    expect(art.reason).toContain('Shown: as part of the picture');
+    expect(edition.reason).toContain('Not shown:');
+    for (const r of [name, art, edition]) expect(r.reason).not.toContain('not app wording:');
+  });
+});
