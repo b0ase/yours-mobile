@@ -33,6 +33,7 @@ import {
   inertHtml,
   fetchSignedCopy,
   accountHandles,
+  handlesFromErrorBody,
   namesLoadError,
   myFields,
   nativeRoomSteps,
@@ -320,7 +321,7 @@ export const NativeSealPage = () => {
   }, [me]);
   // Every handle on this account counts (accountHandles): a block bound to $boase is yours when you sign in as $b0asex.
   // A failed list is never swallowed (P0, 16 Nov 2026: a 503 from the server hid the $boase block and the page only said
-  // "no signature block"): names in an error body still count, a 401 signs in again once, and anything else is shown.
+  // "no signature block"): names in a 5xx error body still count, a 401 signs in again once, and anything else is shown.
   const [handles, setHandles] = useState<string[]>([]);
   const [namesError, setNamesError] = useState<string | null>(null);
   useEffect(() => {
@@ -333,7 +334,8 @@ export const NativeSealPage = () => {
           names = await list(await client());
         } catch (e) {
           if (!(e instanceof ChatApiError)) throw e;
-          const fromBody = accountHandles(e.data);
+          // Names in the body count only for a server error (5xx), never for a 401 / 4xx (handlesFromErrorBody).
+          const fromBody = handlesFromErrorBody(e);
           if (fromBody.length) names = fromBody;
           else if (e.status === 401) {
             const s = await new BchatClient(defaultHttp(isNative)).signIn(walletSigner(apiContext));
