@@ -52,11 +52,6 @@
       "reason": "Reviewed and allowed: b-Aware bug-bounty payout address field."
     },
     {
-      "chunk": "OpnsMintPage",
-      "match": "buy … taken",
-      "reason": "False positive: Code ids ('buy', 'taken') compared inside a children expression, not text."
-    },
-    {
       "chunk": "prompt-tab",
       "match": "groupedPermission",
       "reason": "False positive: A list of prompt kind ids (code), not text."
@@ -130,16 +125,6 @@
       "chunk": "MintButton",
       "match": "your agent trades from",
       "reason": "Not shown in a store build: Mint tile with when: () => isBWalletX()."
-    },
-    {
-      "chunk": "MintButton",
-      "match": "shown in the Market",
-      "reason": "Not shown in a store build: TicketMint: the Ticket step needs CHOICES.has('ticket'); mintChoicesFor leaves 'ticket' out of a store build."
-    },
-    {
-      "chunk": "MintButton",
-      "match": "Its room and Market listing",
-      "reason": "Not shown in a store build: TicketMint: the Ticket step needs CHOICES.has('ticket'); mintChoicesFor leaves 'ticket' out of a store build."
     },
     {
       "chunk": "ChatPage",
