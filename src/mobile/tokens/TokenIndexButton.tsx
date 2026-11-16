@@ -1,6 +1,6 @@
 import { Sparkles } from 'lucide-react';
 import { money } from '../money/money';
-import { indexingEnabled } from '../storeBuild';
+import { INDEXING_ENABLED } from '../storeBuild';
 import { holderIndexState } from './indexFund';
 import { useRoomSetup } from './useRoomSetup';
 import { ownTokens } from './pendingIndexing';
@@ -10,10 +10,10 @@ import { useServiceContext } from '../../hooks/useServiceContext';
  * Token detail screen: "Index $X" for ANY holder when the 1Sat overlay says the token needs funding
  * (inactive, or its fee balance can't pay one more output). Anyone may pay a token's fee address, so
  * this is not issuer-only. Reuses the room-setup flow (useRoomSetup: price, confirm sheet, one tx).
- * Indexed: a small "Indexed" note. Indexer silent: nothing. Hidden where indexingEnabled() is off.
+ * Indexed: a small "Indexed" note. Indexer silent: nothing. Not in a store build (INDEXING_ENABLED).
  */
 export const TokenIndexButton = (props: { tokenId: string; ticker: string; exchangeRate?: number }) =>
-  indexingEnabled() ? <Inner {...props} /> : null;
+  INDEXING_ENABLED ? <Inner {...props} /> : null;
 
 const Inner = ({ tokenId, ticker, exchangeRate = 0 }: { tokenId: string; ticker: string; exchangeRate?: number }) => {
   const { chromeStorageService } = useServiceContext();

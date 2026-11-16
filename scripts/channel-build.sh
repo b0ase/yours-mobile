@@ -83,6 +83,15 @@ GS=$HOME/Secrets/bwalletx-push/google-services.json
 
 echo "▸ web build ($CH)"
 VITE_CHANNEL=$CH VITE_STORE_BUILD=${STORE:+1} pnpm build:mobile >/dev/null
+# Store channels: read the built bundle for wording the store edition must not ship (scripts/store-bundle-check.mjs).
+# A hit stops the release here, before anything is synced, signed or archived.
+if [[ -n $STORE ]]; then
+  echo "▸ store bundle check"
+  if ! node scripts/store-bundle-check.mjs build-mobile; then
+    echo "    ✗ store bundle check failed: $CH not built (fix the gate, or allowlist with a reason)" >&2
+    exit 1
+  fi
+fi
 pnpm exec cap sync >/dev/null
 mkdir -p dist
 

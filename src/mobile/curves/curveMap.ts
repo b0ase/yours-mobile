@@ -1,7 +1,7 @@
 import { LockingScript, OP, Utils } from '@bsv/sdk';
 import { MAP_PREFIX } from '../names/personalToken';
 import { curveCommitment, type Curve } from '../../lib/curves';
-import { CURVE_COINS_ENABLED } from '../storeBuild';
+import { CURVE_COINS_ENABLED, STORE_NAME_NOTE } from '../storeBuild';
 
 /**
  * The launch curve on the deploy tx: one extra 0-sat MAP SET output
@@ -14,7 +14,10 @@ export function curveMapFields(c: Curve): string[] {
   return ['app', 'bWallet', 'type', 'curve', 'curve', curve, 'curveHash', curveHash];
 }
 
-export function curveMapScript(c: Curve): LockingScript {
+export function curveMapScript(c: Curve, enabled: boolean = CURVE_COINS_ENABLED): LockingScript {
+  // No launch curves in a store build: every store deploy passes no curve (tokens/mintToken.ts curveForDeploy). If one
+  // ever got there, mintTicket / deployPersonalToken would stop here, before the wallet is asked (storeBuild.ts).
+  if (!enabled) throw new Error(STORE_NAME_NOTE);
   const s = new LockingScript();
   s.writeOpCode(OP.OP_FALSE).writeOpCode(OP.OP_RETURN);
   for (const part of [MAP_PREFIX, 'SET', ...curveMapFields(c)]) s.writeBin(Utils.toArray(part, 'utf8'));

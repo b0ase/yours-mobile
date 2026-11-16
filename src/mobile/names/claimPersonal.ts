@@ -13,6 +13,7 @@ import { BchatClient, defaultHttp, loadSession, saveSession } from '../chat/api'
 import { walletSigner } from '../chat/signer';
 import { proveHoldings } from '../chat/holdings';
 import { requestRoomByTicker } from '../chat/segmentNav';
+import { PAID_FEATURES_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 import {
   bsv20TakenError,
   bsv20TickExists,
@@ -64,6 +65,15 @@ export const PERSONAL_NETWORK_FEE_SATS = 110;
  * later, as a separate confirmed payment (tokens/roomSetup.ts).
  */
 export const PERSONAL_FEE_ESTIMATE_SATS = PERSONAL_NETWORK_FEE_SATS;
+
+/**
+ * Settings › Identity: does binding `name` also mint the personal token (the "Also mint my personal token" tick, or
+ * the token-only button)? Never in a store build: it has no personal token and no holders' room (storeBuild.ts).
+ */
+export const bindMintsToken = (
+  o: { tokenOnly?: boolean; withToken: boolean; linked: boolean; name: string },
+  paid: boolean = PAID_FEATURES_ENABLED,
+): boolean => paid && (!!o.tokenOnly || (o.withToken && !o.linked && !!personalTicker(o.name)));
 
 /** Did a mint fail only because the wallet can't pay its network fee? */
 export const isFundsError = (e: string | undefined) => !!e && /insufficient|not enough|no (utxos|funds)|funds/i.test(e);
@@ -233,13 +243,18 @@ async function chatClient(ctx: OneSatContext): Promise<BchatClient> {
   return client;
 }
 
-/** Open (idempotently) the personal room for a link. Returns its ticker, or null if not yet. */
+/**
+ * Open (idempotently) the personal room for a link. Returns its ticker, or null if not yet. A store build has no
+ * token rooms (storeBuild.ts TOKEN_ROOMS_ENABLED): it returns null before signing in or asking the server.
+ */
 export async function openPersonalRoom(
   ctx: OneSatContext,
   identityAddress: string,
   link: PersonalLink,
   client?: BchatClient,
+  rooms: boolean = TOKEN_ROOMS_ENABLED,
 ): Promise<string | null> {
+  if (!rooms) return null;
   const c = client ?? (await chatClient(ctx));
   const key = `bsv21:${link.tokenId}`;
   await proveHoldings(ctx, c, key).catch(() => 0);
@@ -256,10 +271,16 @@ export async function openPersonalRoom(
 }
 
 /** Chat tab: finish a personal room that could not be opened right after the deploy. */
-export async function retryPersonalRoom(ctx: OneSatContext, identityAddress: string, client: BchatClient) {
+export async function retryPersonalRoom(
+  ctx: OneSatContext,
+  identityAddress: string,
+  client: BchatClient,
+  rooms: boolean = TOKEN_ROOMS_ENABLED,
+) {
+  if (!rooms) return null;
   const link = getPersonalLink(identityAddress);
   if (!link || link.roomTicker) return null;
-  return openPersonalRoom(ctx, identityAddress, link, client).catch(() => null);
+  return openPersonalRoom(ctx, identityAddress, link, client, rooms).catch(() => null);
 }
 
 /** Learn (and cache) the token bound to a name from bit-sign. */

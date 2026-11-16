@@ -410,9 +410,13 @@ export const OpnsNameActions = ({
               title={MARKET_ENABLED ? 'Sell it' : 'Give it away'}
               coming={!canAdopt}
               sub={
-                canAdopt
-                  ? 'Selling works for names in your Names list. Use Add to my Names above, then sell it from Wallet › Names.'
-                  : 'Selling works for names in your Names list. A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
+                MARKET_ENABLED
+                  ? canAdopt
+                    ? 'Selling works for names in your Names list. Use Add to my Names above, then sell it from Wallet › Names.'
+                    : 'Selling works for names in your Names list. A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
+                  : canAdopt
+                    ? 'Giving works for names in your Names list. Use Add to my Names above, then give it from Wallet › Names.'
+                    : 'A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
               }
             />
           )
@@ -432,8 +436,10 @@ export const OpnsNameActions = ({
       </ul>
       {!held && (
         <p className="m-0 text-xs" style={{ color: '#e6d08a' }}>
-          <Sparkles size={12} className="inline" /> It’s at your address. Linking, selling and sending unlock once it
-          shows in Wallet › NFTs.
+          <Sparkles size={12} className="inline" />{' '}
+          {MARKET_ENABLED
+            ? 'It’s at your address. Linking, selling and sending unlock once it shows in Wallet › NFTs.'
+            : 'It’s at your address. Linking and sending unlock once it shows in Wallet › NFTs.'}
         </p>
       )}
       {msg && <p className="m-0 text-sm text-[#98A2B3] break-words">{msg}</p>}

@@ -157,6 +157,7 @@ import {
   APP_NAME,
   BSPACES_ENABLED,
   BUREAU_ENABLED,
+  INDEXING_ENABLED,
   XINVITES_ENABLED,
   roomSpacesAllowed,
   MARKET_ENABLED,
@@ -2786,7 +2787,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     setAccepted(loadInviteList(handle, 'accepted'));
     return afterPaint(() => {
       void syncBlocks(client);
-      if (identityAddress) void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
+      // No token rooms in a store build, so no personal room to finish (storeBuild.ts TOKEN_ROOMS_ENABLED).
+      if (TOKEN_ROOMS_ENABLED && identityAddress)
+        void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle, identityAddress]);
@@ -3561,7 +3564,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               </p>
             )}
             <ul className="w-full">
-              {ROOMS &&
+              {/* Room set-up is paid indexing: bWalletX only (INDEXING_ENABLED literal, so a store bundle drops it). */}
+              {INDEXING_ENABLED &&
+                ROOMS &&
                 !bappsView &&
                 ownTokens(identityAddress).map((t) => (
                   <SetupRoomRow

@@ -1,6 +1,7 @@
 import { HD, Hash, P2PKH, Utils } from '@bsv/sdk';
 import type { OneSatContext } from '@1sat/actions';
 import { withTimeout } from '../withTimeout';
+import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import type { ChromeStorageObject } from '../../services/types/chromeStorage.types';
 
@@ -241,7 +242,11 @@ export async function fundIndexing(
     /** Extra outputs in the SAME tx (the bCorp room setup fee): all paid together or not at all. */
     extraOutputs?: { address: string; satoshis: number; outputDescription: string }[];
   } = {},
+  store: boolean = STORE_BUILD,
 ): Promise<{ txid: string; sats: number; feeAddress: string }> {
+  // Paid indexing is bWalletX only (storeBuild.ts INDEXING_ENABLED, owner 16 Nov 2026). It refuses before anything is
+  // read from the indexer or asked of the wallet, like buyOpnsListing.
+  if (store) throw new Error(STORE_NAME_NOTE);
   const derived = deriveFeeAddress(tokenId);
   let status = opts.status ?? (await waitForOverlayStatus(ctx, tokenId, { timeoutMs: opts.timeoutMs }));
   if (!status && opts.allowDerived && derived)

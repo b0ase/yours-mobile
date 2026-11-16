@@ -10,7 +10,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { bareName, checkOpnsAvailability, type Availability } from './names';
 import { getMyName, onMyNameChange, setMyName } from './myName';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
-import { PERSONAL_FEE_ESTIMATE_SATS, deployPersonalToken, openPersonalRoom } from './claimPersonal';
+import { PERSONAL_FEE_ESTIMATE_SATS, bindMintsToken, deployPersonalToken, openPersonalRoom } from './claimPersonal';
 import { showOnWallet } from '../tokens/indexFund';
 import { getPaymail, ownedFromOutputs, setPaymail, syncAccountNames, type OwnedName } from './accountName';
 import { syncBchatHandle } from './bchatHandle';
@@ -39,7 +39,14 @@ import { opnsTreeFor } from './opnsTree';
 import { sweepDeadMints } from './opnsTxStatus';
 import { moneyNow } from '../money/money';
 import { buyOpnsListing } from './opnsBuy';
-import { MARKET_ENABLED, NRT_ENABLED, PAID_FEATURES_ENABLED, STORE_NAME_NOTE, paidNameBlocked } from '../storeBuild';
+import {
+  MARKET_ENABLED,
+  NRT_ENABLED,
+  PAID_FEATURES_ENABLED,
+  STORE_NAME_NOTE,
+  TOKEN_ROOMS_ENABLED,
+  paidNameBlocked,
+} from '../storeBuild';
 
 /**
  * Settings → Identity → "Make your name payable" (rendered under the profile name).
@@ -157,7 +164,9 @@ export const GetYourName = ({
   const [opnsOpen, setOpnsOpen] = useState(false);
   const showOpns = opnsOpen || !paymail || !!progress || !!mining || (owned.length > 0 && !myName);
 
-  const mintsToken = (name: string) => withToken && !link && !!personalTicker(name);
+  // Store build: never (no personal token or holders' room there; claimPersonal.ts bindMintsToken).
+  const mintsToken = (name: string, tokenOnly?: boolean) =>
+    bindMintsToken({ tokenOnly, withToken, linked: !!link, name });
   const supplyError = validateSupply(supply);
 
   const mintPersonal = async (name: string) => {
@@ -170,15 +179,18 @@ export const GetYourName = ({
     });
     void showOnWallet(chromeStorageService, l.tokenId);
     void askNotifyPermissionOnce();
-    setMsg(`$${l.ticker} minted — ${Number(l.supply).toLocaleString()} to your wallet. Opening your room…`);
-    // Signatures only; a fresh token may not be indexed yet — Chat retries until it is.
-    openPersonalRoom(apiContext, identityAddress, l)
-      .then((t) =>
-        setMsg(`$${l.ticker} minted and your room ${t ? `$${t} ` : ''}is open. Invite = send 1 $${l.ticker}.`),
-      )
-      .catch(() =>
-        setMsg(`$${l.ticker} minted. Set up your room from Chat or Settings › My tokens when you're ready.`),
-      );
+    // No token rooms in a store build (and no mint here either: bindMintsToken); written so Rollup drops the room text.
+    if (TOKEN_ROOMS_ENABLED) {
+      setMsg(`$${l.ticker} minted — ${Number(l.supply).toLocaleString()} to your wallet. Opening your room…`);
+      // Signatures only; a fresh token may not be indexed yet — Chat retries until it is.
+      openPersonalRoom(apiContext, identityAddress, l)
+        .then((t) =>
+          setMsg(`$${l.ticker} minted and your room ${t ? `$${t} ` : ''}is open. Invite = send 1 $${l.ticker}.`),
+        )
+        .catch(() =>
+          setMsg(`$${l.ticker} minted. Set up your room from Chat or Settings › My tokens when you're ready.`),
+        );
+    } else setMsg(`$${l.ticker} minted — ${Number(l.supply).toLocaleString()} to your wallet.`);
   };
 
   const bind = async (n: { name: string; id: string; tokenOnly?: boolean }) => {
@@ -191,7 +203,7 @@ export const GetYourName = ({
       setMyName(identityAddress, n.name);
       setMsg(`${n.name} is now your name`);
     }
-    if (n.tokenOnly || mintsToken(n.name)) await mintPersonal(n.name);
+    if (mintsToken(n.name, n.tokenOnly)) await mintPersonal(n.name);
   };
 
   /** Mine + broadcast a new name, wait until it's indexed, then bind it (the Use this name flow). */
@@ -325,7 +337,7 @@ export const GetYourName = ({
     if (p.kind === 'buy') return [{ address: `Buy OpNS name "${p.name}"`, amount: moneyNow(p.price) }];
     const lines = p.tokenOnly ? [] : [{ address: `OpNS: ${p.name} → your identity key`, amount: '1 sat (kept)' }];
     const t = personalTicker(p.name);
-    if (t && (p.tokenOnly || mintsToken(p.name))) {
+    if (PAID_FEATURES_ENABLED && t && mintsToken(p.name, p.tokenOnly)) {
       lines.push({
         address: `New token $${t} (${Number(supply).toLocaleString()}, to you) + your $${t} room`,
         amount: '1 sat (kept)',
@@ -338,7 +350,7 @@ export const GetYourName = ({
     if (p.kind === 'buy') return REGISTER_FEE_ESTIMATE_SATS * 2;
     return (
       (p.tokenOnly ? 0 : REGISTER_FEE_ESTIMATE_SATS) +
-      (p.tokenOnly || mintsToken(p.name) ? PERSONAL_FEE_ESTIMATE_SATS : 0)
+      (mintsToken(p.name, p.tokenOnly) ? PERSONAL_FEE_ESTIMATE_SATS : 0)
     );
   };
 
@@ -636,7 +648,8 @@ export const GetYourName = ({
               <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
                 Names you own{owned.length > 1 && !myName ? ' — pick one' : ''}
               </span>
-              {!link && !NRT_ENABLED && (
+              {/* Personal token + room: bWalletX only (no tick in a store build; bindMintsToken refuses there too). */}
+              {PAID_FEATURES_ENABLED && !link && !NRT_ENABLED && (
                 <label className="text-[11px] flex items-center gap-2" style={{ color: gray }}>
                   <input type="checkbox" checked={withToken} onChange={(e) => setWithToken(e.target.checked)} />
                   Also mint my personal token ({supplyError ? 'fix supply below' : `${Number(supply).toLocaleString()}`}
@@ -713,7 +726,8 @@ export const GetYourName = ({
           )}
         </>
       )}
-      {handleName && personalTicker(handleName) && (
+      {/* Your token + room: bWalletX only (a store build has no personal token or holders' room). */}
+      {PAID_FEATURES_ENABLED && handleName && personalTicker(handleName) && (
         <div className="flex flex-col gap-2 rounded-xl p-3" style={{ border: '1px solid #3a2f0c' }}>
           <span className="text-[10px] uppercase tracking-widest" style={{ color: gray }}>
             Your token

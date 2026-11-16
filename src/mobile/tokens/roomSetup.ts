@@ -157,13 +157,21 @@ export const payRoomSetup = (
   status: OverlayStatus | null,
   feeSats: number,
   feeAddress = roomSetupFeeAddress(),
+  store: boolean = STORE_BUILD,
 ) =>
-  fundIndexing(ctx, tokenId, ticker, {
-    status,
-    allowDerived: true,
-    timeoutMs: 8000,
-    extraOutputs: roomSetupExtraOutputs(ticker, feeSats, feeAddress),
-  });
+  // A store build pays no indexing: fundIndexing refuses there before the indexer or the wallet is asked.
+  fundIndexing(
+    ctx,
+    tokenId,
+    ticker,
+    {
+      status,
+      allowDerived: true,
+      timeoutMs: 8000,
+      extraOutputs: roomSetupExtraOutputs(ticker, feeSats, feeAddress),
+    },
+    store,
+  );
 
 // ── "Not now" (per token, this device) ──
 
