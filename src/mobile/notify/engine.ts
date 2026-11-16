@@ -56,6 +56,7 @@ import {
   mentionsMe,
   nativeId,
   osNoticeBody,
+  saleNotice,
   type IncomingRow,
   type MeKeys,
   type NotifyItem,
@@ -427,8 +428,7 @@ async function incoming(m: Me, st: PollState, out: NotifyItem[]) {
         item({
           id: `sale:${s.value.o}`,
           kind: 'sale',
-          title: 'Your listing sold',
-          body: price ? `Sold for ${formatSatsShort(price)}` : 'A buyer took your listing',
+          ...saleNotice(price, formatSatsShort),
           target: { type: 'wallet' },
         }),
       );

@@ -2070,3 +2070,345 @@ describe('A8 (owner, 16 Nov 2026): no paid indexing anywhere in a store build', 
     );
   }, 60_000);
 });
+
+/**
+ * Round A7 (CTO decisions, 16 Nov 2026): the store build's wording for the A6 follow-ups. bWalletX keeps its words and
+ * behaviour; each test runs the store envs and bWalletX in child processes (the literal flags are read at import).
+ */
+const runA7 = <T>(code: string, env: Record<string, string>): T => {
+  const r = Bun.spawnSync(['bun', '-e', code], {
+    env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+  });
+  const out = r.stdout.toString().trim().split('\n').pop() ?? '';
+  if (!out) throw new Error(r.stderr.toString());
+  return JSON.parse(out) as T;
+};
+
+describe('A7.1: chat commissions say "payment" in a store build, and the form is not there', () => {
+  const code = `
+    const React = await import('react'); const { renderToStaticMarkup } = await import('react-dom/server');
+    const c = await import('./src/mobile/chat/CommissionCard.tsx'); const m = await import('./src/mobile/chat/commissions.ts');
+    const html = renderToStaticMarkup(React.createElement(c.CommissionComposer, { ticker: 'T', client: {}, initial: { assignee: null, draft: 'x' }, onClose() {}, onPosted() {}, createEnabled: true }));
+    const d = { commission: { status: 'draft', created_by: 'alice', assignee: null }, escrow: null, proposals: [], entries: [] };
+    console.log(JSON.stringify({ html, wait: m.cardAction(d, 'bob', 0, new Date(), true) }));`;
+  test('store: /commission shows only the pause line even when creating is on; the card waits for a "payment"', () => {
+    for (const env of STORE_ENVS) {
+      const r = runA7<{ html: string; wait: { label?: string } }>(code, env);
+      expect(r.html).toContain('data-commissions-paused');
+      expect(r.html).not.toMatch(/reward/i);
+      expect(r.wait).toEqual({ kind: 'wait', label: 'Waiting for the poster to lock the payment' });
+    }
+  }, 60_000);
+  test('bWalletX: the form and its words are unchanged', () => {
+    const r = runA7<{ html: string; wait: { label?: string } }>(code, {});
+    expect(r.html).toContain('placeholder="Reward, e.g. 10M"');
+    expect(r.html).not.toContain('data-commissions-paused');
+    expect(r.wait).toEqual({ kind: 'wait', label: 'Waiting for the poster to lock the reward' });
+  }, 60_000);
+  test('the form sits behind the literal TOKEN_ROOMS_ENABLED, so Rollup drops it from a store bundle', () => {
+    const s = srcOf('./chat/CommissionCard.tsx');
+    expect(s).toContain(
+      'if (TOKEN_ROOMS_ENABLED && (props.createEnabled ?? COMMISSIONS_CREATE_ENABLED))\n    return <CommissionForm {...props} createEnabled />;',
+    );
+    expect(s.match(/<CommissionForm\b/g)).toHaveLength(1);
+    expect(s).not.toMatch(/export function CommissionForm/);
+  });
+});
+
+describe('A7.2: Feed lock is "Lock BSV on this post" in a store build, with no backing words', () => {
+  const f = () => srcOf('./feed/FeedPage.tsx');
+  test('the title, button label, intro and note pick their words with the literal MARKET_ENABLED', () => {
+    const s = f();
+    expect(s).toContain("const LOCK_TITLE = MARKET_ENABLED ? 'Lock BSV to back this post' : 'Lock BSV on this post';");
+    expect(s).toContain('aria-label={LOCK_TITLE}');
+    expect(s).toContain('<Sheet title={LOCK_TITLE} onClose={onClose}>');
+    expect(s.match(/Lock BSV to back this post/g)).toHaveLength(1); // only in the bWalletX branch
+    // The note: bWalletX's sentence unchanged; the store says the coins stay yours and locking shows support.
+    expect(s).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Locking backs a post; it earns nothing\.'\s*: 'Locking shows support for the post\. The coins stay yours\.'\}/,
+    );
+    // The intro: bWalletX "Back <name>'s post with your own coins", the store "Lock your own coins on <name>'s post".
+    const intro =
+      /\{MARKET_ENABLED \? \(\s*<p[^>]*>\s*Back <AuthorName[\s\S]*?<\/p>\s*\) : \(\s*<p[^>]*>([\s\S]*?)<\/p>\s*\)\}/.exec(
+        s,
+      );
+    expect(intro).not.toBeNull();
+    const store = intro![1].replace(/\s+/g, ' ');
+    expect(store).toContain('Lock your own coins on <AuthorName name={post.author.name} className="" /> \'s post.');
+    expect(store).not.toMatch(/\bback/i);
+  });
+  test('the store words pass the store word list; the bWalletX words are the ones the A6 check flagged', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Lock BSV on this post',
+      'Locking shows support for the post. The coins stay yours.',
+      "Lock your own coins on … 's post. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows how much is locked on it.",
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+    expect(storeBannedWord('Lock BSV to back this post')).toBe('back this');
+    expect(storeBannedWord('Locking backs a post; it earns nothing.')).toBe('earns');
+  });
+});
+
+describe('A7.3, A7.4: bMint says "keep it or send it" and Media "mint or receive" in a store build', () => {
+  test('both lines pick their words with the literal MARKET_ENABLED; bWalletX keeps its words', () => {
+    expect(srcOf('./bmint/Studio.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'It sits in your vault as yours: keep it, send it or sell it\.'\s*: 'It sits in your vault as yours: keep it or send it\.'\}/,
+    );
+    expect(srcOf('./media/MediaSection.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Music, video and pictures you buy or mint live here and play from here\.'\s*: 'Music, video and pictures you mint or receive live here and play from here\.'\}/,
+    );
+  });
+  test('the store lines pass the store word list; the bWalletX lines are the ones the A6 check flagged', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    expect(storeBannedWord('It sits in your vault as yours: keep it or send it.')).toBeNull();
+    expect(storeBannedWord('Music, video and pictures you mint or receive live here and play from here.')).toBeNull();
+    expect(storeBannedWord('It sits in your vault as yours: keep it, send it or sell it.')).toBe('sell');
+    expect(storeBannedWord('Music, video and pictures you buy or mint live here and play from here.')).toBe('buy');
+  });
+  test('the literal flag gives the store line in every store env and the bWalletX line otherwise', () => {
+    const code = `const s = await import('./src/mobile/storeBuild.ts');
+      console.log(JSON.stringify(s.MARKET_ENABLED ? 'keep it, send it or sell it' : 'keep it or send it'));`;
+    for (const env of STORE_ENVS) expect(runA7<string>(code, env)).toBe('keep it or send it');
+    expect(runA7<string>(code, {})).toBe('keep it, send it or sell it');
+  }, 60_000);
+});
+
+describe('A7.5: listings made elsewhere on the same seed read as state in a store build', () => {
+  test('RelayX recovery: the listed group is "Listed on RelayX" in a store build, word for word in bWalletX', () => {
+    const code = `const r = await import('./src/sweep/relayxRecover.ts');
+      console.log(JSON.stringify(r.groupFound([{ title: 'NPG #1', collection: '', listed: { price: 1 } }]).map((g) => g.title)));`;
+    for (const env of STORE_ENVS) expect(runA7<string[]>(code, env)).toEqual(['Listed on RelayX']);
+    expect(runA7<string[]>(code, {})).toEqual(['Listed for sale on RelayX']);
+  }, 60_000);
+  test('RelayX card, RelayX empty note, NFT library chip and OrdLock v1 note pick their words with MARKET_ENABLED', () => {
+    const r = srcOf('./sweep/RelayxRecoverScreen.tsx');
+    expect(r).toContain(
+      "{MARKET_ENABLED ? 'Listed for sale on RelayX' : 'Listed on RelayX'} at {bsv(f.listed.price)} BSV",
+    );
+    expect(r).toMatch(
+      /\{MARKET_ENABLED\s*\? "Check these are your RelayX words, not another wallet's\. NFTs listed for sale on RelayX show here while their listing's cancel output is still at these words\."\s*: "Check these are your RelayX words, not another wallet's\. NFTs listed on RelayX show here while their listing's cancel output is still at these words\."\}/,
+    );
+    expect(r.match(/for sale/g)).toHaveLength(2); // both in bWalletX branches
+    const n = srcOf('./nfts/NftLibraryPage.tsx');
+    expect(n).toContain("{MARKET_ENABLED ? 'Listed for sale' : 'Listed elsewhere'} {listedCount}");
+    expect(n).toMatch(
+      /\{MARKET_ENABLED\s*\? 'This NFT sits in an old OrdLock v1 listing\. 1Sat withdrew that contract, so it isn’t for sale and can’t be sent from here\.'\s*: 'This NFT sits in an old OrdLock v1 listing\. 1Sat withdrew that contract, so it can’t be sent from here\.'\}/,
+    );
+    expect(n.match(/for sale/g)).toHaveLength(2);
+  });
+  test('History: a listing of ours that ended reads "listing ended" in a store build; bWalletX says sold / cancelled', () => {
+    const code = `
+      const { default: fixtures } = await import('./src/mobile/wallet/fixtures/marketTxs.json');
+      const h = await import('./src/mobile/wallet/historyEvents.ts');
+      const t = await import('./src/mobile/wallet/txHistory.ts'); const f = await import('./src/mobile/wallet/txHistoryFetch.ts');
+      const tx = (p) => f.toRawTx(Object.values(fixtures).find((x) => x.txid.startsWith(p)));
+      const LIST = tx('f49e09fa'), BUY = tx('7cac90cb'); const seller = LIST.vout[3].addresses[0];
+      const fund = [...new Set(LIST.vin.map((i) => i.txid))].map((txid) => ({ txid, time: 1700000000, confirmations: 100,
+        vin: [{ txid: '0'.repeat(64), vout: 0 }],
+        vout: Array.from({ length: Math.max(...LIST.vin.filter((i) => i.txid === txid).map((i) => i.vout)) + 1 }, (_, n) => ({ n,
+          sats: LIST.vin.some((i) => i.txid === txid && i.vout === n) ? 33000000 : 0,
+          addresses: LIST.vin.some((i) => i.txid === txid && i.vout === n) ? [seller] : [] })) }));
+      const txs = [LIST, BUY, ...fund]; const own = new Set([seller]); const local = new Map();
+      const rows = t.buildRows(txs, own, local, 0); const byId = new Map(txs.map((x) => [x.txid, x]));
+      const prev = t.ownOutputs([...byId.values()], own);
+      const ctx = { own, prev, listings: h.findListings([...byId.values()], prev) };
+      const sale = rows.map((r) => h.classifyEvent(r, byId.get(r.txid), undefined, ctx)).find((r) => r.txid === BUY.txid);
+      console.log(JSON.stringify({ type: sale.type, label: sale.label, amountSats: sale.amountSats }));`;
+    for (const env of STORE_ENVS)
+      expect(runA7(code, env)).toEqual({ type: 'sell', label: 'token listing ended', amountSats: 20_400_000 });
+    expect(runA7(code, {})).toEqual({ type: 'sell', label: 'token sold', amountSats: 20_400_000 });
+    expect(srcOf('./wallet/historyEvents.ts')).toMatch(
+      /label: MARKET_ENABLED\s*\? `\$\{asset\.kind === 'nft' \? 'NFT' : 'token'\} \$\{back \? 'listing cancelled' : 'sold'\}`\s*: `\$\{asset\.kind === 'nft' \? 'NFT' : 'token'\} listing ended`,/,
+    );
+  }, 60_000);
+  test('Notifications: no Sales row in a store build; a taken listing still notifies, under Incoming payments', () => {
+    const code = `const n = await import('./src/mobile/notify/notify.ts');
+      const fmt = (s) => s + ' sats'; const item = { id: 'sale:x', kind: 'sale', title: '', body: '', at: 0, read: false };
+      const on = Object.fromEntries(n.CATEGORIES.map((c) => [c, true]));
+      console.log(JSON.stringify({ cats: n.CATEGORIES, cat: n.KIND_CATEGORY.sale, labels: n.CATEGORIES.map((c) => n.CATEGORY_LABELS[c].label),
+        priced: n.saleNotice(5000, fmt), unpriced: n.saleNotice(0, fmt),
+        shown: n.allowed([item], on).length, offWithPayments: n.allowed([item], { ...on, payments: false }).length }));`;
+    for (const env of STORE_ENVS) {
+      const r = runA7<Record<string, unknown>>(code, env);
+      expect(r.cats).not.toContain('sales');
+      expect(r.labels).not.toContain('Sales');
+      expect(r.cat).toBe('payments');
+      expect(r.priced).toEqual({
+        title: 'An item you listed elsewhere has left your wallet',
+        body: 'It was listed at 5000 sats',
+      });
+      expect(r.unpriced).toEqual({
+        title: 'An item you listed elsewhere has left your wallet',
+        body: 'It left through a listing made elsewhere',
+      });
+      expect([r.shown, r.offWithPayments]).toEqual([1, 0]);
+    }
+    const x = runA7<Record<string, unknown>>(code, {});
+    expect(x.cats).toEqual(['bmail', 'social', 'mentions', 'chat', 'calls', 'payments', 'sales']);
+    expect(x.cat).toBe('sales');
+    expect(x.priced).toEqual({ title: 'Your listing sold', body: 'Sold for 5000 sats' });
+    expect(x.unpriced).toEqual({ title: 'Your listing sold', body: 'A buyer took your listing' });
+    expect(x.shown).toBe(1);
+    expect(srcOf('./notify/engine.ts')).toContain("kind: 'sale',\n          ...saleNotice(price, formatSatsShort),");
+  }, 60_000);
+  test('every store line passes the store word list', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Listed on RelayX',
+      'Listed elsewhere',
+      "Check these are your RelayX words, not another wallet's. NFTs listed on RelayX show here while their listing's cancel output is still at these words.",
+      'This NFT sits in an old OrdLock v1 listing. 1Sat withdrew that contract, so it can’t be sent from here.',
+      'NFT listing ended',
+      'An item you listed elsewhere has left your wallet',
+      'It was listed at 1,000 sats',
+      'It left through a listing made elsewhere',
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+  });
+});
+
+describe('A7.6: the Ask b "Exchange search" add-on is not offered in a store build, and a stored "on" is ignored', () => {
+  const code = `const b = await import('./src/mobile/bweb/bweb.ts');
+    const s = b.parseBWeb({ addOns: { names: true, exchange: true, bmail: false, feed: false } });
+    console.log(JSON.stringify({ ids: b.ADD_ON_IDS, labels: b.ADD_ONS.map((a) => a.label), on: b.enabledAddOns(s), ctx: b.bwebContext(s) }));`;
+  type R = { ids: string[]; labels: string[]; on: string[]; ctx: string };
+  test('store: not listed, not enabled, not in b instructions', () => {
+    for (const env of STORE_ENVS) {
+      const r = runA7<R>(code, env);
+      expect(r.ids).toEqual(['names', 'bmail', 'feed']);
+      expect(r.labels.join(' ')).not.toMatch(/exchange/i);
+      expect(r.on).toEqual(['names']);
+      expect(r.ctx).toContain('- Names:');
+      expect(r.ctx).not.toMatch(/exchange/i);
+    }
+  }, 60_000);
+  test('bWalletX: the add-on, its words and its place in the list are unchanged', () => {
+    const r = runA7<R>(code, {});
+    expect(r.ids).toEqual(['names', 'exchange', 'bmail', 'feed']);
+    expect(r.labels).toEqual(['Names', 'Exchange search', 'bMail drafting', 'Feed summaries']);
+    expect(r.on).toEqual(['names', 'exchange']);
+    expect(r.ctx).toContain(
+      '- Exchange search: help the user find tokens, apps and strategies on the Exchange (/m/exchange).',
+    );
+  }, 60_000);
+});
+
+describe('A7.8, A7.9, A7.11: pairing, site token balance and prove-holdings sheets in a store build', () => {
+  test('site token balance sheet: reading the balance only in a store build; bWalletX word for word', () => {
+    const code = `const t = await import('./src/services/siteTokens.ts'); console.log(JSON.stringify(t.balanceAccessText('example.com', '$TEST')));`;
+    for (const env of STORE_ENVS)
+      expect(runA7<string>(code, env)).toBe(
+        'example.com wants to see your $TEST balance. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+      );
+    expect(runA7<string>(code, {})).toBe(
+      'example.com wants to see your $TEST balance, so it can offer to sell them for you. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+    );
+    expect(srcOf('../services/siteTokens.ts')).toContain('description: balanceAccessText(site, name),');
+  }, 60_000);
+  test('prove holdings: "so the site can check what you hold" in a store build; bWalletX keeps rooms and swaps', () => {
+    const code = `const React = await import('react'); const { renderToStaticMarkup } = await import('react-dom/server');
+      const p = await import('./src/pages/requests/ProveHoldingsRequest.tsx');
+      const { ThemeProvider } = await import('./src/contexts/providers/ThemeProvider.tsx');
+      const page = React.createElement(p.ProveHoldingsRequestPage, { request: { originator: 'bchatx.com', requestID: 'r1' }, onResponse() {} });
+      console.log(JSON.stringify(renderToStaticMarkup(React.createElement(ThemeProvider, null, page))));`;
+    for (const env of STORE_ENVS) {
+      const html = runA7<string>(code, env);
+      expect(html).toContain(
+        'bchatx.com can then see which wallet addresses hold your tokens, so the site can check what you hold. Your wallet signs a message for each one. Nothing is spent.',
+      );
+      expect(html).not.toMatch(/swap|rooms/i);
+    }
+    expect(runA7<string>(code, {})).toContain(
+      'bchatx.com can then see which wallet addresses hold your tokens, so your rooms and swaps work. Your wallet signs a message for each one. Nothing is spent.',
+    );
+  }, 60_000);
+  test('CLI pairing: "Sending needs an agent account" in a store build, by the literal MARKET_ENABLED', () => {
+    expect(srcOf('./pair/CliPairConfirm.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Trading and sending need an agent account \(Settings › Agents\)\. Turn on Mint NFTs to pair this account for minting only\.'\s*: 'Sending needs an agent account \(Settings › Agents\)\. Turn on Mint NFTs to pair this account for minting only\.'\}/,
+    );
+  });
+  test('the store lines pass the store word list', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Sending needs an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for minting only.',
+      'x wants to see your $T balance. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+      'x can then see which wallet addresses hold your tokens, so the site can check what you hold.',
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+  });
+});
+
+describe('A7.10: p2p swaps (and prove holdings) cannot reach the wallet in a store build', () => {
+  // A store build is only the phone app (channel-build.sh: STORE=1 for ios-store / android-play, both `build:mobile`).
+  // On the phone a site reaches the wallet only through handleSiteCall (dApp browser, bApp frames, paired sessions),
+  // which admits BRC-100 calls and mintPrivate only. window.CWI.swap / proveHoldings exist only in the Chrome
+  // extension's content script (content.ts), which no store build ships.
+  const code = `const d = await import('./src/mobile/dappBrowser.ts'); const reached = [];
+    d.initDappBrowser(() => ({ runtime: { sendMessage: (m) => (reached.push(m.action), Promise.resolve({ success: true })) } }));
+    const out = {};
+    for (const a of ['bwxSwapOffer', 'bwxSwapAccept', 'bwxSwapRelease', 'bwxProveHoldings'])
+      out[a] = await d.handleSiteCall('https://www.bchatx.com', 'https://www.bchatx.com/room/X', a, {}).then(() => 'reached', (e) => String(e?.message ?? e));
+    console.log(JSON.stringify({ out, reached }));`;
+  type R = { out: Record<string, string>; reached: string[] };
+  test('handleSiteCall refuses every swap and prove-holdings call from bChatX before the wallet is asked', () => {
+    for (const env of [...STORE_ENVS, {}]) {
+      const r = runA7<R>(code, env);
+      expect(r.reached).toEqual([]);
+      for (const [a, msg] of Object.entries(r.out)) expect(msg).toBe(`Unsupported request: ${a}`);
+    }
+  }, 60_000);
+  test('the gate, the call sites and the store channels are as the allowlist reason says', () => {
+    expect(srcOf('./dappBrowser.ts')).toContain(
+      'if (!isCWIEventName(type) && !isMintPrivateAction(type)) throw new Error(`Unsupported request: ${type}`);',
+    );
+    const callers = ['./dappBrowser.ts', './bappFrame/BappFrameHost.tsx', './pair/sessions.ts'];
+    for (const f of callers) expect(srcOf(f)).toContain('handleSiteCall(');
+    expect(srcOf('../content.ts')).toContain('isSwapAction(type)');
+    const ch = readFileSync(new URL('../../scripts/channel-build.sh', import.meta.url), 'utf8');
+    expect(ch).toContain('ios-store | android-play) STORE=1 ;;');
+    expect(ch).toContain('VITE_CHANNEL=$CH VITE_STORE_BUILD=${STORE:+1} pnpm build:mobile');
+  });
+  test('the allowlist keeps the two swap descriptions with that gate as the reason', () => {
+    const allow = JSON.parse(readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8'))
+      .allow as { chunk: string; match?: string; reason: string }[];
+    for (const m of ['Swap offer closed', 'Swap ${']) {
+      const e = allow.find((a) => a.chunk === 'background' && a.match === m);
+      expect(e?.reason).toContain('Unreachable in a store build');
+      expect(e?.reason).toContain('handleSiteCall');
+    }
+  });
+});
+
+describe('A7.7: Portfolio "vs market" is price data, kept in both editions (CTO, 16 Nov)', () => {
+  test('the screen reads BSV / BTC prices only and links to no marketplace', () => {
+    const m = srcOf('./portfolio/market.ts');
+    expect(m).toContain("const CG = 'https://api.coingecko.com/api/v3/coins';");
+    expect(m).toContain("const WOC = 'https://api.whatsonchain.com/v1/bsv/main/exchangerate/historical';");
+    expect(m.match(/https:\/\/[^'"`\s]+/g)?.every((u) => /coingecko\.com|whatsonchain\.com/.test(u))).toBe(true);
+    const p = srcOf('./portfolio/PortfolioScreen.tsx');
+    expect(p).not.toMatch(/\/m\/(exchange|market)|MarketPage|marketTradingEnabled/);
+    for (const t of [
+      'Portfolio vs market',
+      "'vs market'",
+      "Market prices aren't reachable",
+      'with no market price here',
+    ])
+      expect(p).toContain(t);
+  });
+  test('its three allowlist entries say why', () => {
+    const allow = JSON.parse(readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8'))
+      .allow as { chunk: string; match?: string; reason: string }[];
+    for (const m of ['vs market', 'Market prices', 'with no market price here'])
+      expect(allow.find((a) => a.chunk === 'PortfolioScreen' && a.match === m)?.reason).toContain(
+        'price data, not a marketplace (CTO, 16 Nov)',
+      );
+  });
+});
+
+describe('A7: no allowlist entry is left as a FOLLOW-UP', () => {
+  test('every reason is a checked fact', () => {
+    const raw = readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8');
+    expect(raw).not.toMatch(/follow-up/i);
+  });
+});

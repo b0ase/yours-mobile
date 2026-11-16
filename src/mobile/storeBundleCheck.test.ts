@@ -98,6 +98,33 @@ describe('store bundle check', () => {
       expect(BANNED).toContain(s);
     // A bare 'Index $' would hit minified code (`outputIndex ${i}`).
     expect(BANNED).not.toContain('Index $');
+    // A9: the investor placeholders, in both passes, and never allowlisted.
+    expect(BANNED).toContain('LEGAL REVIEW');
+    expect(BANNED).toContain('Placeholder for the FPO');
+    const w = storeBannedWords() as RegExp;
+    expect(w.test('[LEGAL REVIEW] Statement wording is pending legal review.')).toBe(true);
+    expect(w.test('[legal review] Placeholder for the FPO art. 48 high net worth statement')).toBe(true);
+  });
+  test('the list covers the bWalletX wording of the A7 decisions (16 Nov), so a store build cannot carry it', () => {
+    for (const s of [
+      'Reward, e.g.',
+      'lock the reward',
+      'back this post',
+      'Locking backs a post',
+      'send it or sell it',
+      'you buy or mint live here',
+      'Listed for sale on RelayX',
+      'listed for sale on RelayX',
+      'Your listing sold',
+      'When a listing of yours sells',
+      'listing cancelled',
+      'Exchange search',
+      'strategies on the Exchange',
+      'Trading and sending need',
+      'offer to sell them for you',
+      'rooms and swaps work',
+    ])
+      expect(BANNED).toContain(s);
   });
   const built = process.env.STORE_BUNDLE_DIR;
   test.skipIf(!built || !existsSync(built ?? ''))('the built store bundle in STORE_BUNDLE_DIR is clean', () => {
@@ -174,7 +201,16 @@ describe('store bundle check, pass 2: banned words in UI strings', () => {
         allow: { match?: string; pattern?: string }[];
       }
     ).allow.map((a) => `${a.match ?? ''} ${a.pattern ?? ''}`);
-    for (const s of ['open my room', 'Invite = send', 'token room', 'Selling works', 'tap to sell', 'On sale'])
+    for (const s of [
+      'open my room',
+      'Invite = send',
+      'token room',
+      'Selling works',
+      'tap to sell',
+      'On sale',
+      'LEGAL',
+      'FPO',
+    ])
       expect(allowed.filter((a) => a.includes(s))).toEqual([]);
   });
   test('channel-build.sh runs the check right after the store web build and stops the release on a failure', () => {

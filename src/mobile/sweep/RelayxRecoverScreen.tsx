@@ -20,6 +20,7 @@ import { HdSweepScreen } from './HdSweepScreen';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { NpgMelt } from './NpgMelt';
 import { RelayxListedCancel } from './RelayxListedCancel';
+import { MARKET_ENABLED } from '../storeBuild';
 import { loadSavedRelayx, saveRelayxResult } from './relayxSaved';
 
 /**
@@ -291,7 +292,7 @@ function Detail({
           </h2>
           {f.listed && (
             <span className="text-[13px] font-medium" style={{ color: INK }}>
-              Listed for sale on RelayX at {bsv(f.listed.price)} BSV
+              {MARKET_ENABLED ? 'Listed for sale on RelayX' : 'Listed on RelayX'} at {bsv(f.listed.price)} BSV
             </span>
           )}
           <span className="text-[13px]" style={{ color: MUTED }}>
@@ -691,8 +692,9 @@ export function RelayxRecoverScreen({
                     No RelayX NFTs at these words
                   </p>
                   <p className="m-0 text-[13px] leading-relaxed" style={{ color: MUTED }}>
-                    Check these are your RelayX words, not another wallet's. NFTs listed for sale on RelayX show here
-                    while their listing's cancel output is still at these words.
+                    {MARKET_ENABLED
+                      ? "Check these are your RelayX words, not another wallet's. NFTs listed for sale on RelayX show here while their listing's cancel output is still at these words."
+                      : "Check these are your RelayX words, not another wallet's. NFTs listed on RelayX show here while their listing's cancel output is still at these words."}
                   </p>
                   <button
                     type="button"

@@ -1,5 +1,5 @@
 {
-  "_doc": "Pass 2 of scripts/store-bundle-check.mjs: a UI string in the STORE build that has a STORE_BANNED_WORDS word is allowed only if it contains `match` (case-sensitive) or matches the regex `pattern` in a chunk named `chunk` (file name without Vite's hash; '*' = any). Every entry needs a reason. 'FOLLOW-UP' entries are reachable in a store build, or not traced to a gate, and still need a wording decision.",
+  "_doc": "Pass 2 of scripts/store-bundle-check.mjs: a UI string in the STORE build that has a STORE_BANNED_WORDS word is allowed only if it contains `match` (case-sensitive) or matches the regex `pattern` in a chunk named `chunk` (file name without Vite's hash; '*' = any). Every entry needs a reason. A reason states a checked fact: the gate that keeps the text from a store user, a false positive, or a reviewed decision. No entry is left open for a later wording decision (round A7, 16 Nov 2026).",
   "allow": [
     {
       "chunk": "LockScreen",
@@ -197,114 +197,29 @@
       "reason": "Reviewed and allowed: receiving: the Receive screen says items sent unasked land in Wallet › Airdrops (16 Nov review: benign)."
     },
     {
-      "chunk": "ChatPage",
-      "match": "the reward",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): chat commissions (/commission): a poster locks a payment for a job. A payment for work, not a prize; owner to confirm the wording."
-    },
-    {
-      "chunk": "ChatPage",
-      "match": "Reward, e.g.",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): chat commissions (/commission) amount field. A payment for work, not a prize; owner to confirm the wording."
-    },
-    {
-      "chunk": "FeedTab",
-      "match": "back this post",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Feed › lock BSV on a post (the guide calls it locking behind a post). The coins stay the user's; 'back' may read as funding."
-    },
-    {
-      "chunk": "FeedTab",
-      "match": "Locking backs a",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Feed lock sheet explanation; the coins stay the user's; 'backs' may read as funding."
-    },
-    {
-      "chunk": "BmintPage",
-      "match": "keep it, send it or sell it",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): bMint Studio intro ('Keep it'). Not traced to a gate."
-    },
-    {
-      "chunk": "BsvWallet",
-      "match": "you buy or mint live here",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Media empty state (media/MediaSection.tsx). Not traced to a gate."
-    },
-    {
-      "chunk": "NftLibraryPage",
-      "match": "for sale",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): NFT library: an NFT already listed (from another wallet or an old OrdLock v1 listing) is labelled as listed. State, not an offer; not reworded."
-    },
-    {
-      "chunk": "index",
-      "match": "Listed for sale on RelayX",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): RelayX NFT recovery (NPG): shows NFTs a user listed on RelayX so they can recover them. State, not an offer."
-    },
-    {
-      "chunk": "index",
-      "match": "listed for sale on RelayX",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): RelayX words check (NPG recovery). State, not an offer."
-    },
-    {
-      "chunk": "index",
-      "match": "Your listing sold",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): notification for a sale of a listing made elsewhere on the same seed (notify/engine.ts). Not traced to a store gate."
-    },
-    {
-      "chunk": "index",
-      "match": "listing cancelled",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): history labels for past listing events on the same seed (wallet/historyEvents.ts)."
-    },
-    {
-      "chunk": "dappBrowser",
-      "match": "When a listing of yours sells",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): notification category 'Sales' (notify/notify.ts). Not traced to a store gate."
-    },
-    {
-      "chunk": "index",
-      "match": "Exchange search",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Ask b bWeb add-on 'Exchange search' (bweb/bweb.ts); the 16 Nov review did not check it under own-key mode. Not traced."
-    },
-    {
-      "chunk": "index",
-      "match": "strategies on the Exchange",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Ask b bWeb add-on description (bweb/bweb.ts). Not traced."
-    },
-    {
       "chunk": "PortfolioScreen",
       "match": "vs market",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio vs market (price tile): 'market' is the BSV price index, not a marketplace. Owner to confirm."
+      "reason": "Portfolio vs market: price data, not a marketplace (CTO, 16 Nov). The chart compares the account with holding BSV, holding BTC and dollars, from CoinGecko / WhatsOnChain prices (portfolio/market.ts); it links to no market."
     },
     {
       "chunk": "PortfolioScreen",
       "match": "Market prices",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio screen price error: 'market prices' = BSV price data. Owner to confirm."
+      "reason": "Portfolio price error: price data, not a marketplace (CTO, 16 Nov). 'Market prices' = the CoinGecko / WhatsOnChain BSV and BTC price series (portfolio/market.ts)."
     },
     {
       "chunk": "PortfolioScreen",
       "match": "with no market price here",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio total note: 'market price' = BSV/token price data. Owner to confirm."
-    },
-    {
-      "chunk": "PairSheet",
-      "match": "Trading and sending need an agent account",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): CLI pairing notice (pair/CliPairConfirm.tsx). Not traced to a store gate."
-    },
-    {
-      "chunk": "background",
-      "match": "offer to sell them for you",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): a third-party site's token-balance permission prompt (services/siteTokens.ts) states what the site says it wants. The wallet sells nothing."
+      "reason": "Portfolio total note: price data, not a marketplace (CTO, 16 Nov). Tokens with no price in the price data are shown but not valued."
     },
     {
       "chunk": "background",
       "match": "Swap offer closed",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): p2p swap action description (mobile/p2p/swap/swapActions.ts); only created by the swap flow. Not traced to a store gate."
+      "reason": "Unreachable in a store build: p2p swap action description (mobile/p2p/swap/swapActions.ts), created only by window.CWI.swap. A store build is the phone app only (channel-build.sh ios-store / android-play); there a site reaches the wallet only through handleSiteCall (mobile/dappBrowser.ts), which refuses bwxSwap* ('Unsupported request'); the swap bridge is the Chrome extension's content.ts. Checked in round A7 (storeBuild.test.ts A7.10)."
     },
     {
       "chunk": "background",
       "match": "Swap ${",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): p2p swap action description (mobile/p2p/swap/swapActions.ts). Not traced to a store gate."
-    },
-    {
-      "chunk": "prompt-tab",
-      "match": "rooms and swaps work",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Prove holdings prompt from bChatX (pages/requests/ProveHoldingsRequest.tsx). Not traced to a store gate."
+      "reason": "Unreachable in a store build: p2p swap action description 'Swap <ref>' (mobile/p2p/swap/swapActions.ts), created only by window.CWI.swap. A store build is the phone app only; there handleSiteCall (mobile/dappBrowser.ts) refuses bwxSwap* ('Unsupported request'); the swap bridge is the Chrome extension's content.ts. Checked in round A7 (storeBuild.test.ts A7.10)."
     }
   ]
 }

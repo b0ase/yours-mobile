@@ -166,8 +166,10 @@ export const CliPairConfirm = ({
       </div>
       {!canPair && (
         <p className="mt-4 text-sm" style={{ color: '#FDA29B' }}>
-          Trading and sending need an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for
-          minting only.
+          {/* Store wording (CTO decision 8, 16 Nov 2026): no trading in the store edition. */}
+          {MARKET_ENABLED
+            ? 'Trading and sending need an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for minting only.'
+            : 'Sending needs an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for minting only.'}
         </p>
       )}
       <div className="mt-4 flex w-full items-center gap-2 text-sm" style={{ color: MUTED }}>

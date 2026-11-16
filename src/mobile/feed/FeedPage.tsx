@@ -219,7 +219,7 @@ import {
   movePin,
   type FeedId,
 } from './feeds';
-import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, MARKET_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 
 // bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
 const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
@@ -738,7 +738,7 @@ const PostCardBody = ({
                   onClick={() => a.onLock(post)}
                   className={cls}
                   style={{ color: locked?.total ? GOLD : MUTED }}
-                  aria-label="Lock BSV to back this post"
+                  aria-label={LOCK_TITLE}
                 >
                   <Lock size={16} /> {locked?.total ? '' : 'Lock'}
                 </button>
@@ -1490,6 +1490,12 @@ const TipSheet = ({
   );
 };
 
+/**
+ * The lock sheet's title and the Lock button's label. Store wording (CTO decision 2, 16 Nov 2026): locking is "on" a
+ * post, never "backing" it (MARKET_ENABLED is a literal, so the bWalletX words are not in a store bundle).
+ */
+const LOCK_TITLE = MARKET_ENABLED ? 'Lock BSV to back this post' : 'Lock BSV on this post';
+
 const LockSheet = ({
   post,
   height,
@@ -1533,12 +1539,20 @@ const LockSheet = ({
   const pill = (on: boolean) =>
     on ? { background: GOLD, color: '#1a1300' } : { background: PANEL, color: 'white', border: `1px solid ${LINE}` };
   return (
-    <Sheet title="Lock BSV to back this post" onClose={onClose}>
-      <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Back <AuthorName name={post.author.name} className="" />
-        's post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows how
-        much is locked behind it.
-      </p>
+    <Sheet title={LOCK_TITLE} onClose={onClose}>
+      {MARKET_ENABLED ? (
+        <p className="text-xs mb-3" style={{ color: MUTED }}>
+          Back <AuthorName name={post.author.name} className="" />
+          's post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows
+          how much is locked behind it.
+        </p>
+      ) : (
+        <p className="text-xs mb-3" style={{ color: MUTED }}>
+          Lock your own coins on <AuthorName name={post.author.name} className="" />
+          's post. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows how much is locked on
+          it.
+        </p>
+      )}
       <p className="text-[12px] font-semibold text-white mb-1">Amount</p>
       <div className="flex gap-2">
         {LOCK_AMOUNTS.map((v) => (
@@ -1608,8 +1622,10 @@ const LockSheet = ({
         Your BSV stays yours. It's locked until {date}, then you can unlock it.
         <span className="block mt-1" style={{ color: MUTED }}>
           {blocks.toLocaleString()} blocks{height ? `, until block ${(height + blocks).toLocaleString()}` : ''}. The
-          date is an estimate (about 10 minutes a block). Locked coins can't be spent early. Locking backs a post; it
-          earns nothing.
+          date is an estimate (about 10 minutes a block). Locked coins can't be spent early.{' '}
+          {MARKET_ENABLED
+            ? 'Locking backs a post; it earns nothing.'
+            : 'Locking shows support for the post. The coins stay yours.'}
         </span>
       </div>
       {error && (
