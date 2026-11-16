@@ -1,7 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test';
 
 let prompt: () => Promise<unknown> = async () => ({ ok: true, method: 'biometric' });
-mock.module('./native', () => ({ YoursNative: { deviceOwnerAuth: () => prompt() } }));
+// bun keeps a module mock for the rest of the process, so mock every export native.ts has (YoursNative, isNative):
+// a later file importing isNative from it otherwise fails to load ("Export named 'isNative' not found").
+mock.module('./native', () => ({ YoursNative: { deviceOwnerAuth: () => prompt() }, isNative: false }));
 const { nativeAuth } = await import('./siteGateNative');
 
 describe('nativeAuth', () => {
