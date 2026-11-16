@@ -158,13 +158,14 @@ export const storeLinkShown = (url: string, store = STORE_BUILD): boolean => {
  * Words no Apps tile, catalogue line or game may show in a store build (App Review 3.1.5(iii), 3.1.1; Play
  * financial features and gambling declarations): exchanges and markets, trading, buying and selling, swaps,
  * launchpads, token sales and tokenising, backing or investing, stakes, bets and prizes, earning, tickers, token
- * rooms, "for sale" / "on sale", opening a personal room or inviting with a token, and paid indexing ("Index $X",
- * "indexing fee", "Token indexing"). The one list: storeBuild.test.ts reads every string the store catalogue can show against it, so
+ * rooms, "for sale" / "on sale", opening a personal room or inviting with a token, paid indexing ("Index $X",
+ * "indexing fee", "Token indexing"), and the investor placeholders ("[LEGAL REVIEW]", "Placeholder for the FPO").
+ * The one list: storeBuild.test.ts reads every string the store catalogue can show against it, so
  * a new entry cannot bring one back, and scripts/store-bundle-check.mjs reads the UI strings of the built store
  * bundle against it. (bwallet.space's page has its own, wider list: scripts/store-site.py.)
  */
 export const STORE_BANNED_WORDS: RegExp =
-  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\b(?:gets|is|her|his|their|its) (?:a |own )?ticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token|\b(?:for|on) sale\b|\bopen (?:my|your|its) room\b|invite = send|\bindex (?:\$|\u00B7|your token)|indexing fee|token indexing/i;
+  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\b(?:gets|is|her|his|their|its) (?:a |own )?ticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token|\b(?:for|on) sale\b|\bopen (?:my|your|its) room\b|invite = send|\bindex (?:\$|\u00B7|your token)|indexing fee|token indexing|legal review|placeholder for the fpo/i;
 /** The banned wording in `text`, or null. */
 export const storeBannedWord = (text: string): string | null => STORE_BANNED_WORDS.exec(text)?.[0] ?? null;
 

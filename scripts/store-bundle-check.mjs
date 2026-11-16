@@ -117,6 +117,10 @@ export const BANNED = [
   'One-tap indexing',
   'Indexed by 1Sat',
   'prepaid deposit with the 1Sat',
+  // A9 (coordinator, 16 Nov 2026): the investor self-certification placeholders must not ship. Removed in
+  // fix/hide-investor-status (cb3949e9); never allowlist these.
+  'LEGAL REVIEW',
+  'Placeholder for the FPO',
 ];
 
 const TEXT = /\.(js|mjs|css|html|json|webmanifest|txt|svg)$/;

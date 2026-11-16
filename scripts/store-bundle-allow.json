@@ -183,8 +183,8 @@
     },
     {
       "chunk": "index",
-      "match": "sophisticated investor",
-      "reason": "Owner decision pending: A9, investor self-certification and its [LEGAL REVIEW] placeholder (kyc/). Not built or removed in A6 by instruction."
+      "reason": "Owner decision pending: A9, the investor self-certification category labels only (kyc/); the [LEGAL REVIEW] placeholder statements are banned, never allowed. Not built or removed in A6 by instruction.",
+      "pattern": "^(?:Certified|Self-certified) sophisticated investor$"
     },
     {
       "chunk": "index",
