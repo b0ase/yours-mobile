@@ -31,6 +31,15 @@ describe('a freshly created or restored wallet stays unlocked with auto-lock Nev
     expect(mark).toBeLessThan(sw.indexOf('resolveWalletWaiters()'));
   });
 
+  test('the switch never puts an unloaded storage service in front of other messages', () => {
+    const bg = read('../background.ts');
+    const sw = bg.slice(bg.indexOf('const switchAccount = async () => {'), bg.indexOf('reinitPromise = doSwitch();'));
+    expect(sw).not.toContain('chromeStorageService = new ChromeStorageService()');
+    const load = sw.indexOf('await loaded.getAndSetStorage();');
+    expect(load).toBeGreaterThan(0);
+    expect(sw.indexOf('chromeStorageService = loaded;')).toBeGreaterThan(load);
+  });
+
   test('a worker restart does not close the setup window (the person may be writing down their words)', () => {
     const bg = read('../background.ts');
     expect(bg).toContain("const setupUrl = chrome.runtime.getURL('index.html?setupFor=')");

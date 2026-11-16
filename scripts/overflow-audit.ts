@@ -28,8 +28,10 @@ const password = randomBytes(12).toString('base64url');
 const found = new Map<string, Set<string>>();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Polled on a timer, not on animation frames (the default): a row that opens an outside link or mail leaves this
+// tab in the background, where frames stop and a frame-polled wait never sees the screen that is already there.
 const waitText = (page: Page, text: string, timeout = 60_000) =>
-  page.waitForFunction((t) => document.body.innerText.includes(t), { timeout }, text);
+  page.waitForFunction((t) => document.body.innerText.includes(t), { timeout, polling: 250 }, text);
 
 /** In the page: every overflowing page/scroller and the outermost elements sticking out of it. */
 const probe = (OVERSCROLL_MAX: number) => {
@@ -114,8 +116,11 @@ const probe = (OVERSCROLL_MAX: number) => {
         continue;
       if (el.children.length) continue; // leaves only: wrappers carry the padding
       let nested = false; // content of an inner scroller is that scroller's, not this one's
+      // Only a wrapper that really scrolls owns its content. One that merely has overflow-y auto (the wallet's
+      // sections, any overflow-x-auto row) is part of this scroller's own content: skipping those made the wallet
+      // look as if it scrolled hundreds of px past its end when its last section sits 76 px (the dock) above it.
       for (let q = el.parentElement; q && q !== sc; q = q.parentElement)
-        if (/(auto|scroll)/.test(getComputedStyle(q).overflowY)) nested = true;
+        if (/(auto|scroll)/.test(getComputedStyle(q).overflowY) && q.scrollHeight > q.clientHeight + 2) nested = true;
       if (nested) continue;
       const r = el.getBoundingClientRect();
       if (r.height === 0) continue;
@@ -192,7 +197,7 @@ const openSettings = async (page: Page) => {
     )
   )
     return clickAria(page, 'Settings');
-  await clickAria(page, 'Accounts menu');
+  await clickAria(page, 'Menu and account');
   await clickByText(page, 'Settings');
 };
 // The one-tap terms sheet after unlock (src/mobile/ugc/UgcSheets.tsx TermsOnceSheet; was a card inside Chat/Feed).
@@ -212,20 +217,28 @@ const home = async () => {
   const up = () =>
     page.waitForFunction(
       () => !!document.querySelector('input[type="password"]') || /Receive/.test(document.body.innerText),
-      { timeout: 40_000 },
+      { timeout: 40_000, polling: 250 },
     );
   // A row may have navigated away (a bApp, an external page): start again from the app.
   // Web edition (this preview, web.bwalletx.com): the unlock key is held in memory only, so every page load opens
   // on the lock screen (src/mobile/hub.ts persistSession). The extension and phones keep the session and skip this.
+  // A row that opened an outside link left a second tab in front: bring the app forward, or this tab stays in the
+  // background, where Chrome stops frames and typing into the lock screen never completes.
+  await page.bringToFront().catch(() => undefined);
   try {
     await page.goto(URL);
     await up();
-  } catch {
-    // Seen in this preview (16 Nov 2026): now and then a load right after the last one never finishes and the page
-    // stays blank, with no boot notice either; loading it again in the same tab hangs too. Not explained yet. Said
-    // out loud here, and the app is opened in a new tab (the old one closed, as a person would).
-    const text = await page.evaluate(() => document.body.innerText.trim().slice(0, 80)).catch(() => '');
-    console.log(`  ! page still ${text ? `at "${text}"` : 'blank'} 40 s after loading: opening it in a new tab`);
+  } catch (e) {
+    // The load did not come up in this tab. One cause was found and fixed on 16 Nov 2026 (services/wocLimiter.ts: a
+    // page being left spun on a refused Web Lock and starved the next one). Should it happen again it is said out
+    // loud with the reason, and the app is opened in a new tab (the old one closed, as a person would).
+    const text = await page
+      .evaluate(() => document.body.innerText.trim().replace(/\s+/g, ' ').slice(0, 60))
+      .catch(() => '');
+    const why = e instanceof Error ? e.message.split('\n')[0].slice(0, 100) : String(e);
+    console.log(
+      `  ! load not confirmed (${why}); screen: ${text ? `"${text}"` : 'blank'}: opening the app in a new tab`,
+    );
     blankLoads += 1;
     await page.close().catch(() => undefined);
     page = await openPage();
@@ -263,6 +276,7 @@ if (EXT) {
   );
   URL = `chrome-extension://${new globalThis.URL(sw.url()).hostname}/index.html`;
 }
+const appErrors = new Set<string>();
 const openPage = async () => {
   const p = await browser.newPage();
   await p.emulate({
@@ -271,6 +285,12 @@ const openPage = async () => {
       'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
   });
   // A page that asks "Leave site?" would hold every later navigation in headless Chrome: answer it, and say so.
+  // Errors from the app itself while the audit drives it (not failed network requests).
+  p.on('pageerror', (e) => appErrors.add(`uncaught: ${String(e).slice(0, 200)}`));
+  p.on('console', (m) => {
+    if (m.type() === 'error' && /listener threw|Storage is not initialized/.test(m.text()))
+      appErrors.add(m.text().replace(/\s+/g, ' ').slice(0, 200));
+  });
   p.on('dialog', (d) => {
     console.log(`  ! dialog (${d.type()}): ${d.message().slice(0, 80)}`);
     void d.accept().catch(() => undefined);
@@ -341,7 +361,8 @@ try {
       await clickByText(page, tab);
       await acceptTerms(page);
     });
-  for (const aria of ['Calls', 'Agent b', 'Media', 'Apps', 'Accounts menu'])
+  // "Agent b" was renamed Ask b, and "Accounts menu" is "Menu and account" in the phone layout.
+  for (const aria of ['Calls', 'Ask b', 'Media', 'Apps', 'Menu and account'])
     await step(`top ${aria}`, async () => {
       await clickAria(page, aria);
     });
@@ -358,14 +379,14 @@ try {
     });
     for (const r of list) await step(`${section} › ${r}`, async () => (await open(), await clickByText(page, r)));
   }
-  // Time locks: the wallet's Lock button beside Mint (wallet/WalletLockButton, /m/lock); the top bar has Apps now.
-  await step('Lock BSV › New lock', async () => {
+  // Time locks: the wallet's Lock button opens Pots & Locks; "Lock BSV" there starts a new lock (was "New lock").
+  await step('Lock BSV › new lock', async () => {
     await clickByText(page, 'Lock');
-    await clickByText(page, 'New lock');
+    await clickByText(page, 'Lock BSV');
   });
-  await step('Lock BSV › New lock (preview filled in)', async () => {
+  await step('Lock BSV › new lock (preview filled in)', async () => {
     await clickByText(page, 'Lock');
-    await clickByText(page, 'New lock');
+    await clickByText(page, 'Lock BSV');
     const inputs = await page.$$('input[placeholder^="e.g."]');
     for (const [i, el] of inputs.entries()) await el.type(i === 0 ? '10' : '30');
     await sleep(1500);
@@ -377,7 +398,8 @@ try {
   await browser.close();
 }
 
-if (blankLoads) console.log(`\n${blankLoads} page load(s) stayed blank and were opened again in a new tab`);
+if (blankLoads) console.log(`\n${blankLoads} page load(s) were not confirmed and were opened again in a new tab`);
+if (appErrors.size) console.log(`\n${appErrors.size} app error(s):\n  ${[...appErrors].join('\n  ')}`);
 if (errors.length) console.log(`\n${errors.length} screen(s) not reached:\n  ${errors.join('\n  ')}`);
 if (found.size) {
   console.log(`\n${found.size} overflow(s):`);

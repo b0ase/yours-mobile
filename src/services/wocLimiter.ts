@@ -14,6 +14,7 @@
  *     check before a send) goes to the front of its context's queue, so it is never starved by a long walk.
  *   - Elsewhere, a local limiter with a split budget (the worker 2 a second, a page 1) on a monotonic clock.
  *   - A request whose signal aborts while it waits gives its place up (it never takes a slot).
+ *   - A refused lock (a page being left) is never asked for again without a timer in between (createLockPacer).
  *   - A 429, or a request that fails outright with a network error (WhatsOnChain's rate-limit page has no CORS
  *     headers, so the browser hides it as a TypeError), holds every request back for one fixed WOC_PAUSE_MS; pauses
  *     never stack. A request that times out or is aborted (a slow answer, not a refusal) never pauses the others (17d
@@ -169,6 +170,17 @@ export function createLockPacer(
       .request(WOC_LOCK, {}, async () => {
         if (queue.grant()) await sleep(gapMs);
       })
+      .then(
+        () => undefined,
+        // The lock was refused, not just slow: a page that is being left (a reload, a navigation) is refused at once
+        // and for good. Asking again straight away never gave the thread back: the page it was reloading into shares
+        // that thread and stayed blank, at full CPU (found 16 Nov 2026 from a trace of a blank reload after unlock).
+        // Wait one gap on a timer first, then let this context's next request go, paced here instead of by the lock.
+        async () => {
+          await sleep(gapMs);
+          queue.grant();
+        },
+      )
       .catch(() => undefined)
       .finally(() => {
         asking = false;
