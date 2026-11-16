@@ -286,5 +286,37 @@
       "match": "Backing ${",
       "reason": "Not shown in a store build: the artist-lock label is set only when backArtist is set, and backArtist needs ARTIST_PROGRAMME_ENABLED, which is false in a store build (LockScreen.tsx). The pot name says 'Locked for' in a store build (pots.ts)."
     }
+  ],
+  "productName": [
+    {
+      "chunk": "BavatarMintSheet",
+      "match": " · bWalletX ",
+      "reason": "On-chain id, not app wording: a bAvatar's inscribed name is '$handle · bWalletX #n' (mintBavatar.ts bavatarLabel), and pictureSource.ts isBavatarItem finds the collection by exactly that text. A store-minted bAvatar named '· bWallet #n' would drop out of the collection. Kept for the owner to decide (store-gates-a9.md)."
+    },
+    {
+      "chunk": "BavatarMintSheet",
+      "match": "fill=\"#f1ead9\">bWalletX ",
+      "reason": "On-chain content, not app wording: the bAvatar artwork's caption 'bWalletX #n', inscribed into the SVG with the name above (mintBavatar.ts). Same collection identity as the name. Kept for the owner to decide (store-gates-a9.md)."
+    },
+    {
+      "chunk": "BavatarMintSheet",
+      "pattern": "^bWalletX$",
+      "reason": "On-chain metadata, not app wording: the bAvatar edition field ('Founding 1,000' or 'bWalletX', mintBavatar.ts) written into the inscription's MAP. Same collection identity as the name. Kept for the owner to decide (store-gates-a9.md)."
+    },
+    {
+      "chunk": "bwalletx-glyph",
+      "match": "aria-label='bWalletX'",
+      "reason": "Inside the b+x glyph SVG file (mobile/brand/bwalletx-glyph.svg), which is only ever used as an <img src> (UnlockMark, ObsidianHero, WideShell, JustBIntro) with its own alt; an <img> does not expose the SVG's inner aria-label, so it is never read or shown."
+    },
+    {
+      "chunk": "index",
+      "match": "bWalletX: link token ",
+      "reason": "Signed protocol text: names/existingToken.ts importChallenge, the exact message the identity key signs to import a token, which the name server checks byte for byte. Changing it per edition would break the import."
+    },
+    {
+      "chunk": "index",
+      "pattern": "^bWalletX$",
+      "reason": "Protocol id: airdrops/note.ts NOTE_APP, the MAP 'app' field written on and matched in airdrop notes on chain (note.ts parse: d.MAP.app !== NOTE_APP). Not shown to the user."
+    }
   ]
 }

@@ -432,3 +432,120 @@ describe('A9.1 the permission-module Buy / List text: unreachable in a store bui
     expect(e[0].reason).not.toContain('so the user can refuse it');
   });
 });
+
+describe('A9.2 the app is "bWallet" in a store build: APP_NAME, a literal build constant', () => {
+  const code = `const s = await import('./src/mobile/storeBuild.ts');
+    const r = await import('./src/services/reservedProtocols.ts'); const o = await import('./src/services/originKey.ts');
+    const g = await import('./src/mobile/siteGate.ts'); const n = await import('./src/mobile/names/names.ts');
+    const c = await import('./src/utils/constants.ts'); const w = await import('./src/services/walletSetupWait.ts');
+    console.log(JSON.stringify({ name: s.APP_NAME, reserved: r.RESERVED_REFUSAL, https: o.INSECURE_ORIGIN_ERROR,
+      faceId: g.VERIFICATION_TIMEOUT_MESSAGE, user: n.noSuchUser('$al'), mail: c.SUPPORT_EMAIL_URL, ns: 'appNameFor' in s }));`;
+  type R = { name: string; reserved: string; https: string; faceId: string; user: string; mail: string; ns: boolean };
+  test('store: "bWallet" in every store env, in the strings that name the app', () => {
+    for (const env of STORE_ENVS)
+      expect(run<R>(code, env)).toEqual({
+        name: 'bWallet',
+        reserved: 'This protocol is reserved for bWallet itself',
+        https: 'bWallet only works with secure (https) sites',
+        faceId: "bWallet didn't get a Face ID, fingerprint or passcode answer in time.",
+        user: 'No bWallet user called $al',
+        mail: 'mailto:support@bwalletx.com?subject=bWallet%20support',
+        ns: false,
+      });
+  }, 60_000);
+  test('bWalletX: the same strings, word for word as before', () => {
+    expect(run<R>(code, {})).toEqual({
+      name: 'bWalletX',
+      reserved: 'This protocol is reserved for bWalletX itself',
+      https: 'bWalletX only works with secure (https) sites',
+      faceId: "bWalletX didn't get a Face ID, fingerprint or passcode answer in time.",
+      user: 'No bWalletX user called $al',
+      mail: 'mailto:support@bwalletx.com?subject=bWalletX%20support',
+      ns: false,
+    });
+  }, 60_000);
+  test('APP_NAME is a literal env check (folded by Rollup), and the old function form is gone', () => {
+    const s = srcOf('./storeBuild.ts');
+    expect(s).toContain(
+      "export const APP_NAME: string =\n  import.meta.env.VITE_STORE_BUILD === '1' ||\n  import.meta.env.VITE_CHANNEL === 'ios-store' ||\n  import.meta.env.VITE_CHANNEL === 'android-play'\n    ? 'bWallet'\n    : 'bWalletX';",
+    );
+    expect(s).not.toContain('export const appNameFor');
+    // The YoursIcon alt text patched in at build time follows it too.
+    expect(readFileSync(join(ROOT, 'vite.brand.ts'), 'utf8')).toContain("['alt=\"Yours Head\"', 'alt={APP_NAME}'],");
+  });
+  test('constants.ts still loads under plain node / tsx (its own optional-chain copy of the check)', () => {
+    const s = srcOf('../utils/constants.ts');
+    expect(s).not.toContain("from '../mobile/storeBuild'");
+    expect(s).toContain(
+      'export const SUPPORT_EMAIL_URL = `mailto:support@bwalletx.com?subject=${SUPPORT_APP_NAME}%20support`;',
+    );
+  });
+});
+
+describe('A9.2 the store bundle check fails a store bundle that still names the app "bWalletX"', () => {
+  test('PRODUCT_NAME: the app name, never a domain, paymail or longer identifier', async () => {
+    // @ts-expect-error plain .mjs script, no type declarations
+    const { PRODUCT_NAME } = await import('../../scripts/store-bundle-check.mjs');
+    for (const s of ['Unlock bWalletX first', 'bWalletX', ' · bWalletX #3', '(your bWalletX).', "bWalletX's storage"])
+      expect(PRODUCT_NAME.test(s)).toBe(true);
+    for (const s of [
+      'https://web.bwalletx.com/x',
+      'support@bwalletx.com',
+      'name@bwalletx.com',
+      'bWalletX.com',
+      'bWalletXRequest',
+      'bWallet',
+      'Unlock bWallet first',
+    ])
+      expect(PRODUCT_NAME.test(s)).toBe(false);
+  });
+  test('scanProductName reads strings, template parts and text files, and honours the productName allowlist', async () => {
+    // @ts-expect-error plain .mjs script, no type declarations
+    const { scanProductName } = await import('../../scripts/store-bundle-check.mjs');
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const dir = mkdtempSync(join(tmpdir(), 'a9-name-'));
+    mkdirSync(join(dir, 'assets'));
+    writeFileSync(
+      join(dir, 'assets/main-Ab12Cd34.js'),
+      'const a="Unlock bWalletX first",b=`Open ${x} in bWalletX now`,c=/bWalletX/,d="https://web.bwalletx.com",e="ok";',
+    );
+    writeFileSync(join(dir, 'assets/keep-Zz99Yy88.js'), 'const k="bWalletX: link token ";');
+    writeFileSync(join(dir, 'index.html'), '<title>bWalletX</title>');
+    const allow = [
+      {
+        chunk: 'keep',
+        match: 'bWalletX: link token ',
+        reason: 'signed protocol text',
+        test: (s: string) => s.includes('bWalletX: link token '),
+      },
+    ];
+    const r = await scanProductName(dir, allow);
+    expect(r.hits.map((h: { file: string; around: string }) => [h.file, h.around]).sort()).toEqual([
+      ['assets/main-Ab12Cd34.js', ' in bWalletX now'],
+      ['assets/main-Ab12Cd34.js', 'Unlock bWalletX first'],
+      ['index.html', '<title>bWalletX</title>'],
+    ]);
+    expect(r.unused).toEqual([]);
+  });
+  test('the productName allowlist: on-chain ids and protocol text only, each with its reason', async () => {
+    // @ts-expect-error plain .mjs script, no type declarations
+    const { loadNameAllow } = await import('../../scripts/store-bundle-check.mjs');
+    const list = loadNameAllow() as { chunk: string; match?: string; pattern?: string; reason: string }[];
+    expect(list.map((a) => [a.chunk, a.match ?? a.pattern])).toEqual([
+      ['BavatarMintSheet', ' · bWalletX '],
+      ['BavatarMintSheet', 'fill="#f1ead9">bWalletX '],
+      ['BavatarMintSheet', '^bWalletX$'],
+      ['bwalletx-glyph', "aria-label='bWalletX'"],
+      ['index', 'bWalletX: link token '],
+      ['index', '^bWalletX$'],
+    ]);
+    for (const a of list) expect(a.reason.length).toBeGreaterThan(60);
+  });
+  test('the check runs pass 3 and fails on it; "is clean" names it', () => {
+    const s = readFileSync(join(ROOT, 'scripts/store-bundle-check.mjs'), 'utf8');
+    expect(s).toContain('  const names = await scanProductName(dir);');
+    expect(s).toContain('  if (hits.length || words.hits.length || names.hits.length) process.exit(1);');
+    expect(s).toContain('no "bWalletX" app name)');
+  });
+});
