@@ -4,7 +4,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { openDappBrowser } from '../dappBrowser';
-import { KYC_PAGE_URL } from './config';
+import { INVESTOR_SELF_CERT_ENABLED, KYC_PAGE_URL } from './config';
 import { investorValid, kycValid, PLACEHOLDER_STATEMENTS, statementsFromServer, type InvestorStatement } from './kyc';
 import { importKycCertificate, signedInClient, signInvestorStatement } from './kycWallet';
 import { useKyc } from './useKyc';
@@ -34,7 +34,7 @@ export const IdentityVerification = () => {
   const qualified = investorValid(investor, identityKey, Date.now());
 
   useEffect(() => {
-    if (query === 'investor' && verified) setQualifying(true);
+    if (INVESTOR_SELF_CERT_ENABLED && query === 'investor' && verified) setQualifying(true);
   }, [query, verified]);
 
   useEffect(() => {
@@ -143,7 +143,7 @@ export const IdentityVerification = () => {
         </>
       )}
 
-      {verified && (
+      {INVESTOR_SELF_CERT_ENABLED && verified && (
         <div className="flex flex-col gap-2 pt-2" style={{ borderTop: '1px solid #2b2f36' }}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold" style={{ color: fg }}>

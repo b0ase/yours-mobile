@@ -43,3 +43,10 @@ export const INVESTOR_CERT_VALID_MONTHS = 12;
 
 /** Feature flag: third-party issuer share offers. Stays OFF: no third-party offers are shown anywhere. */
 export const SHOW_OTHER_COMPANIES = false;
+
+/**
+ * Feature flag: "Qualify as an investor" (UK FPO self-certification) in Settings › Identity and bShares. OFF in every
+ * edition until a solicitor has approved the statement wording (16 Nov 2026: the screen still carried a
+ * "[LEGAL REVIEW] … pending" placeholder). Identity verification itself is unaffected.
+ */
+export const INVESTOR_SELF_CERT_ENABLED = false;
