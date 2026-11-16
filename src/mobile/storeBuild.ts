@@ -844,3 +844,18 @@ export const WAGES_ENABLED: boolean =
     import.meta.env.VITE_CHANNEL === 'ios-store' ||
     import.meta.env.VITE_CHANNEL === 'android-play'
   ) && import.meta.env.VITE_WAGES !== '0';
+
+/**
+ * A connected site buying, listing or cancelling a listing through the wallet (CTO + CEO, round A9, 16 Nov 2026): a
+ * site's createAction that @1sat/permission-module classifies as a purchase, a listing or a cancelled listing, or any
+ * action with an OrdLock script, is bWalletX only. A store build refuses it with STORE_NAME_NOTE before any sheet is
+ * shown or anything is signed, and refuses an action on 1Sat assets that the module can't classify too (fails
+ * closed). One gate for every site: services/storeMarketGate.ts, wrapped outermost on the site wallet in
+ * initWallet.ts. Plain payments, sign-in, message signing and the document seal are not touched. Literal env check so
+ * Rollup drops the gate from bWalletX, whose sites still get the module's purchase and listing sheets.
+ */
+export const SITE_MARKET_ACTIONS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
