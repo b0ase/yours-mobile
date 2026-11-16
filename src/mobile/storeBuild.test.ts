@@ -1173,3 +1173,186 @@ describe('gate (d): no games in a store build (third-party games out entirely; n
     expect(radarGroupShown('games', false)).toBe(true);
   });
 });
+
+// ── Store gates, second round (16 Nov 2026): priced names, the domain mint step, the marketplace address ───────
+describe('priced names are bWalletX only: a store build offers free handles and never pays for a name', () => {
+  test('paidNameBlocked / paidNamesEnabled, both editions', async () => {
+    const { paidNameBlocked, paidNamesEnabled, STORE_NAME_NOTE } = await import('./storeBuild');
+    const fee = { address: '1FeeAddress', usd: 10 };
+    expect(paidNamesEnabled(true)).toBe(false);
+    expect(paidNamesEnabled(false)).toBe(true);
+    // Store build: a name with a price is off; a free one (no fee) is fine.
+    expect(paidNameBlocked(fee, true)).toBe(true);
+    expect(paidNameBlocked(null, true)).toBe(false);
+    expect(paidNameBlocked(undefined, true)).toBe(false);
+    // bWalletX: nothing is blocked.
+    expect(paidNameBlocked(fee, false)).toBe(false);
+    expect(paidNameBlocked(null, false)).toBe(false);
+    expect(STORE_NAME_NOTE).toBe('Not available in this edition');
+  });
+  test('which names carry a fee is the server price list: 5+ characters free, shorter ones priced', async () => {
+    const { nameFeeFor } = await import('./names/paymail');
+    const { paidNameBlocked } = await import('./storeBuild');
+    const prices = { address: '1FeeAddress', tiers: { '1': 1000, '2': 1000, '3': 100, '4': 10 } };
+    for (const n of ['a', 'ab', 'abc', 'abcd']) {
+      expect(paidNameBlocked(nameFeeFor(prices, n), true)).toBe(true);
+      expect(paidNameBlocked(nameFeeFor(prices, n), false)).toBe(false);
+    }
+    for (const n of ['alice', 'richard', 'a-long-name'])
+      expect(paidNameBlocked(nameFeeFor(prices, n), true)).toBe(false);
+  });
+  test('payNameFee and addExtraName refuse in a store build before anything is priced or sent', async () => {
+    const { payNameFee } = await import('./names/nameFee');
+    const { addExtraName } = await import('./names/extraNames');
+    let touched = 0;
+    const trap = new Proxy({}, { get: () => ((touched += 1), () => Promise.reject(new Error('reached the wallet'))) });
+    const ctx = { wallet: trap } as never;
+    const f = (() => ((touched += 1), Promise.reject(new Error('reached the network')))) as never;
+    const fee = { address: '1FeeAddress', usd: 10 };
+    await expect(payNameFee(ctx, fee, 'abcd', true)).rejects.toThrow('Not available in this edition');
+    await expect(
+      addExtraName(ctx, f, 'abcd', { pence: 0, sats: 5000, to: '1FeeAddress', usd: 10, direct: true }, true),
+    ).rejects.toThrow('Not available in this edition');
+    await expect(addExtraName(ctx, f, 'abcd', { sats: 5000, to: '1FeeAddress' }, true)).rejects.toThrow(
+      'Not available in this edition',
+    );
+    expect(touched).toBe(0);
+    // bWalletX: the same calls go on to the wallet / the network (and fail there, in this test).
+    await expect(payNameFee(ctx, fee, 'abcd', false)).rejects.not.toThrow('Not available in this edition');
+    await expect(
+      addExtraName(ctx, f, 'abcd', { pence: 0, sats: 5000, to: '1FeeAddress', usd: 10, direct: true }, false),
+    ).rejects.not.toThrow('Not available in this edition');
+  });
+  test('every claim screen checks it before the fee sheet, and shows no price for a blocked name', () => {
+    const g = srcOf('./names/GetYourName.tsx');
+    expect(g).toMatch(
+      /if \(!ownPaymail && paidNameBlocked\(nameFee\)\) return setMsg\(STORE_NAME_NOTE\);\s*if \(nameFee && !ownPaymail && !paid\) return setFeeConfirm\(true\);/,
+    );
+    const h = srcOf('./names/HandleFlow.tsx');
+    expect(h).toContain('const feeOff = (n: string) => paidNameBlocked(feeFor(n));');
+    expect(h).toMatch(
+      /if \(feeOff\(order\[0\]\)\) setMsg\(STORE_NAME_NOTE\);\s*else if \(feeFor\(order\[0\]\)\) setFeeConfirm\(true\);/,
+    );
+    expect(h).toMatch(
+      /if \(!fee\) return claim\(\{\}, name\);\s*if \(feeOff\(name\)\) return setMsg\(STORE_NAME_NOTE\);/,
+    );
+    expect(h).toContain(
+      "feeOff(alias) ? STORE_NAME_NOTE : nameFee ? `${usdText(nameFee.usd)} · instant` : 'Free · instant'",
+    );
+    expect(h).toContain('feeOff(alias) ? setMsg(STORE_NAME_NOTE) : nameFee ? setFeeConfirm(true) : void claim()');
+    // No price in a label for a blocked name: every usdText(nameFee.usd) is behind feeOff.
+    expect(h.match(/usdText\(nameFee\.usd\)/g)).toHaveLength(3);
+    expect(h.match(/nameFee && !feeOff\(alias\) \? ` · \$\{usdText\(nameFee\.usd\)\}` : ''/g)).toHaveLength(2);
+    const w = srcOf('./settings/WalletNames.tsx');
+    expect(w).toMatch(
+      /if \(paidNameBlocked\(fee\)\) return setError\(STORE_NAME_NOTE\);\s*setNameFee\(fee\);\s*if \(fee\) return setFeeConfirm\(true\);/,
+    );
+    // The only callers of payNameFee are those two screens.
+    expect(g.match(/payNameFee\(/g)).toHaveLength(1);
+    expect(h.match(/payNameFee\(/g)).toHaveLength(1);
+  });
+});
+
+describe('store wording and data, second round', () => {
+  const textsOf = (env: Record<string, string>) => {
+    const code = `
+      const s = await import('./src/mobile/storeBuild.ts'); const r = await import('./src/mobile/chat/bappRooms.ts');
+      const st = await import('./src/mobile/bappStandard.ts'); const c = await import('./src/utils/constants.ts');
+      const i = await import('./src/mobile/brand/bappIcons/registry.ts'); const h = await import('./src/mobile/wallet/historyEvents.ts');
+      const m = await import('./src/mobile/mint/mintCatalog.ts');
+      console.log(JSON.stringify({
+        domain: s.DOMAIN_MINT_ENABLED, marketApp: s.MARKET_APP_NAME, venues: s.LISTING_VENUES, url: c.ONE_SAT_MARKET_URL,
+        purposes: r.BAPPS.map((b) => b.name + ': ' + b.purpose),
+        std: [...st.BX_APPS, ...st.COMMERCIAL_APPS].map((a) => [a.name, a.verb, a.category]),
+        icons: Object.values(i.BAPP_ICONS).map((d) => d.label ?? d.name ?? ''),
+        history: h.inWalletAppOf({ description: 'Purchase 5 tokens for 100 sats' }),
+        mint: JSON.stringify(m),
+      }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as {
+      domain: boolean;
+      marketApp: string;
+      venues: string;
+      url: string;
+      purposes: string[];
+      std: string[][];
+      icons: string[];
+      history: string;
+      mint: string;
+    };
+  };
+  test('store build: no marketplace address, no bExchange label, no dice, no "tokenise", safe room purposes', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const env of STORE_ENVS) {
+      const t = textsOf(env);
+      expect(t.domain).toBe(false);
+      expect(t.marketApp).toBe('Marketplace');
+      expect(t.history).toBe('Marketplace');
+      expect(t.venues).toBe('the Market');
+      expect(t.url).toBe('');
+      expect(JSON.stringify(t)).not.toMatch(/1sat\.market|bExchange|Provably fair|Zero Dice|Tokenise|tokenise it/);
+      // bApp room purposes are shown only where rooms are (BSPACES_ENABLED); the store bundle's copies are plain.
+      expect(t.purposes.map((p) => [p, storeBannedWord(p)]).filter((x) => x[1])).toEqual([]);
+      expect(t.purposes.filter((p) => /bWalletX/.test(p))).toEqual([]);
+      expect(t.std.find((a) => a[0] === 'VexVoid')?.[2]).toBe('Music & art');
+      expect(t.std.map((a) => a[2]).filter((c) => /game/i.test(c))).toEqual([]);
+    }
+  });
+  test('bWalletX build: all of it is as it was', () => {
+    const t = textsOf({});
+    expect(t.domain).toBe(true);
+    expect(t.marketApp).toBe('1sat.market');
+    expect(t.history).toBe('1sat.market');
+    expect(t.venues).toBe('the Market and 1sat.market');
+    expect(t.url).toBe('https://1sat.market/market');
+    expect(t.icons).toContain('bExchange');
+    expect(t.purposes).toContain('bMail: Tokenised mail, price-to-reach and inbox tips.');
+    expect(t.purposes).toContain('bStore: Themes, icons and packs for bWalletX, and their makers.');
+    const zero = t.std.find((a) => a[0] === 'Zero Dice');
+    expect(zero?.[1]).toBe('Provably fair dice with a zero house edge');
+    expect(t.std.find((a) => a[0] === 'VexVoid')?.[2]).toBe('Games & collectibles');
+    expect(t.mint).toContain('Prove it, then tokenise it');
+    expect(t.mint).toContain('or prove you own a web domain and tokenise it.');
+    expect(t.mint).toContain('A name or a domain');
+  });
+  test('Mint › A domain: the step, its title and both chooser rows are behind DOMAIN_MINT_ENABLED', () => {
+    const m = srcOf('./mint/MintButton.tsx');
+    expect(m).toMatch(/DOMAIN_MINT_ENABLED && step === 'domain'\s*\? 'Tokenise a domain'/);
+    expect(m).toContain("{DOMAIN_MINT_ENABLED && step === 'domain' && CHOICES.has('token') && (");
+    expect(m).toMatch(/\.\.\.\(DOMAIN_MINT_ENABLED\s*\? \[\s*\{\s*id: 'domain',/);
+    expect(m.match(/Tokenise|tokenise/g)).toHaveLength(2);
+    expect(srcOf('./mint/mintCatalog.ts')).toMatch(/\.\.\.\(DOMAIN_MINT_ENABLED\s*\? \[\s*\{\s*id: 'domain',/);
+    expect(srcOf('./storeBuild.ts')).toMatch(
+      /export const DOMAIN_MINT_ENABLED: boolean = !\(\s*import\.meta\.env\.VITE_STORE_BUILD === '1'/,
+    );
+  });
+  test('the bApp room cards and menu are bWalletX only, so a store user never sees a room purpose', () => {
+    expect(srcOf('./tabs/ChatPage.tsx')).toContain("const bappsView = BSPACES_ENABLED && roomFilter === 'bapps';");
+    expect(srcOf('./wide/WideShell.tsx')).toMatch(
+      /items: BAPP_ROOMS\.map\(\(b\) => \(\{.{0,400}?hidden: !BSPACES_ENABLED,/s,
+    );
+  });
+  test('Home: every module a store build can show has plain wording; the Store showcase is not one of them', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    const h = srcOf('./home/HomeModules.tsx');
+    const mods = [
+      ...h.matchAll(/id: '(\w+)',\s*title: '([^']*)',\s*blurb: ("[^"]*"|'[^']*'),[^}]*?store: (true|false),/g),
+    ];
+    expect(mods.length).toBe(9);
+    const store = mods.filter((m) => m[4] === 'true');
+    expect(store.map((m) => m[1])).toEqual([
+      'card',
+      'askB',
+      'history',
+      'priceChart',
+      'pots',
+      'notifications',
+      'holdings',
+      'music',
+    ]);
+    for (const m of store) expect(storeBannedWord(`${m[2]} ${m[3]}`)).toBeNull();
+    expect(mods.find((m) => m[1] === 'showcase')?.[4]).toBe('false');
+  });
+});

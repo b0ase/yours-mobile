@@ -10,7 +10,13 @@ export const INACTIVITY_LIMIT = 10 * 60 * 1000; // 10 minutes
 export const SNACKBAR_TIMEOUT = 3 * 1000; // 2.5 seconds
 export const HOSTED_YOURS_IMAGE = 'https://i.ibb.co/zGcthBv/yours-org-light.png';
 export const YOURS_DEV_WALLET = '1MtzWXQEYGp89bQ9U2nfrnuChFv37j6pV6';
-export const ONE_SAT_MARKET_URL = 'https://1sat.market/market';
+// A store build links to no marketplace (mobile/storeBuild.ts MARKET_ENABLED): the address is not in its bundle.
+export const ONE_SAT_MARKET_URL =
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+    ? ''
+    : 'https://1sat.market/market';
 export const MESSAGEBOX_URL = 'https://messagebox.1sat.app';
 export const GENERIC_TOKEN_ICON =
   'https://static-00.iconduck.com/assets.00/generic-cryptocurrency-icon-2048x2029-vzaeox5w.png';

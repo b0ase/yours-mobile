@@ -51,6 +51,7 @@ import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
+import { STORE_NAME_NOTE, paidNameBlocked } from '../storeBuild';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
@@ -181,6 +182,8 @@ export const HandleFlow = ({
   // What claiming `n` costs (null = free); keeping your own name costs nothing.
   const feeFor = (n: string) => (paymail && paymail.split('@')[0] === n ? null : nameFeeFor(prices, n));
   const nameFee = feeFor(alias);
+  // A store build offers only free names (5+ characters): a priced one reads STORE_NAME_NOTE, with no price.
+  const feeOff = (n: string) => paidNameBlocked(feeFor(n));
   const roomsFor = useRef<{ names: string[]; primary: string }>({ names: [], primary: '' });
   useEffect(() => {
     if (!enabled || paymail || !suggestions.length) return;
@@ -217,7 +220,8 @@ export const HandleFlow = ({
     pending.current = order[0];
     roomsFor.current = { names: order, primary: order[0] };
     setAlias(order[0]);
-    if (feeFor(order[0])) setFeeConfirm(true);
+    if (feeOff(order[0])) setMsg(STORE_NAME_NOTE);
+    else if (feeFor(order[0])) setFeeConfirm(true);
     else void claim({}, order[0]);
   };
   /**
@@ -293,6 +297,7 @@ export const HandleFlow = ({
     const name = pending.current || alias;
     const fee = feeFor(name);
     if (!fee) return claim({}, name);
+    if (feeOff(name)) return setMsg(STORE_NAME_NOTE);
     setBusy(true);
     setMsg('');
     try {
@@ -398,7 +403,7 @@ export const HandleFlow = ({
                 Your paymail
               </span>
               <span className="text-[10px] font-semibold" style={{ color: nameFee ? GOLD : '#2ecc71' }}>
-                {nameFee ? `${usdText(nameFee.usd)} · instant` : 'Free · instant'}
+                {feeOff(alias) ? STORE_NAME_NOTE : nameFee ? `${usdText(nameFee.usd)} · instant` : 'Free · instant'}
               </span>
             </div>
             {!paymail && suggestions.length > 0 && (
@@ -491,7 +496,7 @@ export const HandleFlow = ({
                       ? 'Tick the names to claim'
                       : !primary
                         ? 'Pick your primary name'
-                        : `Claim ${selected.length === 1 ? `$${primary}` : `${selected.length} names`} · primary $${primary}${nameFee ? ` · ${usdText(nameFee.usd)}` : ''}`}
+                        : `Claim ${selected.length === 1 ? `$${primary}` : `${selected.length} names`} · primary $${primary}${nameFee && !feeOff(alias) ? ` · ${usdText(nameFee.usd)}` : ''}`}
                 </button>
               </div>
             )}
@@ -565,13 +570,16 @@ export const HandleFlow = ({
               <button
                 type="button"
                 disabled={busy || state !== 'free'}
-                onClick={() => ((pending.current = alias), nameFee ? setFeeConfirm(true) : void claim())}
+                onClick={() => (
+                  (pending.current = alias),
+                  feeOff(alias) ? setMsg(STORE_NAME_NOTE) : nameFee ? setFeeConfirm(true) : void claim()
+                )}
                 className="h-11 rounded-xl text-sm font-bold border-0 cursor-pointer disabled:opacity-40"
                 style={{ background: GOLD, color: '#000' }}
               >
                 {busy
                   ? 'Claiming…'
-                  : `${paymail ? 'Change to' : 'Claim'} ${alias || 'name'}@${BWALLET_PAYMAIL_DOMAIN}${nameFee ? ` · ${usdText(nameFee.usd)}` : ''}`}
+                  : `${paymail ? 'Change to' : 'Claim'} ${alias || 'name'}@${BWALLET_PAYMAIL_DOMAIN}${nameFee && !feeOff(alias) ? ` · ${usdText(nameFee.usd)}` : ''}`}
               </button>
             )}
             {msg && (

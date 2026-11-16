@@ -1,5 +1,6 @@
 import { Beef } from '@bsv/sdk';
 import { logInWalletApp } from '../wallet/connectionLog';
+import { MARKET_APP_NAME } from '../storeBuild';
 
 /**
  * The 1Sat APIs and our Market use `txid_vout` outpoints, but buyBsv21 and
@@ -94,7 +95,7 @@ export const purchaseContext = <C extends { wallet: W }, W extends WalletLike>(c
             | undefined;
           // History › Connections: the in-wallet Market calls the wallet from the page, not via background.ts.
           logInWalletApp(
-            '1sat.market',
+            MARKET_APP_NAME,
             'createAction',
             r?.txid ? { txid: r.txid, sats: 0, description: args.description?.slice(0, 120) } : undefined,
           );

@@ -186,6 +186,48 @@ export const GAMES_ENABLED: boolean = !(
  */
 export const pneeRowShown = (balance: number, store = STORE_BUILD): boolean => !store || balance > 0;
 
+/**
+ * The name History gives the in-wallet Market's own transactions (wallet/historyEvents.ts inWalletAppOf,
+ * market/walletOutpoint.ts): the marketplace's address in bWalletX. A store build has no Market, but a restored
+ * wallet can hold old purchases and listings, so they still get a plain name there, and the store bundle does
+ * not carry the address. Written as a literal env check so Rollup folds it.
+ */
+export const MARKET_APP_NAME: string =
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+    ? 'Marketplace'
+    : '1sat.market';
+/** Where a listing shows, for the sell sheet (bWalletX only; the store wording never names the marketplace). */
+export const LISTING_VENUES: string =
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+    ? 'the Market'
+    : 'the Market and 1sat.market';
+
+/**
+ * Mint › A domain (domains/DomainMint.tsx, /m/mint/domain): prove you own a web domain, then make a token for it.
+ * bWalletX only: tokenising is not offered in a store build, not even as text. Literal env check so Rollup drops
+ * the step, its chooser rows and the DomainMint chunk.
+ */
+export const DOMAIN_MINT_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * Names with a price (short paymail handles: 4 characters and under; and any extra name the server prices): a
+ * payment to bCorp for a digital good (Apple 3.1.1, Play Payments), so bWalletX only. A store build offers only the
+ * free handles (5+ characters): a priced name reads STORE_NAME_NOTE, its price is never shown, and the fee is never
+ * sent (names/nameFee.ts and names/extraNames.ts refuse as well). The server asks no fee for a free name.
+ */
+export const paidNamesEnabled = (store = STORE_BUILD) => !store;
+export const STORE_NAME_NOTE = 'Not available in this edition';
+/** Is this name off limits here? `fee` = the server's price for it (null / undefined = free). */
+export const paidNameBlocked = (fee: unknown, store = STORE_BUILD): boolean => store && !!fee;
+
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
 export const STORE_ROOM_NOTE = 'This room is for token holders. Open it in bWalletX or on bchatx.com.';

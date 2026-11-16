@@ -39,7 +39,7 @@ import { opnsTreeFor } from './opnsTree';
 import { sweepDeadMints } from './opnsTxStatus';
 import { moneyNow } from '../money/money';
 import { buyOpnsListing } from './opnsBuy';
-import { NRT_ENABLED, PAID_FEATURES_ENABLED } from '../storeBuild';
+import { NRT_ENABLED, PAID_FEATURES_ENABLED, STORE_NAME_NOTE, paidNameBlocked } from '../storeBuild';
 
 /**
  * Settings → Identity → "Make your name payable" (rendered under the profile name).
@@ -289,6 +289,8 @@ export const GetYourName = ({
   const nameFee = nameFeeFor(prices, alias);
   const claim = async (paid = false) => {
     setFeeConfirm(false);
+    // A store build offers only free names (5+ characters): a priced one is not claimable, and nothing is paid.
+    if (!ownPaymail && paidNameBlocked(nameFee)) return setMsg(STORE_NAME_NOTE);
     if (nameFee && !ownPaymail && !paid) return setFeeConfirm(true);
     setBusy(true);
     setMsg('');

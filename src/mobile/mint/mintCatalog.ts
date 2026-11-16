@@ -2,6 +2,7 @@ import { MAX_PRIVATE_BYTES } from '../private/privateMint';
 import {
   BTRUST_ENABLED,
   GREETING_CARDS_ENABLED,
+  DOMAIN_MINT_ENABLED,
   MINT_PREVIEWS_ENABLED,
   RELEASES_ENABLED,
   STORE_BUILD,
@@ -545,9 +546,11 @@ export const MINT_CARDS: MintCard[] = [
     brands: [brand('OpNS')],
     icon: 'at',
     title: 'Your name',
-    sub: 'A name or a domain',
+    sub: DOMAIN_MINT_ENABLED ? 'A name or a domain' : 'A name on Bitcoin',
     tint: '#0d2a22',
-    pitch: 'Claim your name on Bitcoin, or prove you own a web domain and tokenise it.',
+    pitch: DOMAIN_MINT_ENABLED
+      ? 'Claim your name on Bitcoin, or prove you own a web domain and tokenise it.'
+      : 'Claim your name on Bitcoin.',
     uses: [
       { id: 'name', title: 'A name on Bitcoin', sub: 'Search, buy or claim one. From $1', action: { go: '/m/names' } },
       ...(!STORE_BUILD
@@ -560,7 +563,17 @@ export const MINT_CARDS: MintCard[] = [
             },
           ]
         : []),
-      { id: 'domain', title: 'A domain you own', sub: 'Prove it, then tokenise it', action: { flow: 'domain' } },
+      // bWalletX only (DOMAIN_MINT_ENABLED): not in a store build, not even as text.
+      ...(DOMAIN_MINT_ENABLED
+        ? [
+            {
+              id: 'domain',
+              title: 'A domain you own',
+              sub: 'Prove it, then tokenise it',
+              action: { flow: 'domain' as const },
+            },
+          ]
+        : []),
     ],
     why: ['People can find and pay you by name', 'It’s yours, held in your wallet', 'Easy to say, easy to remember'],
     later: MINT_PREVIEWS_ENABLED ? ['Your agent answers to it', 'Hand it down to your heirs'] : [],

@@ -353,24 +353,39 @@ export const COMMERCIAL_APPS: StoreApp[] = [
     url: 'https://vexvoid.com',
     verb: 'Jet-bike racing, music and techwear drops',
     tier: 'commercial',
-    category: 'Games & collectibles',
+    // A store build has no Games (storeBuild.ts GAMES_ENABLED), so no category named for them.
+    category:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? 'Music & art'
+        : 'Games & collectibles',
     color: '#7CF7FF',
     standard: std('https://vexvoid.com', 'VEX', true),
     status: 'live',
   },
   // Zero Dice (client): real-money dice, so never in the store edition (like the real-money games).
-  {
-    id: 'zerodice',
-    name: 'Zero Dice',
-    url: 'https://zerodice.online',
-    verb: 'Provably fair dice with a zero house edge',
-    tier: 'commercial',
-    category: 'Games & collectibles',
-    color: '#FFFFFF',
-    standard: std('https://zerodice.online', 'ZERODICE', true),
-    privateOnly: true,
-    status: 'live',
-  },
+  // Not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          id: 'zerodice',
+          name: 'Zero Dice',
+          url: 'https://zerodice.online',
+          verb: 'Provably fair dice with a zero house edge',
+          tier: 'commercial' as const,
+          category: 'Games & collectibles',
+          color: '#FFFFFF',
+          standard: std('https://zerodice.online', 'ZERODICE', true),
+          privateOnly: true,
+          status: 'live' as const,
+        },
+      ]
+    : []),
   ...(!(
     import.meta.env.VITE_STORE_BUILD === '1' ||
     import.meta.env.VITE_CHANNEL === 'ios-store' ||
