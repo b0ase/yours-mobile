@@ -22,6 +22,7 @@
 import { BSM, Utils } from '@bsv/sdk';
 import { MESSAGE_SIGNING_PROTOCOL } from '@1sat/types';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE } from '../../services/userDenied';
+import { APP_NAME } from '../storeBuild';
 
 export const LOGIN_PROTOCOL_NAME = 'bwallet sign in';
 /** bit-sign issues two-minute nonces; allow a little clock skew, refuse anything further out. */
@@ -223,7 +224,7 @@ export type PairLoginDeps = {
 };
 export type PairLoginReply = { result: unknown } | { error: { code: string; message: string } };
 
-const LOCKED = { error: { code: 'LOCKED', message: 'bWalletX is locked. Unlock it on your phone.' } };
+const LOCKED = { error: { code: 'LOCKED', message: `${APP_NAME} is locked. Unlock it on your phone.` } };
 
 /**
  * A paired, Connected site's call, if it is part of a sign-in (see the top of this file); null for every other call,

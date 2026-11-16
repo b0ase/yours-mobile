@@ -43,7 +43,7 @@ import { ProveHoldingsRequestPage } from './pages/requests/ProveHoldingsRequest'
 import { MintPrivateRequestPage } from './pages/requests/MintPrivateRequest';
 import { StreamGrantRequestPage } from './pages/requests/StreamGrantRequest';
 import { EnvelopeRequestPage } from './pages/requests/EnvelopeRequest';
-import { ENVELOPES_ENABLED } from './mobile/storeBuild';
+import { APP_NAME, ENVELOPES_ENABLED } from './mobile/storeBuild';
 import { SiteThemeFrame } from './mobile/theme/SiteThemeFrame';
 import './index.css';
 
@@ -303,7 +303,7 @@ const PromptApp = () => {
   if (!allowed) {
     return (
       <p className="text-xs p-4" style={{ color: '#98A2B3' }}>
-        Open bWalletX to answer this request.
+        Open {APP_NAME} to answer this request.
       </p>
     );
   }
@@ -316,7 +316,7 @@ const PromptApp = () => {
           style={{ background: walletBg, borderBottom: '1px solid #ffffff14' }}
         >
           <span className="text-sm font-bold" style={{ color: theme.color.global.contrast }}>
-            bWalletX
+            {APP_NAME}
           </span>
           {inPage.stuck && (
             <button
@@ -325,7 +325,7 @@ const PromptApp = () => {
               style={{ background: '#F5C542', color: '#0b0a08' }}
               onClick={() => chrome.runtime.sendMessage({ action: 'MOVE_PROMPT_TO_WINDOW' }).catch(() => undefined)}
             >
-              Open in bWalletX
+              Open in {APP_NAME}
             </button>
           )}
           <button

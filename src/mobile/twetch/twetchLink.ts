@@ -20,6 +20,7 @@ import { DEFAULT_TWETCH_WALLET_PATH } from '../../utils/constants';
 import { generateKeysFromTag } from '../../utils/keys';
 import { TWETCH_API } from '../feed/post';
 import { decrypt, encrypt } from '../../utils/crypto';
+import { APP_NAME } from '../storeBuild';
 
 /** Public facts about the linked Twetch account (settings.twetch). */
 export type TwetchLink = {
@@ -145,7 +146,7 @@ export const makeTwetchStore = (s: TwetchStorage, c: Crypto): TwetchStore => {
   const openKeys = async () => {
     const { a, id } = current();
     const passKey = await s.getPassKey();
-    if (!passKey || !a.encryptedKeys) throw new Error('bWalletX is locked. Unlock it and try again.');
+    if (!passKey || !a.encryptedKeys) throw new Error(`${APP_NAME} is locked. Unlock it and try again.`);
     return { a, id, passKey, keys: JSON.parse(await c.decrypt(a.encryptedKeys, passKey)) as Record<string, unknown> };
   };
   const writeAccount = async (id: string, a: object, patch: object) =>

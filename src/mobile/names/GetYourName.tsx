@@ -40,6 +40,7 @@ import { sweepDeadMints } from './opnsTxStatus';
 import { moneyNow } from '../money/money';
 import { buyOpnsListing } from './opnsBuy';
 import {
+  APP_NAME,
   MARKET_ENABLED,
   NRT_ENABLED,
   PAID_FEATURES_ENABLED,
@@ -466,7 +467,7 @@ export const GetYourName = ({
             >
               {aliasState === 'free' && (ownPaymail ? 'Yours' : 'Available')}
               {aliasState === 'taken' && 'Taken'}
-              {aliasState === 'reserved' && 'Reserved: kept for the bWalletX team'}
+              {aliasState === 'reserved' && `Reserved: kept for the ${APP_NAME} team`}
               {aliasState === 'invalid' && 'a-z, 0-9, - or _'}
               {aliasState === 'checking' && 'Checking…'}
             </span>

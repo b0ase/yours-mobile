@@ -8,11 +8,11 @@
  */
 import { classifySendError } from '../utils/sendErrors';
 import { unprovableParentTxid } from './unprovableCoinRetry';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export const COIN_HISTORY_MESSAGE =
   "Couldn't load a coin's history from the Bitcoin data services, so the payment wasn't built. Nothing was sent. Try again in a minute.";
-export const WALLET_INTERNAL_MESSAGE =
-  "bWalletX couldn't build this payment (a coin's data was missing or a Bitcoin data service was busy). Nothing was broadcast. Try again in a minute.";
+export const WALLET_INTERNAL_MESSAGE = `${APP_NAME} couldn't build this payment (a coin's data was missing or a Bitcoin data service was busy). Nothing was broadcast. Try again in a minute.`;
 
 const codeOf = (e: unknown): string | undefined => {
   const o = e as { code?: unknown; name?: unknown } | null;

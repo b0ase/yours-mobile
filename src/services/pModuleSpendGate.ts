@@ -29,10 +29,10 @@
 import { P2PKH, PublicKey, Transaction } from '@bsv/sdk';
 import { PERMISSION_SCHEME_IDS, parseOneInputLabel } from '@1sat/types';
 import { noteModuleOutputs } from './spendRecipients';
+import { APP_NAME } from '../mobile/storeBuild';
 
-export const HELD_ASSET_REFUSAL =
-  "A site can't name your wallet's own ordinals, tokens, names or locks for bWalletX to sign";
-export const MODULE_GATE_UNAVAILABLE = "bWalletX couldn't check this payment, so it was refused";
+export const HELD_ASSET_REFUSAL = `A site can't name your wallet's own ordinals, tokens, names or locks for ${APP_NAME} to sign`;
+export const MODULE_GATE_UNAVAILABLE = `${APP_NAME} couldn't check this payment, so it was refused`;
 
 /** The asset schemes createAssetPermissionModules registers (1sat, opns, bsv21, lock): the modules that finish. */
 const ASSET_SCHEMES = new Set<string>(PERMISSION_SCHEME_IDS);

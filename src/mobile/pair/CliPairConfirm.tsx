@@ -109,7 +109,7 @@ export const CliPairConfirm = ({
       >
         <Terminal size={28} color={GOLD} />
       </span>
-      <p className="mt-4 text-xl font-bold text-white">Pair the bWalletX CLI</p>
+      <p className="mt-4 text-xl font-bold text-white">Pair the {APP_NAME} CLI</p>
       <p className="mt-1 break-all font-mono text-sm text-white">{originHost(origin)}</p>
       <p className="mt-1 text-sm" style={{ color: MUTED }}>
         A program on a computer (CLI or an AI agent through MCP)

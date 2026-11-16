@@ -346,7 +346,6 @@ export const paidFeaturesEnabled = (store = STORE_BUILD) => !store;
 
 /** bWalletX = every non-store build (private channels, web, dev); the store app is plain bWallet. */
 export const isBWalletX = (store = STORE_BUILD) => !store;
-export const appNameFor = (store = STORE_BUILD) => (store ? 'bWallet' : 'bWalletX');
 
 /** The trading tab: "Exchange" in bWalletX (it trades, hence the X), "Market" in the store app (browse only). */
 export const marketLabel = (store = STORE_BUILD) => (store ? 'Market' : 'Exchange');
@@ -364,8 +363,19 @@ export const socialLoginEnabled = (store = STORE_BUILD) => !store;
  */
 export const buyCryptoEnabled = (store = STORE_BUILD) => !store;
 
-/** The app's own name for user-visible text: "bWallet" in a store build, "bWalletX" otherwise. */
-export const APP_NAME = appNameFor();
+/**
+ * The app's own name in user-visible text: "bWallet" in a store build, "bWalletX" otherwise (CEO, A9). Every UI string
+ * that names the app uses it. A literal env check (the old appNameFor() helper is gone), so Rollup folds it and a store bundle never
+ * carries "bWalletX" through it. Domains (bwalletx.com, web.bwalletx.com), paymails (@bwalletx.com), protocol / basket /
+ * storage ids and log text keep their own spelling. scripts/store-bundle-check.mjs fails a store bundle that still
+ * names the app "bWalletX".
+ */
+export const APP_NAME: string =
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+    ? 'bWallet'
+    : 'bWalletX';
 
 /**
  * The same gates as plain constants, for JSX: Rollup folds `!STORE_BUILD` at build time, so the store bundle
@@ -844,3 +854,18 @@ export const WAGES_ENABLED: boolean =
     import.meta.env.VITE_CHANNEL === 'ios-store' ||
     import.meta.env.VITE_CHANNEL === 'android-play'
   ) && import.meta.env.VITE_WAGES !== '0';
+
+/**
+ * A connected site buying, listing or cancelling a listing through the wallet (CTO + CEO, round A9, 16 Nov 2026): a
+ * site's createAction that @1sat/permission-module classifies as a purchase, a listing or a cancelled listing, or any
+ * action with an OrdLock script, is bWalletX only. A store build refuses it with STORE_NAME_NOTE before any sheet is
+ * shown or anything is signed, and refuses an action on 1Sat assets that the module can't classify too (fails
+ * closed). One gate for every site: services/storeMarketGate.ts, wrapped outermost on the site wallet in
+ * initWallet.ts. Plain payments, sign-in, message signing and the document seal are not touched. Literal env check so
+ * Rollup drops the gate from bWalletX, whose sites still get the module's purchase and listing sheets.
+ */
+export const SITE_MARKET_ACTIONS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);

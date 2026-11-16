@@ -30,7 +30,7 @@ import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
 import { pairedKeyHost, setProvenPairingCheck } from '../../services/crossSiteSignGuard';
-import { appNameFor } from '../storeBuild';
+import { APP_NAME } from '../storeBuild';
 import type { OneSatContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { AgentCallError, CLI_ORIGIN, handleAgentCall, type AgentGrant } from './agentPairing';
@@ -48,8 +48,7 @@ import { accountNamesFor } from '../names/accountNames';
  * site must show its QR again. Distinct from ERR_PERMISSION_DENIED, which only ever means the user said no.
  * Sent as a call's error `{ code: 'REPAIR_NEEDED', message }` and as the reason of the phone's close frame.
  */
-export const CLI_ONLY_FROM_SETTINGS =
-  'To pair the bWalletX CLI, open Agents › Pair the CLI (or Settings › Paired websites) and scan from there. Only do this if you just ran `bwalletx login` on your own computer.';
+export const CLI_ONLY_FROM_SETTINGS = `To pair the ${APP_NAME} CLI, open Agents › Pair the CLI (or Settings › Paired websites) and scan from there. Only do this if you just ran \`bwalletx login\` on your own computer.`;
 export const REPAIR_NEEDED_CODE = 'REPAIR_NEEDED';
 export const REPAIR_NEEDED_MESSAGE = 'This pairing has ended. Scan the QR code on the site again to reconnect.';
 /** The relay refused the join: someone else already joined with this QR, or it expired. */
@@ -530,7 +529,7 @@ export const pairingLiveCheck = (c: string, grant: AgentGrant, ctx: OneSatContex
 
 async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
   try {
-    if (!agentDeps.ctx) throw new AgentCallError('LOCKED', `${appNameFor()} is locked. Unlock it on your phone.`);
+    if (!agentDeps.ctx) throw new AgentCallError('LOCKED', `${APP_NAME} is locked. Unlock it on your phone.`);
     const result = await handleAgentCall(grant, action, params, {
       ctx: agentDeps.ctx,
       currentId: agentDeps.currentId,
@@ -858,7 +857,7 @@ function connectPairing(
       const hello: HelloFrame = {
         t: 'hello',
         k: P.toPublicKey().toString(),
-        info: { name: appNameFor(), rdns: 'space.bwallet.mobile' },
+        info: { name: APP_NAME, rdns: 'space.bwallet.mobile' },
         ...(link.cd === 8 && { cd: 8 as const }),
         ...(v2 && { wcv: 2 as const }),
       };

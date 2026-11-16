@@ -11,7 +11,7 @@ import { CustomListenerName, RequestEventDetail, RequestParams } from './inject'
 import { originatorForOrigin } from './services/originKey';
 import { forwardCwiCall } from './services/cwiForward';
 import { chromeLocalStore, markAndDetect } from './services/duplicateExtension';
-import { SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
+import { APP_NAME, SUBSCRIPTIONS_ENABLED } from './mobile/storeBuild';
 import { HANDOFF_ENABLED, HANDOFF_WEB_ORIGIN } from './mobile/passkey/extHandoff';
 import {
   ROOM_PLAYING_ACTION,
@@ -65,7 +65,7 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
   }
   if (!frameOk) {
     self.dispatchEvent(
-      new CustomEvent(messageId, { detail: { success: false, error: 'bWalletX only works inside a secure (https) site' } }),
+      new CustomEvent(messageId, { detail: { success: false, error: `${APP_NAME} only works inside a secure (https) site` } }),
     );
     return;
   }

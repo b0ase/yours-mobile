@@ -47,6 +47,7 @@ import {
 import { mapLimit, rateLimiter, withBeefCache } from './speed';
 import { RelayxJigs } from './RelayxJigs';
 import { requestWalletRefresh, useGoToWallet } from '../wallet/walletRefresh';
+import { APP_NAME } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
@@ -172,8 +173,7 @@ const mergeTokens = (all: TokenBalance[]): TokenBalance[] => {
 const SFP_NOTE =
   'Money Button tokens (Simple Fabriik Protocol) can only move with a signature from Money Button’s token server, which shut down in 2022. They stay where they are, untouched: the sweep leaves them and the small amount of BSV inside each one alone.';
 
-const BRC100_NOTE =
-  'Coins received through newer wallet features (Yours 5 / bWalletX change and paymail payments) sit at one-off keys that can’t be found from the phrase alone. To move those, restore the phrase as an account here (Add account › Restore) and send from it.';
+const BRC100_NOTE = `Coins received through newer wallet features (Yours 5 / ${APP_NAME} change and paymail payments) sit at one-off keys that can’t be found from the phrase alone. To move those, restore the phrase as an account here (Add account › Restore) and send from it.`;
 
 /**
  * Settings › Sweep from another wallet: move everything from another wallet into the current bWallet
@@ -565,7 +565,7 @@ export const HdSweepScreen = ({ onBack, initialPhrase }: { onBack: () => void; i
         {step === 'enter' && !initialPhrase && (
           <>
             <p className="text-xs" style={{ color: MUTED }}>
-              Move everything from another wallet (bWalletX, Yours, Money Button, RelayX, Twetch, SimplyCash and other
+              Move everything from another wallet ({APP_NAME}, Yours, Money Button, RelayX, Twetch, SimplyCash and other
               12 or 24-word wallets) into this account. We try every known wallet layout for you. What you paste stays
               on this phone and is forgotten when you leave this screen.
             </p>

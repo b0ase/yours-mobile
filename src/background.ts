@@ -99,7 +99,7 @@ import type { TwetchAsk, TwetchWallet } from './mobile/twetch/twetchCalls';
 import { isMintPrivateAction, runSiteMintPrivate, type Kv as MintKv } from './services/mintPrivateSite';
 import { createContext, type OneSatContext } from '@1sat/actions';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
-import { ENVELOPES_ENABLED } from './mobile/storeBuild';
+import { APP_NAME, ENVELOPES_ENABLED } from './mobile/storeBuild';
 import {
   DEFAULT_ENVELOPE_USD,
   ENVELOPE_PRESETS_USD,
@@ -2689,7 +2689,7 @@ if (isInServiceWorker) {
       chrome.notifications?.create('bwalletx-approval', {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: 'bWalletX needs your approval',
+        title: `${APP_NAME} needs your approval`,
         message: 'A site is waiting for you to approve a request.',
       });
     } catch {
@@ -7914,7 +7914,7 @@ chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: 'Pairing link received',
-      message: 'Open bWalletX (toolbar icon) to check the code and pair.',
+      message: `Open ${APP_NAME} (toolbar icon) to check the code and pair.`,
     });
   if (sp?.open) Promise.resolve(sp.open({ tabId, windowId: tab.windowId })).catch(nudge);
   else nudge();
@@ -7947,7 +7947,7 @@ chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: 'Sign-in request',
-      message: 'Open bWalletX (toolbar icon) to approve.',
+      message: `Open ${APP_NAME} (toolbar icon) to approve.`,
     });
   if (sp?.open) Promise.resolve(sp.open({ tabId, windowId: tab.windowId })).catch(nudge);
   else nudge();

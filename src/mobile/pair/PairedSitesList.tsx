@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { Globe, Terminal } from 'lucide-react';
 import { forget, pairedSites, subscribePairs, type StoredSession } from './sessions';
 import { usd2 } from './mintScope';
+import { APP_NAME } from '../storeBuild';
 
 const MUTED = '#98A2B3';
 
@@ -24,7 +25,7 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
     <div>
       {sites.length === 0 && (
         <p className="text-sm" style={{ color: MUTED }}>
-          Nothing paired. Use Scan to connect on a site that shows a bWallet QR code, or to pair the bWalletX CLI
+          Nothing paired. Use Scan to connect on a site that shows a bWallet QR code, or to pair the {APP_NAME} CLI
           (bwalletx login).
         </p>
       )}
@@ -35,7 +36,7 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
             <div className="min-w-0 flex-1">
               <div className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-white">
                 {s.agent
-                  ? `bWalletX CLI · ${s.agent.name}`
+                  ? `${APP_NAME} CLI · ${s.agent.name}`
                   : s.proven
                     ? new URL(s.origin).host
                     : `claims to be ${new URL(s.origin).host}`}

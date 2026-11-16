@@ -25,6 +25,7 @@ import {
   type MeltStatus,
 } from '../../sweep/npgMelt';
 import type { IdentifiedJig } from '../../sweep/runIdentify';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * "Melt into element cards" for one identified NPG (owner, 17 Oct 2026). One approval sheet, drawn like a share
@@ -235,7 +236,7 @@ export function NpgMelt({
           <ul className="m-0 p-0 list-none flex flex-col gap-1.5 text-xs text-white">
             <li className="text-[13px] leading-snug">
               <b>What happens:</b> her old RelayX NFT (a Run token) is destroyed, and each of her parts is minted fresh
-              as a <b>1Sat Ordinal</b>, the NFT standard bWalletX and today&apos;s BSV wallets use.
+              as a <b>1Sat Ordinal</b>, the NFT standard {APP_NAME} and today&apos;s BSV wallets use.
             </li>
             <li style={{ color: '#FF8A80' }}>
               <b>The RelayX NFT will be destroyed</b> (burned on chain). It can&apos;t be undone.

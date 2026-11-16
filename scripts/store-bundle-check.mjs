@@ -17,6 +17,11 @@
  *     A hit that has to stay goes in scripts/store-bundle-allow.json with its reason; an entry without a reason
  *     fails the check.
  * Add to BANNED when a gate is added.
+ *  3. Product name (A9, CEO): the store app is "bWallet". Any string in a store bundle that names the app "bWalletX"
+ *     fails: every string, template part and JSX text of every JS chunk (read with TypeScript's parser) and the text
+ *     of every HTML / JSON / SVG / manifest file. Domains and paymails (bwalletx.com, web.bwalletx.com, @bwalletx.com)
+ *     never match; anything else that has to stay (an on-chain id, a signed protocol text) goes in the allowlist's
+ *     "productName" list with its reason.
  */
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
@@ -274,6 +279,78 @@ export const loadAllow = (path = join(HERE, 'store-bundle-allow.json')) => {
   });
 };
 
+/**
+ * Pass 3: the app named "bWalletX". Not a domain or paymail (followed by ".com", or preceded by "@", "." or "-"), and
+ * not part of a longer identifier (bWalletXRequest).
+ */
+export const PRODUCT_NAME = /(?<![\w@.-])bWalletX(?![\w-]|\.com)/;
+
+/** scripts/store-bundle-allow.json "productName": [{ chunk, match | pattern, reason }], checked as loadAllow checks. */
+export const loadNameAllow = (path = join(HERE, 'store-bundle-allow.json')) => {
+  const list = JSON.parse(readFileSync(path, 'utf8')).productName ?? [];
+  for (const a of list)
+    if (!a.chunk || !(a.match || a.pattern) || typeof a.reason !== 'string' || a.reason.trim().length < 10)
+      throw new Error(
+        `store-bundle-check: productName entry ${JSON.stringify(a)} needs chunk, match or pattern, and a reason`,
+      );
+  return list.map((a) => {
+    const re = a.pattern ? new RegExp(a.pattern) : null;
+    return { ...a, test: (s) => (re ? re.test(s) : s.includes(a.match)) };
+  });
+};
+
+/** Every string, template part and JSX text in a JS file, read with TypeScript's parser (regex literals are not text). */
+export const jsTexts = (ts, name, js) => {
+  const out = [];
+  const sf = ts.createSourceFile(name, js, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+  const visit = (node) => {
+    if (
+      ts.isStringLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isTemplateHead(node) ||
+      ts.isTemplateMiddle(node) ||
+      ts.isTemplateTail(node) ||
+      ts.isJsxText(node)
+    )
+      out.push(node.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+};
+
+/** Pass 3: the app named "bWalletX" anywhere in the bundle, less the productName allowlist. Returns { hits, unused }. */
+export const scanProductName = async (dir, allow = loadNameAllow()) => {
+  const ts = (await import('typescript')).default;
+  const hits = [];
+  const used = new Set();
+  const check = (file, text) => {
+    const m = PRODUCT_NAME.exec(text);
+    if (!m) return;
+    const chunk = chunkName(file);
+    const ok = allow.findIndex((a) => (a.chunk === '*' || a.chunk === chunk) && a.test(text));
+    if (ok >= 0) {
+      used.add(ok);
+      return;
+    }
+    hits.push({
+      file: relative(dir, file),
+      text: m[0],
+      around: text.slice(Math.max(0, m.index - 70), m.index + 90).replace(/\s+/g, ' '),
+    });
+  };
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      const p = join(d, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.m?js$/.test(name)) for (const t of jsTexts(ts, name, readFileSync(p, 'utf8'))) check(p, t);
+      else if (TEXT.test(name)) check(p, readFileSync(p, 'utf8'));
+    }
+  };
+  walk(dir);
+  return { hits, unused: allow.filter((_, i) => !used.has(i)) };
+};
+
 /** Pass 2: banned words in the UI strings of every JS chunk, less the allowlist. Returns { hits, unused }. */
 export const scanWords = (dir, words = storeBannedWords(), allow = loadAllow()) => {
   const hits = [];
@@ -348,6 +425,7 @@ if (isMain()) {
   const dir = process.argv[2] ?? 'build-mobile';
   const hits = scan(dir);
   const words = scanWords(dir);
+  const names = await scanProductName(dir);
   if (hits.length) {
     console.error(`store-bundle-check: ${hits.length} banned string(s) in ${dir}:`);
     for (const h of hits) console.error(`  ${h.file}: "${h.text}" … ${h.around}`);
@@ -356,13 +434,20 @@ if (isMain()) {
     console.error(`store-bundle-check: ${words.hits.length} UI string(s) with a banned word in ${dir}:`);
     for (const h of words.hits) console.error(`  ${h.file}: [${h.text}] ${h.around}`);
   }
-  if (hits.length || words.hits.length) process.exit(1);
-  if (words.unused.length)
+  if (names.hits.length) {
+    console.error(
+      `store-bundle-check: ${names.hits.length} string(s) naming the app "bWalletX" in ${dir} (the store app is bWallet):`,
+    );
+    for (const h of names.hits) console.error(`  ${h.file}: ${h.around}`);
+  }
+  if (hits.length || words.hits.length || names.hits.length) process.exit(1);
+  const unused = [...words.unused, ...names.unused];
+  if (unused.length)
     console.log(
-      `store-bundle-check: ${words.unused.length} allowlist entr${words.unused.length === 1 ? 'y' : 'ies'} matched nothing (stale?): ` +
-        words.unused.map((a) => `${a.chunk}: ${a.match ?? a.pattern}`).join('; '),
+      `store-bundle-check: ${unused.length} allowlist entr${unused.length === 1 ? 'y' : 'ies'} matched nothing (stale?): ` +
+        unused.map((a) => `${a.chunk}: ${a.match ?? a.pattern}`).join('; '),
     );
   console.log(
-    `store-bundle-check: ${dir} is clean (${BANNED.length} strings; banned words in UI strings, with the allowlist)`,
+    `store-bundle-check: ${dir} is clean (${BANNED.length} strings; banned words in UI strings, with the allowlist; no "bWalletX" app name)`,
   );
 }

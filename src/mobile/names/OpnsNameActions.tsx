@@ -32,7 +32,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { moneyNow } from '../money/money';
-import { MARKET_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+import { APP_NAME, MARKET_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { getPaymail, ownedFromOutputs, syncAccountNames, type OwnedName } from './accountName';
 import { setLocalAvatar } from './avatar';
@@ -258,7 +258,7 @@ export const OpnsNameActions = ({
           <Row
             icon={<AtSign size={20} color={GOLD} />}
             title="Use as my $handle"
-            sub={`Get paid at ${pm}. Handles live on the bWalletX name server, separate from the on-chain name, so the next screen checks it is free.`}
+            sub={`Get paid at ${pm}. Handles live on the ${APP_NAME} name server, separate from the on-chain name, so the next screen checks it is free.`}
             action={
               on('handle') ? (
                 <Done>Your $handle</Done>

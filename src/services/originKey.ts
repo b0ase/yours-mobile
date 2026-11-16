@@ -13,8 +13,9 @@
  *   that was made from a plain-http page is never used again (that is the "drop http grants" half: stored grants
  *   only ever carried the host, so they can't be told apart; the http path to them is what is closed).
  */
+import { APP_NAME } from '../mobile/storeBuild';
 
-export const INSECURE_ORIGIN_ERROR = 'bWalletX only works with secure (https) sites';
+export const INSECURE_ORIGIN_ERROR = `${APP_NAME} only works with secure (https) sites`;
 
 export const isLoopbackHostname = (hostname: string): boolean => {
   const h = hostname.toLowerCase().replace(/\.$/, '');

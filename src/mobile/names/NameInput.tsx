@@ -26,6 +26,7 @@ import { payeeDetail, recipientHint } from './payeeText';
 import { PLAIN_KEY_WARNING } from './pubkeyRecipient';
 import { isPeerPayUri, parsePeerPay } from '../scan/peerpay';
 import { requestPay } from '../wallet/payNav';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Recipient box for the Send screens (build-time swap for upstream's address <Input>, see
@@ -278,7 +279,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       className="mt-1 text-xs font-semibold border-0 bg-transparent p-0 cursor-pointer"
                       style={{ color: 'var(--bw-accent-hi)' }}
                     >
-                      Did you mean {r.didYouMean}? (a bWalletX name)
+                      Did you mean {r.didYouMean}? (a {APP_NAME} name)
                     </button>
                   )}
                   {r.nameBinding === 'signed' && (

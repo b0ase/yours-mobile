@@ -73,7 +73,7 @@ import { BackPneeSheet } from '../notes/BackPneeSheet';
 import { BackPneeDoneSheet } from '../notes/BackPneeDoneSheet';
 import { artistFromSearch, artistOfPot, artistPot, groupPots, PNEE_POT, potName } from './pots';
 import { isBackPneeMode } from '../notes/backPnee';
-import { MARKET_ENABLED, PLACEMENT_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
+import { APP_NAME, MARKET_ENABLED, PLACEMENT_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
 import { listSubs, monthlyUsd } from '../pots/pots';
 import { fundAvailable } from '../pots/fund';
 import { LOCK_TAB_PATH, lockTabFor, type LockTab } from '../pots/subsList';
@@ -1318,7 +1318,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
             <ul className="text-xs text-white flex flex-col gap-2 list-disc pl-4">
               <li>
                 {fmtBsv(schedule?.totalSats ?? 0)} will be locked on the Bitcoin SV blockchain.{' '}
-                <b>Nobody can unlock it before its block: not you, not bWalletX, not support.</b>
+                <b>Nobody can unlock it before its block: not you, not {APP_NAME}, not support.</b>
               </li>
               <li className="font-semibold">{confirmOpensText(schedule?.pieces ?? [])}</li>
               <li>

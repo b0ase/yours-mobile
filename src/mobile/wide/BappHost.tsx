@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { readWide, setBadge, type BappEntry, type Section, type Wide } from './bapps';
 import './bapp-host.css';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * PROTOTYPE (demo/desktop-shell): bApps in the wide layout, shell protocol v2
@@ -146,7 +147,7 @@ export function BappHost({ app, onClose }: { app: BappEntry; onClose?: () => voi
           // Strip control characters from the app's title.
           if (typeof d.title === 'string')
             // eslint-disable-next-line no-control-regex
-            document.title = `${d.title.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)} — bWalletX`;
+            document.title = `${d.title.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 80)} — ${APP_NAME}`;
           break;
         case 'bapp:menu':
           // The wide shell's account drawer (flag.ts WW_OPEN; an event so this file stands alone).

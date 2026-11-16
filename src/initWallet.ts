@@ -126,7 +126,8 @@ import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
 import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
 import { isPhone, onWifi } from './services/networkKind';
 import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
-import { ENVELOPES_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
+import { ENVELOPES_ENABLED, SITE_MARKET_ACTIONS_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
+import { guardStoreMarketActions, walletAssetOutpoints } from './services/storeMarketGate';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
 import {
   clearLearnedOwnBackends,
@@ -1196,7 +1197,7 @@ export const initWallet = async (
   // Outermost: sites deliver bought BSV-21 tokens to receive keys the wallet picks, and sell them with the wallet
   // signing its own token inputs behind one sheet; onesat stays reserved (services/siteTokens.ts, docs/SITE-TOKENS.md).
   // A payment's sheet lists where its outputs go (services/spendRecipients.ts, b-Aware 26 Oct 2026 N3-3).
-  const wallet = guardSiteTokens(
+  const siteWallet = guardSiteTokens(
     guardSpendRecipients(
       guardLabelsOnSpend(
         guardReservedBaskets(
@@ -1257,6 +1258,16 @@ export const initWallet = async (
       listConsent: chromeConsentStore(),
     },
   );
+  // Store edition, outermost of all: a site's purchase, listing or cancelled listing (as @1sat/permission-module
+  // classifies it), any OrdLock action, and any 1Sat-asset action the module can't classify are refused with "Not
+  // available in this edition" before any sheet or signature (services/storeMarketGate.ts, CTO + CEO A9). bWalletX
+  // never wraps it (SITE_MARKET_ACTIONS_ENABLED is a literal, so Rollup drops the gate there).
+  const wallet = SITE_MARKET_ACTIONS_ENABLED
+    ? siteWallet
+    : guardStoreMarketActions(siteWallet, {
+        adminOriginator: ADMIN_ORIGINATOR,
+        assetOutpoints: walletAssetOutpoints(baseWallet),
+      });
   // Upgrade migration (C1): grants a site already holds for a reserved protocol are removed. Idempotent.
   await revokeReservedProtocolGrants(permissionStore, ADMIN_ORIGINATOR)
     .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for wallet-internal protocols`))

@@ -34,6 +34,7 @@
 import type { LocalBackend } from './hub';
 import { isQuotaError as isQuota } from './atomicStorage';
 import { freeDisposableCaches } from './storageCaches';
+import { APP_NAME } from './storeBuild';
 
 export { freeDisposableCaches, isDisposableCacheKey } from './storageCaches';
 
@@ -44,7 +45,7 @@ export const WEB_TAB_OWNER_KEY = 'bwx.web.activeTab';
 export const WEB_TAB_TAKEOVER_KEY = 'bwx.web.takeover';
 export const WEB_TAB_FLUSH_KEY = 'bwx.web.handedOver';
 export const WEB_TAB_CHANNEL = 'bwx-web-tab';
-export const MOVED_ERROR = 'bWalletX is open in another tab';
+export const MOVED_ERROR = `${APP_NAME} is open in another tab`;
 /** How long the old tab lets a running payment finish before it hands over anyway. */
 export const PAYMENT_HANDOVER_WAIT_MS = 20_000;
 /** After the payments: how long storage must be quiet before the hub is fenced, and the cap on that wait. */
@@ -746,17 +747,17 @@ export const browserWebTabEnv = (): WebTabEnv => {
 
 const SCREEN_COPY: Record<Exclude<WebTabBlock, 'busy'>, { title: string; line: string; button: string }> = {
   'other-tab': {
-    title: 'bWalletX is open in another tab',
+    title: `${APP_NAME} is open in another tab`,
     line: 'Your wallet runs in one tab at a time, so everything stays in step.',
     button: 'Use here instead',
   },
   'storage-full': {
-    title: 'This browser’s storage for bWalletX is full',
+    title: `This browser’s storage for ${APP_NAME} is full`,
     line: 'Please don’t clear this site’s data: your wallet’s keys are kept there. Free some space in your browser, then try again.',
     button: 'Try again',
   },
   'no-storage': {
-    title: 'bWalletX can’t use this browser’s storage',
+    title: `${APP_NAME} can’t use this browser’s storage`,
     line: 'Allow site data for this site in your browser settings (private windows may block it), then try again.',
     button: 'Try again',
   },

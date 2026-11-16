@@ -56,6 +56,7 @@ import { keystorePasswordFromPrf, passkeyName, savePasskeyUnlock } from '../../m
 import { offerSavePassword } from '../../mobile/passkey/passkeyUi';
 import { takeTransferredWallet } from '../../mobile/passkey/session';
 import { switchBeforeReload } from './finishSwitch';
+import { APP_NAME } from '../../mobile/storeBuild';
 
 const TRACE_ENABLED = SEEDLESS_ENABLED && import.meta.env.VITE_SEEDLESS_TRACE === '1';
 
@@ -329,7 +330,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
     return importWallet === 'yours'
       ? // Not "the 12 words are enough" (release click-through, 4 Nov 2026): change from before this update can live only on
         // the device that made it. Same advice as bwalletx.com's restore copy (bwalletx-site 49f9c9a).
-        'Enter your 12 words; the Yours extension is not required. If your old device still works, keep bWalletX on it until this one shows the right balance: some change from before this update is recorded only on the device that made it.'
+        `Enter your 12 words; the Yours extension is not required. If your old device still works, keep ${APP_NAME} on it until this one shows the right balance: some change from before this update is recorded only on the device that made it.`
       : importWallet
       ? 'Enter your seed phrase'
       : 'Enter a seed phrase and use custom derivation paths to import a wallet from anywhere!';
@@ -716,7 +717,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
   const passwordStep = (
     <div className={`flex flex-col items-center w-full ${newWallet ? 'pb-6' : 'pb-20'}`}>
       <SubStepHeader
-        title={viaExt ? 'Master password for this extension' : newWallet ? 'Create Password' : 'Your bWalletX password'}
+        title={viaExt ? 'Master password for this extension' : newWallet ? 'Create Password' : `Your ${APP_NAME} password`}
         onBack={() => setStep(2)}
       />
       <p className="text-xs mb-4 text-center px-4" style={{ color: gray }}>
@@ -724,7 +725,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
           ? 'Your passkey brought your wallet here. This password unlocks all your accounts in this Chrome. Pick one your password manager will keep. Everything else on this page is optional.'
           : newWallet
           ? 'This will be used to unlock your wallet.'
-          : `The password you use to unlock bWalletX${currentAccountName ? ` (checked against ${currentAccountName})` : ''}.`}
+          : `The password you use to unlock ${APP_NAME}${currentAccountName ? ` (checked against ${currentAccountName})` : ''}.`}
       </p>
 
       {SEEDLESS_ENABLED && !newWallet && <PasskeyUnlockButton label="Use passkey" onPassword={applyPasskeyPassword} />}
@@ -772,7 +773,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
         {!viaExt && (<>
         <Input
           theme={theme}
-          placeholder={newWallet ? 'Password' : 'bWalletX password'}
+          placeholder={newWallet ? 'Password' : `${APP_NAME} password`}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

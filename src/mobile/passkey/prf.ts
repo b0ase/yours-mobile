@@ -1,6 +1,6 @@
 /* WebAuthn PRF for the passkey seed backup (prototype). See docs/SEEDLESS-PASSKEY.md for the rpId choice. */
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { STORE_BUILD } from '../storeBuild';
+import { APP_NAME, STORE_BUILD } from '../storeBuild';
 import { NATIVE_RP_ID, nativeCreateWithPrf, nativeGetPrf, type PasskeysPlugin } from './nativePasskeys';
 import { b64url, fromB64url, prfSalt } from './seedBackup';
 
@@ -144,7 +144,7 @@ export async function createPasskeyWithPrf(
   const cred = (await navigator.credentials.create({
     publicKey: {
       challenge: crypto.getRandomValues(new Uint8Array(32)),
-      rp: { id: rpId, name: 'bWalletX' },
+      rp: { id: rpId, name: `${APP_NAME}` },
       user: { id: crypto.getRandomValues(new Uint8Array(16)), name: label, displayName: label },
       pubKeyCredParams: [
         { type: 'public-key', alg: -7 },

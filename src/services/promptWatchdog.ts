@@ -20,10 +20,10 @@
 
 import { PRE_APPROVAL_CODED } from './preApprovalTimeout';
 import { WALLET_SETUP_CODED } from './walletSetupWait';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export const PROMPT_NOT_SHOWN_CODE = 'ERR_PROMPT_NOT_SHOWN';
-export const PROMPT_NOT_SHOWN_MESSAGE =
-  'bWalletX could not show its approval sheet. Click the bWalletX icon in your toolbar, then try again.';
+export const PROMPT_NOT_SHOWN_MESSAGE = `${APP_NAME} could not show its approval sheet. Click the ${APP_NAME} icon in your toolbar, then try again.`;
 /** How long a prompt UI has to confirm it is showing a prompt, per stage. */
 export const PROMPT_CONFIRM_MS = 4000;
 
@@ -48,8 +48,7 @@ export const PROMPT_EXPIRY_MS = 60_000;
  * first" and retry. It is never approved; the visible sheet is untouched. Only requests not yet approved or signed.
  */
 export const PROMPT_BUSY_CODE = 'ERR_PROMPT_BUSY';
-export const PROMPT_BUSY_MESSAGE =
-  'bWalletX is showing another request. Nothing was paid; answer the open request in bWalletX, then try again.';
+export const PROMPT_BUSY_MESSAGE = `${APP_NAME} is showing another request. Nothing was paid; answer the open request in ${APP_NAME}, then try again.`;
 export const PROMPT_BUSY_MS = 20_000;
 
 export function promptBusyError(): Error & { code: string; status: number } {

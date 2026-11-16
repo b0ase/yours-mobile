@@ -11,7 +11,7 @@ import { listOrdinals, type OneSatContext } from '@1sat/actions';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { checkSize, estimateCost, isMintableType, notifyMinted, validateForm, type Collection } from '../mint/mint';
 import { mintMedia } from '../mint/mintMedia';
-import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
+import { APP_NAME, STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 import {
   checkMintBudget,
   MintLimitError,
@@ -95,7 +95,7 @@ export const checkGrant = (grant: AgentGrant, action: string, currentId: string 
   if (!(mintOnly(grant) && grant.mint) && !isPairableAgent(grant.agentId))
     throw new AgentCallError('NOT_AGENT', `${grant.name} is no longer an agent account.`);
   if (currentId !== grant.agentId)
-    throw new AgentCallError('NOT_OPEN', `bWalletX is open on another account. Switch to ${grant.name} in the app.`);
+    throw new AgentCallError('NOT_OPEN', `${APP_NAME} is open on another account. Switch to ${grant.name} in the app.`);
 };
 
 type P = Record<string, unknown>;
@@ -123,7 +123,7 @@ export type AgentDeps = {
   tradeIo?: AgentActionHooks['io'];
 };
 
-const NOT_PAIRED = 'This computer is no longer paired with bWalletX. Run `bwalletx login` again.';
+const NOT_PAIRED = `This computer is no longer paired with ${APP_NAME}. Run \`bwalletx login\` again.`;
 
 /** Refuse when the pairing was removed (or the account switched) since the request came in. Fails closed. */
 const assertLive = (deps: AgentDeps) => {
@@ -141,9 +141,9 @@ const assertLive = (deps: AgentDeps) => {
  * pause is on. Checked before anything is assembled or signed, for agent and mint-only pairings alike.
  */
 const assertMaySpend = async (grant: AgentGrant, deps: AgentDeps) => {
-  if (allAgentsStopped()) throw new AgentCallError('STOPPED', 'All agents are stopped in bWalletX.');
+  if (allAgentsStopped()) throw new AgentCallError('STOPPED', `All agents are stopped in ${APP_NAME}.`);
   if (getAgentAccount(grant.agentId)?.stopped)
-    throw new AgentCallError('STOPPED', `${grant.name} is stopped in bWalletX.`);
+    throw new AgentCallError('STOPPED', `${grant.name} is stopped in ${APP_NAME}.`);
   const paused = deps.spendingPaused ?? (() => isPaused('spending'));
   if (await paused().catch(() => true)) throw new AgentCallError('PAUSED', PAUSED_MESSAGE);
 };

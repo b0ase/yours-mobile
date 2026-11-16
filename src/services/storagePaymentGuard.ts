@@ -25,6 +25,7 @@
 import { AuthFetch } from '@bsv/sdk';
 import type { StoragePaymentHook, StoragePaymentRequiredInfo } from '@1sat/wallet';
 import { isPausedOrUnknown } from '../mobile/config/killSwitch';
+import { APP_NAME } from '../mobile/storeBuild';
 
 /** A store whose price we know. The payment is derived to `serverIdentityKey` (BRC-29), so it is the destination. */
 export type KnownStoragePrice = {
@@ -50,11 +51,11 @@ export const STORAGE_PAY_COOLDOWN_MS = 10 * 60_000;
 const DAY_MS = 24 * 3_600_000;
 
 export const STORAGE_PAY_REFUSED_NOTICE =
-  'Your online storage is full and asked for a payment. bWalletX did not pay it. Nothing was paid. ' +
+  `Your online storage is full and asked for a payment. ${APP_NAME} did not pay it. Nothing was paid. ` +
   'Switch to This device in Settings › Storage to keep going.';
 
 export const BACKUP_FULL_NOTICE =
-  'Your online backup is full. bWalletX did not pay for more space. Nothing was paid. ' +
+  `Your online backup is full. ${APP_NAME} did not pay for more space. Nothing was paid. ` +
   'Your wallet on this device keeps working.';
 
 export type StoragePayDecision = { ok: true } | { ok: false; reason: string };
@@ -313,7 +314,7 @@ export const backupFullNotice =
 
 // ── HTTP 402 (BRC-105): a storage server is never paid by AuthFetch ────────────────────────────────────────────
 
-export const STORAGE_402_REFUSED = 'A storage server asked to be paid. bWalletX did not pay it. Nothing was paid.';
+export const STORAGE_402_REFUSED = `A storage server asked to be paid. ${APP_NAME} did not pay it. Nothing was paid.`;
 
 export class StoragePaymentRefusedError extends Error {
   readonly code = 'storage-402-refused';

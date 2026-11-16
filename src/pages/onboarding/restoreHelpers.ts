@@ -107,7 +107,7 @@ export { AccountExistsError };
 /** What went wrong while adding the account, in words the person can act on. */
 export const restoreErrorMessage = (err: unknown): string => {
   const msg = err instanceof Error ? err.message : String(err ?? '');
-  if (err instanceof AccountExistsError || /already added/i.test(msg)) return 'That account is already in bWalletX.';
+  if (err instanceof AccountExistsError || /already added/i.test(msg)) return `That account is already in ${APP_NAME}.`;
   // Same words the phone/extension builds already showed (mobile/onboardingError.ts): accurate, so kept.
   if (/unauthori[sz]ed/i.test(msg))
     return `Wrong password: use the password you unlock ${APP_NAME} with (one for all accounts).`;

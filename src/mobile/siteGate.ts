@@ -16,6 +16,7 @@
  * Pure: the native prompt, clock and timers come in as deps so it can be unit-tested.
  */
 import { userDeniedError } from '../services/userDenied';
+import { APP_NAME } from './storeBuild';
 
 export type VerifiedBy = 'biometric' | 'passcode' | 'password' | 'none';
 export type GatedCall = 'createSignature' | 'createAction' | 'confirmUser';
@@ -38,7 +39,7 @@ export const GRACE_MS = 30_000;
 export const VERIFY_TIMEOUT_MS = 60_000;
 
 export const VERIFICATION_TIMEOUT_CODE = 'ERR_USER_VERIFICATION_TIMEOUT';
-export const VERIFICATION_TIMEOUT_MESSAGE = "bWalletX didn't get a Face ID, fingerprint or passcode answer in time.";
+export const VERIFICATION_TIMEOUT_MESSAGE = `${APP_NAME} didn't get a Face ID, fingerprint or passcode answer in time.`;
 
 /**
  * Non-standard call a site makes to ask the SAME gate before an act that is not itself a wallet call: the bChatX
@@ -217,8 +218,7 @@ export const siteCallTimeoutFor = (call: string) =>
   call === 'createAction' || call === 'signAction' ? SITE_PAY_TIMEOUT_MS : SITE_CALL_TIMEOUT_MS;
 
 export const SITE_CALL_TIMEOUT_CODE = 'ERR_WALLET_TIMEOUT';
-export const SITE_CALL_TIMEOUT_MESSAGE =
-  "bWalletX didn't answer this request in time. Check History in your wallet before you try again.";
+export const SITE_CALL_TIMEOUT_MESSAGE = `${APP_NAME} didn't answer this request in time. Check History in your wallet before you try again.`;
 
 /** Settle `work` within `ms`: a late answer is dropped (never unhandled), the caller gets the timeout reply. */
 export const withSiteCeiling = <T>(

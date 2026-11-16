@@ -12,7 +12,7 @@ import {
   marketTradingEnabled,
   marketLabel,
   isBWalletX,
-  appNameFor,
+  APP_NAME,
   mintChoicesFor,
   ownerAppsFor,
   paidFeaturesEnabled,
@@ -81,8 +81,8 @@ describe('storeBuild', () => {
   test('bWalletX branding outside the store build', () => {
     expect(isBWalletX(true)).toBe(false);
     expect(isBWalletX(false)).toBe(true);
-    expect(appNameFor(true)).toBe('bWallet');
-    expect(appNameFor(false)).toBe('bWalletX');
+    // The name itself is a literal build constant now (storeGatesA9.test.ts checks it in every env).
+    expect(APP_NAME).toBe('bWalletX');
   });
   test('marketLabel: Exchange in bWalletX, Market in the store app', () => {
     expect(marketLabel(false)).toBe('Exchange');

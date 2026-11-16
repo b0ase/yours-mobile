@@ -5,6 +5,7 @@ import { SEEDLESS_ENABLED } from '../mobile/passkey/prf';
 import { getPlatform } from '../platform';
 import { copyWithAutoClear, revealSeed, SeedRevealError } from '../utils/seedReveal';
 import { DeviceDataNote } from './DeviceDataNote';
+import { APP_NAME } from '../mobile/storeBuild';
 
 /**
  * Settings › Show my 12 words (owner, 19 Oct 2026). Warning → password (or Face ID / fingerprint where it is set up)
@@ -150,7 +151,7 @@ export const ShowSeedWords = ({
           <ul className="text-xs leading-relaxed m-0 pl-4 space-y-1" style={MUTED}>
             <li>Anyone with these 12 words can take everything in this account.</li>
             <li>Never share them, type them into a website or send them in a chat.</li>
-            <li>We will never ask for them. Nobody from bWalletX, b or support ever will.</li>
+            <li>We will never ask for them. Nobody from {APP_NAME}, b or support ever will.</li>
             <li>Write them on paper and keep it somewhere safe. Check nobody can see your screen.</li>
           </ul>
         </div>
@@ -260,7 +261,7 @@ export const ShowSeedWords = ({
         )}
       </div>
       <p className="text-[11px] mt-3 mb-3" style={MUTED}>
-        Write the words down in this order. With them you can restore this account in bWalletX on any device.
+        Write the words down in this order. With them you can restore this account in {APP_NAME} on any device.
       </p>
       <button
         className={`${secondary} flex items-center justify-center gap-2`}

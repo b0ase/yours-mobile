@@ -10,6 +10,7 @@
  * so changing any of it makes decryption fail. Nothing here touches key derivation or the password keystore.
  * Pure WebCrypto; the WebAuthn calls live in prf.ts so this file is unit-tested without a browser.
  */
+import { APP_NAME } from '../storeBuild';
 
 export const BLOB_KIND = 'bwalletx-passkey-seed-backup';
 export const BLOB_VERSION = 1;
@@ -123,10 +124,10 @@ export function parseSeedBackup(raw: string): SeedBackupBlob {
   try {
     j = JSON.parse(raw);
   } catch {
-    throw new Error('Not a bWalletX passkey backup file.');
+    throw new Error(`Not a ${APP_NAME} passkey backup file.`);
   }
   const o = j as Partial<SeedBackupBlob> & { v?: unknown };
-  if (!o || o.kind !== BLOB_KIND) throw new Error('Not a bWalletX passkey backup file.');
+  if (!o || o.kind !== BLOB_KIND) throw new Error(`Not a ${APP_NAME} passkey backup file.`);
   if (o.v !== BLOB_VERSION) throw new Error(`Backup version ${String(o.v)} needs a newer bWalletX.`);
   for (const f of ['rpId', 'credentialId', 'salt', 'iv', 'ct'] as const) {
     if (typeof o[f] !== 'string' || !o[f]) throw new Error('This backup file is damaged.');
@@ -166,7 +167,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 export const passkeyName = (when: Date = new Date()): string => {
   const hh = String(when.getHours()).padStart(2, '0');
   const mm = String(when.getMinutes()).padStart(2, '0');
-  return `bWalletX · ${when.getDate()} ${MONTHS[when.getMonth()]} ${hh}:${mm}`;
+  return `${APP_NAME} · ${when.getDate()} ${MONTHS[when.getMonth()]} ${hh}:${mm}`;
 };
 
 export const backupFileName = (blob: SeedBackupBlob) =>

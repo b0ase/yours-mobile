@@ -36,6 +36,7 @@ import {
   DEFAULT_RELAY,
   PAIR_HOST,
 } from '../../pair/protocol';
+import { APP_NAME } from '../storeBuild';
 
 export const OPEN_VERSION = '2';
 export const OPEN_INFO = 'bwalletx-open-v2';
@@ -78,7 +79,7 @@ export const isOpenLink = (s: string) => {
 };
 
 export function parseOpenUrl(text: string, nowS = Math.floor(Date.now() / 1000), allowLocal = false): OpenLink {
-  if (!isOpenLink(text)) throw new Error('Not a bWalletX "open on computer" code');
+  if (!isOpenLink(text)) throw new Error(`Not a ${APP_NAME} "open on computer" code`);
   const q = new URL(text.trim()).searchParams;
   const l: OpenLink = {
     v: q.get('v') ?? '',

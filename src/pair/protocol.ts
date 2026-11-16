@@ -11,6 +11,7 @@
  *           of SHA-256(key bits).
  */
 import { Hash, PrivateKey, PublicKey, Signature, Utils } from '@bsv/sdk';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export const PAIR_VERSION = '1';
 export const PAIR_INFO = 'bwallet-pair-v1';
@@ -194,7 +195,7 @@ export function parsePairUrl(
   if (!/^0[23][0-9a-f]{64}$/i.test(link.k)) throw new Error('Bad pairing code');
   if (!/^[a-z0-9.-]+(:\d+)?$/i.test(link.r)) throw new Error('Bad pairing code');
   if (!isAllowedRelay(link.r, opts.allowLocalRelay))
-    throw new Error("This pairing code uses a pairing service bWalletX doesn't trust. Don't connect.");
+    throw new Error(`This pairing code uses a pairing service ${APP_NAME} doesn't trust. Don't connect.`);
   const o = new URL(link.o);
   if (o.origin !== link.o) throw new Error('Bad pairing code');
   if (!Number.isFinite(link.e) || link.e < nowS) throw new Error('This code has expired. Ask the site for a new one.');
