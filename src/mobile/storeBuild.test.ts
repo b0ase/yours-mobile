@@ -2338,3 +2338,77 @@ describe('A7.8, A7.9, A7.11: pairing, site token balance and prove-holdings shee
       expect(storeBannedWord(t)).toBeNull();
   });
 });
+
+describe('A7.10: p2p swaps (and prove holdings) cannot reach the wallet in a store build', () => {
+  // A store build is only the phone app (channel-build.sh: STORE=1 for ios-store / android-play, both `build:mobile`).
+  // On the phone a site reaches the wallet only through handleSiteCall (dApp browser, bApp frames, paired sessions),
+  // which admits BRC-100 calls and mintPrivate only. window.CWI.swap / proveHoldings exist only in the Chrome
+  // extension's content script (content.ts), which no store build ships.
+  const code = `const d = await import('./src/mobile/dappBrowser.ts'); const reached = [];
+    d.initDappBrowser(() => ({ runtime: { sendMessage: (m) => (reached.push(m.action), Promise.resolve({ success: true })) } }));
+    const out = {};
+    for (const a of ['bwxSwapOffer', 'bwxSwapAccept', 'bwxSwapRelease', 'bwxProveHoldings'])
+      out[a] = await d.handleSiteCall('https://www.bchatx.com', 'https://www.bchatx.com/room/X', a, {}).then(() => 'reached', (e) => String(e?.message ?? e));
+    console.log(JSON.stringify({ out, reached }));`;
+  type R = { out: Record<string, string>; reached: string[] };
+  test('handleSiteCall refuses every swap and prove-holdings call from bChatX before the wallet is asked', () => {
+    for (const env of [...STORE_ENVS, {}]) {
+      const r = runA7<R>(code, env);
+      expect(r.reached).toEqual([]);
+      for (const [a, msg] of Object.entries(r.out)) expect(msg).toBe(`Unsupported request: ${a}`);
+    }
+  }, 60_000);
+  test('the gate, the call sites and the store channels are as the allowlist reason says', () => {
+    expect(srcOf('./dappBrowser.ts')).toContain(
+      'if (!isCWIEventName(type) && !isMintPrivateAction(type)) throw new Error(`Unsupported request: ${type}`);',
+    );
+    const callers = ['./dappBrowser.ts', './bappFrame/BappFrameHost.tsx', './pair/sessions.ts'];
+    for (const f of callers) expect(srcOf(f)).toContain('handleSiteCall(');
+    expect(srcOf('../content.ts')).toContain('isSwapAction(type)');
+    const ch = readFileSync(new URL('../../scripts/channel-build.sh', import.meta.url), 'utf8');
+    expect(ch).toContain('ios-store | android-play) STORE=1 ;;');
+    expect(ch).toContain('VITE_CHANNEL=$CH VITE_STORE_BUILD=${STORE:+1} pnpm build:mobile');
+  });
+  test('the allowlist keeps the two swap descriptions with that gate as the reason', () => {
+    const allow = JSON.parse(readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8'))
+      .allow as { chunk: string; match?: string; reason: string }[];
+    for (const m of ['Swap offer closed', 'Swap ${']) {
+      const e = allow.find((a) => a.chunk === 'background' && a.match === m);
+      expect(e?.reason).toContain('Unreachable in a store build');
+      expect(e?.reason).toContain('handleSiteCall');
+    }
+  });
+});
+
+describe('A7.7: Portfolio "vs market" is price data, kept in both editions (CTO, 16 Nov)', () => {
+  test('the screen reads BSV / BTC prices only and links to no marketplace', () => {
+    const m = srcOf('./portfolio/market.ts');
+    expect(m).toContain("const CG = 'https://api.coingecko.com/api/v3/coins';");
+    expect(m).toContain("const WOC = 'https://api.whatsonchain.com/v1/bsv/main/exchangerate/historical';");
+    expect(m.match(/https:\/\/[^'"`\s]+/g)?.every((u) => /coingecko\.com|whatsonchain\.com/.test(u))).toBe(true);
+    const p = srcOf('./portfolio/PortfolioScreen.tsx');
+    expect(p).not.toMatch(/\/m\/(exchange|market)|MarketPage|marketTradingEnabled/);
+    for (const t of [
+      'Portfolio vs market',
+      "'vs market'",
+      "Market prices aren't reachable",
+      'with no market price here',
+    ])
+      expect(p).toContain(t);
+  });
+  test('its three allowlist entries say why', () => {
+    const allow = JSON.parse(readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8'))
+      .allow as { chunk: string; match?: string; reason: string }[];
+    for (const m of ['vs market', 'Market prices', 'with no market price here'])
+      expect(allow.find((a) => a.chunk === 'PortfolioScreen' && a.match === m)?.reason).toContain(
+        'price data, not a marketplace (CTO, 16 Nov)',
+      );
+  });
+});
+
+describe('A7: no allowlist entry is left as a FOLLOW-UP', () => {
+  test('every reason is a checked fact', () => {
+    const raw = readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8');
+    expect(raw).not.toMatch(/follow-up/i);
+  });
+});

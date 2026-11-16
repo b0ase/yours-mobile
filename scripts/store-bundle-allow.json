@@ -1,5 +1,5 @@
 {
-  "_doc": "Pass 2 of scripts/store-bundle-check.mjs: a UI string in the STORE build that has a STORE_BANNED_WORDS word is allowed only if it contains `match` (case-sensitive) or matches the regex `pattern` in a chunk named `chunk` (file name without Vite's hash; '*' = any). Every entry needs a reason. 'FOLLOW-UP' entries are reachable in a store build, or not traced to a gate, and still need a wording decision.",
+  "_doc": "Pass 2 of scripts/store-bundle-check.mjs: a UI string in the STORE build that has a STORE_BANNED_WORDS word is allowed only if it contains `match` (case-sensitive) or matches the regex `pattern` in a chunk named `chunk` (file name without Vite's hash; '*' = any). Every entry needs a reason. A reason states a checked fact: the gate that keeps the text from a store user, a false positive, or a reviewed decision. No entry is left open for a later wording decision (round A7, 16 Nov 2026).",
   "allow": [
     {
       "chunk": "LockScreen",
@@ -214,27 +214,27 @@
     {
       "chunk": "PortfolioScreen",
       "match": "vs market",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio vs market (price tile): 'market' is the BSV price index, not a marketplace. Owner to confirm."
+      "reason": "Portfolio vs market: price data, not a marketplace (CTO, 16 Nov). The chart compares the account with holding BSV, holding BTC and dollars, from CoinGecko / WhatsOnChain prices (portfolio/market.ts); it links to no market."
     },
     {
       "chunk": "PortfolioScreen",
       "match": "Market prices",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio screen price error: 'market prices' = BSV price data. Owner to confirm."
+      "reason": "Portfolio price error: price data, not a marketplace (CTO, 16 Nov). 'Market prices' = the CoinGecko / WhatsOnChain BSV and BTC price series (portfolio/market.ts)."
     },
     {
       "chunk": "PortfolioScreen",
       "match": "with no market price here",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Portfolio total note: 'market price' = BSV/token price data. Owner to confirm."
+      "reason": "Portfolio total note: price data, not a marketplace (CTO, 16 Nov). Tokens with no price in the price data are shown but not valued."
     },
     {
       "chunk": "background",
       "match": "Swap offer closed",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): p2p swap action description (mobile/p2p/swap/swapActions.ts); only created by the swap flow. Not traced to a store gate."
+      "reason": "Unreachable in a store build: p2p swap action description (mobile/p2p/swap/swapActions.ts), created only by window.CWI.swap. A store build is the phone app only (channel-build.sh ios-store / android-play); there a site reaches the wallet only through handleSiteCall (mobile/dappBrowser.ts), which refuses bwxSwap* ('Unsupported request'); the swap bridge is the Chrome extension's content.ts. Checked in round A7 (storeBuild.test.ts A7.10)."
     },
     {
       "chunk": "background",
       "match": "Swap ${",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): p2p swap action description (mobile/p2p/swap/swapActions.ts). Not traced to a store gate."
+      "reason": "Unreachable in a store build: p2p swap action description 'Swap <ref>' (mobile/p2p/swap/swapActions.ts), created only by window.CWI.swap. A store build is the phone app only; there handleSiteCall (mobile/dappBrowser.ts) refuses bwxSwap* ('Unsupported request'); the swap bridge is the Chrome extension's content.ts. Checked in round A7 (storeBuild.test.ts A7.10)."
     }
   ]
 }
