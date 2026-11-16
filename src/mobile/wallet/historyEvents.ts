@@ -11,7 +11,7 @@
  */
 import { Utils } from '@bsv/sdk';
 import type { HistoryRow, LocalInfo, RawTx } from './txHistory';
-import { MARKET_APP_NAME } from '../storeBuild';
+import { MARKET_APP_NAME, MARKET_ENABLED } from '../storeBuild';
 
 export type Category = 'payment' | 'token' | 'nft' | 'game' | 'subscription' | 'app' | 'social' | 'lock';
 
@@ -343,7 +343,11 @@ export const classifyEvent = (
       const asset = { ...listingIn.asset, symbol: ctx.symbols?.get(listingIn.asset.id) ?? listingIn.asset.symbol };
       return {
         ...base(asset.kind, back ? 'cancel' : 'sell', asset),
-        label: `${asset.kind === 'nft' ? 'NFT' : 'token'} ${back ? 'listing cancelled' : 'sold'}`,
+        // Store wording (CTO decision 5, 16 Nov 2026): a listing made elsewhere on this seed "ended", sold or
+        // cancelled; the row's type and amounts still tell the two apart.
+        label: MARKET_ENABLED
+          ? `${asset.kind === 'nft' ? 'NFT' : 'token'} ${back ? 'listing cancelled' : 'sold'}`
+          : `${asset.kind === 'nft' ? 'NFT' : 'token'} listing ended`,
       };
     }
     const funded = tx.vin.some((i) => ctx.prev.has(`${i.txid}:${i.vout}`));

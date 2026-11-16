@@ -1,5 +1,6 @@
 import { hasRate, moneyNow } from '../money/money';
 import { cachedExchangeRate } from '../../utils/wallet';
+import { MARKET_ENABLED } from '../storeBuild';
 /**
  * bWallet notifications: pure logic (no I/O) — the item list, unread state, "what is new since
  * last time" diffs, mention matching and per-category filtering. engine.ts does the polling.
@@ -29,7 +30,9 @@ export const KIND_CATEGORY: Record<NotifyKind, NotifyCategory> = {
   call: 'calls',
   payment: 'payments',
   token: 'payments',
-  sale: 'sales',
+  // A store build has no Sales setting (no Market there): a listing made elsewhere on this seed that leaves the
+  // wallet is filed under Incoming payments, so it still notifies and is switched off with that row.
+  sale: MARKET_ENABLED ? 'sales' : 'payments',
   bmail: 'bmail',
 };
 
@@ -40,10 +43,29 @@ export const CATEGORY_LABELS: Record<NotifyCategory, { label: string; descriptio
   chat: { label: 'Room messages', description: 'New messages in your bChat rooms' },
   calls: { label: 'Calls', description: 'Incoming and missed calls' },
   payments: { label: 'Incoming payments', description: 'BSV, tokens and tickets received' },
-  sales: { label: 'Sales', description: 'When a listing of yours sells' },
+  // bWalletX only (CTO decision 5, 16 Nov 2026). A store build files sales under payments (KIND_CATEGORY) and lists no
+  // Sales row (CATEGORIES); MARKET_ENABLED is a literal, so these words are not in a store bundle.
+  sales: MARKET_ENABLED
+    ? { label: 'Sales', description: 'When a listing of yours sells' }
+    : { label: 'Incoming payments', description: 'BSV, tokens and tickets received' },
 };
 
-export const CATEGORIES = Object.keys(CATEGORY_LABELS) as NotifyCategory[];
+/** The rows in Settings › Notifications. No Sales row in a store build. */
+export const CATEGORIES = (Object.keys(CATEGORY_LABELS) as NotifyCategory[]).filter(
+  (c) => MARKET_ENABLED || c !== 'sales',
+);
+
+/**
+ * The notification for a listing of ours (made elsewhere on this seed) that someone else's transaction took. Store
+ * wording (CTO decision 5): neutral, no selling words; it still tells the person the item left and at what price.
+ */
+export const saleNotice = (price: number, fmt: (sats: number) => string): { title: string; body: string } =>
+  MARKET_ENABLED
+    ? { title: 'Your listing sold', body: price ? `Sold for ${fmt(price)}` : 'A buyer took your listing' }
+    : {
+        title: 'An item you listed elsewhere has left your wallet',
+        body: price ? `It was listed at ${fmt(price)}` : 'It left through a listing made elsewhere',
+      };
 
 /** What tapping a notification opens. */
 export type NotifyTarget =

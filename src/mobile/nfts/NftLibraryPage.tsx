@@ -77,6 +77,7 @@ import { useRelayxAccount } from '../sweep/useRelayxAccount';
 import { loadSavedRelayx } from '../sweep/relayxSaved';
 import { CardArt, RelayxRecoverScreen } from '../sweep/RelayxRecoverScreen';
 import type { Found } from '../../sweep/relayxRecover';
+import { MARKET_ENABLED } from '../storeBuild';
 
 const ModelViewer = lazy(() => import('../three3d/ModelViewer'));
 
@@ -628,8 +629,10 @@ const DetailPanel = ({
         <p className="text-[11px] text-[#98A2B3] m-0">{HIDE_NOTE}</p>
         {it.legacyListing && (
           <p className="text-[11px] text-[color:var(--bw-accent)]">
-            This NFT sits in an old OrdLock v1 listing. 1Sat withdrew that contract, so it isn’t for sale and can’t be
-            sent from here.
+            {/* Store wording (CTO decision 5, 16 Nov 2026): a listing made elsewhere is state, never an offer. */}
+            {MARKET_ENABLED
+              ? 'This NFT sits in an old OrdLock v1 listing. 1Sat withdrew that contract, so it isn’t for sale and can’t be sent from here.'
+              : 'This NFT sits in an old OrdLock v1 listing. 1Sat withdrew that contract, so it can’t be sent from here.'}
           </p>
         )}
         {it.pending && (
@@ -942,7 +945,7 @@ const NftLibraryPage = () => {
               ))}
             {listedCount > 0 && (
               <button className={chip(filter.listedOnly)} onClick={() => set({ listedOnly: !filter.listedOnly })}>
-                Listed for sale {listedCount}
+                {MARKET_ENABLED ? 'Listed for sale' : 'Listed elsewhere'} {listedCount}
               </button>
             )}
             {pendingCount > 0 && (

@@ -2173,3 +2173,97 @@ describe('A7.3, A7.4: bMint says "keep it or send it" and Media "mint or receive
     expect(runA7<string>(code, {})).toBe('keep it, send it or sell it');
   }, 60_000);
 });
+
+describe('A7.5: listings made elsewhere on the same seed read as state in a store build', () => {
+  test('RelayX recovery: the listed group is "Listed on RelayX" in a store build, word for word in bWalletX', () => {
+    const code = `const r = await import('./src/sweep/relayxRecover.ts');
+      console.log(JSON.stringify(r.groupFound([{ title: 'NPG #1', collection: '', listed: { price: 1 } }]).map((g) => g.title)));`;
+    for (const env of STORE_ENVS) expect(runA7<string[]>(code, env)).toEqual(['Listed on RelayX']);
+    expect(runA7<string[]>(code, {})).toEqual(['Listed for sale on RelayX']);
+  }, 60_000);
+  test('RelayX card, RelayX empty note, NFT library chip and OrdLock v1 note pick their words with MARKET_ENABLED', () => {
+    const r = srcOf('./sweep/RelayxRecoverScreen.tsx');
+    expect(r).toContain(
+      "{MARKET_ENABLED ? 'Listed for sale on RelayX' : 'Listed on RelayX'} at {bsv(f.listed.price)} BSV",
+    );
+    expect(r).toMatch(
+      /\{MARKET_ENABLED\s*\? "Check these are your RelayX words, not another wallet's\. NFTs listed for sale on RelayX show here while their listing's cancel output is still at these words\."\s*: "Check these are your RelayX words, not another wallet's\. NFTs listed on RelayX show here while their listing's cancel output is still at these words\."\}/,
+    );
+    expect(r.match(/for sale/g)).toHaveLength(2); // both in bWalletX branches
+    const n = srcOf('./nfts/NftLibraryPage.tsx');
+    expect(n).toContain("{MARKET_ENABLED ? 'Listed for sale' : 'Listed elsewhere'} {listedCount}");
+    expect(n).toMatch(
+      /\{MARKET_ENABLED\s*\? 'This NFT sits in an old OrdLock v1 listing\. 1Sat withdrew that contract, so it isn’t for sale and can’t be sent from here\.'\s*: 'This NFT sits in an old OrdLock v1 listing\. 1Sat withdrew that contract, so it can’t be sent from here\.'\}/,
+    );
+    expect(n.match(/for sale/g)).toHaveLength(2);
+  });
+  test('History: a listing of ours that ended reads "listing ended" in a store build; bWalletX says sold / cancelled', () => {
+    const code = `
+      const { default: fixtures } = await import('./src/mobile/wallet/fixtures/marketTxs.json');
+      const h = await import('./src/mobile/wallet/historyEvents.ts');
+      const t = await import('./src/mobile/wallet/txHistory.ts'); const f = await import('./src/mobile/wallet/txHistoryFetch.ts');
+      const tx = (p) => f.toRawTx(Object.values(fixtures).find((x) => x.txid.startsWith(p)));
+      const LIST = tx('f49e09fa'), BUY = tx('7cac90cb'); const seller = LIST.vout[3].addresses[0];
+      const fund = [...new Set(LIST.vin.map((i) => i.txid))].map((txid) => ({ txid, time: 1700000000, confirmations: 100,
+        vin: [{ txid: '0'.repeat(64), vout: 0 }],
+        vout: Array.from({ length: Math.max(...LIST.vin.filter((i) => i.txid === txid).map((i) => i.vout)) + 1 }, (_, n) => ({ n,
+          sats: LIST.vin.some((i) => i.txid === txid && i.vout === n) ? 33000000 : 0,
+          addresses: LIST.vin.some((i) => i.txid === txid && i.vout === n) ? [seller] : [] })) }));
+      const txs = [LIST, BUY, ...fund]; const own = new Set([seller]); const local = new Map();
+      const rows = t.buildRows(txs, own, local, 0); const byId = new Map(txs.map((x) => [x.txid, x]));
+      const prev = t.ownOutputs([...byId.values()], own);
+      const ctx = { own, prev, listings: h.findListings([...byId.values()], prev) };
+      const sale = rows.map((r) => h.classifyEvent(r, byId.get(r.txid), undefined, ctx)).find((r) => r.txid === BUY.txid);
+      console.log(JSON.stringify({ type: sale.type, label: sale.label, amountSats: sale.amountSats }));`;
+    for (const env of STORE_ENVS)
+      expect(runA7(code, env)).toEqual({ type: 'sell', label: 'token listing ended', amountSats: 20_400_000 });
+    expect(runA7(code, {})).toEqual({ type: 'sell', label: 'token sold', amountSats: 20_400_000 });
+    expect(srcOf('./wallet/historyEvents.ts')).toMatch(
+      /label: MARKET_ENABLED\s*\? `\$\{asset\.kind === 'nft' \? 'NFT' : 'token'\} \$\{back \? 'listing cancelled' : 'sold'\}`\s*: `\$\{asset\.kind === 'nft' \? 'NFT' : 'token'\} listing ended`,/,
+    );
+  }, 60_000);
+  test('Notifications: no Sales row in a store build; a taken listing still notifies, under Incoming payments', () => {
+    const code = `const n = await import('./src/mobile/notify/notify.ts');
+      const fmt = (s) => s + ' sats'; const item = { id: 'sale:x', kind: 'sale', title: '', body: '', at: 0, read: false };
+      const on = Object.fromEntries(n.CATEGORIES.map((c) => [c, true]));
+      console.log(JSON.stringify({ cats: n.CATEGORIES, cat: n.KIND_CATEGORY.sale, labels: n.CATEGORIES.map((c) => n.CATEGORY_LABELS[c].label),
+        priced: n.saleNotice(5000, fmt), unpriced: n.saleNotice(0, fmt),
+        shown: n.allowed([item], on).length, offWithPayments: n.allowed([item], { ...on, payments: false }).length }));`;
+    for (const env of STORE_ENVS) {
+      const r = runA7<Record<string, unknown>>(code, env);
+      expect(r.cats).not.toContain('sales');
+      expect(r.labels).not.toContain('Sales');
+      expect(r.cat).toBe('payments');
+      expect(r.priced).toEqual({
+        title: 'An item you listed elsewhere has left your wallet',
+        body: 'It was listed at 5000 sats',
+      });
+      expect(r.unpriced).toEqual({
+        title: 'An item you listed elsewhere has left your wallet',
+        body: 'It left through a listing made elsewhere',
+      });
+      expect([r.shown, r.offWithPayments]).toEqual([1, 0]);
+    }
+    const x = runA7<Record<string, unknown>>(code, {});
+    expect(x.cats).toEqual(['bmail', 'social', 'mentions', 'chat', 'calls', 'payments', 'sales']);
+    expect(x.cat).toBe('sales');
+    expect(x.priced).toEqual({ title: 'Your listing sold', body: 'Sold for 5000 sats' });
+    expect(x.unpriced).toEqual({ title: 'Your listing sold', body: 'A buyer took your listing' });
+    expect(x.shown).toBe(1);
+    expect(srcOf('./notify/engine.ts')).toContain("kind: 'sale',\n          ...saleNotice(price, formatSatsShort),");
+  }, 60_000);
+  test('every store line passes the store word list', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Listed on RelayX',
+      'Listed elsewhere',
+      "Check these are your RelayX words, not another wallet's. NFTs listed on RelayX show here while their listing's cancel output is still at these words.",
+      'This NFT sits in an old OrdLock v1 listing. 1Sat withdrew that contract, so it can’t be sent from here.',
+      'NFT listing ended',
+      'An item you listed elsewhere has left your wallet',
+      'It was listed at 1,000 sats',
+      'It left through a listing made elsewhere',
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+  });
+});

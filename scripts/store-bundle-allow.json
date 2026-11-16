@@ -212,36 +212,6 @@
       "reason": "Reviewed and allowed: receiving: the Receive screen says items sent unasked land in Wallet › Airdrops (16 Nov review: benign)."
     },
     {
-      "chunk": "NftLibraryPage",
-      "match": "for sale",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): NFT library: an NFT already listed (from another wallet or an old OrdLock v1 listing) is labelled as listed. State, not an offer; not reworded."
-    },
-    {
-      "chunk": "index",
-      "match": "Listed for sale on RelayX",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): RelayX NFT recovery (NPG): shows NFTs a user listed on RelayX so they can recover them. State, not an offer."
-    },
-    {
-      "chunk": "index",
-      "match": "listed for sale on RelayX",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): RelayX words check (NPG recovery). State, not an offer."
-    },
-    {
-      "chunk": "index",
-      "match": "Your listing sold",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): notification for a sale of a listing made elsewhere on the same seed (notify/engine.ts). Not traced to a store gate."
-    },
-    {
-      "chunk": "index",
-      "match": "listing cancelled",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): history labels for past listing events on the same seed (wallet/historyEvents.ts)."
-    },
-    {
-      "chunk": "dappBrowser",
-      "match": "When a listing of yours sells",
-      "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): notification category 'Sales' (notify/notify.ts). Not traced to a store gate."
-    },
-    {
       "chunk": "index",
       "match": "Exchange search",
       "reason": "FOLLOW-UP (reachable or not traced; not reworded in round A6): Ask b bWeb add-on 'Exchange search' (bweb/bweb.ts); the 16 Nov review did not check it under own-key mode. Not traced."
