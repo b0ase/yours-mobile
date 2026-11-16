@@ -1791,3 +1791,70 @@ describe('A1: Settings › Identity mints no personal token and opens no room in
     expect(srcOf('./names/HandleOnboarding.tsx')).toMatch(/PAID_FEATURES_ENABLED && !hasRoom \? \(/);
   });
 });
+
+describe('A2: Ask b describes the store edition as it is', () => {
+  const read = (env: Record<string, string>) => {
+    const code = `
+      const g = await import('./src/mobile/agent/guide.ts'); const t = await import('./src/mobile/tabs/tabs.ts');
+      const d = await import('./src/mobile/phone/dockModel.ts'); const sc = await import('./src/mobile/phone/screens.ts');
+      const label = (id) => sc.SCREENS.find((s) => s.id === id).label;
+      const dock = d.DEFAULT_DOCK.map((i) => label(i.id)); dock.splice(d.DOCK_LEFT, 0, 'b');
+      const classic = { bsv: 'Wallet', market: 'Market', browser: 'Apps', feed: 'Feed', chat: 'Chat' };
+      console.log(JSON.stringify({ guide: g.BWALLET_GUIDE, dock: dock.join(' · '), strip: sc.STRIP.map((s) => s.label).join(' · '),
+        classic: t.TAB_ORDER.map((id) => classic[id]).join(' · ') }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as { guide: string; dock: string; strip: string; classic: string };
+  };
+  test('store build: the bar, pages and classic bar b names are the ones the build shows', () => {
+    for (const env of STORE_ENVS) {
+      const t = read(env);
+      expect(t.dock).toBe('Wallet · bApps · b · Feed · Chat');
+      expect(t.strip).toBe('Wallet · Home · bApps · People · Feed · Chat');
+      expect(t.classic).toBe('Wallet · Apps · Feed · Chat');
+      expect(t.guide).toContain(`Bottom bar, left to right: ${t.dock}.`);
+      expect(t.guide).toContain(`Swipe sideways between the pages ${t.strip}.`);
+      expect(t.guide).toContain(`the bottom bar is ${t.classic} and`);
+    }
+  }, 60_000);
+  test('store build: no Market tab, tickets, token or personal rooms, or "send the room’s token"', () => {
+    for (const env of STORE_ENVS) {
+      const g = read(env).guide;
+      for (const bad of [
+        /Market ·|· Market/,
+        /ticket/i,
+        /token rooms?/i,
+        /personal (?:token|room)/i,
+        /room's token|send (?:them|someone) (?:one|1|the)/i,
+        /Start a room/,
+        /for sale|\bsell tickets\b/i,
+        /bWallet's own b|b agent messages/,
+        /Launch your own coin|Exchange ›/,
+      ])
+        expect(g).not.toMatch(bad);
+      expect(g).toContain(
+        'This edition is a wallet: it does not buy, sell or trade, and it has no Market or Exchange.',
+      );
+      expect(g).toContain('Chat: Chatrooms, DMs and Calls.');
+      expect(g).toContain('or a token with a fixed supply that goes to your own wallet.');
+      expect(g).toContain('b agent: use your own AI provider key');
+      expect(g).toContain("say there's no charge to talk to b");
+    }
+  }, 60_000);
+  test('bWalletX build: every line the store edition swaps is word for word what it was', () => {
+    const g = read({}).guide;
+    for (const line of [
+      "Bottom bar, left to right: Apps · Market · Wallet · Feed · Chat. Wallet (centre) is the home tab. The top bar's account picture opens the account drawer (switch or add accounts, Settings). The centre b in the top bar opens this assistant.\n",
+      '- NFTs: your 1Sat ordinals shown as a media library (music, video, images).\n- Tickets: tokens that get you into a room. Send one ticket to invite someone. Sell tickets you hold',
+      '- Mint: the Mint button creates an NFT from a photo, video, song or document, or "Start a room" mints a ticket token (name, supply, optional event date and price). The cost (network fee, plus any clearly labelled mint fee) is shown before confirming.\n\nNames and handles:',
+      'and a personal token $NAME that opens your personal room in Chat. Hold the $NAME token to enter that room; send someone one $NAME token to invite them.',
+      "Chat: token rooms. You get a room for each token or ticket you hold at or above the room minimum; it goes away if you no longer hold enough. To invite someone, send them the room's token. Rooms can have bounties and calls.\n",
+      '- Never give investment, tax or legal advice. Tickets and personal tokens are access/utility, not investments.\n',
+      'small paying actions (tips, locks, b agent messages) under',
+      "- b agent: bWallet's own b, or use your own AI provider key (Anthropic, OpenAI, OpenRouter) stored only on this device. Bug reports",
+    ])
+      expect(g).toContain(line);
+    expect(g).not.toContain('Wallet · bApps · b · Feed · Chat');
+  }, 60_000);
+});
