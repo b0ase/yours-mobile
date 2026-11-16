@@ -9,30 +9,6 @@
       "destination": "/api/library?op=:op"
     },
     {
-      "source": "/b-Aware",
-      "destination": "/b-aware.html"
-    },
-    {
-      "source": "/b-aware",
-      "destination": "/b-aware.html"
-    },
-    {
-      "source": "/bugs",
-      "destination": "/b-aware.html"
-    },
-    {
-      "source": "/disclosure",
-      "destination": "/b-aware.html"
-    },
-    {
-      "source": "/security",
-      "destination": "/b-aware.html"
-    },
-    {
-      "source": "/bounty",
-      "destination": "/b-aware.html"
-    },
-    {
       "source": "/api/theme-orders/:op",
       "destination": "/api/theme-orders?op=:op"
     },
@@ -182,6 +158,46 @@
   ],
   "cleanUrls": true,
   "redirects": [
+    {
+      "source": "/.well-known/security.txt",
+      "destination": "https://bwalletx.com/.well-known/security.txt",
+      "permanent": true
+    },
+    {
+      "source": "/b-aware",
+      "destination": "https://www.bwalletx.com/b-aware",
+      "permanent": true
+    },
+    {
+      "source": "/b-Aware",
+      "destination": "https://www.bwalletx.com/b-aware",
+      "permanent": true
+    },
+    {
+      "source": "/b-aware.html",
+      "destination": "https://www.bwalletx.com/b-aware",
+      "permanent": true
+    },
+    {
+      "source": "/disclosure",
+      "destination": "https://www.bwalletx.com/b-aware",
+      "permanent": true
+    },
+    {
+      "source": "/security",
+      "destination": "https://www.bwalletx.com/b-aware",
+      "permanent": true
+    },
+    {
+      "source": "/bounty",
+      "destination": "https://www.bwalletx.com/b-aware",
+      "permanent": true
+    },
+    {
+      "source": "/bugs",
+      "destination": "https://www.bwalletx.com/bugs",
+      "permanent": true
+    },
     {
       "source": "/download/:file*",
       "destination": "https://bwalletx.com/download/:file*",
