@@ -955,7 +955,7 @@ const Conversation = ({
               <Info size={20} color={GOLD} />
             </button>
           )}
-          {onMarket && (
+          {MARKET_ENABLED && onMarket && (
             <button
               onClick={onMarket}
               className="p-2 rounded-full active:opacity-60"
@@ -1047,7 +1047,9 @@ const Conversation = ({
             peer
               ? 'Direct message'
               : entry
-                ? 'Token room'
+                ? TOKEN_ROOMS_ENABLED
+                  ? 'Token room'
+                  : 'Room'
                 : openRoom
                   ? `${openRoom.visibility === 'public' ? 'Public' : 'Invite-only'} room${openRoom.closed ? ' · closed' : ''}`
                   : `Room · $${room.ticker}`
@@ -3663,7 +3665,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             </ul>
 
             {/* Token rooms: full build only. The store build hides the section entirely (storeBuild.ts). */}
-            {ROOMS && !bappsView && (
+            {TOKEN_ROOMS_ENABLED && ROOMS && !bappsView && (
               <>
                 <ListLabel>Token rooms</ListLabel>
                 {entries === null && <SkeletonRows count={3} label="Loading token rooms" />}

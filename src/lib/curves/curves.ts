@@ -274,9 +274,9 @@ export const PRESETS: Record<PresetId, Preset> = {
     label: 'Standard',
     // Shown in the launch curve picker, which a store build does not have: not in its bundle (literal env check).
     blurb:
-      import.meta.env.VITE_STORE_BUILD === '1' ||
-      import.meta.env.VITE_CHANNEL === 'ios-store' ||
-      import.meta.env.VITE_CHANNEL === 'android-play'
+      import.meta.env?.VITE_STORE_BUILD === '1' ||
+      import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env?.VITE_CHANNEL === 'android-play'
         ? ''
         : '1¢ to 19¢. $100M if all sell.',
     curve: makeCurve({ preset: 'standard', ceilingRaiseUsd: 100_000_000 }),
@@ -286,9 +286,9 @@ export const PRESETS: Record<PresetId, Preset> = {
     label: 'Big',
     // Shown in the launch curve picker, which a store build does not have: not in its bundle (literal env check).
     blurb:
-      import.meta.env.VITE_STORE_BUILD === '1' ||
-      import.meta.env.VITE_CHANNEL === 'ios-store' ||
-      import.meta.env.VITE_CHANNEL === 'android-play'
+      import.meta.env?.VITE_STORE_BUILD === '1' ||
+      import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env?.VITE_CHANNEL === 'android-play'
         ? ''
         : '1¢ to $1.99. $1B if all sell.',
     curve: makeCurve({ preset: 'big', ceilingRaiseUsd: 1_000_000_000 }),
@@ -298,9 +298,9 @@ export const PRESETS: Record<PresetId, Preset> = {
     label: 'Huge',
     // Shown in the launch curve picker, which a store build does not have: not in its bundle (literal env check).
     blurb:
-      import.meta.env.VITE_STORE_BUILD === '1' ||
-      import.meta.env.VITE_CHANNEL === 'ios-store' ||
-      import.meta.env.VITE_CHANNEL === 'android-play'
+      import.meta.env?.VITE_STORE_BUILD === '1' ||
+      import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env?.VITE_CHANNEL === 'android-play'
         ? ''
         : '1¢ to $19.99. $10B if all sell.',
     curve: makeCurve({ preset: 'huge', ceilingRaiseUsd: 10_000_000_000 }),

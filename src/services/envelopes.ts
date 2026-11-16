@@ -407,7 +407,13 @@ export const closeEnvelopeInAccounts = async (
 };
 
 /** Sites whose payments are many and tiny (arcade games, per-second streams): their pay sheet offers an envelope. */
-export const MICROPAYMENT_SITES: readonly string[] = ['tokenblaster.lol'];
+// None in a store build (no envelopes there: mobile/storeBuild.ts ENVELOPES_ENABLED), so the name is not in its bundle.
+export const MICROPAYMENT_SITES: readonly string[] =
+  import.meta.env?.VITE_STORE_BUILD === '1' ||
+  import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env?.VITE_CHANNEL === 'android-play'
+    ? []
+    : ['tokenblaster.lol'];
 
 const micropayCalls = new Map<string, number>();
 

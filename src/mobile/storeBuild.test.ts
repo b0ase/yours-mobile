@@ -1425,7 +1425,7 @@ describe('launch curves and example trading strategies are bWalletX only', () =>
     const m = srcOf('./tokens/TokenMint.tsx');
     expect(m).toMatch(/\{CURVE_COINS_ENABLED && \(\s*<CurvePicker/);
     expect(m).toContain('(CURVE_COINS_ENABLED ? curveProblem(curve, curveOk, supplyNum) : null);');
-    expect(m).toContain('curve: CURVE_COINS_ENABLED ? curve : null,');
+    expect(m).toContain('curve: curveForDeploy(curve),');
     expect(m).toContain('curve={CURVE_COINS_ENABLED ? curve : null}');
     expect(m).toMatch(/\.\.\.\(CURVE_COINS_ENABLED\s*\? \[\{ address: 'Curve \(fixed\)'/);
     expect(m).toContain(
@@ -1502,16 +1502,16 @@ describe('store leftovers: sell-price wording, the room after a token mint, laun
   });
   test('Mint a token, done screen: a store build opens no room, offers no room button and names no Market', () => {
     const m = srcOf('./tokens/TokenMint.tsx');
-    expect(m).toContain('if (TOKEN_ROOMS_ENABLED) void openTokenRoom(apiContext, token).catch(() => null);');
-    expect(m).toMatch(
-      /if \(!TOKEN_ROOMS_ENABLED\) return setDone\(\{ token, room: null \}\);\s*setBusy\('Opening the room…'\);/,
-    );
+    expect(m).toContain('void openRoomAfterMint(apiContext, token);');
+    expect(m).toContain('if (!TOKEN_ROOMS_ENABLED) return setDone({ token, room: null });');
     expect(m).toMatch(
       /\{TOKEN_ROOMS_ENABLED && \(\s*<button\s+type="button"\s+onClick=\{\(\) => go\('chat', token\)\}/,
     );
     expect(m).toMatch(/\{!TOKEN_ROOMS_ENABLED\s*\? ''\s*: done\.room/);
     // Every call that opens a room is behind the flag; "View in wallet" stays for both editions.
-    expect(m.match(/openTokenRoom\(apiContext, token\)/g)).toHaveLength(2);
+    // No direct call to open a room is left in the screen: both go through openRoomAfterMint.
+    expect(m).not.toMatch(/openTokenRoom\(/);
+    expect(m.match(/openRoomAfterMint\(apiContext, token\)/g)).toHaveLength(2);
     expect(m).toContain("onClick={() => go('bsv')}");
     // Listing after a mint renders nothing where there is no trading.
     expect(srcOf('./sell/ListAfterMint.tsx')).toContain('if (!SELL_ENABLED || !marketTradingEnabled()) return null;');
@@ -1522,5 +1522,192 @@ describe('store leftovers: sell-price wording, the room after a token mint, laun
     const n = srcOf('./names/store/NameStorePage.tsx');
     expect(n).toContain("return setMsg(MARKET_ENABLED ? 'Choose a price between $0.01 and $100,000.' : '');");
     expect(n.match(/Choose a price between/g)).toHaveLength(1);
+  });
+});
+
+// ── Fifth round (16 Nov 2026): the independent review's findings F1 to F5 ─────────────────────────────────────
+describe('Mint a token: the store decisions, called for real (review: not source regexes)', () => {
+  const token = {
+    tokenId: 'a'.repeat(64) + '_0',
+    ticker: 'TEST',
+    name: 'Test',
+    supply: '10',
+    decimals: 0,
+    description: '',
+    min: '1',
+  };
+  test('curveForDeploy: the chosen curve in bWalletX, none in a store build', async () => {
+    const { curveForDeploy } = await import('./tokens/mintToken');
+    const { standardCurve } = await import('../lib/curves');
+    const curve = standardCurve();
+    expect(curveForDeploy(curve, true)).toBe(curve);
+    expect(curveForDeploy(curve, false)).toBeNull();
+  });
+  test('openRoomAfterMint: a store build opens no room and touches neither the wallet nor the server', async () => {
+    const { openRoomAfterMint } = await import('./tokens/mintToken');
+    let touched = 0;
+    const trap = new Proxy(
+      {},
+      { get: () => ((touched += 1), () => Promise.reject(new Error('reached the wallet'))) },
+    ) as never;
+    let opened = 0;
+    const open = async () => ((opened += 1), 'TEST');
+    // Store build.
+    expect(await openRoomAfterMint(trap, token, false, open)).toBeNull();
+    expect(opened).toBe(0);
+    expect(touched).toBe(0);
+    // bWalletX: the room is opened and its ticker returned; a failed open is null, as before.
+    expect(await openRoomAfterMint(trap, token, true, open)).toBe('TEST');
+    expect(opened).toBe(1);
+    expect(await openRoomAfterMint(trap, token, true, async () => Promise.reject(new Error('down')))).toBeNull();
+  });
+  test('deployToken hands deployBsv21 exactly the curve it was given (null in a store build)', () => {
+    // deployToken itself needs a wallet; what it forwards is one line, pinned here.
+    expect(srcOf('./tokens/mintToken.ts')).toContain('curve: opts.curve ?? null,');
+  });
+});
+
+describe('F1: token indexing in a store build is worded as indexing only (no room, no Market)', () => {
+  const read = (env: Record<string, string>) => {
+    const code = `
+      const s = await import('./src/mobile/storeBuild.ts'); const r = await import('./src/mobile/tokens/roomSetup.ts');
+      const u = await import('./src/mobile/tokens/useRoomSetup.tsx');
+      const free = { reason: 'free-first-1000', freeRemaining: 900, feeUsd: 0 };
+      console.log(JSON.stringify({ rooms: s.TOKEN_ROOMS_ENABLED, label: u.setupLabel(150000, 50), free: r.freeRoomNote(free),
+        fee: r.setupFeeSats(1, 50), desc: s.MY_TOKENS_DESC, note: s.MY_TOKENS_NOTE, indexing: s.indexingEnabled() }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as Record<string, string | number | boolean>;
+  };
+  test('store build: "Index · $n", no free-room note, no fee to us, no room or Market in the text', () => {
+    for (const env of STORE_ENVS) {
+      const t = read(env);
+      expect(t.rooms).toBe(false);
+      expect(t.indexing).toBe(true);
+      expect(String(t.label)).toMatch(/^Index · /);
+      expect(t.free).toBe('');
+      expect(t.fee).toBe(0);
+      expect(`${t.desc} ${t.note}`).not.toMatch(/room|Market|list/i);
+      expect(t.note).toBe('Indexing a token lets other wallets see it. You confirm the price before anything is sent.');
+    }
+  });
+  test('bWalletX build: the room set-up wording is what it was', () => {
+    const t = read({});
+    expect(String(t.label)).toMatch(/^Set up · /);
+    expect(t.free).toBe('Free: one of the first 1,000 rooms (900 left)');
+    expect(String(t.note)).toContain('lists it in other wallets and the Market and opens its chat room');
+  });
+  test('every set-up string on the Wallet card, snackbar, notification and Settings has a store wording', () => {
+    const w = srcOf('./tokens/WalletIndexing.tsx');
+    expect(w).toMatch(
+      /const text = !TOKEN_ROOMS_ENABLED\s*\? list\.length === 1\s*\? `Index \$\$\{list\[0\]\.ticker\} so other wallets can see it\.`/,
+    );
+    expect(w).toContain("notifyIfPermitted(TOKEN_ROOMS_ENABLED ? 'Set up your token room' : 'Index your token', text)");
+    const f = srcOf('./tokens/FinishIndexing.tsx');
+    expect(f).toContain("{TOKEN_ROOMS_ENABLED ? `Set up $${ticker}'s room` : `Index $${ticker}`}");
+    expect(f).toContain(': `Indexing lets other wallets see $${ticker}.`}');
+    expect(srcOf('./settings/FeedSettings.tsx')).toMatch(/: !TOKEN_ROOMS_ENABLED\s*\? s\.open\s*\? 'Indexed'/);
+  });
+});
+
+describe('F2: a store build never shows or buys a listed name', () => {
+  const taken = (listed: boolean) =>
+    (async (url: string) => {
+      const body =
+        /opns\/origin|origin/i.test(url) && !/latest/.test(url)
+          ? { outpoint: 'ab'.repeat(32) + '_0' }
+          : /latest/.test(url)
+            ? { outpoint: 'cd'.repeat(32) + '_0', owner: '1Owner', data: listed ? { list: { price: 5000 } } : {} }
+            : { owner: '1Owner' };
+      return { ok: true, status: 200, json: async () => body } as never;
+    }) as never;
+  test('checkOpnsAvailability: the listing is reported in bWalletX and left out in a store build', async () => {
+    const { checkOpnsAvailability } = await import('./names/names');
+    const x = await checkOpnsAvailability(taken(true), 'alice', false);
+    expect(x.status).toBe('taken');
+    expect((x as { listing?: { price: number } }).listing?.price).toBe(5000);
+    const s = await checkOpnsAvailability(taken(true), 'alice', true);
+    expect(s.status).toBe('taken');
+    expect((s as { listing?: unknown }).listing).toBeUndefined();
+    expect(
+      ((await checkOpnsAvailability(taken(false), 'alice', false)) as { listing?: unknown }).listing,
+    ).toBeUndefined();
+  });
+  test('buyOpnsListing refuses in a store build before any network or wallet call', async () => {
+    const { buyOpnsListing } = await import('./names/opnsBuy');
+    let touched = 0;
+    const trap = new Proxy({}, { get: () => ((touched += 1), () => Promise.reject(new Error('reached'))) }) as never;
+    await expect(buyOpnsListing(trap, 'ab'.repeat(32) + '.0', 'alice', 5000, true)).rejects.toThrow(
+      'Not available in this edition',
+    );
+    expect(touched).toBe(0);
+    await expect(buyOpnsListing(trap, 'ab'.repeat(32) + '.0', 'alice', 5000, false)).rejects.not.toThrow(
+      'Not available in this edition',
+    );
+  });
+  test('Settings › Identity: the price, the Buy button and the buy branch are behind MARKET_ENABLED', () => {
+    const g = srcOf('./names/GetYourName.tsx');
+    expect(g).toContain("{MARKET_ENABLED && result.listing ? ` For sale: ${moneyNow(result.listing.price)}.` : ''}");
+    expect(g).toContain('{MARKET_ENABLED && result.listing && !owned.some((o) => o.name === result.name) && (');
+    expect(g).toMatch(/else if \(MARKET_ENABLED\) \{\s*await buyOpnsListing\(/);
+  });
+});
+
+describe('F3, F5: Mint catalogue wording and bWalletX-only pages', () => {
+  test('store build: every Mint catalogue string passes the word list; names are claimed, not bought', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    const code = `const m = await import('./src/mobile/mint/mintCatalog.ts'); console.log(JSON.stringify(m));`;
+    for (const env of STORE_ENVS) {
+      const r = Bun.spawnSync(['bun', '-e', code], {
+        env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+      });
+      const strings: string[] = [];
+      const walk = (v: unknown) => {
+        if (typeof v === 'string') strings.push(v);
+        else if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+      };
+      walk(JSON.parse(r.stdout.toString()));
+      expect(strings.length).toBeGreaterThan(40);
+      expect(strings).toContain('Search for one and claim it');
+      expect(strings.map((s) => [s, storeBannedWord(s)]).filter((x) => x[1])).toEqual([]);
+      expect(strings.filter((s) => /From \$|\bbuy\b/i.test(s))).toEqual([]);
+    }
+  });
+  test('bWalletX build: the Mint catalogue line is what it was', () => {
+    const code = `const m = await import('./src/mobile/mint/mintCatalog.ts'); console.log(JSON.stringify(m));`;
+    const r = Bun.spawnSync(['bun', '-e', code], { env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '' } });
+    expect(r.stdout.toString()).toContain('Search, buy or claim one. From $1');
+  });
+  test('/m/tickets lands on the wallet in a store build; the names page does not say "sell it" there', () => {
+    expect(srcOf('./tabs/MobileRoutes.tsx')).toMatch(
+      /path="tickets"\s*element=\{TOKEN_ROOMS_ENABLED \? <TicketsPage \/> : <Navigate to="\/bsv-wallet" replace \/>\}/,
+    );
+    const k = srcOf('./wide/WalletKindPages.tsx');
+    expect(k).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Names this wallet holds:[^']*sell it or give it away\.'\s*: 'Names this wallet holds:[^']*Bind a name to your identity or give it away\.'\}/,
+    );
+    expect(k).toMatch(/\{TOKEN_ROOMS_ENABLED\s*\? 'Tickets are tokens that get you into a room/);
+  });
+});
+
+describe('F4: shared modules load where import.meta.env is undefined (plain tsx / node)', () => {
+  test('src/utils/constants.ts and src/lib/curves/curves.ts import under tsx, with the bWalletX values', () => {
+    const tsx = new URL('../../node_modules/.bin/tsx', import.meta.url).pathname;
+    const code =
+      "Promise.all([import('./src/utils/constants.ts'), import('./src/lib/curves/curves.ts')]).then(([c, l]) => " +
+      'console.log(JSON.stringify({ url: c.ONE_SAT_MARKET_URL, blurb: l.PRESETS.standard.blurb })))';
+    const r = Bun.spawnSync([tsx, '-e', code], { cwd: new URL('../..', import.meta.url).pathname });
+    expect(r.stderr.toString()).not.toMatch(/TypeError|Cannot read properties/);
+    const out = JSON.parse(r.stdout.toString().trim().split('\n').pop() ?? '{}');
+    expect(out).toEqual({ url: 'https://1sat.market/market', blurb: '1¢ to 19¢. $100M if all sell.' });
+  }, 60_000);
+  test('neither file reads import.meta.env without the optional chain', () => {
+    for (const f of ['../utils/constants.ts', '../lib/curves/curves.ts']) {
+      const t = readFileSync(new URL(f, import.meta.url), 'utf8');
+      expect(t).toMatch(/import\.meta\.env\?\.VITE_STORE_BUILD === '1'/);
+      expect(t).not.toMatch(/import\.meta\.env\.VITE_/);
+    }
   });
 });

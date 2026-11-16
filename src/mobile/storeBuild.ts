@@ -162,7 +162,7 @@ export const storeLinkShown = (url: string, store = STORE_BUILD): boolean => {
  * a new entry cannot bring one back. (bwallet.space's page has its own, wider list: scripts/store-site.py.)
  */
 export const STORE_BANNED_WORDS: RegExp =
-  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\bticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token/i;
+  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\b(?:gets|is|her|his|their|its) (?:a |own )?ticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token/i;
 /** The banned wording in `text`, or null. */
 export const storeBannedWord = (text: string): string | null => STORE_BANNED_WORDS.exec(text)?.[0] ?? null;
 

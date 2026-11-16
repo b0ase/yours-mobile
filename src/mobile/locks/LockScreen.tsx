@@ -810,7 +810,7 @@ const LockScreen = ({ initialVerify }: { initialVerify?: string }) => {
                         </span>
                       </div>
                       <div className="text-xs" style={{ color: MUTED }}>
-                        {pt.id === PNEE_POT ? 'Locked to back PNEEs · ' : ''}
+                        {MARKET_ENABLED && pt.id === PNEE_POT ? 'Locked to back PNEEs · ' : ''}
                         {pt.plans.length} lock{pt.plans.length === 1 ? '' : 's'}
                         {pt.ready > 0
                           ? ` · ${fmtBsv(pt.ready)} ready to claim`

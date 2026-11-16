@@ -18,14 +18,21 @@ export type GameRoomVideo = {
   earnUrl: string;
 };
 
-const GAME_ROOMS: Record<string, GameRoomVideo> = {
-  TERRORNODE: {
-    ticker: 'TERRORNODE',
-    idleUrl: 'https://terrornode.com/media/terrornode-live-30s.mp4',
-    poster: 'https://terrornode.com/media/poster-v2.jpg',
-    earnUrl: 'https://www.tokenblaster.lol/arcade/terrornode',
-  },
-};
+// Game rooms are the TokenBlaster arcade's: bWalletX only, not in a store bundle even as data (the same literal env
+// check as storeBuild.ts TOKENBLASTER_ENABLED; written out because the extension's content script imports this file).
+const GAME_ROOMS: Record<string, GameRoomVideo> =
+  import.meta.env?.VITE_STORE_BUILD === '1' ||
+  import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env?.VITE_CHANNEL === 'android-play'
+    ? {}
+    : {
+        TERRORNODE: {
+          ticker: 'TERRORNODE',
+          idleUrl: 'https://terrornode.com/media/terrornode-live-30s.mp4',
+          poster: 'https://terrornode.com/media/poster-v2.jpg',
+          earnUrl: 'https://www.tokenblaster.lol/arcade/terrornode',
+        },
+      };
 
 /** Seconds of live (or, signed out, idle) video a viewer who is not playing sees per visit. Same as the web. */
 export const PREVIEW_SECONDS = 45;

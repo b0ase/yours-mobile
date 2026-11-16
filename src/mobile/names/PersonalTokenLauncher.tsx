@@ -164,10 +164,10 @@ export const PersonalTokenLauncher = ({ onClose }: { onClose: () => void }) => {
         paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)',
       }}
       role="dialog"
-      aria-label="Launch your tokens"
+      aria-label={PAID_FEATURES_ENABLED ? 'Launch your tokens' : undefined}
     >
       <div className="flex items-center justify-between px-4 h-12">
-        <span className="text-base font-bold text-white">Launch your tokens</span>
+        <span className="text-base font-bold text-white">{PAID_FEATURES_ENABLED ? 'Launch your tokens' : ''}</span>
         <button type="button" aria-label="Close" onClick={onClose} className="p-2 bg-transparent border-0">
           <X size={18} color={GRAY} />
         </button>

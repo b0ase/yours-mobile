@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+// `import.meta.env?.`: this file also runs under plain node / tsx (scripts/), where import.meta.env is undefined.
 import { NetWork } from '../services/types/provider.types';
 import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
 
@@ -13,9 +14,9 @@ export const HOSTED_YOURS_IMAGE = 'https://i.ibb.co/zGcthBv/yours-org-light.png'
 export const YOURS_DEV_WALLET = '1MtzWXQEYGp89bQ9U2nfrnuChFv37j6pV6';
 // A store build links to no marketplace (mobile/storeBuild.ts MARKET_ENABLED): the address is not in its bundle.
 export const ONE_SAT_MARKET_URL =
-  import.meta.env.VITE_STORE_BUILD === '1' ||
-  import.meta.env.VITE_CHANNEL === 'ios-store' ||
-  import.meta.env.VITE_CHANNEL === 'android-play'
+  import.meta.env?.VITE_STORE_BUILD === '1' ||
+  import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env?.VITE_CHANNEL === 'android-play'
     ? ''
     : 'https://1sat.market/market';
 export const MESSAGEBOX_URL = 'https://messagebox.1sat.app';

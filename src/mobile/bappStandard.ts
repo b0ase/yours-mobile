@@ -257,18 +257,27 @@ export const BX_APPS: StoreApp[] = [
           },
         ),
       ]),
-  bx(
-    'bmoneyx',
-    'bMoneyX',
-    'https://bmoneyx.com',
-    'All your money in one view, with proofs',
-    'Own & trade',
-    '#2ECC71',
-    'BMONEYX',
-    {
-      privateOnly: true,
-    },
-  ),
+  // privateOnly already keeps it out of a store build's list; the literal env check keeps its text out of the bundle.
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        bx(
+          'bmoneyx',
+          'bMoneyX',
+          'https://bmoneyx.com',
+          'All your money in one view, with proofs',
+          'Own & trade',
+          '#2ECC71',
+          'BMONEYX',
+          {
+            privateOnly: true,
+          },
+        ),
+      ]
+    : []),
   // Sells themes and packs for bWalletX. bWalletX only: not in a store bundle even as data (literal env check).
   ...(!(
     import.meta.env.VITE_STORE_BUILD === '1' ||

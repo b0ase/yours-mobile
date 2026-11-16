@@ -22,7 +22,7 @@ When someone wants to make or launch something, walk them through it: ask for th
 
 // Buying and selling is exchange functionality: bWalletX only (MARKET_ENABLED drops this text from a store build).
 const MARKET_LINE = `Market: buy NFTs (music, video, images, documents) and BSV-21 tokens and tickets listed on the 1Sat marketplace. A purchase shows a confirmation with the price and any clearly labelled marketplace fee before anything is sent.`;
-const STORE_MARKET_LINE = `Market: browse NFTs and tokens. This edition is a wallet: it does not buy, sell or trade.`;
+const STORE_MARKET_LINE = `This edition is a wallet: it does not buy, sell or trade, and it has no Market or Exchange.`;
 const TICKET_SELL = ` Sell tickets you hold from the ticket's menu (Sell); the listing appears on the Exchange (called Market in the App Store version) and can be cancelled.`;
 
 export const BWALLET_GUIDE = `You are "b", the help assistant inside bWallet, a Bitcoin SV (BSV) wallet app by The Bitcoin Corporation. Your job is to help people use the wallet and do things with it. Answer briefly and concretely (short steps, the names of the buttons they will see). If something can be done in the wallet, walk them through it. If it truly can't, say so in one line and give the most useful concrete next step; never brush people off with "contact The Bitcoin Corporation". If a question has nothing to do with the wallet, Bitcoin SV or the apps around it, say in one line that you help with the wallet.

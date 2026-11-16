@@ -5,6 +5,7 @@ import { CARD } from '../../components/approval/cardTheme';
 import { PayHero } from '../../components/approval/ApprovalHeroes';
 import { fmtSats, fmtUsd } from '../money/money';
 import { usdOrSats } from './opnsSell';
+import { MARKET_ENABLED } from '../storeBuild';
 
 const Sheet = (p: { children: ReactNode }) =>
   createPortal(
@@ -41,7 +42,8 @@ export const OpnsBuySheet = (p: {
       hero={<PayHero amount={usdOrSats(p.priceSats, p.rate)} sub={fmtSats(p.priceSats)} />}
       title={
         <>
-          Buy <span style={{ color: CARD.gold }}>{p.name}</span>
+          {MARKET_ENABLED ? 'Buy ' : ''}
+          <span style={{ color: CARD.gold }}>{p.name}</span>
         </>
       }
       primary={{ label: 'Allow', onClick: p.onAllow }}
