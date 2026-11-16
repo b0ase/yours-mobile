@@ -35,7 +35,7 @@
  * createAction at all) goes on to the wallet exactly as before. bWalletX never wraps the wallet with this
  * (initWallet.ts), so its sites still get the module's purchase and listing sheets.
  */
-import { Beef, Script, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
+import { Beef, OP, Script, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import { BSV20, BSV21, Inscription, OrdLock, OrdLockV2 } from '@1sat/templates';
 import { ONESAT_ASSET_BASKETS, parseOneInputLabel } from '@1sat/types';
 import { STORE_NAME_NOTE } from '../mobile/storeBuild';
@@ -80,24 +80,94 @@ type Args = { labels?: unknown; outputs?: unknown; inputs?: unknown; inputBEEF?:
 
 type ScriptKind = 'ordlock' | 'mint' | 'asset' | 'plain' | 'unreadable';
 
-/** The ord envelope (OP_0 OP_IF "ord") and the content type every BSV-20 and BSV-21 token inscription carries. */
-const ORD_ENVELOPE = '0063036f7264';
+/** The content type every BSV-20 and BSV-21 token inscription carries (compared without case or parameters). */
 const TOKEN_CONTENT = 'application/bsv-20';
 /** Token ops that only move supply that already exists. Every other op creates supply or the right to mint it. */
 const TOKEN_MOVES = new Set(['transfer', 'burn']);
-const latin1 = new TextDecoder('latin1');
+const ORD = [0x6f, 0x72, 0x64];
+type Chunk = Script['chunks'][number];
+/** A data push of any form (direct, PUSHDATA1/2/4); OP_0 is an empty push. A truncated push is malformed. */
+const pushData = (c: Chunk | undefined): number[] | null => {
+  if (!c || c.op > OP.OP_PUSHDATA4) return null;
+  if ((c as { invalidLength?: boolean }).invalidLength) throw new Error('truncated push');
+  return c.data ?? [];
+};
+const sameBytes = (a: number[] | null, b: number[]) => !!a && a.length === b.length && a.every((x, i) => x === b[i]);
+/** An envelope field's tag: OP_1..OP_16, or a pushed little-endian number. */
+const tagOf = (c: Chunk): number | null => {
+  if (c.op >= OP.OP_1 && c.op <= OP.OP_16) return c.op - OP.OP_1 + 1;
+  const d = pushData(c);
+  return d && d.length ? d.reduceRight((n, b) => n * 256 + b, 0) : null;
+};
+
+type Envelope = { types: string[]; body: number[] };
+/**
+ * Every ord envelope in a script, read chunk by chunk (A11, R7 + R8): OP_0 (OP_FALSE), OP_IF, then any push whose data
+ * is "ord", then tag / value fields up to OP_0 (the body pushes) and OP_ENDIF. The content types are every field-1
+ * value. A malformed envelope (a field with no value, a non-push in the body, no OP_ENDIF) throws.
+ */
+export const ordEnvelopes = (s: Script): Envelope[] => {
+  const c = s.chunks;
+  const out: Envelope[] = [];
+  for (let i = 0; i + 2 < c.length; i++) {
+    if (c[i].op !== OP.OP_0 || c[i + 1].op !== OP.OP_IF || !sameBytes(pushData(c[i + 2]), ORD)) continue;
+    const env: Envelope = { types: [], body: [] };
+    let j = i + 3;
+    let closed = false;
+    while (j < c.length) {
+      if (c[j].op === OP.OP_ENDIF) {
+        closed = true;
+        break;
+      }
+      if (c[j].op === OP.OP_0) {
+        // The body: data pushes up to OP_ENDIF.
+        for (j++; j < c.length && c[j].op !== OP.OP_ENDIF; j++) {
+          const d = pushData(c[j]);
+          if (d === null) throw new Error('non-push in an inscription body');
+          env.body.push(...d);
+        }
+        closed = j < c.length;
+        break;
+      }
+      const tag = tagOf(c[j]);
+      const value = pushData(c[j + 1]);
+      if (value === null) throw new Error('inscription field without a value');
+      if (tag === 1) env.types.push(Utils.toUTF8(value));
+      j += 2;
+    }
+    if (!closed) throw new Error('inscription envelope without OP_ENDIF');
+    out.push(env);
+    i = j;
+  }
+  return out;
+};
+
+const isTokenType = (t: string) => t.split(';')[0].trim().toLowerCase() === TOKEN_CONTENT;
+/** One token envelope rebuilt in the decoders' canonical form, so their own validation reads it. */
+const canonicalToken = (body: number[]) =>
+  new Script()
+    .writeOpCode(OP.OP_0)
+    .writeOpCode(OP.OP_IF)
+    .writeBin(ORD)
+    .writeOpCode(OP.OP_1)
+    .writeBin(Utils.toArray(TOKEN_CONTENT, 'utf8'))
+    .writeOpCode(OP.OP_0)
+    .writeBin(body)
+    .writeOpCode(OP.OP_ENDIF);
 
 /**
- * A fungible token deploy or mint (A10, R2): an ord envelope with bsv-20 content (any case) that does not decode as a
- * plain BSV-21 or BSV-20 transfer or burn. So BSV-21 deploy+mint, deploy+auth, mint and auth, BSV-20 deploy and mint,
- * and bsv-20 content the decoders can't read all count (fails closed).
+ * A fungible token deploy or mint (A10 R2, A11 R7–R9): ANY envelope whose content type (field 1, any case) is
+ * application/bsv-20 and whose body does not decode as a plain BSV-21 or BSV-20 transfer or burn. So BSV-21
+ * deploy+mint, deploy+auth, mint and auth, BSV-20 deploy and mint, and bsv-20 content the decoders can't read all count
+ * (fails closed), in whatever push form and envelope position. Content that only mentions the type does not.
  */
-const tokenCreation = (s: Script, hex: string): boolean => {
-  if (!hex.toLowerCase().includes(ORD_ENVELOPE)) return false;
-  if (!latin1.decode(Uint8Array.from(s.toBinary())).toLowerCase().includes(TOKEN_CONTENT)) return false;
-  const t = BSV21.decode(s) ?? BSV20.decode(s);
-  return !t || !TOKEN_MOVES.has(String(t.tokenData.op).toLowerCase());
-};
+const tokenCreation = (envelopes: Envelope[]): boolean =>
+  envelopes.some((e) => {
+    if (!e.types.some(isTokenType)) return false;
+    const canon = canonicalToken(e.body);
+    const t = BSV21.decode(canon) ?? BSV20.decode(canon);
+    return !t || !TOKEN_MOVES.has(String(t.tokenData.op).toLowerCase());
+  });
 
 /** What a locking script is, for this gate: the marketplace lock, a token deploy or mint, a 1Sat asset, or other. */
 export const scriptKind = (hex: unknown): ScriptKind => {
@@ -106,8 +176,9 @@ export const scriptKind = (hex: unknown): ScriptKind => {
   try {
     const s = Script.fromHex(hex);
     if (OrdLock.isOrdLock(s) || OrdLockV2.isOrdLockV2(s)) return 'ordlock';
-    if (tokenCreation(s, hex)) return 'mint';
-    if (BSV21.decode(s) || BSV20.decode(s) || Inscription.decode(s)) return 'asset';
+    const envelopes = ordEnvelopes(s); // throws on a malformed envelope: 'unreadable', refused (A11)
+    if (tokenCreation(envelopes)) return 'mint';
+    if (envelopes.length || BSV21.decode(s) || BSV20.decode(s) || Inscription.decode(s)) return 'asset';
     return 'plain';
   } catch {
     return 'unreadable';
@@ -166,7 +237,8 @@ export const storeMarketVerdict = async (args: unknown, deps: StoreMarketDeps): 
     if (kind === 'ordlock') return refuse('ordlock');
     if (kind === 'mint') return refuse('token-mint');
     if (kind === 'asset') touches = true;
-    if (kind === 'unreadable') unreadable = true;
+    // A script the gate can't parse (or a malformed inscription envelope) is refused outright (A11).
+    if (kind === 'unreadable') return refuse('unclassified');
     const b = normBasket(o?.basket);
     if (typeof b === 'string' && (ASSET_OUTPUT_BASKETS.has(b) || b.startsWith('p '))) touches = true;
   }
@@ -196,7 +268,7 @@ export const storeMarketVerdict = async (args: unknown, deps: StoreMarketDeps): 
     if (kind === 'mint') return refuse('token-mint');
     if (kind === null) unread.push(op);
     else if (kind === 'asset') touches = true;
-    else if (kind === 'unreadable') unreadable = true;
+    else if (kind === 'unreadable') return refuse('unclassified');
   }
   // A coin the module was told to spend from outside (purchase of a listing) must be in the BEEF to be read.
   if (external.some((op) => unread.includes(op))) return refuse('unclassified');
