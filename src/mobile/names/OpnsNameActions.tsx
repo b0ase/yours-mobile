@@ -410,9 +410,13 @@ export const OpnsNameActions = ({
               title={MARKET_ENABLED ? 'Sell it' : 'Give it away'}
               coming={!canAdopt}
               sub={
-                canAdopt
-                  ? 'Selling works for names in your Names list. Use Add to my Names above, then sell it from Wallet › Names.'
-                  : 'Selling works for names in your Names list. A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
+                MARKET_ENABLED
+                  ? canAdopt
+                    ? 'Selling works for names in your Names list. Use Add to my Names above, then sell it from Wallet › Names.'
+                    : 'Selling works for names in your Names list. A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
+                  : canAdopt
+                    ? 'Giving works for names in your Names list. Use Add to my Names above, then give it from Wallet › Names.'
+                    : 'A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
               }
             />
           )

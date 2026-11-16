@@ -509,10 +509,10 @@ export const NameStorePage = () => {
           </p>
         )}
 
-        {/* Your names: tap one to sell it, take it off sale or give it (owner, 14 Oct 2026). */}
+        {/* Your names: tap one to sell it, take it off sale or give it (owner, 14 Oct 2026). Store build: give only. */}
         {yourNames.length > 0 && (
           <div className="mt-12">
-            <Rail title="Your names" sub="tap to sell or give" loading={false}>
+            <Rail title="Your names" sub={MARKET_ENABLED ? 'tap to sell or give' : 'tap to give'} loading={false}>
               {yourNames.map((n) => (
                 <button
                   key={n}
@@ -523,7 +523,7 @@ export const NameStorePage = () => {
                 >
                   <span className="block text-base font-semibold break-all">{n}</span>
                   <span className="block mt-1 text-xs tabular-nums" style={{ color: MUTED }}>
-                    {owned.get(n)?.listedSats
+                    {MARKET_ENABLED && owned.get(n)?.listedSats
                       ? `On sale · ${rate ? fmtUsd(((owned.get(n)?.listedSats ?? 0) / 1e8) * rate) : fmtSats(owned.get(n)?.listedSats ?? 0)}`
                       : 'Yours'}
                   </span>

@@ -1858,3 +1858,46 @@ describe('A2: Ask b describes the store edition as it is', () => {
     expect(g).not.toContain('Wallet · bApps · b · Feed · Chat');
   }, 60_000);
 });
+
+describe('A5, A6: no selling words or listing on the names screens in a store build', () => {
+  test('listOpnsName refuses in a store build before the wallet is asked; bWalletX lists as before', async () => {
+    const { listOpnsName } = await import('./names/opnsBuy');
+    let touched = 0;
+    const trap = new Proxy({}, { get: () => ((touched += 1), () => Promise.reject(new Error('reached'))) }) as never;
+    await expect(listOpnsName(trap, 'id1', 5000, true)).rejects.toThrow('Not available in this edition');
+    expect(touched).toBe(0);
+    // bWalletX goes on to sellOpns (which this trap context cannot finish): not the store refusal.
+    await expect(listOpnsName(trap, 'id1', 5000, false)).rejects.not.toThrow('Not available in this edition');
+  });
+  test('the default follows the build: refused in every store env, attempted in bWalletX', () => {
+    const code = `
+      const o = await import('./src/mobile/names/opnsBuy.ts');
+      const r = await o.listOpnsName({}, 'id1', 5000).then(() => 'listed', (e) => String(e?.message ?? e));
+      console.log(JSON.stringify(r));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as string;
+    for (const env of STORE_ENVS) expect(run(env)).toBe('Not available in this edition');
+    expect(run({})).not.toBe('Not available in this edition');
+  }, 60_000);
+  test('"Give it away" row, "For sale" badge, the rail sub and "On sale" pick their words with MARKET_ENABLED', () => {
+    const a = srcOf('./names/OpnsNameActions.tsx');
+    expect(a).toMatch(
+      /sub=\{\s*MARKET_ENABLED\s*\? canAdopt\s*\? 'Selling works for names in your Names list\. Use Add to my Names above, then sell it from Wallet › Names\.'\s*: 'Selling works for names in your Names list\. A name received/,
+    );
+    expect(a).toContain(
+      ": canAdopt\n                    ? 'Giving works for names in your Names list. Use Add to my Names above, then give it from Wallet › Names.'",
+    );
+    expect(a.match(/Selling works for names/g)).toHaveLength(2); // both inside the MARKET_ENABLED branch
+    expect(srcOf('./wallet/NamesSection.tsx')).toContain('{MARKET_ENABLED && n.listedSats != null && (');
+    const n = srcOf('./names/store/NameStorePage.tsx');
+    expect(n).toContain(`sub={MARKET_ENABLED ? 'tap to sell or give' : 'tap to give'}`);
+    expect(n).toContain('{MARKET_ENABLED && owned.get(n)?.listedSats');
+    expect(srcOf('./names/opnsBuy.ts')).toMatch(
+      /export const listOpnsName = async \([^)]*store: boolean = STORE_BUILD,\s*\): Promise<string> => \{[^}]*if \(store\) throw new Error\(STORE_NAME_NOTE\);/,
+    );
+  });
+});

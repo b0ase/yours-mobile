@@ -47,7 +47,15 @@ export const buyOpnsListing = async (
 };
 
 /** List one owned name (a plain P1SAT spend, like registerOpns / cancel: no module flag) (OPNS basket id) for `sats` with an OrdLock v2 listing. */
-export const listOpnsName = async (ctx: OneSatContext, id: string, sats: number): Promise<string> => {
+export const listOpnsName = async (
+  ctx: OneSatContext,
+  id: string,
+  sats: number,
+  store: boolean = STORE_BUILD,
+): Promise<string> => {
+  // Listing a name for sale is marketplace selling: never in a store build (as buyOpnsListing). It refuses before
+  // anything is asked of the wallet.
+  if (store) throw new Error(STORE_NAME_NOTE);
   const res = await sellOpns.execute(ctx, { id, price: sats });
   if (res.error || !res.txid) throw new Error(String(res.error ?? 'Listing failed'));
   return res.txid;
