@@ -206,7 +206,17 @@ const acceptTerms = async (page: Page) => {
 const home = async (page: Page) => {
   // A row may have navigated away (a bApp, an external page): start again from the app.
   await page.goto(URL);
-  await waitText(page, 'Wallet', 120_000);
+  // Web edition (this preview, web.bwalletx.com): the unlock key is held in memory only, so every page load opens
+  // on the lock screen (src/mobile/hub.ts persistSession). The extension and phones keep the session and skip this.
+  await page.waitForFunction(
+    () => !!document.querySelector('input[type="password"]') || /Receive/.test(document.body.innerText),
+    { timeout: 120_000 },
+  );
+  if (await page.$('input[type="password"]')) {
+    await page.locator('input[type="password"]').fill(password);
+    await page.keyboard.press('Enter');
+  }
+  await waitText(page, 'Receive', 120_000);
   await sleep(800);
   await clickByText(page, 'Wallet');
   await waitText(page, 'Receive', 60_000);

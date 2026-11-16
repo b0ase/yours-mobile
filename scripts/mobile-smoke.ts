@@ -44,7 +44,10 @@ try {
       'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
   });
   const watch = (source: string) => (msg: { type: () => string; text: () => string }) => {
-    if (msg.type() === 'error') problems.push(`[${source}] ${msg.text()}`);
+    // A failed request's console line has no URL or names it only for CORS; those are judged below from the
+    // request and response lists, which carry the URL and status.
+    if (msg.type() === 'error' && !/^Failed to load resource|blocked by CORS policy/.test(msg.text()))
+      problems.push(`[${source}] ${msg.text()}`);
   };
   page.on('console', watch('page'));
   page.on('pageerror', (err) => problems.push(`[page] uncaught: ${err instanceof Error ? err.message : err}`));
@@ -137,8 +140,27 @@ try {
   await browser.close();
 }
 
-const failed = (globalThis as { __failedRequests?: string[] }).__failedRequests ?? [];
-if (problems.length && failed.length) problems.push(...failed.map((f) => `[request] ${f}`));
+// Failed requests a throwaway wallet in this preview is bound to make; anything else is a problem.
+const EXPECTED: [RegExp, string][] = [
+  // bMarketX allows the real wallet origins (web.bwalletx.com, the phone apps), not http://localhost:<port>.
+  [
+    /^net::ERR_FAILED https:\/\/bmarketx\.com\/api\/ebay\/wallet\/status/,
+    'eBay link status: preview origin not on its CORS list',
+  ],
+  // "No $name for this key" is answered as 404.
+  [/^404 GET https:\/\/pay\.bwallet\.space\/api\/paymail\/lookup\?key=/, 'a new wallet has no $name yet'],
+  // WhatsOnChain answers 404 for an address that has never been used.
+  [
+    /^404 GET https:\/\/api\.whatsonchain\.com\/v1\/bsv\/main\/address\/[^/]+\/(un)?confirmed\/history/,
+    'a new address has no history',
+  ],
+  // The page dropped its own request (a navigation or an unmounted screen).
+  [/^net::ERR_ABORTED /, 'cancelled by the page'],
+];
+const failed = ((globalThis as { __failedRequests?: string[] }).__failedRequests ?? []).filter(
+  (f) => !EXPECTED.some(([re]) => re.test(f)),
+);
+problems.push(...failed.map((f) => `[request] ${f}`));
 if (problems.length) {
   console.log(`\n${problems.length} problem(s):`);
   for (const p of problems) console.log('  ' + p.replaceAll(password, '<password>').slice(0, 400));
