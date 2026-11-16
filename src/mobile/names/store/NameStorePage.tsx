@@ -322,7 +322,9 @@ export const NameStorePage = () => {
     if (!o) return;
     setMsg('');
     const usd = Number(sellUsd || nameTierUsd(n) || 15);
-    if (!(usd >= 0.01 && usd <= 100_000)) return setMsg('Choose a price between $0.01 and $100,000.');
+    // Selling is bWalletX only (MARKET_ENABLED): the wording is not in a store bundle.
+    if (!(usd >= 0.01 && usd <= 100_000))
+      return setMsg(MARKET_ENABLED ? 'Choose a price between $0.01 and $100,000.' : '');
     const sats = usdToSats(usd, rate || (await fetchExchangeRate('main').catch(() => 0))) ?? 0;
     if (!sats) return setMsg("Couldn't get the BSV price. Try again in a minute.");
     setPendingSell({ name: n, id: o.id, usd, sats });

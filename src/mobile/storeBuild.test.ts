@@ -1460,3 +1460,67 @@ describe('launch curves and example trading strategies are bWalletX only', () =>
     expect(Object.keys(st).sort()).toEqual(Object.keys(real).sort());
   });
 });
+
+// ── Fourth round (16 Nov 2026): the last store-bundle leftovers ───────────────────────────────────────────────
+describe('store leftovers: sell-price wording, the room after a token mint, launch curve wording', () => {
+  const read = (env: Record<string, string>) => {
+    const code = `
+      const s = await import('./src/mobile/storeBuild.ts'); const c = await import('./src/mobile/curves/curveChoice.ts');
+      const l = await import('./src/lib/curves/curves.ts'); const curve = l.standardCurve();
+      console.log(JSON.stringify({ rooms: s.TOKEN_ROOMS_ENABLED, roomsFn: s.tokenRoomsEnabled(), note: c.PERMANENT_NOTE,
+        wrongSupply: c.curveProblem(curve, true, 5), notAccepted: c.curveProblem(curve, false, curve.supply),
+        fine: c.curveProblem(curve, true, curve.supply) }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as {
+      rooms: boolean;
+      roomsFn: boolean;
+      note: string;
+      wrongSupply: string | null;
+      notAccepted: string | null;
+      fine: string | null;
+    };
+  };
+  test('store build: no token rooms flag, no curve wording, no curve problem ever', () => {
+    for (const env of STORE_ENVS) {
+      const t = read(env);
+      expect(t.rooms).toBe(false);
+      expect(t.roomsFn).toBe(false);
+      expect(t.note).toBe('');
+      expect([t.wrongSupply, t.notAccepted, t.fine]).toEqual([null, null, null]);
+    }
+  });
+  test('bWalletX build: the flag is on and the curve wording and checks are what they were', () => {
+    const t = read({});
+    expect(t.rooms).toBe(true);
+    expect(t.roomsFn).toBe(true);
+    expect(t.note).toBe('This curve is permanent once you launch. Nobody, you included, can change it later.');
+    expect(t.wrongSupply).toBe('Every launch is 1,000,000,000 tokens, all on the curve. Set the supply to that.');
+    expect(t.notAccepted).toBe('Tick "permanent" under the launch curve to go on.');
+    expect(t.fine).toBeNull();
+  });
+  test('Mint a token, done screen: a store build opens no room, offers no room button and names no Market', () => {
+    const m = srcOf('./tokens/TokenMint.tsx');
+    expect(m).toContain('if (TOKEN_ROOMS_ENABLED) void openTokenRoom(apiContext, token).catch(() => null);');
+    expect(m).toMatch(
+      /if \(!TOKEN_ROOMS_ENABLED\) return setDone\(\{ token, room: null \}\);\s*setBusy\('Opening the room…'\);/,
+    );
+    expect(m).toMatch(
+      /\{TOKEN_ROOMS_ENABLED && \(\s*<button\s+type="button"\s+onClick=\{\(\) => go\('chat', token\)\}/,
+    );
+    expect(m).toMatch(/\{!TOKEN_ROOMS_ENABLED\s*\? ''\s*: done\.room/);
+    // Every call that opens a room is behind the flag; "View in wallet" stays for both editions.
+    expect(m.match(/openTokenRoom\(apiContext, token\)/g)).toHaveLength(2);
+    expect(m).toContain("onClick={() => go('bsv')}");
+    // Listing after a mint renders nothing where there is no trading.
+    expect(srcOf('./sell/ListAfterMint.tsx')).toContain('if (!SELL_ENABLED || !marketTradingEnabled()) return null;');
+    expect(marketTradingEnabled(true)).toBe(false);
+    expect(marketTradingEnabled(false)).toBe(true);
+  });
+  test('the asking-price message for selling a name is worded only where names can be sold', () => {
+    const n = srcOf('./names/store/NameStorePage.tsx');
+    expect(n).toContain("return setMsg(MARKET_ENABLED ? 'Choose a price between $0.01 and $100,000.' : '');");
+    expect(n.match(/Choose a price between/g)).toHaveLength(1);
+  });
+});

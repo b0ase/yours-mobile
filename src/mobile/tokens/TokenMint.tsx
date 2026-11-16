@@ -20,7 +20,7 @@ import { CurvePicker } from '../curves/CurvePicker';
 import { ListAfterMint } from '../sell/ListAfterMint';
 import { STANDARD_SUPPLY, curveProblem } from '../curves/curveChoice';
 import { DEFAULT_PRESET, maxPrice, standardCurve, usd, type Curve, type PresetId } from '../../lib/curves';
-import { CURVE_COINS_ENABLED, STORE_BUILD } from '../storeBuild';
+import { CURVE_COINS_ENABLED, STORE_BUILD, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 /**
  * MINT → "Mint a token": a plain BSV-21 token (name, ticker, supply, decimals, optional icon and
@@ -121,10 +121,12 @@ export const TokenMint = ({
       void showOnWallet(chromeStorageService, token.tokenId);
       setConfirming(false);
       notifyMinted();
+      // A store build has no token rooms (TOKEN_ROOMS_ENABLED): no room is opened or offered for the new token.
       if (onMinted) {
-        void openTokenRoom(apiContext, token).catch(() => null);
+        if (TOKEN_ROOMS_ENABLED) void openTokenRoom(apiContext, token).catch(() => null);
         return onMinted(token);
       }
+      if (!TOKEN_ROOMS_ENABLED) return setDone({ token, room: null });
       setBusy('Opening the room…');
       // A just-deployed token may not be indexed yet; opening the room from Chat also creates it.
       const room = await openTokenRoom(apiContext, token).catch(() => null);
@@ -153,9 +155,11 @@ export const TokenMint = ({
       <div className="flex flex-col gap-3 text-sm">
         <p>
           ${token.ticker} is minted: {Number(token.supply).toLocaleString()} in your wallet.{' '}
-          {done.room
-            ? `The room "${token.name}" is open.`
-            : 'Set up its room (Settings › My tokens) to list it in other wallets and the Market and open its chat.'}
+          {!TOKEN_ROOMS_ENABLED
+            ? ''
+            : done.room
+              ? `The room "${token.name}" is open.`
+              : 'Set up its room (Settings › My tokens) to list it in other wallets and the Market and open its chat.'}
         </p>
         <p className="text-xs" style={{ color: '#999' }}>
           Token id
@@ -175,14 +179,16 @@ export const TokenMint = ({
           dec={token.decimals}
           curve={CURVE_COINS_ENABLED ? curve : null}
         />
-        <button
-          type="button"
-          onClick={() => go('chat', token)}
-          className="h-11 rounded-xl font-bold border-0 cursor-pointer"
-          style={primary}
-        >
-          Open its room
-        </button>
+        {TOKEN_ROOMS_ENABLED && (
+          <button
+            type="button"
+            onClick={() => go('chat', token)}
+            className="h-11 rounded-xl font-bold border-0 cursor-pointer"
+            style={primary}
+          >
+            Open its room
+          </button>
+        )}
         <button
           type="button"
           onClick={() => go('bsv')}

@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { NetWork } from '../services/types/provider.types';
 import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
 

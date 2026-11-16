@@ -230,6 +230,12 @@ export const paidNameBlocked = (fee: unknown, store = STORE_BUILD): boolean => s
 
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
+/** The same gate as a literal env check, for text and buttons a store bundle must not carry (Mint a token's done screen). */
+export const TOKEN_ROOMS_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 export const STORE_ROOM_NOTE = 'This room is for token holders. Open it in bWalletX or on bchatx.com.';
 
 /**
