@@ -5,6 +5,7 @@
  */
 import { planStatus, type LockPlan } from './schedule';
 import { TEMPLATES } from './templates';
+import { MARKET_ENABLED } from '../storeBuild';
 
 export const PNEE_POT = 'pnee';
 export const OTHER_POT = 'other';
@@ -33,7 +34,9 @@ export type Pot = {
 
 export const potName = (id: string) =>
   artistOfPot(id)
-    ? `Backing ${artistOfPot(id)}`
+    ? MARKET_ENABLED
+      ? `Backing ${artistOfPot(id)}`
+      : `Locked for ${artistOfPot(id)}`
     : id === PNEE_POT
       ? 'PNEEs'
       : id === OTHER_POT
