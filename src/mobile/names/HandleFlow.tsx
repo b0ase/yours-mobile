@@ -51,7 +51,7 @@ import { SendConfirmation } from '../../components/SendConfirmation';
 import { useTheme } from '../../hooks/useTheme';
 import { handleTitle, suggestHandle } from './handlePrompt';
 import { useBackClose } from '../backStack';
-import { STORE_NAME_NOTE, paidNameBlocked } from '../storeBuild';
+import { APP_NAME, STORE_NAME_NOTE, paidNameBlocked } from '../storeBuild';
 
 /**
  * "Choose your handle": a full-screen sheet shown after create / restore (HandleOnboarding) and
@@ -355,7 +355,7 @@ export const HandleFlow = ({
     free: owned ? 'Yours ✓' : 'Available',
     mine: 'Yours ✓',
     taken: 'Taken. Try another.',
-    reserved: 'Reserved. This name is kept for the bWalletX team. Try another.',
+    reserved: `Reserved. This name is kept for the ${APP_NAME} team. Try another.`,
     invalid: 'Use a-z, 0-9, - or _',
     error: "Couldn't check. Check your connection.",
   };

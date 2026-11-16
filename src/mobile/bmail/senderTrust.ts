@@ -2,6 +2,7 @@
  * bMail sender trust (owner, 28 Oct 2026: "the fake and phishing problems are real, fix those first").
  * Display-only: these never block delivery. Mirrors site/lib/brandGuard.js (BRANDS + the look-alike fold).
  */
+import { APP_NAME } from '../storeBuild';
 
 /** The Bitcoin Corporation Ltd's identity key (bcorp@bwalletx.com). */
 export const BCORP_KEY = '03c96b37e69377c8af33b583067f56444c83a656b05014e8f15003e67250943880';
@@ -121,5 +122,5 @@ const SECRET_RES = [
 export const asksForSecrets = (text: string): boolean => SECRET_RES.some((re) => re.test(String(text ?? '')));
 
 export const VERIFIED_TEXT = 'Verified · The Bitcoin Corporation';
-export const LOOKALIKE_TEXT = 'This sender is NOT bWalletX or bCorp.';
-export const SECRETS_TEXT = "bWalletX will never ask for your 12 words or password. Don't reply.";
+export const LOOKALIKE_TEXT = `This sender is NOT ${APP_NAME} or bCorp.`;
+export const SECRETS_TEXT = `${APP_NAME} will never ask for your 12 words or password. Don't reply.`;

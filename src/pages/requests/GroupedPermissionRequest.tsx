@@ -19,6 +19,7 @@ import { SiteThemeOffer } from '../../mobile/theme/SiteThemeOffer';
 import { familySite } from '../../mobile/theme/themeSites';
 import { accountNamesFor } from '../../mobile/names/accountNames';
 import { basketDisplayName } from '../../services/reservedBaskets';
+import { APP_NAME } from '../../mobile/storeBuild';
 
 export type GroupedPermissionRequestProps = {
   request: GroupedPermissionRequestType;
@@ -126,7 +127,7 @@ export const GroupedPermissionRequestPage = (props: GroupedPermissionRequestProp
         </span>
       </p>
       <p className="text-sm mt-4 text-center leading-relaxed" style={{ color: theme.color.global.gray }}>
-        Nothing is spent. If {host} later wants anything more, bWalletX will ask you then.
+        Nothing is spent. If {host} later wants anything more, {APP_NAME} will ask you then.
       </p>
 
       {/* A family site may offer its colours (mobile/theme/siteTheme.ts): a separate tap, never part of the grant. */}

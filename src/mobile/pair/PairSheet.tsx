@@ -12,6 +12,7 @@ import { returnHint, switchBackHint } from './doneHint';
 import { Scanner } from '../scan/Scanner';
 import type { ReturnPlan } from '../../pair/returnTo';
 import { openReturn, returnPlatform } from './openReturn';
+import { APP_NAME } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -180,7 +181,7 @@ export default function PairSheet({
                   a site that claims to be {new URL(stage.p.origin).host}
                 </p>
                 <p className="mt-2 text-xs" style={{ color: AMBER }}>
-                  bWalletX can&apos;t confirm this. Only connect if you opened the QR code on that site yourself.
+                  {APP_NAME} can&apos;t confirm this. Only connect if you opened the QR code on that site yourself.
                 </p>
               </>
             )}
@@ -234,7 +235,7 @@ export default function PairSheet({
             </span>
             <p className="mt-4 text-lg font-bold text-white">
               {stage.origin === CLI_ORIGIN
-                ? 'Paired with the bWalletX CLI'
+                ? `Paired with the ${APP_NAME} CLI`
                 : stage.proven
                   ? `Connected to ${new URL(stage.origin).host}`
                   : `Connected to a site that claims to be ${new URL(stage.origin).host}`}

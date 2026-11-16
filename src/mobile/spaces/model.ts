@@ -8,6 +8,7 @@
  */
 
 import { DEFAULT_LISTEN_NOTICE, parseMode, parseTranscription, type Transcription } from './transcription';
+import { APP_NAME } from '../storeBuild';
 
 export type SpaceRole = 'host' | 'speaker' | 'listener';
 export type SpaceMode = 'stage' | 'meeting';
@@ -311,7 +312,7 @@ export const parseRoomSpaceMeta = (data: unknown, ticker?: string | null): RoomS
   const o = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
   const alwaysOpen = o.always_open === true;
   let hostLabel = str(o.host_label);
-  if (alwaysOpen && !hostLabel && (o.room_host === 'bwalletx' || isAlwaysOpenTicker(ticker))) hostLabel = 'bWalletX';
+  if (alwaysOpen && !hostLabel && (o.room_host === 'bwalletx' || isAlwaysOpenTicker(ticker))) hostLabel = `${APP_NAME}`;
   const alwaysHere = (Array.isArray(o.always_here) ? o.always_here : [])
     .map((v): AlwaysHere | null => {
       const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
@@ -330,7 +331,7 @@ export const alwaysOpenBarText = (ticker: string, roomName: string) =>
 
 /** The agent tile's caption (b on an always-open stage). */
 export const alwaysHereCaption = (a: AlwaysHere) =>
-  a.handle === 'b' ? 'bWalletX agent · always here' : `${a.label} · always here`;
+  a.handle === 'b' ? `${APP_NAME} agent · always here` : `${a.label} · always here`;
 
 /** Always-open rooms have no host to end it: whoever started is just on stage. */
 export const mayEndSpace = (o: { isHost: boolean; alwaysOpen: boolean }) => o.isHost && !o.alwaysOpen;

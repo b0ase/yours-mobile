@@ -7,6 +7,7 @@ import {
   DEFAULT_WALLET_PATH,
   SWEEP_PATH,
 } from '../../utils/constants';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Sweep from another wallet: the HD (BIP39 + BIP32/44) side. Turns a 12/24-word phrase (plus optional
@@ -44,9 +45,9 @@ export const FALLBACK_PATHS = PRESETS.filter((p) => p.path).map((p) => p.path);
  */
 export type FixedKey = { wallet: string; label: string; path: string };
 export const FIXED_KEYS: FixedKey[] = [
-  { wallet: 'Yours / bWalletX', label: 'payment', path: DEFAULT_WALLET_PATH },
-  { wallet: 'Yours / bWalletX', label: 'ordinals', path: DEFAULT_ORD_PATH },
-  { wallet: 'Yours / bWalletX', label: 'identity', path: DEFAULT_IDENTITY_PATH },
+  { wallet: `Yours / ${APP_NAME}`, label: 'payment', path: DEFAULT_WALLET_PATH },
+  { wallet: `Yours / ${APP_NAME}`, label: 'ordinals', path: DEFAULT_ORD_PATH },
+  { wallet: `Yours / ${APP_NAME}`, label: 'identity', path: DEFAULT_IDENTITY_PATH },
   // Yours' old default payment key; also RelayX's payment key (Yours restores RelayX with this
   // wallet path and only swaps the ordinals path).
   { wallet: 'Yours (older) / RelayX', label: 'payment', path: SWEEP_PATH },

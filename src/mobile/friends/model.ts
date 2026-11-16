@@ -6,6 +6,7 @@
  */
 import { lookalikes } from '../names/names';
 import type { Contact } from '../chat/contacts';
+import { APP_NAME } from '../storeBuild';
 
 /* ── Privacy ─────────────────────────────────────────────────────────────────────────── */
 
@@ -351,7 +352,7 @@ export const lookalikeWarnings = (
         });
     }
   }
-  if (didYouMean) out.push({ level: 'warn', text: `Not a bWalletX name. Did you mean ${didYouMean}?` });
+  if (didYouMean) out.push({ level: 'warn', text: `Not a ${APP_NAME} name. Did you mean ${didYouMean}?` });
   return out;
 };
 

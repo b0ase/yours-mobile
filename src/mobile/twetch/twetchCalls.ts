@@ -24,7 +24,7 @@
 import { Transaction, Utils } from '@bsv/sdk';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE } from '../../services/userDenied';
 import { settleWhenSeen, type UnsentWallet } from '../../services/unsentGuard';
-import { TWETCH_POST_ENABLED } from '../storeBuild';
+import { APP_NAME, TWETCH_POST_ENABLED } from '../storeBuild';
 import { TwetchKeyMismatch, twetchHandle, type TwetchStore } from './twetchLink';
 import {
   bsmSign,
@@ -74,8 +74,8 @@ export type TwetchDeps = {
 export type TwetchReply = { result: unknown } | { error: { code: string; message: string } };
 
 const err = (code: string, message: string): TwetchReply => ({ error: { code, message } });
-const LOCKED = err('LOCKED', 'bWalletX is locked. Unlock it and try again.');
-const NOT_LINKED = err(NOT_LINKED_CODE, 'Link your Twetch account in bWalletX first (Settings › Twetch).');
+const LOCKED = err('LOCKED', `${APP_NAME} is locked. Unlock it and try again.`);
+const NOT_LINKED = err(NOT_LINKED_CODE, `Link your Twetch account in ${APP_NAME} first (Settings › Twetch).`);
 const DENIED = err(USER_DENIED_CODE, USER_DENIED_MESSAGE);
 
 const hostOf = (origin: string) => {

@@ -24,6 +24,7 @@ import {
   type OriginResult,
   type OriginScan,
 } from './origins';
+import { APP_NAME } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#17191E';
@@ -221,7 +222,7 @@ export const OriginsScreen = ({ onBack }: { onBack: () => void }) => {
                   color: mine === o ? GOLD : 'white',
                 }}
               >
-                {o ? ORIGIN_NAMES[o] : 'bWalletX (new)'}
+                {o ? ORIGIN_NAMES[o] : `${APP_NAME} (new)`}
               </button>
             ))}
           </div>

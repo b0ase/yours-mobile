@@ -4,6 +4,7 @@ import { applyAtomically } from './atomicStorage';
 import { YoursNative } from './native';
 import { freeDisposableCaches } from './storageCaches';
 import type { HostOp, Sender, StorageArea, StorageChanges, ToEndpoint, ToHub } from './protocol';
+import { APP_NAME } from './storeBuild';
 
 /**
  * The hub plays the part of the browser: it routes runtime messages and ports
@@ -432,7 +433,7 @@ export class Hub {
   private async runStorageOp(from: string, msg: Extract<ToHub, { t: 'storage' }>) {
     const store = msg.area === 'local' ? this.local : this.session;
     if (this.fenced && msg.op !== 'get') {
-      return this.send(from, { t: 'storageResult', reqId: msg.reqId, error: 'bWalletX is open in another tab' });
+      return this.send(from, { t: 'storageResult', reqId: msg.reqId, error: `${APP_NAME} is open in another tab` });
     }
     try {
       const { result, changes } = this.applyStorageOp(store, msg.op, msg.arg);

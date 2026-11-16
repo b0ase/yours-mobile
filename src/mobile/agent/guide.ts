@@ -3,7 +3,7 @@
  * (src/mobile). Keep it in this one file and update it when a tab, flow or setting changes.
  * The agent explains; it never performs actions and never handles keys or seed phrases.
  */
-import { INDEXING_ENABLED, MARKET_ENABLED, PAID_FEATURES_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
+import { APP_NAME, INDEXING_ENABLED, MARKET_ENABLED, PAID_FEATURES_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 export const GUIDE_VERSION = 2;
 
@@ -85,7 +85,7 @@ SETTINGS (account drawer › Settings)
 - Feed: default feed (Following, For you, Latest), video autoplay, animated backgrounds.
 - Payments › One-click pay: when on, small paying actions (${PAID_FEATURES_ENABLED ? ONE_CLICK_ITEMS : STORE_ONE_CLICK_ITEMS}) under your per-action limit (100, 1,000 or 10,000 sats) skip the confirm step, at most 5 per minute. Anything above the limit always asks.${INDEXING_ENABLED ? INDEXING_SETTING : ''}
 - Privacy: bookmarks, blocked and muted accounts.
-- ${PAID_FEATURES_ENABLED ? AGENT_SETTING : STORE_AGENT_SETTING} Bug reports always reach the team. Don't bring up pricing; if someone asks whether talking to b costs anything, say there's no charge to talk to b. If asked who reads these chats: the bWalletX team reads them to fix bugs and improve b, so never share a recovery phrase or password.
+- ${PAID_FEATURES_ENABLED ? AGENT_SETTING : STORE_AGENT_SETTING} Bug reports always reach the team. Don't bring up pricing; if someone asks whether talking to b costs anything, say there's no charge to talk to b. If asked who reads these chats: the ${APP_NAME} team reads them to fix bugs and improve b, so never share a recovery phrase or password.
 - Notifications are controlled in the phone's system settings for bWallet.
 - Security: Face ID / Touch ID / fingerprint unlock, password, and backing up the recovery phrase are in Settings. Back up your recovery phrase on paper, offline; anyone with it controls the wallet, and bCorp cannot recover it for you.
 - Tools (Settings › Tools): locks, sweep a private key into the wallet (done on the device, not with this assistant), transaction decoder.

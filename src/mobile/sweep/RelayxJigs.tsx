@@ -3,6 +3,7 @@ import { Transaction } from '@bsv/sdk';
 import { identifyJig, loadNpgMaps, NPG_CUTOUT_INDEX, type IdentifiedJig } from '../../sweep/runIdentify';
 import { mapLimit } from './speed';
 import { NpgMelt } from './NpgMelt';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * RelayX NFT Collection Importer, phase a (owner, 17 Oct 2026): the Run NFTs found at the swept wallet's
@@ -182,8 +183,8 @@ export function RelayxJigs({ held, getHex }: { held: Held[]; getHex: (txid: stri
       ))}
       {found && (
         <p className="m-0 text-[11px]" style={{ color: '#B6C8F5' }}>
-          NPGs can be melted into element cards for the NPG games. Bringing other NFTs into bWalletX: coming soon. They
-          stay safe where they are until then.
+          NPGs can be melted into element cards for the NPG games. Bringing other NFTs into {APP_NAME}: coming soon.
+          They stay safe where they are until then.
         </p>
       )}
     </div>

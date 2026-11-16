@@ -8,7 +8,7 @@
  * builder, linear, no self-pay; 0 until the server reports it), A–Z.
  */
 import type { BApp } from '../../bapps';
-import { MARKET_ENABLED } from '../../storeBuild';
+import { APP_NAME, MARKET_ENABLED } from '../../storeBuild';
 
 /** Who built an app. Our own suite is built by Bitcoin Corp, paid at the owner's handle. */
 export type Builder = { name: string; handle?: string; paymail?: string };
@@ -87,7 +87,7 @@ export const contributeLinks = (c: Pick<AppCard, 'source' | 'name'>): { repo: st
   if (!s || !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/?$/.test(s)) return null;
   const repo = s.replace(/\/$/, '');
   const title = encodeURIComponent(`Suggestion for ${c.name}`);
-  const body = encodeURIComponent('What would make this app better?\n\n(Sent from the bWalletX bApps feed.)');
+  const body = encodeURIComponent(`What would make this app better?\n\n(Sent from the ${APP_NAME} bApps feed.)`);
   return { repo, suggest: `${repo}/issues/new?title=${title}&body=${body}` };
 };
 

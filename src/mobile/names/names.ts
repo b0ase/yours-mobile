@@ -9,7 +9,7 @@ import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS, SI
 const alsoOurs = (): string[] => [...(LEGACY_PAYMAIL_DOMAINS ?? []), ...(SIBLING_PAYMAIL_DOMAINS ?? [])];
 import { isPlaceholderName } from './handlePrompt';
 import { compressedKey, keyAddress, knownKeyLabel, parsePubKey, shortKey } from './pubkeyRecipient';
-import { STORE_BUILD } from '../storeBuild';
+import { APP_NAME, STORE_BUILD } from '../storeBuild';
 
 /**
  * "Send to a name": classify what the user typed in a recipient box and resolve it to
@@ -130,7 +130,7 @@ export class ResolveError extends Error {}
  * domain, so it is never mistaken for a bWalletX handle ("boase@handcash.io — outside bWalletX").
  */
 export const externalLabel = (r: Pick<Resolved, 'input' | 'external'>): string | undefined =>
-  r.external ? `${r.input.replace(/^\$/, '').toLowerCase()} — outside bWalletX` : undefined;
+  r.external ? `${r.input.replace(/^\$/, '').toLowerCase()} — outside ${APP_NAME}` : undefined;
 
 /**
  * Whether an OpNS name is bound to a wallet (signed identity key, opns.idKey) or only held at an address.
@@ -440,7 +440,7 @@ export const isOurDomain = (d: string, domain: string = BWALLET_PAYMAIL_DOMAIN) 
   return (!!domain && x === domain.toLowerCase()) || alsoOurs().includes(x);
 };
 
-export const noSuchUser = (input: string) => `No bWalletX user called ${input}`;
+export const noSuchUser = (input: string) => `No ${APP_NAME} user called ${input}`;
 
 /**
  * A `$name` is a bWalletX handle and nothing else (owner, 13 Oct 2026): name@<domain> (bwalletx.com),
@@ -542,8 +542,7 @@ export const BAD_ORD_PROOF =
   "This name's ordinal address isn't signed by its owner's key, so it may have been swapped. Not sending tokens to it.";
 
 /** Shown on the pay sheet when bWalletX can't check the destination against the payee's key. */
-export const NOT_VERIFIED_NOTE =
-  "Not verified: this name's host doesn't let bWalletX check the payment address against the owner's key.";
+export const NOT_VERIFIED_NOTE = `Not verified: this name's host doesn't let ${APP_NAME} check the payment address against the owner's key.`;
 
 /** "ord" proof (paymail.ts signOrdProof) by `pubkey` over `address`: ok, bad, or none (nothing to check against). */
 export const checkOrdProof = async (
@@ -603,12 +602,10 @@ export const BAD_BINDING =
  * Our host answered the typed name with a different name's binding and no forward (28 Oct 2026: boase@ came back
  * as b0asex@). Nothing shows the typed name's owner chose that wallet, so it is never paid; no "Pay anyway".
  */
-export const NAME_MISMATCH =
-  "This name isn't set up in bWalletX: the server answered with a different name's wallet, and its owner hasn't signed this name or set it to forward. Not paying it. Ask them for their exact name.";
+export const NAME_MISMATCH = `This name isn't set up in ${APP_NAME}: the server answered with a different name's wallet, and its owner hasn't signed this name or set it to forward. Not paying it. Ask them for their exact name.`;
 
 /** Shown under a bWalletX name whose owner hasn't signed its binding yet. Payable: the key is still remembered. */
-export const UNSIGNED_NOTE =
-  "Not signed by its owner yet: bWalletX can't prove the owner chose this wallet. If it's a large amount, check the name with them first.";
+export const UNSIGNED_NOTE = `Not signed by its owner yet: ${APP_NAME} can't prove the owner chose this wallet. If it's a large amount, check the name with them first.`;
 
 /** BRC-169 4.4: the name points to a different key than before, with no signed handover. */
 export const KEY_CHANGED =
@@ -623,7 +620,7 @@ export const proofRefusal = (r: Pick<Resolved, 'nameProof'>): string | undefined
     return `This name has no proof from ${who}, so it may not belong to who it says. Not paying it.`;
   if (p.status === 'sub-changed')
     return `This name is now proven by a different ${who} account than before. Not paying it.`;
-  if (p.status === 'unchecked') return `This version of bWalletX can't check ${who} proofs. Not paying it.`;
+  if (p.status === 'unchecked') return `This version of ${APP_NAME} can't check ${who} proofs. Not paying it.`;
   return `This name's proof from ${who} doesn't check out, so it may have been moved without its owner. Not paying it.`;
 };
 

@@ -28,6 +28,7 @@ import {
   type ComposerOptionId,
 } from './composerOptions';
 import { formatSize } from './roomMediaInfo';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * The chat composer's panels (chat/ComposerBar.tsx owns which one is open):
@@ -358,7 +359,7 @@ export const VoiceNoteSheet = ({ onSend, onClose }: { onSend: (file: File) => Pr
       r.start(1000);
       setS({ at: 'recording', since });
     } catch {
-      setS({ at: 'error', text: 'Microphone not available. Allow it for bWalletX in your settings.' });
+      setS({ at: 'error', text: `Microphone not available. Allow it for ${APP_NAME} in your settings.` });
     }
   };
   const stop = () => {

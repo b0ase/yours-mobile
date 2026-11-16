@@ -1,5 +1,6 @@
 import { destinationFor, TOKENS_UNSUPPORTED, type Resolved } from './names';
 import type { OwnedForSale } from './opnsSell';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Gift OpNS names (owner, 13 Oct 2026): send one or more owned names to a $handle, paymail or address.
@@ -12,8 +13,7 @@ import type { OwnedForSale } from './opnsSell';
  * A listed name is taken off sale first (cancelOpnsListing), then sent (sendOpns), all under ONE approval.
  */
 
-export const GIFT_NO_ORD_DESTINATION =
-  "This recipient can't receive names. Ask them for a bWalletX $handle, a paymail that takes ordinals, or a 1… address.";
+export const GIFT_NO_ORD_DESTINATION = `This recipient can't receive names. Ask them for a ${APP_NAME} $handle, a paymail that takes ordinals, or a 1… address.`;
 
 /** The ordinals address to send a name to, or why not. */
 export const giftDestination = (r: Resolved): { ok: true; to: string } | { ok: false; error: string } => {

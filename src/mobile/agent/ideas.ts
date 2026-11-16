@@ -1,4 +1,4 @@
-import { BSPACES_ENABLED, MARKET_ENABLED, SUBSCRIPTIONS_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
+import { APP_NAME, BSPACES_ENABLED, MARKET_ENABLED, SUBSCRIPTIONS_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 /**
  * Ask b's rotating subtitle lines (owner, 12 Oct 2026: ~100, shuffled). Each is something b can walk you through
@@ -23,7 +23,7 @@ const T = (topic: IdeaTopic, labels: string[]): Idea[] => labels.map((label) => 
 export const IDEAS: Idea[] = [
   ...T('Getting started', [
     'What can you help me with?',
-    'Show me around bWalletX',
+    `Show me around ${APP_NAME}`,
     'Claim your free $name',
     'What is my paymail?',
     'How do I receive BSV?',

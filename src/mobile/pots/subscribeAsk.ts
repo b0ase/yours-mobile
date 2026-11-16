@@ -10,6 +10,7 @@ import { cachedExchangeRate } from '../../utils/wallet';
 import type { AppSubscribeRequest, SubscribeDeps } from './appSubscribe';
 import { SubscribeError } from './appSubscribe';
 import { chargeSoon, potsRunning } from './potsEngine';
+import { APP_NAME } from '../storeBuild';
 
 type Ask = { req: AppSubscribeRequest; resolve: (potId: string | null) => void };
 let current: Ask | null = null;
@@ -24,7 +25,7 @@ export const setSubscribeBusy = (f: () => boolean) => {
 
 /** Shows the sheet. Resolves with the chosen pot id, or null (declined, or a sheet is already open). */
 export const askSubscribe = (req: AppSubscribeRequest): Promise<string | null> => {
-  if (!potsRunning()) return Promise.reject(new SubscribeError('Unlock bWalletX, then try again'));
+  if (!potsRunning()) return Promise.reject(new SubscribeError(`Unlock ${APP_NAME}, then try again`));
   if (current || busy()) return Promise.resolve(null);
   return new Promise((resolve) => {
     current = { req, resolve };

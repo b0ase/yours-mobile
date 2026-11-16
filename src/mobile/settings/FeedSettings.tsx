@@ -59,20 +59,21 @@ import { SignNoteScreen } from '../notes/SignNoteScreen';
 import { WagesScreen } from '../wages/WagesScreen';
 import { TwetchSettings } from '../twetch/TwetchSettings';
 import {
+  APP_NAME,
   B_AGENT_DESC,
   INDEXING_ENABLED,
+  LINK_ACCOUNTS_ENABLED,
   MY_TOKENS_DESC,
   MY_TOKENS_NOTE,
+  SUBSCRIPTIONS_DESC,
+  SUBSCRIPTIONS_ENABLED,
+  TOKEN_ROOMS_ENABLED,
+  TWETCH_POST_ENABLED,
+  WAGES_ENABLED,
   isBWalletX,
   languageSettingsEnabled,
   potsEnabled,
   socialLoginEnabled,
-  LINK_ACCOUNTS_ENABLED,
-  TWETCH_POST_ENABLED,
-  WAGES_ENABLED,
-  SUBSCRIPTIONS_DESC,
-  SUBSCRIPTIONS_ENABLED,
-  TOKEN_ROOMS_ENABLED,
 } from '../storeBuild';
 import { onSubscribeRequest, peekSubscribeRequest } from '../pots/subscribeLink';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
@@ -857,7 +858,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           <Row
             icon={<Download size={16} />}
             label="Sweep into this account"
-            description="Move coins, NFTs and tokens from bWalletX, Yours, SimplyCash or any wallet: paste its phrase or private key"
+            description={`Move coins, NFTs and tokens from ${APP_NAME}, Yours, SimplyCash or any wallet: paste its phrase or private key`}
             onClick={() => setScreen('sweep')}
             isFirst
           />
@@ -1047,8 +1048,8 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                 label={IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect'}
                 description={
                   IS_EXTENSION
-                    ? 'Pair the bWalletX CLI or an AI assistant (MCP): paste the link from bwalletx login'
-                    : 'Pair the bWalletX CLI, an AI assistant (MCP) or a website: scan its QR code'
+                    ? `Pair the ${APP_NAME} CLI or an AI assistant (MCP): paste the link from bwalletx login`
+                    : `Pair the ${APP_NAME} CLI, an AI assistant (MCP) or a website: scan its QR code`
                 }
                 onClick={() => setScreen('scan')}
                 isFirst
@@ -1262,7 +1263,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="Be the wallet websites connect to"
               description={
                 takeCwi
-                  ? 'Sites without a wallet picker connect to bWalletX, even with Yours installed'
+                  ? `Sites without a wallet picker connect to ${APP_NAME}, even with Yours installed`
                   : 'Another wallet (e.g. Yours) answers sites without a picker'
               }
               right={<Toggle label="Be the wallet websites connect to" on={takeCwi} onChange={setTakeCwi} />}

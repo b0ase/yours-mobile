@@ -9,7 +9,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import type { RoomLook } from './roomLook';
-import { BIZ_AGENT_ACCOUNT_ENABLED, MARKET_ENABLED } from '../storeBuild';
+import { APP_NAME, BIZ_AGENT_ACCOUNT_ENABLED, MARKET_ENABLED } from '../storeBuild';
 import { createPortal } from 'react-dom';
 import { sendBsv } from '../../utils/guardedSendBsv';
 import { Bot, Plus, Trash2, X } from 'lucide-react';
@@ -191,7 +191,7 @@ export const OrderCard = ({
       <FullSheet>
         <ApprovalCard
           ours
-          site="bWalletX"
+          site={`${APP_NAME}`}
           siteSub={`Order in $${ticker}`}
           onClose={() => !busy && setApprove(null)}
           closeDisabled={!!busy}
@@ -770,8 +770,8 @@ export const BusinessSheet = ({
               style={{ background: '#111', color: cfg?.payments.ready ? '#32D583' : '#F5C542' }}
             >
               {cfg?.payments.ready
-                ? `Payments go straight to ${cfg.payments.paymail} (your bWalletX). No one else can change that.`
-                : 'Payments are not set up: open bWalletX signed in to this account so your receive address is registered. Until then the agent answers but cannot take orders.'}
+                ? `Payments go straight to ${cfg.payments.paymail} (your ${APP_NAME}). No one else can change that.`
+                : `Payments are not set up: open ${APP_NAME} signed in to this account so your receive address is registered. Until then the agent answers but cannot take orders.`}
             </div>
             {draft && (
               <>

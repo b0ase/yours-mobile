@@ -7,6 +7,7 @@
  * The system prompt is guide.ts. Replies are whole turns (no streaming). Pure helpers here.
  */
 import { containsPhrase } from '../errors/phraseGuard';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Owner, 25 Oct 2026: "For now, it shouldn't cost users anything to talk to b. If they want to send bug reports
@@ -21,8 +22,7 @@ export const ASK_B_FREE = true;
  */
 /** Where the first-open line's "More" goes. */
 export const ASK_B_MORE_URL = 'https://bwalletx.com/talk-to-b';
-export const ASK_B_DISCLOSURE =
-  "I'm b, the bWalletX team. We read these chats to fix bugs and improve b. Don't share your recovery phrase or passwords.";
+export const ASK_B_DISCLOSURE = `I'm b, the ${APP_NAME} team. We read these chats to fix bugs and improve b. Don't share your recovery phrase or passwords.`;
 
 export type AgentRole = 'user' | 'assistant';
 export type AgentMessage = { role: AgentRole; text: string };

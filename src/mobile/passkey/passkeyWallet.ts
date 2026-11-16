@@ -2,6 +2,7 @@ import { createPasskeyWithPrf, getPrf } from './prf';
 import { currentRpId } from './passkeyUi';
 import { uploadBackup } from './passkeyServer';
 import { loadPasskeyUnlock, saveLocalBackup, savePasskeyUnlock, sealPassword, sealSeed } from './seedBackup';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Settings › "Add a passkey to this wallet" for an existing password wallet. The password is already verified by
@@ -20,7 +21,7 @@ export async function addPasskeyToWallet(opts: {
   const rpId = existing?.rpId ?? currentRpId();
   const { credentialId, prf } = existing
     ? await getPrf(existing.rpId, existing.credentialId)
-    : await createPasskeyWithPrf(rpId, `bWalletX · ${opts.label}`);
+    : await createPasskeyWithPrf(rpId, `${APP_NAME} · ${opts.label}`);
   try {
     // A passkey-made wallet (no `sealed`) keeps its derived password; otherwise seal the typed one.
     if (!existing || existing.sealed) savePasskeyUnlock(await sealPassword(opts.password, prf, { rpId, credentialId }));

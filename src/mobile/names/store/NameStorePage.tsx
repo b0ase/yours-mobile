@@ -14,7 +14,7 @@ import { fmtSats, fmtUsd, usdToSats, useBsvUsd } from '../../money/money';
 import { fetchExchangeRate } from '../../../utils/wallet';
 import { AccountList, AccountRow } from '../../account/AccountSwitcher';
 import { useAccountSwitch } from '../../account/accountSwitch';
-import { MARKET_ENABLED } from '../../storeBuild';
+import { APP_NAME, MARKET_ENABLED } from '../../storeBuild';
 import { GuestCtx } from '../../media/artists/guestCtx';
 import { resumeAt } from '../../url/resume';
 import { checkOpnsAvailability, parseRecipient, resolveRecipient } from '../names';
@@ -984,7 +984,7 @@ const Preview = ({ name }: { name: string }) => (
     </div>
     <dl className="m-0 grid gap-3 text-sm">
       {[
-        ['Pay me', `Anyone with bWalletX pays you by typing ${name}.`],
+        ['Pay me', `Anyone with ${APP_NAME} pays you by typing ${name}.`],
         ['Profile', `${name}@${OPNS_PROFILE_DOMAIN} shows your name and picture.`],
         ['Yours', 'One payment. No renewals, no expiry.'],
       ].map(([k, v]) => (
@@ -1045,7 +1045,7 @@ const WhatIsThis = () => (
           Purchases are final; there are no refunds.
         </p>
       )}
-      <p className="m-0">Your name takes payments in bWalletX once you set it as your name in Settings › Identity.</p>
+      <p className="m-0">Your name takes payments in {APP_NAME} once you set it as your name in Settings › Identity.</p>
     </div>
   </details>
 );
@@ -1071,7 +1071,7 @@ const BuySheet = (p: {
     >
       <ApprovalCard
         ours
-        site="bWalletX"
+        site={`${APP_NAME}`}
         siteSub="Names"
         onClose={p.onClose}
         hero={

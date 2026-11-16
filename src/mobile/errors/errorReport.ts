@@ -1,5 +1,6 @@
 import { setAgentVoice } from '../agent/handoff';
 import { hidePhrases } from './phraseGuard';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Every error the wallet shows gets "Copy" and "Ask b" (owner, 10 Oct 2026). Ask b opens the b agent
@@ -56,7 +57,7 @@ export const errorContext = (): ErrorContext => {
   const g = globalThis as { Capacitor?: { getPlatform?: () => string } };
   const native = g.Capacitor?.getPlatform?.();
   if (!channel) channel = native && native !== 'web' ? native : version.startsWith('dev') ? 'web' : 'extension';
-  let edition = 'bWalletX';
+  let edition = `${APP_NAME}`;
   try {
     if (/bwallet\b/i.test(document.title) && !/bwalletx/i.test(document.title)) edition = 'bWallet';
   } catch {

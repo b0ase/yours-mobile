@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import mintMark from '../assets/logos/mint-stamp.svg';
 import { CheckPage } from './CheckPage';
 import '../bmint.css';
+import { APP_NAME } from '../../storeBuild';
 
 /**
  * Check this mint for a visitor without an unlocked wallet (web/Desktop): a check link someone sent works signed
@@ -21,7 +22,7 @@ const GuestCheck = ({ route, onWallet }: { route: string; onWallet: () => void }
           </span>
           <nav className="bm-tabs" aria-label="bMint">
             <button type="button" className="bm-tab" onClick={onWallet}>
-              Open bWalletX
+              Open {APP_NAME}
             </button>
           </nav>
         </header>

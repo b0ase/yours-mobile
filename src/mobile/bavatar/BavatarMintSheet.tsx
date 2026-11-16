@@ -23,6 +23,7 @@ import {
   mintOffer,
   recoverPendingBavatar,
 } from './mintBavatar';
+import { APP_NAME } from '../storeBuild';
 
 type State =
   | { k: 'loading' }
@@ -116,7 +117,7 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
     >
       <ApprovalCard
         ours
-        site="bWalletX"
+        site={`${APP_NAME}`}
         siteSub={founding ? 'Founding 1,000' : 'Your bAvatar'}
         onClose={onClose}
         closeLabel="Close"
@@ -201,7 +202,7 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
             {!isCurrent && <PrivacyChoice isPublic={makePublic} onChange={setMakePublic} />}
             <div className="flex flex-wrap" style={{ gap: 8 }}>
               {isCurrent && <Chip solid>Your bAvatar now</Chip>}
-              {offer?.kind === 'free' && <Chip solid>FREE: first mint, fee paid by bWalletX</Chip>}
+              {offer?.kind === 'free' && <Chip solid>FREE: first mint, fee paid by {APP_NAME}</Chip>}
               {offer?.kind === 'paid' && (
                 <Chip>Network fee ~{offer.sats.toLocaleString('en-GB')} sats, paid by you</Chip>
               )}
