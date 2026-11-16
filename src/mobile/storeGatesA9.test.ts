@@ -292,7 +292,9 @@ describe('A9.1 plain payments, the seal and other asset actions are untouched', 
     test(`reaches the wallet unchanged: ${name}`, async () => {
       expect((await storeMarketVerdict(args, noHeld)).refuse).toBe(false);
       const { wallet, calls } = recorder();
-      guardStoreMarketActions(wallet, { adminOriginator: ADMIN, ...failing });
+      // A10: a site action that spends coins needs the held-coin lookup (a failing one refuses: storeGatesA10.test.ts).
+      const spends = Array.isArray((args as { inputs?: unknown[] }).inputs);
+      guardStoreMarketActions(wallet, { adminOriginator: ADMIN, ...(spends ? noHeld : failing) });
       await wallet.createAction(args, SITE);
       expect(calls).toEqual([{ method: 'createAction', args, originator: SITE }]);
     });
@@ -385,8 +387,10 @@ describe('A9.1 one gate, outermost, store build only', () => {
     const s = srcOf('../initWallet.ts');
     expect(s).toContain('  const siteWallet = guardSiteTokens(\n    guardSpendRecipients(');
     expect(s).toContain(
-      '  const wallet = SITE_MARKET_ACTIONS_ENABLED\n    ? siteWallet\n    : guardStoreMarketActions(siteWallet, {\n        adminOriginator: ADMIN_ORIGINATOR,\n        assetOutpoints: walletAssetOutpoints(baseWallet),\n      });',
+      '  const wallet = SITE_MARKET_ACTIONS_ENABLED\n    ? siteWallet\n    : guardStoreMarketActions(siteWallet, {\n        adminOriginator: ADMIN_ORIGINATOR,\n        assetOutpoints: walletAssetOutpoints(baseWallet),\n',
     );
+    // A10: the backstop also reads a spent coin's script from storage (storeGatesA10.test.ts checks that wiring).
+    expect(s).toContain('        inputScript: storedInputScript({\n');
     // Nothing else is wrapped around it, and it is the wallet the account context hands out.
     expect(s.match(/guardStoreMarketActions\(/g)?.length).toBe(1);
     expect(s).toMatch(/\n {4}wallet,\n/);
