@@ -161,6 +161,12 @@ const EXPECTED: [RegExp, string][] = [
     /^404 GET https:\/\/api\.whatsonchain\.com\/v1\/bsv\/main\/address\/[^/]+\/(un)?confirmed\/history/,
     'a new address has no history',
   ],
+  // WhatsOnChain answers a busy moment with 429 and no CORS headers, which the browser reports as ERR_FAILED.
+  // The sweep tool's batched read (src/sweep/chainReads.ts) retries with backoff and falls back to 1Sat's /beef.
+  [
+    /^net::ERR_FAILED https:\/\/api\.whatsonchain\.com\/v1\/bsv\/main\/txs\/hex$/,
+    'WoC rate limit during the sweep overlay; retried, then 1Sat',
+  ],
   // The page dropped its own request (a navigation or an unmounted screen).
   [/^net::ERR_ABORTED /, 'cancelled by the page'],
 ];
