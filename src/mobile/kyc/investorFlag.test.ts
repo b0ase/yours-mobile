@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { INVESTOR_SELF_CERT_ENABLED } from './config';
+import { PLACEHOLDER_STATEMENTS } from './kyc';
 
 // "Qualify as an investor" stays hidden in every edition until a solicitor approves the statement wording (16 Nov 2026).
 const src = (f: string) => readFileSync(join(import.meta.dir, f), 'utf8');
@@ -9,6 +10,10 @@ const src = (f: string) => readFileSync(join(import.meta.dir, f), 'utf8');
 describe('investor self-certification is off', () => {
   test('the flag is false', () => {
     expect(INVESTOR_SELF_CERT_ENABLED).toBe(false);
+  });
+
+  test('the [LEGAL REVIEW] placeholder statements are empty, so they are not shipped', () => {
+    expect(PLACEHOLDER_STATEMENTS).toEqual([]);
   });
 
   test('Settings › Identity: the investor section and the ?investor deep link sit behind the flag', () => {
