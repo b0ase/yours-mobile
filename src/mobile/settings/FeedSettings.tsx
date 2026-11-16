@@ -71,6 +71,7 @@ import {
   WAGES_ENABLED,
   SUBSCRIPTIONS_DESC,
   SUBSCRIPTIONS_ENABLED,
+  TOKEN_ROOMS_ENABLED,
 } from '../storeBuild';
 import { onSubscribeRequest, peekSubscribeRequest } from '../pots/subscribeLink';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
@@ -498,11 +499,17 @@ const MyTokenRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }) 
       ? 'Checking…'
       : s.status === null
         ? 'The indexer didn’t answer. Try again later.'
-        : s.open
-          ? 'Room open'
-          : s.waiting
-            ? 'Setting up… (usually under a minute)'
-            : 'Not set up';
+        : !TOKEN_ROOMS_ENABLED
+          ? s.open
+            ? 'Indexed'
+            : s.waiting
+              ? 'Indexing… (usually under a minute)'
+              : 'Not indexed'
+          : s.open
+            ? 'Room open'
+            : s.waiting
+              ? 'Setting up… (usually under a minute)'
+              : 'Not set up';
   return (
     <div className="mb-2 rounded-xl px-3 py-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
       <div className="flex items-center gap-3">

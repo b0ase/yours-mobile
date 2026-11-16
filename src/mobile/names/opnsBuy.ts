@@ -3,6 +3,7 @@ import { buyOrdinal, cancelOpnsListing, listOpns, sellOpns, sendOpns, type OneSa
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { assertOpnsPayout } from './opnsBuyPrice';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
+import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 
 /**
  * Wallet calls for OpNS trading, shared by Get your name, bMint › OpNS names and the Exchange's Names tab.
@@ -19,7 +20,11 @@ export const buyOpnsListing = async (
   rawOutpoint: string,
   name: string,
   approvedSats: number,
+  store: boolean = STORE_BUILD,
 ): Promise<string> => {
+  // Buying a listed name is a marketplace purchase: never in a store build (storeBuild.ts MARKET_ENABLED). It
+  // refuses before anything is read from the network or asked of the wallet.
+  if (store) throw new Error(STORE_NAME_NOTE);
   const outpoint = walletOutpoint(rawOutpoint);
   await assertOrdLockV2(outpoint);
   const [txid, vout] = outpoint.split('.');

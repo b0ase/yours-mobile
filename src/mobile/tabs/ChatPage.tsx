@@ -165,6 +165,7 @@ import {
   STORE_ROOM_NOTE,
   marketLabel,
   tokenRoomsEnabled,
+  TOKEN_ROOMS_ENABLED,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
 import { LoungeCard } from '../chat/LoungeCard';
@@ -2537,7 +2538,10 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
           <Lock size={12} color={MUTED} className="shrink-0" />
         </div>
         <div className="text-[13px] line-clamp-2" style={{ color: MUTED }}>
-          {s.msg || 'Not open yet. Setting up lists it in other wallets and the Market and opens this room.'}
+          {s.msg ||
+            (TOKEN_ROOMS_ENABLED
+              ? 'Not open yet. Setting up lists it in other wallets and the Market and opens this room.'
+              : '')}
         </div>
         {s.needs && s.freeNote && (
           <div className="text-[12px] font-semibold" style={{ color: GOLD }}>
@@ -2552,7 +2556,7 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
           className="shrink-0 rounded-full px-3 py-1.5 text-xs font-bold disabled:opacity-40"
           style={{ background: GOLD, color: '#1a1300' }}
         >
-          {setupLabel(s.total.totalSats, s.rate, 'Set up your room')}
+          {setupLabel(s.total.totalSats, s.rate, TOKEN_ROOMS_ENABLED ? 'Set up your room' : undefined)}
         </button>
       )}
       {s.sheet}

@@ -552,7 +552,13 @@ export const MINT_CARDS: MintCard[] = [
       ? 'Claim your name on Bitcoin, or prove you own a web domain and tokenise it.'
       : 'Claim your name on Bitcoin.',
     uses: [
-      { id: 'name', title: 'A name on Bitcoin', sub: 'Search, buy or claim one. From $1', action: { go: '/m/names' } },
+      {
+        id: 'name',
+        title: 'A name on Bitcoin',
+        // A store build has no priced or listed names (storeBuild.ts MARKET_ENABLED): claiming only.
+        sub: DOMAIN_MINT_ENABLED ? 'Search, buy or claim one. From $1' : 'Search for one and claim it',
+        action: { go: '/m/names' },
+      },
       ...(!STORE_BUILD
         ? [
             {

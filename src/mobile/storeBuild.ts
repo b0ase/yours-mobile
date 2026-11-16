@@ -443,10 +443,10 @@ export const handleCardText = (hasName: boolean): string =>
       ? 'Your personal token and a chat room only holders can enter.'
       : 'A free handle people can pay, plus your own chat room.';
 export const MY_TOKENS_DESC = STORE_BUILD
-  ? "Tokens this account has minted: list the ones that aren't listed yet"
+  ? "Tokens this account has minted: index the ones other wallets can't see yet"
   : "This account's tokens and their rooms: set up the ones that aren't listed yet";
 export const MY_TOKENS_NOTE = STORE_BUILD
-  ? 'Listing a token shows it in other wallets and the Market. You confirm the price before anything is sent.'
+  ? 'Indexing a token lets other wallets see it. You confirm the price before anything is sent.'
   : 'Setting up a token’s room lists it in other wallets and the Market and opens its chat room. You confirm the price before anything is sent.';
 export const B_AGENT_DESC = STORE_BUILD ? 'Use your own AI key' : 'b, or use your own AI key';
 export const SUBSCRIPTIONS_DESC = STORE_BUILD
