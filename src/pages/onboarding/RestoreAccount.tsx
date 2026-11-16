@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { enterWalletNow } from './enterWallet';
 import { DeviceDataNote } from '../../components/DeviceDataNote';
 import { isOnDeviceStore } from '../../services/localFirst';
 import { AccountNameField } from '../../components/AccountNameField';
@@ -843,7 +844,7 @@ const RestoreAccountInner = ({ onNavigateBack, newWallet = false, onNewAccount }
           label="Enter"
           onClick={() => {
             acceptTerms();
-            window.location.reload();
+            enterWalletNow(newWallet);
           }}
         />
       </motion.div>

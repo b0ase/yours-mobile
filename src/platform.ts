@@ -49,6 +49,11 @@ export type PlatformHooks = {
   welcomeNotice?: string;
   /** Called when the wallet home screen appears (after create, restore or unlock). */
   onWalletReady?: () => void;
+  /**
+   * False when the unlock key (chrome.storage.session) is held in memory only and so is gone after a page reload
+   * (web, Desktop). Unset or true: it survives a reload (the extension, phones). pages/onboarding/enterWallet.ts.
+   */
+  sessionSurvivesReload?: boolean;
 };
 
 export const getPlatform = (): PlatformHooks =>
