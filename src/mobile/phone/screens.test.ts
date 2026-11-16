@@ -56,8 +56,8 @@ describe('phone layout screens', () => {
     ]);
   });
 
-  test('store build: no Exchange, everything else in the same order', () => {
-    expect(ids(stripFor(true, false))).toEqual(['wallet', 'home', 'apps', 'games', 'people', 'feed', 'chat']);
+  test('store build: no Exchange and no Games, everything else in the same order', () => {
+    expect(ids(stripFor(true, false))).toEqual(['wallet', 'home', 'apps', 'people', 'feed', 'chat']);
     // Even if the market flag were on, a store build hides Exchange.
     expect(ids(stripFor(true, true))).not.toContain('exchange');
     // And a build without the Market never shows it.

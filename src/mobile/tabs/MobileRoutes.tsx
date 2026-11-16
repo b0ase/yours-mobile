@@ -19,6 +19,7 @@ import {
   PLACEMENT_ENABLED,
   BTRUST_ENABLED,
   RELEASES_ENABLED,
+  GAMES_ENABLED,
 } from '../storeBuild';
 
 /** Mobile-only tab routes, mounted by vite.config.mobile.ts at /m/* in App.tsx. */
@@ -188,7 +189,11 @@ const MobileRoutes = () => (
         {NativeSealPage && <Route path="seal/:ticker/:doc" element={<NativeSealPage />} />}
         {/* Phone layout app screens 2, 3… (phone/pager.tsx renders them; this is the fallback with the switch off). */}
         <Route path="screen/:n" element={<BrowserPage only="apps" />} />
-        <Route path="games" element={<BrowserPage only="games" />} />
+        {/* Store build: no Games page (GAMES_ENABLED); an old link lands on Apps. */}
+        <Route
+          path="games"
+          element={GAMES_ENABLED ? <BrowserPage only="games" /> : <Navigate to="/m/apps" replace />}
+        />
         <Route path="people" element={<PeopleScreen />} />
         {/* The Exchange (was Market, 12 Oct 2026): /m/exchange, /m/exchange/swap, /m/exchange/<token>… */}
         {ExchangePage && <Route path="exchange/*" element={<ExchangePage />} />}

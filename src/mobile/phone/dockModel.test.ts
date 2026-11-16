@@ -137,7 +137,10 @@ describe('phone dock model', () => {
     const choices = addable(defaultDock(true), stripFor(true, false));
     expect(choices).not.toContainEqual({ kind: 'screen', id: 'wallet' });
     expect(choices).not.toContainEqual({ kind: 'screen', id: 'exchange' });
-    expect(choices).toContainEqual({ kind: 'screen', id: 'games' });
+    // A store build has no Games screen (storeBuild.ts GAMES_ENABLED); bWalletX offers it.
+    expect(choices).not.toContainEqual({ kind: 'screen', id: 'games' });
+    expect(choices).toContainEqual({ kind: 'screen', id: 'people' });
+    expect(addable(defaultDock(false), stripFor(false, true))).toContainEqual({ kind: 'screen', id: 'games' });
     expect(addable([], stripFor(false, true))).toContainEqual({ kind: 'action', id: 'sendReceive' });
   });
 

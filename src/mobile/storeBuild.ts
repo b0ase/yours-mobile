@@ -134,10 +134,57 @@ export const BSVEX_HANDOFF_ON: boolean = false;
  * itself is gated by MARKET_ENABLED in bapps.ts / radarApps.ts, so the name folds to [] in a store build.
  */
 export const STORE_HIDDEN_APPS: readonly string[] = MARKET_ENABLED ? ['bExchange'] : [];
-export const STORE_HIDDEN_RADAR_GROUPS: readonly string[] = ['market', 'buy'];
+export const STORE_HIDDEN_RADAR_GROUPS: readonly string[] = ['market', 'buy', 'games'];
 export const appsTileShown = (name: string, store = STORE_BUILD) => !store || !STORE_HIDDEN_APPS.includes(name);
 export const radarGroupShown = (group: string, store = STORE_BUILD) =>
   !store || !STORE_HIDDEN_RADAR_GROUPS.includes(group);
+
+/**
+ * Apps tiles a store build leaves out by address, from lists we do not own (the inherited Yours featured apps):
+ * a marketplace and an arcade that pays prizes. Our own lists gate their entries in place (bapps.ts, ownerApps.ts,
+ * radarApps.ts, bappStandard.ts), so those are not in a store bundle even as data.
+ */
+export const STORE_HIDDEN_LINK_HOSTS: readonly string[] = ['hastearcade.com', 'takeitnft.com'];
+export const storeLinkShown = (url: string, store = STORE_BUILD): boolean => {
+  if (!store) return true;
+  try {
+    return !STORE_HIDDEN_LINK_HOSTS.includes(new URL(url).hostname.replace(/^www\./, ''));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Words no Apps tile, catalogue line or game may show in a store build (App Review 3.1.5(iii), 3.1.1; Play
+ * financial features and gambling declarations): exchanges and markets, trading, buying and selling, swaps,
+ * launchpads, token sales and tokenising, backing or investing, stakes, bets and prizes, earning, tickers, and
+ * token rooms. The one list: storeBuild.test.ts reads every string the store catalogue can show against it, so
+ * a new entry cannot bring one back. (bwallet.space's page has its own, wider list: scripts/store-site.py.)
+ */
+export const STORE_BANNED_WORDS: RegExp =
+  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\bticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token/i;
+/** The banned wording in `text`, or null. */
+export const storeBannedWord = (text: string): string | null => STORE_BANNED_WORDS.exec(text)?.[0] ?? null;
+
+/**
+ * Games (Apps › Games, /m/games, the bGames tile and the Games screen): bWalletX only. A store build may show a
+ * game only when it is ours and marked `storeSafe` (free to play, no money in or out, checked in its own code);
+ * other people's games are out entirely (CEO, 16 Nov 2026), and today no game is marked, so the store edition has
+ * no Games entry and the catalogue is not in its bundle. Literal env check so Rollup drops the data and the hero.
+ */
+export const GAMES_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
+ * The PNEEs row on the Wallet (wallet/DefaultTokenCards.tsx). bWalletX shows it at zero too, with Get PNEEs. A
+ * dollar-pegged token of ours is kept out of the App Store and Play builds (owner, 18 Oct 2026; CEO, 16 Nov 2026),
+ * so a store build shows the row only to someone who HOLDS PNEEs (indexed or still indexing): a balance is never
+ * hidden, and Send / Receive work from the row as before.
+ */
+export const pneeRowShown = (balance: number, store = STORE_BUILD): boolean => !store || balance > 0;
 
 /** Token-gated chatrooms open (join / start / buy-to-join) only outside a store build. */
 export const tokenRoomsEnabled = (store = STORE_BUILD) => !store;
@@ -364,9 +411,9 @@ export const POT_NAME_PLACEHOLDER = STORE_BUILD ? 'Name (e.g. Rent, Savings)' : 
 
 /**
  * Phone layout (src/mobile/phone, docs/PHONE-LAYOUT-PLAN.md §8): swipe screens and dock items left out of a store
- * build. Exchange is the Market, which a store build does not have at all (MARKET_ENABLED above).
+ * build. Exchange is the Market, which a store build does not have at all (MARKET_ENABLED above); Games: GAMES_ENABLED.
  */
-export const STORE_HIDDEN_SCREENS: readonly string[] = ['exchange'];
+export const STORE_HIDDEN_SCREENS: readonly string[] = ['exchange', 'games'];
 export const screenShown = (id: string, store = STORE_BUILD) => !store || !STORE_HIDDEN_SCREENS.includes(id);
 export const screensFor = <T extends { id: string }>(screens: readonly T[], store = STORE_BUILD): T[] =>
   screens.filter((s) => screenShown(s.id, store));

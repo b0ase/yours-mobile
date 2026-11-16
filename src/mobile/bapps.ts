@@ -58,35 +58,65 @@ export const BAPPS: BApp[] = [
     name: 'bChatX',
     url: 'https://www.bchatx.com',
     webFrame: true,
-    verb: 'Chat rooms, Spaces and feeds for every token',
+    // Store wording names no trading, stakes, backing or tokenising (storeBuild.ts STORE_BANNED_WORDS).
+    verb:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? 'Chat with friends, groups and open rooms'
+        : 'Chat rooms, Spaces and feeds for every token',
     group: 'featured',
     status: 'live',
     icon: bappIconUrl('bchatx'),
   },
-  {
-    // One entry per product (24 Oct 2026): the live b*X site, not bmovies.app.
-    name: 'bMoviesX',
-    url: 'https://www.bmoviesx.com',
-    verb: 'Watch and back tokenised films',
-    group: 'featured',
-    status: 'live',
-    icon: bappIconUrl('bmovies'),
-  },
-  {
-    name: 'bMusicX',
-    url: 'https://bmusicx.com',
-    // frame-ancestors doesn't list the wallet (24 Oct 2026).
-    noFrame: true,
-    verb: 'Tokenise your music; fans who hold it make the video with you',
-    group: 'featured',
-    status: 'live',
-    icon: bappIconUrl('bmusic'),
-  },
+  // Films are tokenised and backed there. bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          // One entry per product (24 Oct 2026): the live b*X site, not bmovies.app.
+          name: 'bMoviesX',
+          url: 'https://www.bmoviesx.com',
+          verb: 'Watch and back tokenised films',
+          group: 'featured' as const,
+          status: 'live' as const,
+          icon: bappIconUrl('bmovies'),
+        },
+      ]
+    : []),
+  // Music is tokenised there. bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'bMusicX',
+          url: 'https://bmusicx.com',
+          // frame-ancestors doesn't list the wallet (24 Oct 2026).
+          noFrame: true,
+          verb: 'Tokenise your music; fans who hold it make the video with you',
+          group: 'featured' as const,
+          status: 'live' as const,
+          icon: bappIconUrl('bmusic'),
+        },
+      ]
+    : []),
   {
     name: 'bMintX',
     // A tile opens the tool that works (owner, 24 Oct 2026): the in-wallet minter; bmintx.com lives inside it.
     url: '/m/bmint',
-    verb: 'Design, stamp and mint tokens, currency and media on-chain',
+    // Store wording names no trading, stakes, backing or tokenising (storeBuild.ts STORE_BANNED_WORDS).
+    verb:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? 'Mint tokens and media on-chain'
+        : 'Design, stamp and mint tokens, currency and media on-chain',
     group: 'featured',
     status: 'live',
     icon: bappIconUrl('bmint'),
@@ -242,15 +272,24 @@ export const BAPPS: BApp[] = [
     icon: bappIconUrl('bsearch'),
     source: suite('bitcoin-search'),
   },
-  {
-    name: 'bDNS',
-    url: 'https://bitcoin-dns.vercel.app',
-    verb: 'Register and trade names on Bitcoin',
-    group: 'work',
-    status: 'live',
-    icon: bappIconUrl('bdns'),
-    source: suite('bitcoin_dns'),
-  },
+  // Names are traded there. bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'bDNS',
+          url: 'https://bitcoin-dns.vercel.app',
+          verb: 'Register and trade names on Bitcoin',
+          group: 'work' as const,
+          status: 'live' as const,
+          icon: bappIconUrl('bdns'),
+          source: suite('bitcoin_dns'),
+        },
+      ]
+    : []),
   // Media
   {
     name: 'bVideoX',
@@ -276,7 +315,13 @@ export const BAPPS: BApp[] = [
   {
     name: 'bPhotos',
     url: 'https://bitcoin-photos.vercel.app',
-    verb: 'Turn photos into tradable NFTs',
+    // Store wording names no trading, stakes, backing or tokenising (storeBuild.ts STORE_BANNED_WORDS).
+    verb:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? 'Turn photos into NFTs'
+        : 'Turn photos into tradable NFTs',
     group: 'media',
     status: 'live',
     icon: bappIconUrl('bphotos'),
@@ -338,15 +383,24 @@ export const BAPPS: BApp[] = [
     status: 'live',
     icon: bappIconUrl('bsocial'),
   },
-  {
-    name: 'bGames',
-    url: 'https://bitcoin-gaming.vercel.app',
-    verb: 'Play games with real stakes',
-    group: 'social',
-    status: 'live',
-    icon: bappIconUrl('bgames'),
-    source: suite('bitcoin-gaming'),
-  },
+  // Games with real stakes (and a store build has no Games at all: GAMES_ENABLED). bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          name: 'bGames',
+          url: 'https://bitcoin-gaming.vercel.app',
+          verb: 'Play games with real stakes',
+          group: 'social' as const,
+          status: 'live' as const,
+          icon: bappIconUrl('bgames'),
+          source: suite('bitcoin-gaming'),
+        },
+      ]
+    : []),
   // bWalletX only (exchangeAppsX.ts; a store build has an empty stand-in).
   ...EXCHANGE_BAPPS,
   {

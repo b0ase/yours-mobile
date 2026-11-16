@@ -94,12 +94,18 @@ const bx = (
 };
 
 /** Tier 1: our b*X bApps. Only ones with a live site (checked 23 Oct 2026). */
+// Store wording (the conditional verbs and category below) names no trading, stakes, backing or tokenising:
+// storeBuild.ts STORE_BANNED_WORDS, checked for every entry in storeBuild.test.ts.
 export const BX_APPS: StoreApp[] = [
   bx(
     'bchatx',
     'bChatX',
     'https://www.bchatx.com',
-    'Rooms, Spaces and feeds for every token',
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+      ? 'Chat with friends, groups and open rooms'
+      : 'Rooms, Spaces and feeds for every token',
     'Talk',
     '#FFD24D',
     'BCHATX',
@@ -108,7 +114,11 @@ export const BX_APPS: StoreApp[] = [
     'bsocialx',
     'bSocialX',
     'https://bsocialx.com',
-    'Spaces for every brand and token, in public',
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+      ? 'Public Spaces and posts'
+      : 'Spaces for every brand and token, in public',
     'Talk',
     '#FF8A3D',
     'BSOCIALX',
@@ -125,43 +135,70 @@ export const BX_APPS: StoreApp[] = [
       logo: bfriendsxLogo,
     },
   ),
-  bx(
-    'bmoviesx',
-    'bMoviesX',
-    'https://www.bmoviesx.com',
-    'Watch and back tokenised films',
-    'Watch & make',
-    '#FF1F2D',
-    'BMOVIES',
-    {
-      logo: bmoviesxLogo,
-    },
-  ),
-  bx(
-    'bmusicx',
-    'bMusicX',
-    'https://bmusicx.com',
-    'Tokenise your music; holders make the video with you',
-    'Watch & make',
-    '#B57BFF',
-    'BMUSIC',
-    {
-      // frame-ancestors doesn't list the wallet yet (23 Oct 2026): opens full screen.
-      inWallet: false,
-    },
-  ),
-  bx(
-    'bdojox',
-    'bDojoX',
-    'https://bdojox.com',
-    'Train, compete and earn your belts',
-    'Watch & make',
-    '#C8141C',
-    'BDOJOX',
-    {
-      logo: bdojoxLogo,
-    },
-  ),
+  // Films are tokenised and backed there. bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        bx(
+          'bmoviesx',
+          'bMoviesX',
+          'https://www.bmoviesx.com',
+          'Watch and back tokenised films',
+          'Watch & make',
+          '#FF1F2D',
+          'BMOVIES',
+          {
+            logo: bmoviesxLogo,
+          },
+        ),
+      ]
+    : []),
+  // Music is tokenised there. bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        bx(
+          'bmusicx',
+          'bMusicX',
+          'https://bmusicx.com',
+          'Tokenise your music; holders make the video with you',
+          'Watch & make',
+          '#B57BFF',
+          'BMUSIC',
+          {
+            // frame-ancestors doesn't list the wallet yet (23 Oct 2026): opens full screen.
+            inWallet: false,
+          },
+        ),
+      ]
+    : []),
+  // Companies raise money there. bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        bx(
+          'bdojox',
+          'bDojoX',
+          'https://bdojox.com',
+          'Train, compete and earn your belts',
+          'Watch & make',
+          '#C8141C',
+          'BDOJOX',
+          {
+            logo: bdojoxLogo,
+          },
+        ),
+      ]
+    : []),
   bx(
     'bradiox',
     'bRadioX',
@@ -187,8 +224,16 @@ export const BX_APPS: StoreApp[] = [
     'bmintx',
     'bMintX',
     'https://bmintx.com',
-    'Mint anything: art, media, coins and archives',
-    'Own & trade',
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+      ? 'Mint your art, media and archives on-chain'
+      : 'Mint anything: art, media, coins and archives',
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+      ? 'Make & own'
+      : 'Own & trade',
     '#FFD24D',
     'BMINTX',
   ),
@@ -224,15 +269,24 @@ export const BX_APPS: StoreApp[] = [
       privateOnly: true,
     },
   ),
-  bx(
-    'bstorex',
-    'bStoreX',
-    'https://bstorex.com',
-    'Themes, icons and packs for bWalletX',
-    'Own & trade',
-    '#FFB020',
-    'BSTORE',
-  ),
+  // Sells themes and packs for bWalletX. bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        bx(
+          'bstorex',
+          'bStoreX',
+          'https://bstorex.com',
+          'Themes, icons and packs for bWalletX',
+          'Own & trade',
+          '#FFB020',
+          'BSTORE',
+        ),
+      ]
+    : []),
   bx(
     'bdrivex',
     'bDriveX',
@@ -252,7 +306,19 @@ export const BX_APPS: StoreApp[] = [
     '#A0A0FF',
     'BWRITERX',
   ),
-  bx('bcalx', 'bCalX', 'https://bcalx.com', 'Paid bookings and shared calendars', 'Work', '#FF7A59', 'BCAL'),
+  bx(
+    'bcalx',
+    'bCalX',
+    'https://bcalx.com',
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+      ? 'Shared calendars and bookings'
+      : 'Paid bookings and shared calendars',
+    'Work',
+    '#FF7A59',
+    'BCAL',
+  ),
   bx('bjobsx', 'bJobsX', 'https://bjobsx.com', 'Micro-jobs for people and agents', 'Work', '#00C2A8', 'BJOBS'),
 ];
 
@@ -261,17 +327,26 @@ export const BX_APPS: StoreApp[] = [
  * a section or artwork. NPGX is not in a store bundle at all (literal env check, so Rollup drops the data).
  */
 export const COMMERCIAL_APPS: StoreApp[] = [
-  {
-    id: 'npg',
-    name: 'Ninja Punk Girls',
-    url: 'https://ninjapunkgirls.com',
-    verb: 'Collect, battle and trade the Ninja Punk Girls',
-    tier: 'commercial',
-    category: 'Games & collectibles',
-    color: '#FF2E88',
-    standard: std('https://ninjapunkgirls.com', 'NPG', true),
-    status: 'live',
-  },
+  // Collectible cards that are traded. bWalletX only: not in a store bundle even as data (literal env check).
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? [
+        {
+          id: 'npg',
+          name: 'Ninja Punk Girls',
+          url: 'https://ninjapunkgirls.com',
+          verb: 'Collect, battle and trade the Ninja Punk Girls',
+          tier: 'commercial' as const,
+          category: 'Games & collectibles',
+          color: '#FF2E88',
+          standard: std('https://ninjapunkgirls.com', 'NPG', true),
+          status: 'live' as const,
+        },
+      ]
+    : []),
   {
     id: 'vexvoid',
     name: 'VexVoid',

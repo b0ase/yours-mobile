@@ -865,3 +865,295 @@ describe('TWETCH_POST_ENABLED: Post to Twetch is bWalletX only', () => {
     expect(src('./settings/FeedSettings.tsx')).toContain("TWETCH_POST_ENABLED && screen === 'twetch'");
   });
 });
+
+// ── Store gates of 16 Nov 2026 (CEO rulings): market targets, catalogue wording, the PNEEs row, games ──────────
+/** The catalogues as a build of the given env sees them (a fresh process, so the literal env checks apply). */
+const catalogues = (env: Record<string, string>) => {
+  const code = `
+    const b = await import('./src/mobile/bapps.ts'); const r = await import('./src/mobile/radarApps.ts');
+    const s = await import('./src/mobile/storeBuild.ts'); const st = await import('./src/mobile/bappStandard.ts');
+    const g = await import('./src/mobile/games/gamesCatalog.ts'); const o = await import('./src/mobile/ownerApps.ts');
+    const bapps = b.BAPP_GROUPS.flatMap((x) => b.bappsIn(x.id)).filter((a) => s.appsTileShown(a.name));
+    const std = st.visibleApps([...st.BX_APPS, ...st.COMMERCIAL_APPS], s.STORE_BUILD);
+    const groups = r.RADAR_GROUPS.filter((x) => s.radarGroupShown(x.id));
+    const radar = r.RADAR_APPS.filter((a) => s.radarGroupShown(a.group));
+    console.log(JSON.stringify({
+      store: s.STORE_BUILD, gamesOn: s.GAMES_ENABLED,
+      bapps: bapps.map((a) => [a.name, a.verb, a.url]), coming: b.COMING_BAPPS.map((a) => [a.name, a.verb]),
+      std: std.map((a) => [a.name, a.verb, a.category, a.url]),
+      groups: groups.map((x) => x.label), radar: radar.map((a) => [a.name, a.desc, a.url]),
+      owner: o.OWNER_APPS.map((a) => a.name), allRadar: r.RADAR_APPS.map((a) => a.name),
+      games: g.GAMES.map((a) => [a.name, a.desc, a.url, a.source]), shownGames: g.gamesFor().map((a) => a.name),
+      gameSources: g.GAME_SOURCES.map((x) => x.label),
+    }));`;
+  const r = Bun.spawnSync(['bun', '-e', code], {
+    env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+  });
+  return JSON.parse(r.stdout.toString()) as {
+    store: boolean;
+    gamesOn: boolean;
+    bapps: string[][];
+    coming: string[][];
+    std: string[][];
+    groups: string[];
+    radar: string[][];
+    owner: string[];
+    allRadar: string[];
+    games: string[][];
+    shownGames: string[];
+    gameSources: string[];
+  };
+};
+const STORE_ENVS = [{ VITE_STORE_BUILD: '1' }, { VITE_CHANNEL: 'ios-store' }, { VITE_CHANNEL: 'android-play' }];
+const srcOf = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+describe('gate (a): no market, exchange or token-sale target in a store build', () => {
+  const X_ONLY_OWNER = [
+    'BUDZ',
+    'BUDGIRLS',
+    'Zanaadu',
+    'GZONE.ROCKS',
+    'GMEHL.ROCKS',
+    'UWUTV',
+    'TWETCH.ROCKS',
+    'AIGF',
+    '1satsocial',
+    'Zero Dice',
+    'Ninja Punk Girls',
+  ];
+  const X_ONLY_RADAR = ['ZedVibe', 'ToDo', 'DXS'];
+  const X_ONLY_BAPPS = ['bMoviesX', 'bMusicX', 'bDNS', 'bGames', 'bExchange'];
+  const X_ONLY_STD = ['bMoviesX', 'bMusicX', 'bDojoX', 'bStoreX', 'Ninja Punk Girls'];
+  test('store build: the token sites, trading platforms and exchange-like bApps are not in the data', () => {
+    for (const env of STORE_ENVS) {
+      const c = catalogues(env);
+      expect(c.store).toBe(true);
+      for (const n of [...X_ONLY_OWNER, ...X_ONLY_RADAR]) expect(c.allRadar).not.toContain(n);
+      expect(c.owner).toEqual(['TankScope', 'VexVoid']);
+      for (const n of X_ONLY_BAPPS) expect(c.bapps.map((a) => a[0])).not.toContain(n);
+      for (const n of X_ONLY_STD) expect(c.std.map((a) => a[0])).not.toContain(n);
+      // What stays.
+      for (const n of ['bChatX', 'bMintX', 'bWriterX', 'bMailX', 'bSheets', 'bDriveX', 'bPhotos', 'bMaps'])
+        expect(c.bapps.map((a) => a[0])).toContain(n);
+      for (const n of ['HandCash', 'WhatsOnChain', 'Tempo']) expect(c.allRadar).toContain(n);
+    }
+  });
+  test('bWalletX build: every one of them is still listed', () => {
+    const c = catalogues({});
+    expect(c.store).toBe(false);
+    for (const n of [...X_ONLY_OWNER, ...X_ONLY_RADAR]) expect(c.allRadar).toContain(n);
+    expect(c.owner.slice(0, 11)).toEqual(X_ONLY_OWNER);
+    for (const n of X_ONLY_BAPPS) expect(c.bapps.map((a) => a[0])).toContain(n);
+    for (const n of X_ONLY_STD) expect(c.std.map((a) => a[0])).toContain(n);
+    expect(c.bapps.slice(0, 4).map((a) => a[0])).toEqual(['bChatX', 'bMoviesX', 'bMusicX', 'bMintX']);
+  });
+  test('Apps › More apps: 1Sat Market and 1satsocial are data only behind MARKET_ENABLED', () => {
+    const p = srcOf('./BrowserPage.tsx');
+    expect(p).toMatch(
+      /\.\.\.\(MARKET_ENABLED\s*\? \[\{ name: '1Sat Market', link: 'https:\/\/1sat\.market\/'[^\]]*\]\s*: \[\]\)/,
+    );
+    expect(p).toMatch(/\.\.\.\(MARKET_ENABLED \? \[\{ name: '1satsocial', [^\]]*\] : \[\]\)/);
+    // Nowhere else in the file as a tile, and the address-bar hint names it only in bWalletX.
+    expect(p.match(/name: '1Sat Market'/g)).toHaveLength(1);
+    expect(p).toContain(
+      "MARKET_ENABLED ? 'Enter a web address, like 1sat.market' : 'Enter a web address, like whatsonchain.com'",
+    );
+    expect(p).toContain('.filter((a) => storeLinkShown(a.link))');
+  });
+  test('inherited featured apps: the marketplace and the prize arcade are hidden by address in a store build only', async () => {
+    const { storeLinkShown, STORE_HIDDEN_LINK_HOSTS } = await import('./storeBuild');
+    const { featuredApps } = await import('../utils/constants');
+    const links = featuredApps.map((a: { link: string }) => a.link);
+    expect(links.some((l: string) => /takeitnft\.com/.test(l))).toBe(true);
+    for (const l of links) expect(storeLinkShown(l, false)).toBe(true);
+    const store = links.filter((l: string) => storeLinkShown(l, true));
+    expect(store.join(' ')).not.toMatch(/takeitnft|hastearcade|market/i);
+    expect(storeLinkShown('https://www.takeitnft.com/marketplace/global', true)).toBe(false);
+    expect(storeLinkShown('https://hastearcade.com', true)).toBe(false);
+    expect(storeLinkShown('https://whatsonchain.com', true)).toBe(true);
+    expect(storeLinkShown('not a url', true)).toBe(false);
+    expect(STORE_HIDDEN_LINK_HOSTS).toEqual(['hastearcade.com', 'takeitnft.com']);
+  });
+});
+
+describe('gate (b): store catalogue wording names no trading, stakes, backing or tokenising', () => {
+  const X_VERBS: [string, string][] = [
+    ['bChatX', 'Chat rooms, Spaces and feeds for every token'],
+    ['bMoviesX', 'Watch and back tokenised films'],
+    ['bMusicX', 'Tokenise your music; fans who hold it make the video with you'],
+    ['bMintX', 'Design, stamp and mint tokens, currency and media on-chain'],
+    ['bDNS', 'Register and trade names on Bitcoin'],
+    ['bPhotos', 'Turn photos into tradable NFTs'],
+    ['bGames', 'Play games with real stakes'],
+  ];
+  test('the word list catches the wording it is for, and leaves ordinary wording alone', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const [, verb] of X_VERBS)
+      expect(storeBannedWord(verb) ?? (verb.includes('currency') ? 'ok' : null)).not.toBeNull();
+    for (const t of [
+      'Earn Bitcoins on Brokerless Trading Platform',
+      'Buy and sell coins',
+      'Swap into BSV',
+      'A launchpad for coins',
+      'gamified rev share',
+      'hold her ticker',
+      'back her token',
+      'Token rooms for holders',
+      'An exchange',
+      'Markets & collectibles',
+      'Win prizes',
+      'with a reward',
+    ])
+      expect(storeBannedWord(t)).not.toBeNull();
+    for (const t of [
+      'Store and share files on-chain',
+      'Email that pays and gets paid',
+      'Mint tokens and media on-chain',
+      'Find places that take Bitcoin',
+      'Turn photos into NFTs',
+      'A marketing tool',
+      'Go back to the wallet',
+      'Traditional payments',
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+  });
+  test('store build: every string the catalogue can show passes the word list, and none names bWalletX', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const env of STORE_ENVS) {
+      const c = catalogues(env);
+      const strings = [
+        ...c.bapps.map((a) => `${a[0]}: ${a[1]}`),
+        ...c.coming.map((a) => `${a[0]}: ${a[1]}`),
+        ...c.std.map((a) => `${a[0]}: ${a[1]} [${a[2]}]`),
+        ...c.groups,
+        ...c.radar.map((a) => `${a[0]}: ${a[1]}`),
+        ...c.games.map((a) => `${a[0]}: ${a[1]}`),
+        ...c.gameSources,
+      ];
+      expect(strings.length).toBeGreaterThan(120);
+      const bad = strings.map((t) => [t, storeBannedWord(t)]).filter((x) => x[1]);
+      expect(bad).toEqual([]);
+      expect(strings.filter((t) => /bWalletX/.test(t))).toEqual([]);
+      // Addresses too: no tile opens a market, exchange, swap or launchpad address.
+      const urls = [...c.bapps.map((a) => a[2]), ...c.std.map((a) => a[3]), ...c.radar.map((a) => a[2])];
+      expect(urls.filter((u) => /exchang|market|swap|launchpad/i.test(u))).toEqual([]);
+      const verbs = Object.fromEntries(c.bapps.map((a) => [a[0], a[1]]));
+      expect(verbs.bChatX).toBe('Chat with friends, groups and open rooms');
+      expect(verbs.bMintX).toBe('Mint tokens and media on-chain');
+      expect(verbs.bPhotos).toBe('Turn photos into NFTs');
+      const std = Object.fromEntries(c.std.map((a) => [a[0], `${a[1]} [${a[2]}]`]));
+      expect(std.bChatX).toBe('Chat with friends, groups and open rooms [Talk]');
+      expect(std.bMintX).toBe('Mint your art, media and archives on-chain [Make & own]');
+      expect(std.bCalX).toBe('Shared calendars and bookings [Work]');
+      expect(std.bSocialX).toBe('Public Spaces and posts [Talk]');
+    }
+  });
+  test('bWalletX build: the wording is what it was', () => {
+    const c = catalogues({});
+    const verbs = Object.fromEntries(c.bapps.map((a) => [a[0], a[1]]));
+    for (const [name, verb] of X_VERBS) expect(verbs[name]).toBe(verb);
+    const std = Object.fromEntries(c.std.map((a) => [a[0], `${a[1]} [${a[2]}]`]));
+    expect(std.bChatX).toBe('Rooms, Spaces and feeds for every token [Talk]');
+    expect(std.bSocialX).toBe('Spaces for every brand and token, in public [Talk]');
+    expect(std.bMintX).toBe('Mint anything: art, media, coins and archives [Own & trade]');
+    expect(std.bCalX).toBe('Paid bookings and shared calendars [Work]');
+    expect(std.bMoviesX).toBe('Watch and back tokenised films [Watch & make]');
+    expect(std.bDojoX).toBe('Train, compete and earn your belts [Watch & make]');
+  });
+  test('the store wording and the gated entries are behind literal env checks, so a store bundle has neither', () => {
+    for (const f of ['./bapps.ts', './bappStandard.ts', './ownerApps.ts', './radarApps.ts']) {
+      const t = srcOf(f);
+      // Each banned line of data sits inside a literal-env conditional (a spread or a ternary), never a plain entry.
+      expect(t).toMatch(/import\.meta\.env\.VITE_STORE_BUILD === '1'/);
+    }
+    expect(srcOf('./bapps.ts')).toMatch(
+      /android-play'\s*\? 'Turn photos into NFTs'\s*: 'Turn photos into tradable NFTs'/,
+    );
+  });
+});
+
+describe('gate (c): the PNEEs default row is not in a store build; a held balance always shows', () => {
+  test('pneeRowShown, both editions', async () => {
+    const { pneeRowShown } = await import('./storeBuild');
+    // bWalletX: always, at zero too.
+    expect(pneeRowShown(0, false)).toBe(true);
+    expect(pneeRowShown(12.5, false)).toBe(true);
+    // Store build: only someone who holds PNEEs (indexed or still indexing).
+    expect(pneeRowShown(0, true)).toBe(false);
+    expect(pneeRowShown(0.01, true)).toBe(true);
+    expect(pneeRowShown(500, true)).toBe(true);
+  });
+  test('the Wallet uses it for the PNEEs row only; the balance is still published and MNEE has no such gate', () => {
+    const t = srcOf('./wallet/DefaultTokenCards.tsx');
+    expect(t).toMatch(/\{pneeRowShown\(pnee\) && \(\s*<CoinRow id="pnee">/);
+    expect(t.match(/pneeRowShown\(/g)).toHaveLength(1);
+    // `pnee` is the indexed balance, else what is still indexing: both count as held.
+    expect(t).toContain('const pnee = indexed > 0 ? indexed : pending;');
+    expect(t).toContain("useEffect(() => publishBalance('pnee', pnee, 'PNEEs'), [pnee]);");
+    const w = readFileSync(new URL('../pages/BsvWallet.tsx', import.meta.url), 'utf8');
+    expect(w).toContain('ticker="MNEE USD"');
+    expect(w).not.toMatch(/pneeRowShown|mneeRowShown/);
+    expect(w).toContain('onGetMneeClick={BUY_CRYPTO_ENABLED ?');
+  });
+});
+
+describe('gate (d): no games in a store build (third-party games out entirely; none of ours is marked storeSafe)', () => {
+  test('GAMES_ENABLED is the inverse of STORE_BUILD, from the same literal env', () => {
+    for (const env of STORE_ENVS) expect(catalogues(env).gamesOn).toBe(false);
+    expect(catalogues({}).gamesOn).toBe(true);
+    expect(srcOf('./storeBuild.ts')).toMatch(
+      /export const GAMES_ENABLED: boolean = !\(\s*import\.meta\.env\.VITE_STORE_BUILD === '1' \|\|/,
+    );
+  });
+  test('store build: no game data, no Games group, screen, page, route or tile', async () => {
+    const { STORE_HIDDEN_SCREENS, STORE_HIDDEN_RADAR_GROUPS, screenShown, radarGroupShown } =
+      await import('./storeBuild');
+    for (const env of STORE_ENVS) {
+      const c = catalogues(env);
+      expect(c.games).toEqual([]);
+      expect(c.shownGames).toEqual([]);
+      expect(c.groups).not.toContain('Games');
+      expect(c.bapps.map((a) => a[0])).not.toContain('bGames');
+      expect(JSON.stringify(c)).not.toMatch(/real stakes|Paiybit arcade|PixelWar|Midnight Pass/);
+    }
+    expect(STORE_HIDDEN_SCREENS).toContain('games');
+    expect(STORE_HIDDEN_RADAR_GROUPS).toContain('games');
+    expect(screenShown('games', true)).toBe(false);
+    expect(radarGroupShown('games', true)).toBe(false);
+    const p = srcOf('./BrowserPage.tsx');
+    expect(p).toMatch(
+      /const PAGES: readonly string\[\] = GAMES_ENABLED\s*\? \['Home', 'bApps', 'Other apps', 'Games'\]\s*: \['Home', 'bApps', 'Other apps'\];/,
+    );
+    expect(p).toContain('if (GAMES_ENABLED && i === 3) {');
+    expect(p).toContain("GAMES_ENABLED && only === 'games' ? (");
+    expect(p).toContain('{GAMES_ENABLED && /^games$/i.test(screenTitle(x, i).trim()) && <BGamesHero top={false} />}');
+    expect(srcOf('./tabs/MobileRoutes.tsx')).toMatch(
+      /path="games"\s*element=\{GAMES_ENABLED \? <BrowserPage only="games" \/> : <Navigate to="\/m\/apps" replace \/>\}/,
+    );
+    expect(srcOf('./wide/WideShell.tsx')).toContain("to: '/m/games', hidden: !GAMES_ENABLED }");
+    expect(srcOf('./games/gamesCatalog.ts')).toMatch(/export const GAMES: Game\[\] = !GAMES_ENABLED\s*\? \[\]/);
+  });
+  test('bWalletX build: the games, the Games group and screen, and the bGames tile are all still there', async () => {
+    const { screenShown, radarGroupShown } = await import('./storeBuild');
+    const c = catalogues({});
+    const names = c.games.map((a) => a[0]);
+    for (const n of [
+      'Snake',
+      '2048',
+      'Ninja Punk Girls',
+      'Satoshi Pong',
+      'Haste Arcade',
+      'Midnight Pass',
+      'PixelWar',
+      'PeerJump',
+    ])
+      expect(names).toContain(n);
+    expect(c.shownGames).toEqual(names);
+    expect(c.games.filter((a) => a[3] === 'tokenblaster')).toHaveLength(18);
+    expect(c.groups).toContain('Games');
+    expect(c.gameSources).toEqual(['bGames', 'TokenBlaster arcade', 'More BSV games']);
+    expect(c.bapps.find((a) => a[0] === 'bGames')?.[1]).toBe('Play games with real stakes');
+    expect(screenShown('games', false)).toBe(true);
+    expect(radarGroupShown('games', false)).toBe(true);
+  });
+});
