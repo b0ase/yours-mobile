@@ -873,6 +873,7 @@ const catalogues = (env: Record<string, string>) => {
     const b = await import('./src/mobile/bapps.ts'); const r = await import('./src/mobile/radarApps.ts');
     const s = await import('./src/mobile/storeBuild.ts'); const st = await import('./src/mobile/bappStandard.ts');
     const g = await import('./src/mobile/games/gamesCatalog.ts'); const o = await import('./src/mobile/ownerApps.ts');
+    const cards = await import('./src/mobile/feed/reels/bappsCards.ts');
     const bapps = b.BAPP_GROUPS.flatMap((x) => b.bappsIn(x.id)).filter((a) => s.appsTileShown(a.name));
     const std = st.visibleApps([...st.BX_APPS, ...st.COMMERCIAL_APPS], s.STORE_BUILD);
     const groups = r.RADAR_GROUPS.filter((x) => s.radarGroupShown(x.id));
@@ -884,7 +885,7 @@ const catalogues = (env: Record<string, string>) => {
       groups: groups.map((x) => x.label), radar: radar.map((a) => [a.name, a.desc, a.url]),
       owner: o.OWNER_APPS.map((a) => a.name), allRadar: r.RADAR_APPS.map((a) => a.name),
       games: g.GAMES.map((a) => [a.name, a.desc, a.url, a.source]), shownGames: g.gamesFor().map((a) => a.name),
-      gameSources: g.GAME_SOURCES.map((x) => x.label),
+      gameSources: g.GAME_SOURCES.map((x) => x.label), about: cards.BAPP_ABOUT,
     }));`;
   const r = Bun.spawnSync(['bun', '-e', code], {
     env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
@@ -902,6 +903,7 @@ const catalogues = (env: Record<string, string>) => {
     games: string[][];
     shownGames: string[];
     gameSources: string[];
+    about: Record<string, string>;
   };
 };
 const STORE_ENVS = [{ VITE_STORE_BUILD: '1' }, { VITE_CHANNEL: 'ios-store' }, { VITE_CHANNEL: 'android-play' }];
@@ -959,6 +961,8 @@ describe('gate (a): no market, exchange or token-sale target in a store build', 
       "MARKET_ENABLED ? 'Enter a web address, like 1sat.market' : 'Enter a web address, like whatsonchain.com'",
     );
     expect(p).toContain('.filter((a) => storeLinkShown(a.link))');
+    // The token panel's link to the token's market page too.
+    expect(srcOf('./tokens/TokenIdPanel.tsx')).toContain("...(MARKET_ENABLED ? [['1sat.market', links.market]] : []),");
   });
   test('inherited featured apps: the marketplace and the prize arcade are hidden by address in a store build only', async () => {
     const { storeLinkShown, STORE_HIDDEN_LINK_HOSTS } = await import('./storeBuild');
@@ -1029,7 +1033,12 @@ describe('gate (b): store catalogue wording names no trading, stakes, backing or
         ...c.radar.map((a) => `${a[0]}: ${a[1]}`),
         ...c.games.map((a) => `${a[0]}: ${a[1]}`),
         ...c.gameSources,
+        // Feed › bApps: one card per catalogue app, with this line on it.
+        ...Object.entries(c.about).map(([k, v]) => `${k}: ${v}`),
       ];
+      for (const a of c.bapps) expect(c.about[a[0]]?.length ?? 0).toBeGreaterThan(10);
+      for (const n of ['bMoviesX', 'bMusicX', 'bDNS', 'bGames', 'bExchange']) expect(c.about[n]).toBeUndefined();
+      expect(c.about.bChatX).toBe('Group chats, open rooms and feeds.');
       expect(strings.length).toBeGreaterThan(120);
       const bad = strings.map((t) => [t, storeBannedWord(t)]).filter((x) => x[1]);
       expect(bad).toEqual([]);
@@ -1059,6 +1068,13 @@ describe('gate (b): store catalogue wording names no trading, stakes, backing or
     expect(std.bCalX).toBe('Paid bookings and shared calendars [Work]');
     expect(std.bMoviesX).toBe('Watch and back tokenised films [Watch & make]');
     expect(std.bDojoX).toBe('Train, compete and earn your belts [Watch & make]');
+    expect(c.about.bChatX).toBe('Group chats, live audio Spaces and feeds, with a room for every token.');
+    expect(c.about.bMoviesX).toBe('A feed of films and trailers you can watch, and back by buying their tokens.');
+    expect(c.about.bMintX).toBe('Design and mint your own tokens, notes and media on Bitcoin.');
+    expect(c.about.bDNS).toBe('Register names on Bitcoin and trade them.');
+    expect(c.about.bPhotos).toBe('Turn your photos into NFTs that can be traded.');
+    expect(c.about.bGames).toBe('Play games where you can stake BSV.');
+    expect(Object.keys(c.about)).toHaveLength(30);
   });
   test('the store wording and the gated entries are behind literal env checks, so a store bundle has neither', () => {
     for (const f of ['./bapps.ts', './bappStandard.ts', './ownerApps.ts', './radarApps.ts']) {

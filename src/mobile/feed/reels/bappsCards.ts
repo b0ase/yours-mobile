@@ -120,10 +120,30 @@ export const commentUrl = (c: Pick<AppCard, 'id'>) => `https://www.bchatx.com/u/
  * kept to what the app does today (no promises). Keyed by the app's name; a test checks every bApp has one.
  */
 export const BAPP_ABOUT: Readonly<Record<string, string>> = {
-  bChatX: 'Group chats, live audio Spaces and feeds, with a room for every token.',
-  bMoviesX: 'A feed of films and trailers you can watch, and back by buying their tokens.',
-  bMusicX: 'Put your tracks on Bitcoin as tokens; fans who hold them help make the video.',
-  bMintX: 'Design and mint your own tokens, notes and media on Bitcoin.',
+  // Store wording names no trading, stakes, backing or tokenising, and the apps a store build leaves out (bapps.ts)
+  // have no line there: storeBuild.ts STORE_BANNED_WORDS, storeBuild.test.ts. Literal env checks, as in bapps.ts.
+  bChatX:
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+      ? 'Group chats, open rooms and feeds.'
+      : 'Group chats, live audio Spaces and feeds, with a room for every token.',
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? {
+        bMoviesX: 'A feed of films and trailers you can watch, and back by buying their tokens.',
+        bMusicX: 'Put your tracks on Bitcoin as tokens; fans who hold them help make the video.',
+      }
+    : {}),
+  bMintX:
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+      ? 'Mint your own tokens and media on Bitcoin.'
+      : 'Design and mint your own tokens, notes and media on Bitcoin.',
   bTrust: 'Cut a secret into slices for people you trust, and pass your coins on to your heirs.',
   bPositive: 'Take a journey one day at a time, with three friends as witnesses. Private by default.',
   // Restricted, bWalletX only: the same literal env check as bapps.ts so the store bundle never carries it.
@@ -146,17 +166,38 @@ export const BAPP_ABOUT: Readonly<Record<string, string>> = {
   bJobsX: 'Post jobs and find work, paid in BSV.',
   bID: 'See and manage your on-chain identity.',
   bSearch: 'Search content stored on Bitcoin.',
-  bDNS: 'Register names on Bitcoin and trade them.',
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? {
+        bDNS: 'Register names on Bitcoin and trade them.',
+      }
+    : {}),
   bVideoX: 'Watch videos and publish your own.',
   bRadioX: 'Listen to Bitcoin radio stations, or run one.',
-  bPhotos: 'Turn your photos into NFTs that can be traded.',
+  bPhotos:
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+      ? 'Turn your photos into NFTs.'
+      : 'Turn your photos into NFTs that can be traded.',
   bArt: 'Collect on-chain art and show it in a gallery.',
   bPaint: 'A paint app that inscribes what you make on Bitcoin.',
   b3D: 'Make 3D models and own them on Bitcoin.',
   bBooks: 'Read books, or publish your own.',
   bAgents: 'Set up AI agents and give each one a budget to spend.',
   bSocialX: 'Post and follow people on Bitcoin.',
-  bGames: 'Play games where you can stake BSV.',
+  ...(!(
+    import.meta.env.VITE_STORE_BUILD === '1' ||
+    import.meta.env.VITE_CHANNEL === 'ios-store' ||
+    import.meta.env.VITE_CHANNEL === 'android-play'
+  )
+    ? {
+        bGames: 'Play games where you can stake BSV.',
+      }
+    : {}),
   ...(MARKET_ENABLED ? { bExchange: 'Trade tokens, with prices from several exchanges in one place.' } : {}),
   bMaps: 'A map of places that accept Bitcoin.',
 };
