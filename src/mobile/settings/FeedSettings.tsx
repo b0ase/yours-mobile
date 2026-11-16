@@ -60,6 +60,7 @@ import { WagesScreen } from '../wages/WagesScreen';
 import { TwetchSettings } from '../twetch/TwetchSettings';
 import {
   B_AGENT_DESC,
+  INDEXING_ENABLED,
   MY_TOKENS_DESC,
   MY_TOKENS_NOTE,
   isBWalletX,
@@ -166,13 +167,18 @@ const FEED_SETTINGS_SEARCH: SettingsEntry[] = [
     keywords: ['browser', 'web', 'bweb', 'sites'],
     target: { kind: 'screen', screen: 'bweb' },
   },
-  {
-    id: 'feed-indexing',
-    label: 'Token indexing',
-    description: 'One-tap indexing fee',
-    keywords: ['index', 'indexing', 'token', 'fee'],
-    target: { kind: 'screen', screen: 'indexing' },
-  },
+  // Paid indexing is bWalletX only (INDEXING_ENABLED).
+  ...(INDEXING_ENABLED
+    ? [
+        {
+          id: 'feed-indexing',
+          label: 'Token indexing',
+          description: 'One-tap indexing fee',
+          keywords: ['index', 'indexing', 'token', 'fee'],
+          target: { kind: 'screen', screen: 'indexing' },
+        } satisfies SettingsEntry,
+      ]
+    : []),
   {
     id: 'feed-bookmarks',
     label: 'Bookmarks',
@@ -201,13 +207,17 @@ const FEED_SETTINGS_SEARCH: SettingsEntry[] = [
     keywords: ['sign in', 'login', 'sessions', 'devices'],
     target: { kind: 'screen', screen: 'signins' },
   },
-  {
-    id: 'feed-tokens',
-    label: 'My tokens',
-    description: 'Tokens you launched',
-    keywords: ['tokens', 'my tokens', 'coins'],
-    target: { kind: 'screen', screen: 'tokens' },
-  },
+  ...(INDEXING_ENABLED
+    ? [
+        {
+          id: 'feed-tokens',
+          label: 'My tokens',
+          description: 'Tokens you launched',
+          keywords: ['tokens', 'my tokens', 'coins'],
+          target: { kind: 'screen', screen: 'tokens' },
+        } satisfies SettingsEntry,
+      ]
+    : []),
   {
     id: 'feed-sweep',
     label: 'Sweep into this account',
@@ -829,7 +839,8 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           />
         </Section>
       )}
-      {acct && (
+      {/* My tokens offers paid indexing / room set-up: bWalletX only (INDEXING_ENABLED). */}
+      {INDEXING_ENABLED && acct && (
         <Section title="Tokens">
           <Row
             icon={<Coins size={16} />}
@@ -925,15 +936,20 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="bWeb"
               description="Your dock, your Feed's bApps, what b can see, add-ons"
               onClick={() => setScreen('bweb')}
+              isLast={!INDEXING_ENABLED && !IS_EXTENSION}
             />
-            <Divider />
-            <Row
-              icon={<Coins size={16} />}
-              label="Token indexing"
-              description="One-tap fee for your own tokens"
-              onClick={() => setScreen('indexing')}
-              isLast={!IS_EXTENSION}
-            />
+            {INDEXING_ENABLED && (
+              <>
+                <Divider />
+                <Row
+                  icon={<Coins size={16} />}
+                  label="Token indexing"
+                  description="One-tap fee for your own tokens"
+                  onClick={() => setScreen('indexing')}
+                  isLast={!IS_EXTENSION}
+                />
+              </>
+            )}
             {IS_EXTENSION && (
               <>
                 <Divider />
@@ -1196,7 +1212,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           </Section>
         </Screen>
       )}
-      {screen === 'indexing' && (
+      {INDEXING_ENABLED && screen === 'indexing' && (
         <Screen title="Token indexing" onBack={() => setScreen(null)}>
           <Section title="Token indexing">
             <Row
@@ -1328,7 +1344,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
       {screen === 'signins' && <SignInsScreen onBack={() => setScreen(null)} />}
-      {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
+      {INDEXING_ENABLED && screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {SEEDLESS_ENABLED && screen === 'passkey' && <PasskeySettings onClose={() => setScreen(null)} />}
       {LINK_ACCOUNTS_ENABLED && screen === 'social' && <ConnectSocial onClose={closeSocial} />}

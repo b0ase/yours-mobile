@@ -45,7 +45,7 @@ describe('store bundle check', () => {
     const d = dir();
     writeFileSync(
       join(d, 'assets/a.js'),
-      'ticker:"PNEEs · USD¢";t="Index your token";u="Not available in this edition"',
+      'ticker:"PNEEs · USD¢";t="Send your token";u="Not available in this edition"',
     );
     expect(scan(d)).toEqual([]);
     expect(BANNED).not.toContain('PNEEs');
@@ -74,7 +74,7 @@ describe('store bundle check', () => {
     ])
       expect(BANNED).toContain(s);
   });
-  test('the list covers the A1, A2, A5 and A6 findings of the second 16 Nov review', () => {
+  test('the list covers the A1, A2, A5, A6 and A8 findings of the second 16 Nov review', () => {
     for (const s of [
       'and open my room',
       'Invite = send 1',
@@ -88,8 +88,16 @@ describe('store bundle check', () => {
       'tap to sell or give',
       'For sale',
       'On sale ·',
+      // A8: paid indexing
+      'Index $$',
+      'Index ·',
+      'Index your token',
+      'Token indexing',
+      'Indexed by 1Sat',
     ])
       expect(BANNED).toContain(s);
+    // A bare 'Index $' would hit minified code (`outputIndex ${i}`).
+    expect(BANNED).not.toContain('Index $');
   });
   const built = process.env.STORE_BUNDLE_DIR;
   test.skipIf(!built || !existsSync(built ?? ''))('the built store bundle in STORE_BUNDLE_DIR is clean', () => {

@@ -103,6 +103,20 @@ export const BANNED = [
   'tap to sell or give',
   'For sale',
   'On sale ·',
+  // A8 (owner, 16 Nov 2026): no paid indexing in a store build. ('Index $$' = the template "Index $${ticker}";
+  // a bare 'Index $' would match code such as `outputIndex ${i}`. 'indexing fee' alone is in history labels and
+  // payment checks, so pass 2's word list covers it in UI strings instead.)
+  'Index $$',
+  'Index ·',
+  'Index your token',
+  'so other wallets can see',
+  'Indexing lets other wallets see',
+  'Indexing a token lets other wallets see',
+  "tokens' indexing fee",
+  'Token indexing',
+  'One-tap indexing',
+  'Indexed by 1Sat',
+  'prepaid deposit with the 1Sat',
 ];
 
 const TEXT = /\.(js|mjs|css|html|json|webmanifest|txt|svg)$/;

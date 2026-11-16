@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { TOKEN_ROOMS_ENABLED, indexingEnabled } from '../storeBuild';
+import { INDEXING_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { useSnackbar } from '../../hooks/useSnackbar';
 import { FinishIndexing } from './FinishIndexing';
@@ -10,9 +10,9 @@ import { notifyIfPermitted, recheckPendingIndexing, takeSessionReminder, usePend
  * (and that didn't get "Not now"), plus one reminder per app session (snackbar, and a local notification when permission
  * was already granted). The Wallet tab badge reads the same list (src/mobile/tabs/BottomMenu.tsx).
  */
-/** Shown in every build (indexingEnabled, storeBuild.ts); a store build words it as indexing only. */
+/** bWalletX only: a store build has no paid indexing (storeBuild.ts INDEXING_ENABLED), so no card or reminder. */
 export const WalletIndexing = (props: { exchangeRate?: number }) =>
-  indexingEnabled() ? <WalletIndexingInner {...props} /> : null;
+  INDEXING_ENABLED ? <WalletIndexingInner {...props} /> : null;
 
 const WalletIndexingInner = ({ exchangeRate = 0 }: { exchangeRate?: number }) => {
   const { apiContext, chromeStorageService } = useServiceContext();

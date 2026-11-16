@@ -157,6 +157,7 @@ import {
   APP_NAME,
   BSPACES_ENABLED,
   BUREAU_ENABLED,
+  INDEXING_ENABLED,
   XINVITES_ENABLED,
   roomSpacesAllowed,
   MARKET_ENABLED,
@@ -3561,7 +3562,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               </p>
             )}
             <ul className="w-full">
-              {ROOMS &&
+              {/* Room set-up is paid indexing: bWalletX only (INDEXING_ENABLED literal, so a store bundle drops it). */}
+              {INDEXING_ENABLED &&
+                ROOMS &&
                 !bappsView &&
                 ownTokens(identityAddress).map((t) => (
                   <SetupRoomRow

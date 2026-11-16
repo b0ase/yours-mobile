@@ -1580,16 +1580,16 @@ describe('F1: token indexing in a store build is worded as indexing only (no roo
     });
     return JSON.parse(r.stdout.toString()) as Record<string, string | number | boolean>;
   };
-  test('store build: "Index · $n", no free-room note, no fee to us, no room or Market in the text', () => {
+  // Round A6 (owner, 16 Nov 2026, A8): no paid indexing at all in a store build, so no indexing wording either.
+  test('store build: indexing off, no free-room note, no fee to us, no My tokens wording', () => {
     for (const env of STORE_ENVS) {
       const t = read(env);
       expect(t.rooms).toBe(false);
-      expect(t.indexing).toBe(true);
-      expect(String(t.label)).toMatch(/^Index · /);
+      expect(t.indexing).toBe(false);
       expect(t.free).toBe('');
       expect(t.fee).toBe(0);
-      expect(`${t.desc} ${t.note}`).not.toMatch(/room|Market|list/i);
-      expect(t.note).toBe('Indexing a token lets other wallets see it. You confirm the price before anything is sent.');
+      expect(t.desc).toBe('');
+      expect(t.note).toBe('');
     }
   });
   test('bWalletX build: the room set-up wording is what it was', () => {
@@ -1957,4 +1957,116 @@ describe('A1, A5 leftovers the strengthened bundle check found', () => {
       /\{MARKET_ENABLED\s*\? 'It’s at your address\. Linking, selling and sending unlock once it shows in Wallet › NFTs\.'\s*: 'It’s at your address\. Linking and sending unlock once it shows in Wallet › NFTs\.'\}/,
     );
   });
+});
+
+describe('A8 (owner, 16 Nov 2026): no paid indexing anywhere in a store build', () => {
+  const trap = () => {
+    const hit = { n: 0 };
+    const p = new Proxy({}, { get: () => ((hit.n += 1), () => Promise.reject(new Error('reached'))) }) as never;
+    return { hit, p };
+  };
+  const tokenId = 'c'.repeat(64) + '_0';
+  const status = {
+    feeAddress: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+    feePerOutput: 1000,
+    isActive: false,
+    balance: 0,
+    minFunding: 0,
+  };
+  test('indexingEnabled: off in a store build, on in bWalletX', async () => {
+    const { indexingEnabled } = await import('./storeBuild');
+    expect(indexingEnabled(true)).toBe(false);
+    expect(indexingEnabled(false)).toBe(true);
+  });
+  test('fundIndexing and payRoomSetup refuse in a store build before the indexer or the wallet is asked', async () => {
+    const { fundIndexing } = await import('./tokens/indexFund');
+    const { payRoomSetup } = await import('./tokens/roomSetup');
+    const ctx = trap();
+    await expect(fundIndexing(ctx.p, tokenId, 'TEST', { status, sats: 2000 }, true)).rejects.toThrow(
+      'Not available in this edition',
+    );
+    await expect(payRoomSetup(ctx.p, tokenId, 'TEST', status, 0, '', true)).rejects.toThrow(
+      'Not available in this edition',
+    );
+    expect(ctx.hit.n).toBe(0);
+    // bWalletX: both go on to the wallet (which this trap context cannot finish), not the store refusal.
+    const x = trap();
+    await expect(fundIndexing(x.p, tokenId, 'TEST', { status, sats: 2000 }, false)).rejects.not.toThrow(
+      'Not available in this edition',
+    );
+    await expect(payRoomSetup(x.p, tokenId, 'TEST', status, 0, '', false)).rejects.not.toThrow(
+      'Not available in this edition',
+    );
+    expect(x.hit.n).toBeGreaterThan(0);
+  });
+  test('the defaults follow the build: refused in every store env, attempted in bWalletX', () => {
+    const code = `
+      const s = await import('./src/mobile/storeBuild.ts'); const f = await import('./src/mobile/tokens/indexFund.ts');
+      const status = { feeAddress: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', feePerOutput: 1000, isActive: false, balance: 0, minFunding: 0 };
+      const r = await f.fundIndexing({}, 'c'.repeat(64) + '_0', 'TEST', { status, sats: 2000 }).then(() => 'paid', (e) => String(e?.message ?? e));
+      console.log(JSON.stringify({ flag: s.INDEXING_ENABLED, fn: s.indexingEnabled(), r }));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as { flag: boolean; fn: boolean; r: string };
+    for (const env of STORE_ENVS)
+      expect(run(env)).toEqual({ flag: false, fn: false, r: 'Not available in this edition' });
+    const x = run({});
+    expect([x.flag, x.fn]).toEqual([true, true]);
+    expect(x.r).not.toBe('Not available in this edition');
+  }, 60_000);
+  test('INDEXING_ENABLED is the inverse of STORE_BUILD, from the same literal env', async () => {
+    const { INDEXING_ENABLED } = await import('./storeBuild');
+    expect(INDEXING_ENABLED).toBe(!STORE_BUILD);
+    const s = srcOf('./storeBuild.ts');
+    const cond = (name: string) =>
+      (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(s)?.[1] ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    expect(cond('INDEXING_ENABLED')).toBe(cond('STORE_BUILD'));
+  });
+  test('every place that offers or starts a paid index sits behind the literal flag', () => {
+    expect(srcOf('./tokens/FinishIndexing.tsx')).toContain(
+      'export const FinishIndexing = (props: Props) => (INDEXING_ENABLED ? <FinishIndexingInner {...props} /> : null);',
+    );
+    expect(srcOf('./tokens/WalletIndexing.tsx')).toContain(
+      'INDEXING_ENABLED ? <WalletIndexingInner {...props} /> : null;',
+    );
+    expect(srcOf('./tokens/TokenIndexButton.tsx')).toContain('INDEXING_ENABLED ? <Inner {...props} /> : null;');
+    expect(srcOf('./tabs/ChatPage.tsx')).toMatch(
+      /\{INDEXING_ENABLED &&\s*ROOMS &&\s*!bappsView &&\s*ownTokens\(identityAddress\)\.map/,
+    );
+    const f = srcOf('./settings/FeedSettings.tsx');
+    expect(f).toContain('{INDEXING_ENABLED && acct && (');
+    expect(f).toContain("{INDEXING_ENABLED && screen === 'indexing' && (");
+    expect(f).toContain(
+      "{INDEXING_ENABLED && screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}",
+    );
+    expect(f).toMatch(
+      /\{INDEXING_ENABLED && \(\s*<>\s*<Divider \/>\s*<Row\s+icon=\{<Coins size=\{16\} \/>\}\s+label="Token indexing"/,
+    );
+    expect(f.match(/\.\.\.\(INDEXING_ENABLED\s*\?/g)).toHaveLength(2); // the two search entries
+    // The Wallet tab badges count pending indexing only where it is offered.
+    expect(srcOf('./tabs/BottomMenu.tsx')).toContain("t.id === 'bsv' && pending && indexingEnabled()");
+    expect(srcOf('./phone/PhoneShell.tsx')).toContain(
+      "'screen:wallet': pending && indexingEnabled() ? String(pending) : undefined",
+    );
+    // The other fundIndexing callers are Exchange-only (no Exchange in a store build) and refused by fundIndexing too.
+    expect(srcOf('./exchange/TradeView.tsx')).toContain('<IndexerFundPanel tokenId={id} ticker={sym} />');
+  });
+  test('Ask b: no Token indexing line in a store build; bWalletX keeps it word for word', () => {
+    const code = `const g = await import('./src/mobile/agent/guide.ts'); console.log(JSON.stringify(g.BWALLET_GUIDE));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as string;
+    for (const env of STORE_ENVS) expect(run(env)).not.toMatch(/index/i);
+    expect(run({})).toContain(
+      "Anything above the limit always asks.\n- Token indexing: one-tap limit for your own tokens' indexing fee.\n- Privacy:",
+    );
+  }, 60_000);
 });

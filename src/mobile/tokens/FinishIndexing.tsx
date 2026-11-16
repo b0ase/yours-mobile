@@ -2,7 +2,7 @@ import { Sparkles } from 'lucide-react';
 import { money } from '../money/money';
 import { dismissRoomSetup } from './roomSetup';
 import { useRoomSetup } from './useRoomSetup';
-import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
+import { INDEXING_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 /**
  * "Set up $X's room": for a token this wallet minted whose room isn't set up yet (1Sat indexing
@@ -10,14 +10,7 @@ import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
  * token (Settings › My tokens and Chat still offer it). Price and payment: useRoomSetup /
  * roomSetup.ts. Nothing is sent without a tap; nothing shows while the indexer doesn't answer.
  */
-export const FinishIndexing = ({
-  tokenId,
-  ticker,
-  onFunded,
-  compact = false,
-  exchangeRate = 0,
-  dismissible = true,
-}: {
+type Props = {
   tokenId: string;
   ticker: string;
   onFunded?: () => void;
@@ -25,7 +18,19 @@ export const FinishIndexing = ({
   /** USD per BSV; 0 = use the live rate (unknown = no bCorp fee, always confirm). */
   exchangeRate?: number;
   dismissible?: boolean;
-}) => {
+};
+
+/** Nothing in a store build: no paid indexing there (storeBuild.ts INDEXING_ENABLED; Rollup drops the card). */
+export const FinishIndexing = (props: Props) => (INDEXING_ENABLED ? <FinishIndexingInner {...props} /> : null);
+
+const FinishIndexingInner = ({
+  tokenId,
+  ticker,
+  onFunded,
+  compact = false,
+  exchangeRate = 0,
+  dismissible = true,
+}: Props) => {
   const s = useRoomSetup(tokenId, ticker, { exchangeRate, onDone: onFunded });
   // Unknown (indexer slow or hasn't seen the token): say nothing rather than ask for money.
   if (!s.status || !s.total || (!s.needs && !s.msg)) return null;

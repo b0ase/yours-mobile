@@ -158,12 +158,13 @@ export const storeLinkShown = (url: string, store = STORE_BUILD): boolean => {
  * Words no Apps tile, catalogue line or game may show in a store build (App Review 3.1.5(iii), 3.1.1; Play
  * financial features and gambling declarations): exchanges and markets, trading, buying and selling, swaps,
  * launchpads, token sales and tokenising, backing or investing, stakes, bets and prizes, earning, tickers, token
- * rooms, "for sale" / "on sale", and opening a personal room or inviting with a token. The one list: storeBuild.test.ts reads every string the store catalogue can show against it, so
+ * rooms, "for sale" / "on sale", opening a personal room or inviting with a token, and paid indexing ("Index $X",
+ * "indexing fee", "Token indexing"). The one list: storeBuild.test.ts reads every string the store catalogue can show against it, so
  * a new entry cannot bring one back, and scripts/store-bundle-check.mjs reads the UI strings of the built store
  * bundle against it. (bwallet.space's page has its own, wider list: scripts/store-site.py.)
  */
 export const STORE_BANNED_WORDS: RegExp =
-  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\b(?:gets|is|her|his|their|its) (?:a |own )?ticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token|\b(?:for|on) sale\b|\bopen (?:my|your|its) room\b|invite = send/i;
+  /exchang|\bmarket(?:s|place|places)?\b|\btrad(?:e|es|ed|er|ers|ing|able)\b|\bbuy(?:s|ing|er|ers)?\b|\bsell(?:s|ing|er|ers)?\b|\bsold\b|\bswap|launch\s?pad|token\s?sale|tokenis|tokeniz|\bback (?:her|his|him|it|the|them|this|a|your)\b|\bbacking\b|\binvest|\bstakes?\b|\bstaking\b|\bbets?\b|\bbetting\b|gambl|casino|lotter|jackpot|\bprizes?\b|\bpayouts?\b|\brewards?\b|\bearn(?:s|ed|ing)?\b|rev(?:enue)?[- ]share|\b(?:gets|is|her|his|their|its) (?:a |own )?ticker|air[- ]?drop|token[- ](?:gated |chat )?rooms?|for every token|\b(?:for|on) sale\b|\bopen (?:my|your|its) room\b|invite = send|\bindex (?:\$|\u00B7|your token)|indexing fee|token indexing/i;
 /** The banned wording in `text`, or null. */
 export const storeBannedWord = (text: string): string | null => STORE_BANNED_WORDS.exec(text)?.[0] ?? null;
 
@@ -310,8 +311,18 @@ export type MintChoice = 'ticket' | 'token' | 'media';
 export const mintChoicesFor = (store = STORE_BUILD): MintChoice[] =>
   store ? ['token', 'media'] : ['ticket', 'token', 'media'];
 
-/** Token indexing fee: paid to the third-party 1Sat overlay (a network cost, like gas), so on everywhere. */
-export const indexingEnabled = (_store = STORE_BUILD) => true;
+/**
+ * Paid token indexing ("Index $X · $n", the 1Sat indexer deposit; in bWalletX "Set up $X's room"): bWalletX only.
+ * Owner, 16 Nov 2026 (review finding A8): a store build offers, starts and pays no indexing anywhere: no Wallet card,
+ * badge, token-page button, Settings › My tokens / Token indexing, and fundIndexing refuses (tokens/indexFund.ts).
+ * INDEXING_ENABLED is the literal env check, so Rollup drops the offer text from a store bundle.
+ */
+export const indexingEnabled = (store = STORE_BUILD) => !store;
+export const INDEXING_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
 
 /** Paid features shown outside a store build only: paid indexing, personal token + room. */
 export const paidFeaturesEnabled = (store = STORE_BUILD) => !store;
@@ -443,11 +454,12 @@ export const handleCardText = (hasName: boolean): string =>
     : hasName
       ? 'Your personal token and a chat room only holders can enter.'
       : 'A free handle people can pay, plus your own chat room.';
+// Settings › My tokens is not in a store build (INDEXING_ENABLED): no store wording.
 export const MY_TOKENS_DESC = STORE_BUILD
-  ? "Tokens this account has minted: index the ones other wallets can't see yet"
+  ? ''
   : "This account's tokens and their rooms: set up the ones that aren't listed yet";
 export const MY_TOKENS_NOTE = STORE_BUILD
-  ? 'Indexing a token lets other wallets see it. You confirm the price before anything is sent.'
+  ? ''
   : 'Setting up a token’s room lists it in other wallets and the Market and opens its chat room. You confirm the price before anything is sent.';
 export const B_AGENT_DESC = STORE_BUILD ? 'Use your own AI key' : 'b, or use your own AI key';
 export const SUBSCRIPTIONS_DESC = STORE_BUILD
