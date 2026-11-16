@@ -247,6 +247,11 @@
       "reason": "Unreachable library text (A9): @1sat/permission-module enrichIntent builds these titles only for an action it classifies as a purchase, listing or cancelled listing, and only to show a site's request on its sheet (the wallet's own actions build none). In a store build every site createAction passes services/storeMarketGate.ts first (wrapped outermost on the site wallet in initWallet.ts), which runs this same enrichIntent and refuses those kinds and steps, and any OrdLock, with 'Not available in this edition' before the module runs. storeGatesA9.test.ts shows it with the real module: no sheet is built. The module stays in the bundle for transfers, inscriptions, locks and names, so its text can't be tree-shaken out without patching the package."
     },
     {
+      "chunk": "storeMarketGate",
+      "pattern": "^(?:Buy (?:“\\$\\{\\w+\\}”|collectable|asset)|List \\$\\{\\w+\\} for sale|List on marketplace lock)$",
+      "reason": "Unreachable library text (A9): the copy of @1sat/permission-module enrichIntent in the store check's own chunk (services/storeMarketGate.ts, loaded by handleSiteCall before Face ID and by the wallet-side backstop). There it only classifies a site's request: storeMarketRefusal keeps the kind and drops the summary and titles, so nothing it builds is ever shown. The module's own sheets are covered by the 'background' entry above."
+    },
+    {
       "chunk": "background",
       "pattern": "^(?:the (?:swap|offer|seller|price|contract) |not a swap offer$|unknown swap call$|output 0 must pay the seller|Swap stopped before signing|Swaps are only available in bChatX$|the 1Sat indexer is not validating this token|indexing fee is more than shown$)",
       "reason": "Unreachable in a store build: p2p swap contract checks (mobile/p2p/swap/*, services/swapSite.ts), run only for window.CWI.swap calls. On the phone handleSiteCall refuses bwxSwapOffer / Accept / Release (A7.10 test)."

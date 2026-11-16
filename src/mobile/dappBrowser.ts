@@ -18,6 +18,7 @@ import {
 import { siteGate as nativeSiteGate } from './siteGateNative';
 import type { SiteGate } from './siteGate';
 import { answerDappBitsign } from './bappFrame/frameBitsign';
+import { SITE_MARKET_ACTIONS_ENABLED } from './storeBuild';
 
 // Swappable for tests only (dappBrowser.gate.test.ts).
 let siteGate: Pick<SiteGate, 'check' | 'lastVerification'> & Partial<Pick<SiteGate, 'extendPass'>> = nativeSiteGate;
@@ -151,6 +152,13 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
   if (!chrome) {
     chrome = contextFactory(`dapp:${o.origin}`, o.origin, url);
     contexts.set(o.origin, chrome);
+  }
+  // Store edition (CTO, A9): a site's purchase, listing or cancelled listing is refused BEFORE Face ID, by the same
+  // check the wallet-side backstop runs (services/storeMarketGate.ts storeMarketRefusal). SITE_MARKET_ACTIONS_ENABLED is
+  // a literal, so the branch and its import are not in a bWalletX bundle.
+  if (!SITE_MARKET_ACTIONS_ENABLED && type === 'createAction') {
+    const gate = await import('../services/storeMarketGate');
+    if (await gate.storeMarketRefusal(params)) return { success: false, error: gate.STORE_MARKET_REFUSAL };
   }
   // Sign / pay: Face ID, fingerprint or the phone passcode first (siteGate.ts). One prompt per user action;
   // cancel = the standard denial, no answer = a timeout error. Never reaches the wallet unless it passed.

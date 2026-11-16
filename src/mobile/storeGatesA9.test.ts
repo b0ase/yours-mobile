@@ -426,10 +426,15 @@ describe('A9.1 the permission-module Buy / List text: unreachable in a store bui
     const e = (loadAllow() as { chunk: string; pattern?: string; reason: string }[]).filter((a) =>
       a.pattern?.includes('List on marketplace lock'),
     );
-    expect(e.length).toBe(1);
-    expect(e[0].reason).toContain('services/storeMarketGate.ts');
+    // The module's own sheets (background) and the store check's copy in its own chunk (loaded before Face ID).
+    expect(e.map((a) => a.chunk)).toEqual(['background', 'storeMarketGate']);
+    expect(e[0].pattern).toBe(e[1].pattern);
+    for (const a of e) {
+      expect(a.reason).toContain('services/storeMarketGate.ts');
+      expect(a.reason).not.toContain('so the user can refuse it');
+    }
     expect(e[0].reason).toContain('storeGatesA9.test.ts');
-    expect(e[0].reason).not.toContain('so the user can refuse it');
+    expect(e[1].reason).toContain('storeMarketRefusal keeps the kind and drops the summary');
   });
 });
 
@@ -547,5 +552,69 @@ describe('A9.2 the store bundle check fails a store bundle that still names the 
     expect(s).toContain('  const names = await scanProductName(dir);');
     expect(s).toContain('  if (hits.length || words.hits.length || names.hits.length) process.exit(1);');
     expect(s).toContain('no "bWalletX" app name)');
+  });
+});
+
+describe('A9.1 (CTO): on the phone a store build refuses before Face ID, with the same check as the backstop', () => {
+  const code = `const { P2PKH, PrivateKey, Utils } = await import('@bsv/sdk');
+    const { OrdLockV2, buildInscriptionScript } = await import('@1sat/templates');
+    const m = await import('./src/mobile/dappBrowser.ts');
+    const face = []; const sent = [];
+    m.__setSiteGateForTests({ check: async (_o, c) => { face.push(c); return 'biometric'; }, lastVerification: () => null }, () => 5000);
+    m.initDappBrowser(() => ({ runtime: { sendMessage: async (msg) => { sent.push(msg.action); return { success: true, data: { txid: 'ab' } }; } } }));
+    const a = new PrivateKey(8).toAddress(); const me = new PrivateKey(7).toAddress();
+    const cases = {
+      list: { description: 'List', outputs: [{ lockingScript: OrdLockV2.lock(a, a, 5000).toHex(), satoshis: 1 }] },
+      buy: { description: 'Buy', outputs: [
+        { lockingScript: buildInscriptionScript(new P2PKH().lock(me), Utils.toArray('hi', 'utf8'), 'text/plain').toHex(), satoshis: 1, basket: '1sat' },
+        { lockingScript: new P2PKH().lock(a).toHex(), satoshis: 5000 }] },
+      pay: { description: 'Tip', outputs: [{ lockingScript: new P2PKH().lock(a).toHex(), satoshis: 1000 }] },
+    };
+    const out = {};
+    for (const [k, args] of Object.entries(cases)) {
+      face.length = 0; sent.length = 0;
+      const r = await m.handleSiteCall('https://www.bchatx.com', 'https://www.bchatx.com/r', 'createAction', args);
+      out[k] = { r, face: [...face], sent: [...sent] };
+    }
+    console.log(JSON.stringify(out));`;
+  type Step = { r: { success: boolean; error?: string }; face: string[]; sent: string[] };
+  type R = { list: Step; buy: Step; pay: Step };
+  const REFUSED = { r: { success: false, error: 'Not available in this edition' }, face: [], sent: [] };
+  const NORMAL = { r: { success: true, data: { txid: 'ab' } }, face: ['createAction'], sent: ['createAction'] };
+  test('store: a listing or purchase gets no Face ID prompt and never reaches the wallet; a plain payment does', () => {
+    for (const env of STORE_ENVS) {
+      const r = run<R>(code, env);
+      expect(r.list).toEqual(REFUSED);
+      expect(r.buy).toEqual(REFUSED);
+      expect(r.pay).toEqual(NORMAL);
+    }
+  }, 90_000);
+  test('bWalletX: unchanged, every createAction asks Face ID and goes to the wallet (its sheets follow there)', () => {
+    const r = run<R>(code, {});
+    expect([r.list, r.buy, r.pay]).toEqual([NORMAL, NORMAL, NORMAL]);
+  }, 60_000);
+  test('one function for both: handleSiteCall and guardStoreMarketActions both call storeMarketRefusal', () => {
+    const page = srcOf('./dappBrowser.ts');
+    expect(page).toContain(
+      "  if (!SITE_MARKET_ACTIONS_ENABLED && type === 'createAction') {\n    const gate = await import('../services/storeMarketGate');\n    if (await gate.storeMarketRefusal(params)) return { success: false, error: gate.STORE_MARKET_REFUSAL };\n  }",
+    );
+    // Before the device-owner prompt.
+    expect(page.indexOf('gate.storeMarketRefusal(params)')).toBeLessThan(
+      page.indexOf('await siteGate.check(o.origin, type);'),
+    );
+    const gate = srcOf('../services/storeMarketGate.ts');
+    expect(gate).toContain('      const why = await storeMarketRefusal(args, deps);');
+    expect(gate.match(/await storeMarketVerdict\(/g)?.length).toBe(1); // only storeMarketRefusal calls it
+  });
+  test('storeMarketRefusal without deps: the market cases, null for a plain payment and the seal', async () => {
+    const { storeMarketRefusal } = await import('../services/storeMarketGate');
+    expect(await storeMarketRefusal(BUY_BY_SHAPE)).toBe('purchase');
+    expect(await storeMarketRefusal(LIST_V2_BARE)).toBe('ordlock');
+    expect(await storeMarketRefusal(BUY_LISTING)).toBe('ordlock');
+    expect(await storeMarketRefusal(PAYMENT)).toBeNull();
+    expect(await storeMarketRefusal(SEAL)).toBeNull();
+    // A held coin needs the wallet's lookup: the page check lets it through to the backstop, which refuses it.
+    expect(await storeMarketRefusal(SELL_HELD_TOKEN)).toBe('unclassified');
+    expect(await storeMarketRefusal(SELL_HELD_TOKEN, held)).toBe('held-asset');
   });
 });
