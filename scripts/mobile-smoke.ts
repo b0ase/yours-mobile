@@ -79,8 +79,12 @@ try {
   await waitText(page, 'Wallet Ready!', 120_000);
   await shot(page, '02-ready');
   await clickText(page, 'Enter');
+  // The wallet opens unlocked (no "Welcome back / Unlock"), and on the web edition the backup step comes up over it:
+  // a new wallet's keys live only in this browser (src/mobile/backup/BackupGate.tsx, reason 'onboarding').
   await waitText(page, 'Receive', 120_000);
-  await shot(page, '03-wallet');
+  if (await page.$('input[type="password"]')) throw new Error('lock screen straight after creating the wallet');
+  await waitText(page, 'You need one before you can receive money', 30_000);
+  await shot(page, '03-wallet-backup-step');
 
   // The preview is not a native phone, so it runs as the web edition: the unlock key is held in memory only
   // (src/mobile/hub.ts persistSession, since 25 Oct 2026) and any page reload locks, as it does on web.bwalletx.com.
@@ -92,16 +96,19 @@ try {
   await page.locator('input[type="password"]').fill(password);
   await page.keyboard.press('Enter');
   await waitText(page, 'Receive', 120_000);
+  // Still not backed up, so the step is back after the unlock; "Remind me later" (offered while the balance is zero).
+  await waitText(page, 'You need one before you can receive money', 30_000);
+  await clickText(page, 'Remind me later');
+  await page.waitForFunction(() => !document.body.innerText.includes('Remind me later'), { timeout: 10_000 });
   await shot(page, '05-unlocked');
 
   console.log('receive');
   await clickText(page, 'Receive');
-  // Web edition: a wallet with no backup is asked to back up before it can receive (the keys live only in this
-  // browser), so a new wallet's Receive opens the backup step, not the address.
+  // Web edition: no address is shown before a backup exists, so Receive opens the backup step ("Not now" leaves).
   await waitText(page, 'You need one before you can receive money', 30_000);
   await shot(page, '06-receive-backup-first');
-  await clickText(page, 'Remind me later');
-  await waitText(page, 'Receive', 30_000);
+  await clickText(page, 'Not now');
+  await page.waitForFunction(() => !document.body.innerText.includes('You need one before'), { timeout: 10_000 });
 
   console.log('apps page');
   // The Browser tab became Apps, opened from the top bar in the phone layout (src/mobile/tabs/TopNav.tsx).
