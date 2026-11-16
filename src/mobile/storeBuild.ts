@@ -239,7 +239,11 @@ export const TOKEN_ROOMS_ENABLED: boolean = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 );
-export const STORE_ROOM_NOTE = 'This room is for token holders. Open it in bWalletX or on bchatx.com.';
+/**
+ * What a store build says for a token room (shown only when token rooms are off). It names no other app or site
+ * (CTO + CEO, 16 Nov 2026, review S9): an excluded feature is simply not available here.
+ */
+export const STORE_ROOM_NOTE = STORE_NAME_NOTE;
 
 /**
  * bSpaces (docs/BSPACES-PLAN.md), the full set: Spaces in token rooms, the Spaces home and its tile,
@@ -289,9 +293,8 @@ export const roomSpacesAllowed = (
   store = STORE_BUILD,
 ): boolean => !store || (FREE_SPACES_ENABLED && isOpenRoom(room));
 
-/** What a store build says where a token room's Space would be. */
-export const storeTokenSpaceNote = (symbol?: string | null) =>
-  `This room is for ${symbol ? `$${symbol}` : 'token'} holders. Open it in bWalletX or on bchatx.com.`;
+/** What a store build says where a token room's Space would be: no app or site named (S9). */
+export const storeTokenSpaceNote = (_symbol?: string | null) => STORE_NAME_NOTE;
 
 /**
  * bPhone paid calls (docs/BPHONE-PLAN.md): charging to receive a call, the directory of people who

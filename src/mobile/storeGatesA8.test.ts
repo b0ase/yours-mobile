@@ -431,3 +431,21 @@ describe('S8 (CTO + CEO, 16 Nov 2026): no fungible token minting in a store buil
       expect(BANNED).toContain(s);
   });
 });
+
+describe('S9 (CTO + CEO, 16 Nov 2026): an excluded feature names no other app or site in a store build', () => {
+  test('the token-room notes are the store note itself', async () => {
+    const s = await import('./storeBuild');
+    expect(s.STORE_ROOM_NOTE).toBe(s.STORE_NAME_NOTE);
+    expect(s.storeTokenSpaceNote('SATOSHI')).toBe('Not available in this edition');
+    expect(srcOf('./storeBuild.ts')).not.toMatch(/Open it in bWalletX|on bchatx\.com\./);
+  });
+  test('ChatPage shows the note only where token rooms are off', () => {
+    const c = srcOf('./tabs/ChatPage.tsx');
+    expect(c).toContain('if (!ROOMS) return setListError(STORE_ROOM_NOTE);');
+    expect(c).toMatch(/const sub = !ROOMS\s*\? STORE_ROOM_NOTE/);
+  });
+  test('the removed pointer phrases are banned in a store bundle', () => {
+    for (const s of ['Open it in bWalletX or on bchatx.com', 'This room is for token holders', 'holders. Open it in'])
+      expect(BANNED).toContain(s);
+  });
+});

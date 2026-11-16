@@ -167,6 +167,10 @@ export const BANNED = [
   'Choose a picture to see the price',
   'Mint names in bulk',
   'list at tier prices',
+  // S9 (CTO + CEO, 16 Nov 2026): an excluded feature says "Not available in this edition", naming no app or site.
+  'Open it in bWalletX or on bchatx.com',
+  'This room is for token holders',
+  'holders. Open it in',
   // A9 (coordinator, 16 Nov 2026): the investor self-certification placeholders must not ship. Removed in
   // fix/hide-investor-status (cb3949e9); never allowlist these.
   'LEGAL REVIEW',
