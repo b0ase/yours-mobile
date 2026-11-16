@@ -105,6 +105,27 @@ describe('store bundle check', () => {
     expect(w.test('[LEGAL REVIEW] Statement wording is pending legal review.')).toBe(true);
     expect(w.test('[legal review] Placeholder for the FPO art. 48 high net worth statement')).toBe(true);
   });
+  test('the list covers the bWalletX wording of the A7 decisions (16 Nov), so a store build cannot carry it', () => {
+    for (const s of [
+      'Reward, e.g.',
+      'lock the reward',
+      'back this post',
+      'Locking backs a post',
+      'send it or sell it',
+      'you buy or mint live here',
+      'Listed for sale on RelayX',
+      'listed for sale on RelayX',
+      'Your listing sold',
+      'When a listing of yours sells',
+      'listing cancelled',
+      'Exchange search',
+      'strategies on the Exchange',
+      'Trading and sending need',
+      'offer to sell them for you',
+      'rooms and swaps work',
+    ])
+      expect(BANNED).toContain(s);
+  });
   const built = process.env.STORE_BUNDLE_DIR;
   test.skipIf(!built || !existsSync(built ?? ''))('the built store bundle in STORE_BUNDLE_DIR is clean', () => {
     expect(scan(built)).toEqual([]);

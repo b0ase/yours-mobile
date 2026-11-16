@@ -117,6 +117,26 @@ export const BANNED = [
   'One-tap indexing',
   'Indexed by 1Sat',
   'prepaid deposit with the 1Sat',
+  // A7 (CTO decisions, 16 Nov 2026): the bWalletX wording of the A6 follow-ups, which a store build words differently
+  // or leaves out. ('Listed for sale' alone is not here: bRadio's "Listed for sale — cancel the listing" still is.)
+  'Reward, e.g.',
+  'lock the reward',
+  'back this post',
+  'Locking backs a post',
+  'send it or sell it',
+  'you buy or mint live here',
+  'isn’t for sale and',
+  'Listed for sale on RelayX',
+  'listed for sale on RelayX',
+  'Your listing sold',
+  'A buyer took your listing',
+  'When a listing of yours sells',
+  'listing cancelled',
+  'Exchange search',
+  'strategies on the Exchange',
+  'Trading and sending need',
+  'offer to sell them for you',
+  'rooms and swaps work',
   // A9 (coordinator, 16 Nov 2026): the investor self-certification placeholders must not ship. Removed in
   // fix/hide-investor-status (cb3949e9); never allowlist these.
   'LEGAL REVIEW',
