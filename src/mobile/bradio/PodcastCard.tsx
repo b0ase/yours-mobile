@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Mic, Pause, Play } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getState, subscribe, toggle } from '../media/player';
-import { fmtDuration, type Podcast } from './podcasts';
+import { PODCAST_LISTED_NOTE, fmtDuration, type Podcast } from './podcasts';
+import { MARKET_ENABLED } from '../storeBuild';
 import { playPodcast } from './usePodcasts';
 
 const MUTED = '#98A2B3';
@@ -37,7 +38,7 @@ export const PodcastCard = ({
     setNote('');
     const r = await playPodcast(p, mine, apiContext, onExpand);
     setBusy(false);
-    if (r === 'listed') setNote('Listed for sale — cancel the listing to play in full');
+    if (r === 'listed') setNote(PODCAST_LISTED_NOTE);
     else if (r === 'none') setNote('Preview not available yet.');
     else if (r === 'preview' && mine) setNote('Full recording isn’t available yet, so this is the preview.');
   };
@@ -82,7 +83,8 @@ export const PodcastCard = ({
               {busy ? 'Loading…' : current && s.playing ? 'Pause' : mine ? 'Play' : 'Preview'}
             </button>
           )}
-          {onBuy && !mine && (
+          {/* Buy opens the Exchange: bWalletX only (BradioFeed passes onBuy only then; literal so a store bundle drops it). */}
+          {MARKET_ENABLED && onBuy && !mine && (
             <button
               type="button"
               onClick={onBuy}

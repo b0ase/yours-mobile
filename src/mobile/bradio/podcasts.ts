@@ -18,6 +18,7 @@
  */
 import { BCHAT_ORIGIN } from '../chat/api';
 import { BCHATX_ORIGIN } from '../feed/bchatxFeed';
+import { MARKET_ENABLED } from '../storeBuild';
 
 export type PodcastNft = { origin: string; outpoint: string | null; price: number | null; contentType: string };
 
@@ -191,10 +192,18 @@ export const fetchLiveSpaces = async (f: Fetch, handle: string, bearer?: string)
   }
 };
 
+/**
+ * Why a listed podcast plays only its preview. A store build has no Market, so its listing was made in another app
+ * on the same seed: "Listed elsewhere" (round A8, S3; the A7 "Listed elsewhere" decision). bWalletX is unchanged.
+ */
+export const PODCAST_LISTED_NOTE = MARKET_ENABLED
+  ? 'Listed for sale — cancel the listing to play in full'
+  : 'Listed elsewhere — cancel that listing in the app where you listed it to play in full';
+
 /** Thrown by the signer when the NFT sits in an OrdLock listing (not P2PKH to our key): the server refuses it. */
 export class PodcastListedError extends Error {
   constructor() {
-    super('Listed for sale — cancel the listing to play in full');
+    super(PODCAST_LISTED_NOTE);
     this.name = 'PodcastListedError';
   }
 }
