@@ -93,47 +93,52 @@ const pushData = (c: Chunk | undefined): number[] | null => {
   return c.data ?? [];
 };
 const sameBytes = (a: number[] | null, b: number[]) => !!a && a.length === b.length && a.every((x, i) => x === b[i]);
-/** An envelope field's tag: OP_1..OP_16, or a pushed little-endian number. */
-const tagOf = (c: Chunk): number | null => {
-  if (c.op >= OP.OP_1 && c.op <= OP.OP_16) return c.op - OP.OP_1 + 1;
-  const d = pushData(c);
-  return d && d.length ? d.reduceRight((n, b) => n * 256 + b, 0) : null;
+const utf8 = (d: number[]) => {
+  try {
+    return Utils.toUTF8(d);
+  } catch {
+    return '';
+  }
 };
 
-type Envelope = { types: string[]; body: number[] };
+type Envelope = { types: string[]; bodies: number[][] };
 /**
- * Every ord envelope in a script, read chunk by chunk (A11, R7 + R8): OP_0 (OP_FALSE), OP_IF, then any push whose data
- * is "ord", then tag / value fields up to OP_0 (the body pushes) and OP_ENDIF. The content types are every field-1
- * value. A malformed envelope (a field with no value, a non-push in the body, no OP_ENDIF) throws.
+ * Every ord envelope in a script, read chunk by chunk (A11 R7 + R8) and strictly in tag / value PAIRS, the way
+ * @1sat/templates Inscription.decode reads one (A12 R12 + R13): OP_0 (OP_FALSE), OP_IF, then any push whose data is
+ * "ord"; then, until OP_ENDIF, a tag followed by exactly one value. Tag OP_0 is the body (field 0); OP_1..OP_16 (any
+ * opcode above OP_PUSHDATA4, as the decoder counts it) or a one-byte push is a field number; a longer push is a named
+ * field; anything else is skipped. The value is the next chunk, a push or an opcode (OP_1..OP_16 included). Field 1
+ * values are the content types and field 0 values the bodies, wherever they sit. Throws only on a truncated push or a
+ * missing OP_ENDIF inside an envelope.
  */
 export const ordEnvelopes = (s: Script): Envelope[] => {
   const c = s.chunks;
   const out: Envelope[] = [];
   for (let i = 0; i + 2 < c.length; i++) {
     if (c[i].op !== OP.OP_0 || c[i + 1].op !== OP.OP_IF || !sameBytes(pushData(c[i + 2]), ORD)) continue;
-    const env: Envelope = { types: [], body: [] };
+    const env: Envelope = { types: [], bodies: [] };
     let j = i + 3;
     let closed = false;
     while (j < c.length) {
-      if (c[j].op === OP.OP_ENDIF) {
+      const tagChunk = c[j];
+      if (tagChunk.op === OP.OP_ENDIF) {
         closed = true;
         break;
       }
-      if (c[j].op === OP.OP_0) {
-        // The body: data pushes up to OP_ENDIF.
-        for (j++; j < c.length && c[j].op !== OP.OP_ENDIF; j++) {
-          const d = pushData(c[j]);
-          if (d === null) throw new Error('non-push in an inscription body');
-          env.body.push(...d);
-        }
-        closed = j < c.length;
-        break;
-      }
-      const tag = tagOf(c[j]);
-      const value = pushData(c[j + 1]);
-      if (value === null) throw new Error('inscription field without a value');
-      if (tag === 1) env.types.push(Utils.toUTF8(value));
-      j += 2;
+      if ((tagChunk as { invalidLength?: boolean }).invalidLength) throw new Error('truncated push');
+      let tag: number | 'named' | null = null;
+      if (tagChunk.op === OP.OP_0) tag = 0;
+      else if (tagChunk.op > OP.OP_PUSHDATA4 && tagChunk.op <= OP.OP_16) tag = tagChunk.op - 80;
+      else if (tagChunk.data?.length === 1) tag = tagChunk.data[0];
+      else if (tagChunk.data && tagChunk.data.length > 1) tag = 'named';
+      j++;
+      if (tag === null) continue; // the decoder skips an unknown tag
+      const value = c[j];
+      if (!value) break; // no value and no OP_ENDIF
+      if ((value as { invalidLength?: boolean }).invalidLength) throw new Error('truncated push');
+      if (tag === 0) env.bodies.push(value.data ?? []);
+      if (tag === 1) env.types.push(utf8(value.data ?? []));
+      j++;
     }
     if (!closed) throw new Error('inscription envelope without OP_ENDIF');
     out.push(env);
@@ -143,6 +148,7 @@ export const ordEnvelopes = (s: Script): Envelope[] => {
 };
 
 const isTokenType = (t: string) => t.split(';')[0].trim().toLowerCase() === TOKEN_CONTENT;
+const movesOnly = (t: BSV21 | BSV20 | null) => !!t && TOKEN_MOVES.has(String(t.tokenData.op).toLowerCase());
 /** One token envelope rebuilt in the decoders' canonical form, so their own validation reads it. */
 const canonicalToken = (body: number[]) =>
   new Script()
@@ -156,18 +162,34 @@ const canonicalToken = (body: number[]) =>
     .writeOpCode(OP.OP_ENDIF);
 
 /**
- * A fungible token deploy or mint (A10 R2, A11 R7–R9): ANY envelope whose content type (field 1, any case) is
- * application/bsv-20 and whose body does not decode as a plain BSV-21 or BSV-20 transfer or burn. So BSV-21
- * deploy+mint, deploy+auth, mint and auth, BSV-20 deploy and mint, and bsv-20 content the decoders can't read all count
- * (fails closed), in whatever push form and envelope position. Content that only mentions the type does not.
+ * A fungible token deploy or mint (A10 R2, A11 R7–R9, A12 R12): ANY envelope with an application/bsv-20 content type
+ * (field 1, any case) whose body (any field-0 value; none counts as empty) does not decode as a plain BSV-21 or BSV-20
+ * transfer or burn. So BSV-21 deploy+mint, deploy+auth, mint and auth, BSV-20 deploy and mint, and bsv-20 content the
+ * decoders can't read all count (fails closed), in whatever push form, field order and envelope position. Content that
+ * only mentions the type does not.
  */
 const tokenCreation = (envelopes: Envelope[]): boolean =>
-  envelopes.some((e) => {
-    if (!e.types.some(isTokenType)) return false;
-    const canon = canonicalToken(e.body);
-    const t = BSV21.decode(canon) ?? BSV20.decode(canon);
-    return !t || !TOKEN_MOVES.has(String(t.tokenData.op).toLowerCase());
-  });
+  envelopes.some(
+    (e) =>
+      e.types.some(isTokenType) &&
+      (e.bodies.length ? e.bodies : [[]]).some((body) => {
+        const canon = canonicalToken(body);
+        return !movesOnly(BSV21.decode(canon) ?? BSV20.decode(canon));
+      }),
+  );
+
+/**
+ * The second, independent check (A12): what the library decoders themselves read in the whole script. A mint when
+ * BSV21.decode / BSV20.decode give an op that is not a transfer or burn, or when Inscription.decode finds an
+ * application/bsv-20 content type (any case) that does not decode as a transfer or burn. Whatever the 1Sat libraries
+ * would read as a mint is refused, whatever this gate's own parser makes of it.
+ */
+const libraryMint = (s: Script): boolean => {
+  const t = BSV21.decode(s) ?? BSV20.decode(s);
+  if (t && !movesOnly(t)) return true;
+  const type = Inscription.decode(s)?.file?.type;
+  return typeof type === 'string' && isTokenType(type) && !movesOnly(t);
+};
 
 /** What a locking script is, for this gate: the marketplace lock, a token deploy or mint, a 1Sat asset, or other. */
 export const scriptKind = (hex: unknown): ScriptKind => {
@@ -176,7 +198,8 @@ export const scriptKind = (hex: unknown): ScriptKind => {
   try {
     const s = Script.fromHex(hex);
     if (OrdLock.isOrdLock(s) || OrdLockV2.isOrdLockV2(s)) return 'ordlock';
-    const envelopes = ordEnvelopes(s); // throws on a malformed envelope: 'unreadable', refused (A11)
+    if (libraryMint(s)) return 'mint';
+    const envelopes = ordEnvelopes(s); // throws on a truncated push or no OP_ENDIF: 'unreadable', refused (A11)
     if (tokenCreation(envelopes)) return 'mint';
     if (envelopes.length || BSV21.decode(s) || BSV20.decode(s) || Inscription.decode(s)) return 'asset';
     return 'plain';
