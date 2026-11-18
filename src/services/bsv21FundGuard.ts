@@ -8,8 +8,11 @@
  *
  * This wraps it: fetch the template ourselves, refuse if the total differs from the confirmed sats, then run
  * fundBsv21Overlay with a bsv21 service whose getFundingTemplate returns that same checked template, so the action
- * cannot pay a different (newer) amount than the one we compared.
+ * cannot pay a different (newer) amount than the one we compared. Every template output must pay the token's own fee
+ * address (feeScriptFor, derived from the token id): the sheet shows the amount, not the address (re-review of b-Aware
+ * row 123).
  */
+import { feeScriptFor } from '../mobile/wallet/send/tokenFee';
 
 export type FundingTemplate = {
   outputs: { lockingScript: string; satoshis: number; outputDescription: string }[];
@@ -43,7 +46,8 @@ type FundAction<C> = { execute(ctx: C, input: { tokenId: string }): Promise<Fund
 
 /**
  * Fund the overlay for exactly `confirmedSats`. Never pays without a confirmed positive amount, and refuses with
- * `funding-amount-changed` (templateSats = the new total) when the indexer now asks for something else.
+ * `funding-amount-changed` (templateSats = the new total) when the indexer now asks for something else, or with
+ * `funding-address-wrong` when any output pays somewhere other than the token's own fee address.
  */
 export async function fundOverlayExact<C extends CtxLike>(
   ctx: C,
@@ -64,6 +68,9 @@ export async function fundOverlayExact<C extends CtxLike>(
   const total = fundingTotal(template);
   if (total === 0) return { error: 'funding-not-needed', templateSats: 0 };
   if (total !== confirmedSats) return { error: 'funding-amount-changed', templateSats: total };
+  const own = feeScriptFor(tokenId);
+  if (!own || template.outputs.some((o) => String(o.lockingScript).toLowerCase() !== own))
+    return { error: 'funding-address-wrong' };
   // Same object, with the template pinned to the one we checked.
   const pinned = new Proxy(bsv21 as object, {
     get(target, prop) {

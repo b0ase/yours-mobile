@@ -17,6 +17,8 @@ import {
   admitPartner,
   agreementProblem,
   agreementText,
+  agreementWording,
+  LEGACY_DRAFT_PROBLEM,
   apportion,
   bpsToPct,
   holdingsFor,
@@ -166,6 +168,51 @@ describe('agreement', () => {
     expect(agreementProblem({ ...draft, agreementSha256: '0'.repeat(64) })).toContain('fingerprint');
     expect(agreementProblem({ ...draft, version: 2 })).toContain('version');
     expect(agreementProblem({ ...draft, agreementText: 'Sign here' })).toContain('standard form');
+  });
+  test('owner, 14 Nov 2026: new agreements say each partner moves only their own shares', () => {
+    expect(text).toContain("each partner's shares move only with their own approval");
+    expect(text).toContain('a majority decides other matters');
+    expect(text).not.toContain('even without one partner');
+    expect(text).not.toContain('never freezes');
+    expect(agreementWording(draft)).toBe('current');
+    const unanimous = agreementText({ ...input, rule: { kind: 'unanimous' } });
+    expect(unanimous).toContain('every partner must sign');
+  });
+  test('an agreement made with the older majority wording still checks', () => {
+    // Byte-for-byte the section 3 warning line every majority agreement carried before 14 Nov 2026.
+    const old = text.replace(
+      /^ {3}Majority: .*$/m,
+      '   Majority: if most partners agree, shares can move even without one partner — and a lost phone never freezes the business.',
+    );
+    expect(old).not.toBe(text);
+    const oldDraft = { ...draft, agreementText: old, agreementSha256: sha256Hex(old), signed: ['fred'] };
+    expect(agreementProblem(oldDraft, 'ICE')).toBeNull(); // a partner already signed it
+    expect(agreementWording(oldDraft, 'ICE')).toBe('legacy');
+    const active = { ...oldDraft, signed: [], status: 'active' };
+    expect(agreementProblem(active, 'ICE')).toBeNull(); // in force
+    expect(agreementWording(active, 'ICE')).toBe('legacy');
+    expect(agreementText(input, 'legacy')).toBe(old);
+    // ...and only that exact older wording: anything else still differs
+    const edited = old.replace('never freezes', 'rarely freezes');
+    expect(agreementProblem({ ...oldDraft, agreementText: edited, agreementSha256: sha256Hex(edited) })).toContain(
+      'differs',
+    );
+    expect(agreementWording({ ...oldDraft, agreementSha256: '0'.repeat(64) })).toBeNull();
+  });
+  test('bit-sign #713: a fresh draft in the old wording is refused; the new wording checks', () => {
+    const old = agreementText(input, 'legacy');
+    const fresh = { ...draft, agreementText: old, agreementSha256: sha256Hex(old), status: 'draft', signed: [] };
+    expect(agreementProblem(fresh, 'ICE')).toBe(LEGACY_DRAFT_PROBLEM);
+    expect(agreementWording(fresh, 'ICE')).toBeNull();
+    expect(agreementProblem({ ...fresh, signed: undefined, status: undefined })).toBe(LEGACY_DRAFT_PROBLEM);
+    const current = { ...draft, status: 'draft', signed: [] };
+    expect(agreementProblem(current, 'ICE')).toBeNull();
+    expect(agreementWording(current, 'ICE')).toBe('current');
+    // byte for byte either way: an edited new-wording text still differs, even when already signed
+    const edited = text.replace('a majority decides other matters', 'a majority decides everything');
+    expect(
+      agreementProblem({ ...current, agreementText: edited, agreementSha256: sha256Hex(edited), signed: ['fred'] }),
+    ).toContain('differs');
   });
   test('sign message binds room, version, hash, signer and time (bit-sign format)', () => {
     expect(signMessage({ roomId: 'r1', version: 2, sha256: 'ab', handle: 'fred', at: 'T' })).toBe(

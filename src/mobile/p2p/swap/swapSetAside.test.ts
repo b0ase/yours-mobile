@@ -10,7 +10,10 @@ let sendTx: (input: SendInput) => { txid: string; tx: number[] };
 mock.module('../../../services/tokenSpendGuard', () => ({
   guardedSendBsv21: { execute: async (_ctx: unknown, input: SendInput) => (sends.push(input), sendTx(input)) },
 }));
-mock.module('../../config/killSwitch', () => ({ assertNotPaused: async () => undefined }));
+// Keep the module's other exports (FeaturePausedError): this mock outlives the file, and the next swap test file
+// imports swapActions, which needs them.
+const realKillSwitch = { ...(await import('../../config/killSwitch')) };
+mock.module('../../config/killSwitch', () => ({ ...realKillSwitch, assertNotPaused: async () => undefined }));
 
 const { offerSwap, setAsideDestination, setAsideTiming, _resetSetAsides, SWAP_TIMED_OUT } =
   await import('./swapActions');

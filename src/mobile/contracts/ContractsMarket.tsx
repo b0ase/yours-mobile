@@ -9,6 +9,7 @@ import { fetchExchangeRate } from '../../utils/wallet';
 import { marketFeeSats } from '../market/fee';
 import {
   buyContract,
+  contractAuthorLabel,
   claimContract,
   contractPriceSats,
   listContracts,
@@ -18,6 +19,7 @@ import {
 } from './market';
 import { CONTRACT_DISCLAIMER, contractEnvelope, contractSaleProblems, parseDescriptor } from './contractNft';
 import { ErrorActions } from '../errors/ErrorActions';
+import { accountNamesFor } from '../names/accountNames';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -75,6 +77,40 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
   const [mine, setMine] = useState<Record<string, string>>({}); // copy outpoint → contract origin
   const [busy, setBusy] = useState('');
   const [publishing, setPublishing] = useState(false);
+  /** How each listing's author is shown (contractAuthorLabel): signed → $name or short key; unsigned → null. */
+  const [authors, setAuthors] = useState<Record<string, { label: string; named: boolean } | null>>({});
+
+  /** Labels are kept per listing AND signature, so a refresh that serves a different envelope is checked again. */
+  const authorKey = (c: ContractListing) => `${c.origin}|${c.envelope.authorSig ?? ''}`;
+
+  useEffect(() => {
+    let live = true;
+    for (const c of items ?? [])
+      if (!(authorKey(c) in authors))
+        void contractAuthorLabel((u, i) => fetch(u, i), c.envelope).then(
+          (a) => live && setAuthors((m) => ({ ...m, [authorKey(c)]: a })),
+          () => {},
+        );
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+  /**
+   * The author line: signed → $name (or short key); unsigned → the typed name, marked as the author's own words; not
+   * checked yet → "checking", never the typed name (review of 00176fbe).
+   */
+  const authorText = (c: ContractListing) => {
+    const a = authors[authorKey(c)];
+    if (a) return a.label;
+    if (a === undefined) return 'checking the author…';
+    const e = c.envelope;
+    return e.author.name ? `${e.author.name} (as they call themselves)` : e.author.address.slice(0, 8);
+  };
+  /** A paid listing found unsigned (or not signed by its claimed key). */
+  const unsignedPaid = (c: ContractListing) => c.envelope.sale.priceUsd > 0 && authors[authorKey(c)] === null;
+  /** Buy waits for the signature check on a paid listing, so it is never enabled before the check says yes. */
+  const paidNotVerified = (c: ContractListing) => c.envelope.sale.priceUsd > 0 && !authors[authorKey(c)];
 
   const refresh = () => {
     listContracts().then(setItems, (e) => setError(e instanceof Error ? e.message : String(e)));
@@ -197,7 +233,7 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
               {e.contract.summary}
             </div>
             <div className="text-[11px]" style={{ color: MUTED }}>
-              by {e.author.name || e.author.address.slice(0, 8)} · {left > 0 ? `${left} left` : 'sold out'}
+              by {authorText(c)} · {left > 0 ? `${left} left` : 'sold out'}
               {ownedOrigins.has(c.origin) ? ' · you own this' : ''}
             </div>
           </button>
@@ -243,7 +279,10 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
                   onDone={() => (setPublishing(false), refresh())}
                   publish={async (env) => {
                     if (!apiContext) throw new Error('Wallet is locked');
-                    return publishContract(apiContext, env);
+                    // Signed as this account, with its bWalletX paymail as the handle buyers see (owner, 14 Nov).
+                    const account = chromeStorageService.getCurrentAccountObject().account;
+                    const handle = accountNamesFor(account?.addresses.identityAddress).paymail || undefined;
+                    return publishContract(apiContext, env, handle);
                   }}
                   author={{
                     name: chromeStorageService.getCurrentAccountObject().account?.name ?? '',
@@ -284,7 +323,12 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
                       )}
                       {open.envelope.contract.codeHash && <Row k="Code hash" v={open.envelope.contract.codeHash} />}
                       {open.envelope.contract.source && <Row k="Source" v={open.envelope.contract.source} />}
-                      <Row k="Author" v={open.envelope.author.name || open.envelope.author.address} />
+                      {/* Signed: the $name bound to the signing key (or its short key), never the typed name; the
+                          address in full either way (owner, 14 Nov 2026; review of row 115). */}
+                      <Row k="Author" v={`${authorText(open)} · ${open.envelope.author.address}`} />
+                      {unsignedPaid(open) && <Row k="Signature" v="Not signed by its author: it can't be bought" />}
+                      {/* The address a paid buy pays, in full (b-Aware 25 Oct 2026, row 115): never paid unseen. */}
+                      {open.envelope.sale.priceUsd > 0 && <Row k="Pays" v={open.envelope.sale.payTo} />}
                       <Row k="Copies" v={`${open.sold} of ${open.envelope.sale.copies} taken`} />
                     </div>
                     <p className="text-[11px] m-0" style={{ color: MUTED }}>
@@ -306,7 +350,7 @@ export const ContractsMarket = ({ tab = 'all', onTab }: { tab?: ContractsTab; on
                         return (
                           <button
                             type="button"
-                            disabled={!!busy || soldOut || (paid && !rate) || !apiContext}
+                            disabled={!!busy || soldOut || (paid && !rate) || !apiContext || paidNotVerified(open)}
                             onClick={() => void buy(open)}
                             className="flex items-center justify-center gap-2 rounded-full py-3 font-bold border-0"
                             style={{ background: GOLD, color: '#000', opacity: busy || soldOut ? 0.6 : 1 }}

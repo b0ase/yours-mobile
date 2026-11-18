@@ -1,5 +1,5 @@
 import { sendMnee, type OneSatContext } from '@1sat/actions';
-import { sendBsv } from '../../utils/guardedSendBsv';
+import { sendBsv, type PaymailRequest } from '../../utils/guardedSendBsv';
 import { isNative } from '../native';
 import { isPermissionDenied, type MediaKind } from '../permissions/mediaPermission';
 import { defaultHttp } from '../chat/api';
@@ -9,6 +9,7 @@ import { usdToSats } from '../money/money';
 import { PAID_CALLS_ENABLED } from '../storeBuild';
 import { CallsClient, walletCallSigner, type BlockEntry } from './api';
 import { fetchPeerBPhone, myRateCard } from './bphone';
+import { bindPayee } from './payee';
 // Type only: the class (and livekit-client, ~0.55 MB) loads when a call joins (joinMedia), not at app start.
 import type { CallMedia } from './media';
 import { verifyCaller } from './peer';
@@ -19,7 +20,6 @@ import {
   decideMeterPayment,
   parsePayNotice,
   payNotice,
-  payToFor,
   recordPayment,
   type Meter,
   type PayTo,
@@ -272,12 +272,14 @@ export async function dial(peer: Peer, opts: { video?: boolean } = {}) {
       }
       const card = checked.card;
       if (card.asset.kind === 'bsv21') checkedTokenDec.set(card.asset.id, card.asset.dec);
-      const payTo = payToFor(card, bp?.paymail ?? null);
-      if (!payTo) {
-        set({ error: `${peer.label} charges for calls but has nowhere to be paid yet` });
+      // The payee is bound to the key this call goes to, or the call isn't paid at all (calls/payee.ts, row 114).
+      const sameKey = bp?.key.toLowerCase() === peer.key.toLowerCase();
+      const bound = await bindPayee(card, sameKey ? (bp?.paymail ?? null) : null, peer.key);
+      if (!bound.ok) {
+        set({ error: `${peer.label} ${bound.error}` });
         return;
       }
-      dispatch({ type: 'QUOTE', peer, card, payTo, video: !!opts.video });
+      dispatch({ type: 'QUOTE', peer, card, payTo: bound.payTo, video: !!opts.video });
       return;
     }
   }
@@ -397,12 +399,18 @@ async function meterTick(s: Extract<CallState, { phase: 'active' }>) {
 async function pay(ctx: OneSatContext, card: RateCard, payTo: PayTo, units: number): Promise<string | null> {
   const asset = card.asset;
   if (asset.kind === 'bsv') {
-    if (!('paymail' in payTo)) throw new Error('No paymail to pay');
+    if (!('paymail' in payTo) || !payTo.identityKey) throw new Error('No paymail to pay');
     const rate = cachedExchangeRate() || (await fetchExchangeRate('main').catch(() => 0));
     const sats = usdToSats(units, rate);
     if (sats === null) throw new Error('BSV price unavailable');
+    // identityKey: the paymail host's outputs must derive from the callee's own key (row 114), not the paymail's.
+    const request: PaymailRequest = {
+      paymail: payTo.paymail,
+      satoshis: Math.max(sats, MIN_PAY_SATS),
+      identityKey: payTo.identityKey,
+    };
     const res = await sendBsv.execute(ctx, {
-      requests: [{ paymail: payTo.paymail, satoshis: Math.max(sats, MIN_PAY_SATS) }],
+      requests: [request],
       requireVerified: true,
     } as Parameters<typeof sendBsv.execute>[1]);
     if (res.error || !res.txid) throw new Error(String(res.error ?? 'send failed'));

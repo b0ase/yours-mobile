@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import * as F from '../private/location.fixtures';
 import { BchatClient, bytesToBase64, nativeFormData, parseGifResults, type FormPart, type Http } from './api';
 
 const session = { token: 'T', handle: 'me', address: 'a' };
@@ -11,7 +12,8 @@ describe('room uploads (photos, files, voice notes)', () => {
       posts.push({ url, auth, parts });
       return { status: 200, data: { ok: true } };
     };
-    const file = new File([new Uint8Array([1, 2, 3])], 'pic.png', { type: 'image/png' });
+    // A real (clean) PNG: anything unreadable as an image may carry location and is refused (uploadLocation.test.ts).
+    const file = new File([F.u8(F.png())], 'pic.png', { type: 'image/png' });
     const progress: number[] = [];
     await client.uploadMedia('ROOM', file, (f) => progress.push(f));
     expect(posts).toHaveLength(1);
@@ -30,7 +32,12 @@ describe('room uploads (photos, files, voice notes)', () => {
       const last = parts.some((p) => p.key === 'filename');
       return { status: 200, data: last ? { assembled: true } : {} };
     };
-    const file = new File([new Uint8Array(7 * 1024 * 1024)], 'clip.mp4', { type: 'video/mp4' });
+    // A clean MP4 (ftyp + moov, no location) with a 7 MB mdat.
+    const head = F.mp4({ mdat: [] }).slice(0, -8);
+    const bytes = new Uint8Array(head.length + 8 + 7 * 1024 * 1024);
+    bytes.set([...head, 0, 0, 0, 0, ...F.ascii('mdat')]);
+    new DataView(bytes.buffer).setUint32(head.length, bytes.length - head.length);
+    const file = new File([bytes], 'clip.mp4', { type: 'video/mp4' });
     await client.uploadMedia('ROOM', file);
     expect(posts.map((p) => p.url.endsWith('/media/chunk'))).toEqual([true, true, true]);
     const last = posts[2].parts;

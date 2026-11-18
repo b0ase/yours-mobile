@@ -38,7 +38,11 @@ describe('BSV-21 send fee', () => {
 
   test('the guard blocks createAction before it reaches the wallet', async () => {
     let called = 0;
-    const w = withTokenSendGuard({ createAction: async () => ++called, other: () => 'ok' }, null);
+    const w = withTokenSendGuard(
+      { createAction: async () => ++called, other: () => 'ok' },
+      null,
+      `${'ab'.repeat(32)}_0`,
+    );
     expect(w.other()).toBe('ok');
     await w.createAction({ outputs: [tokenOut] } as never);
     expect(called).toBe(1);

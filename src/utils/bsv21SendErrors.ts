@@ -29,6 +29,8 @@ export const bsv21ErrorMessage = (error: string | undefined, ticker: string): st
       return `Couldn't get the ${ticker} indexer's price. Nothing was paid. Try again.`;
     case 'funding-amount-changed':
       return `The ${ticker} indexer changed its price. Nothing was paid. Check the new amount and confirm again.`;
+    case 'funding-address-wrong':
+      return `The ${ticker} indexer asked to be paid at an address that isn't ${ticker}'s fee address. Nothing was paid.`;
     default:
       return undefined;
   }
