@@ -164,7 +164,8 @@ export const newAppSub = (r: AppSubscribeRequest, potId: string, now: number) =>
     name: r.merchantName,
     origin: r.appOrigin,
     merchantKey: r.merchantKey,
-    ...(PAYMAIL_RE.test(r.payTo) ? { paymail: r.payTo.toLowerCase() } : { address: r.payTo }),
+    // A paymail is pinned to the address its first payment pays, right after this approval (payeeBinding.ts).
+    ...(PAYMAIL_RE.test(r.payTo) ? { paymail: r.payTo.toLowerCase(), pinOnFirstPay: true } : { address: r.payTo }),
   },
   amount: { value: r.usdPerMonth, currency: 'USD' as const },
   period: 'month' as const,

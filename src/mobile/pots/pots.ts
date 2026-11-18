@@ -44,6 +44,17 @@ export type Payee = {
    * only go to this key; a different one flags the order for review (payeeBinding.ts).
    */
   pinnedKey?: string;
+  /**
+   * Where a paymail / $name / OpNS payee was paid when the user approved it (b-Aware row 73): the address it resolved
+   * to on the confirm card, or one the user approved later on a review card. Automatic payments go only to this
+   * address; a host that serves any other address (even with the same key) flags the order for review.
+   */
+  pinnedAddress?: string;
+  /**
+   * Set on an approved app subscription to a paymail (newAppSub): the approval named the paymail, not an address, so
+   * its first payment pins what it pays. Only while nothing has been paid; never used for older orders.
+   */
+  pinOnFirstPay?: boolean;
 };
 
 export type Subscription = {
@@ -73,14 +84,23 @@ export type Subscription = {
   /** What the app said it is for (app subscriptions). */
   description?: string;
   /** The last payment that went through: the receipt the Subscriptions list and status call show. */
-  lastReceipt?: { at: number; txid: string; usd: number; sats: number };
+  lastReceipt?: { at: number; txid: string; usd: number; sats: number; to?: string };
   /** When the user cancelled. A tombstone: once set, no write can move this order out of 'cancelled'. */
   cancelledAt?: number;
   /**
    * The payee's destination failed verification (changed key, bad binding): nothing is paid until the user
    * confirms the new destination (confirmPayeeReview).
    */
-  needsReview?: { reason: string; at: number; servedKey?: string };
+  needsReview?: {
+    reason: string;
+    at: number;
+    /** The key the payee serves now, if any. */
+    servedKey?: string;
+    /** The address the payee resolves to now: what Approve pins. Absent when the destination itself was refused. */
+    servedAddress?: string;
+    /** An order saved before address pinning, asked once: there is no approved address to compare with. */
+    legacy?: boolean;
+  };
 };
 
 const POTS = 'bwallet.pots';
@@ -352,6 +372,8 @@ export type PendingPayment = {
   at: number;
   /** 'PNEE': rawTx is a BEEF hex of a PNEE transfer, broadcast with broadcastPnee. Absent = a BSV payment. */
   unit?: 'PNEE';
+  /** The address this payment pays (absent on records written before address pinning). */
+  to?: string;
 };
 export const getPending = (subId: string): PendingPayment | null =>
   read<Record<string, PendingPayment>>(PENDING, {})[subId] ?? null;
@@ -471,11 +493,20 @@ export const resumeSub = (id: string, now = Date.now()) => {
   appendAgentLog(s.potId, { at: now, action: 'sub-resume', detail: `Resumed ${s.payee.name}`, usd: 0 });
 };
 
-/** The user checked and accepted the payee's current destination: pin its key and let payments go again. */
-export const confirmPayeeReview = (id: string, key: string | undefined, now = Date.now()) => {
+/**
+ * The user tapped Approve on the destination the review card showed: pin that address (and key) and let payments go
+ * again. Only this explicit tap moves a pin (b-Aware row 73); the scheduler never does.
+ */
+export const confirmPayeeReview = (id: string, dest: { address: string; pubkey?: string }, now = Date.now()) => {
   const s = getSub(id);
-  if (!s) return;
-  saveSub({ ...s, payee: { ...s.payee, pinnedKey: key }, needsReview: undefined, lastError: undefined });
+  if (!s || !dest.address) return;
+  const { pinOnFirstPay: _first, ...payee } = s.payee;
+  saveSub({
+    ...s,
+    payee: { ...payee, pinnedKey: dest.pubkey, pinnedAddress: dest.address },
+    needsReview: undefined,
+    lastError: undefined,
+  });
   appendAgentLog(s.potId, {
     at: now,
     action: 'sub-review',

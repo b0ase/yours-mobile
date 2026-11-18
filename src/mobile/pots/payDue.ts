@@ -32,7 +32,7 @@ import {
   type PendingPayment,
   type Subscription,
 } from './pots';
-import { PayeeReviewError, type PayeeDestination } from './payeeBinding';
+import { PayeeReviewError, legacyPin, scheduledOutputsRefusal, type PayeeDestination } from './payeeBinding';
 
 export type PayDeps = {
   /**
@@ -44,7 +44,7 @@ export type PayDeps = {
   bsvUsd: number;
   /**
    * Where to pay this payee (address, or a resolved and verified paymail). Throws PayeeReviewError when the
-   * destination doesn't verify (changed / bad binding): the order is flagged needsReview and not paid.
+   * destination doesn't verify (changed key or address, bad binding): the order is flagged needsReview and not paid.
    */
   resolve: (p: Payee) => Promise<string | PayeeDestination>;
   /** Sign (don't broadcast) one tx from the pot. */
@@ -209,15 +209,29 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
         const d = await deps.resolve(s.payee);
         const dest = typeof d === 'string' ? { address: d } : d;
         address = dest.address;
-        // An order saved before pinning: pin the first key that verified (payeeBinding.ts).
-        if (s.payee.paymail && !s.payee.pinnedKey && dest.pubkey) {
-          const key = dest.pubkey;
-          s = patch(s.id, (cur) => ({ payee: { ...cur.payee, pinnedKey: cur.payee.pinnedKey ?? key } })) ?? s;
+        // A paymail order with no pinned address (older order, or an app subscription's first payment): pin only
+        // what it already paid or was approved for; otherwise stop and ask once (payeeBinding.ts legacyPin).
+        if (s.payee.paymail && !s.payee.pinnedAddress) {
+          const pins = legacyPin(s, dest);
+          s =
+            patch(s.id, (cur) => {
+              const { pinOnFirstPay: _first, ...payee } = cur.payee;
+              return { payee: { ...payee, ...pins } };
+            }) ?? s;
         }
       } catch (e) {
         if (e instanceof PayeeReviewError) {
           const reason = e.message;
-          patch(s.id, () => ({ lastError: reason, needsReview: { reason, at: now, servedKey: e.servedKey } }));
+          patch(s.id, () => ({
+            lastError: reason,
+            needsReview: {
+              reason,
+              at: now,
+              ...(e.servedKey ? { servedKey: e.servedKey } : {}),
+              ...(e.servedAddress ? { servedAddress: e.servedAddress } : {}),
+              ...(e.legacy ? { legacy: true } : {}),
+            },
+          }));
           deps.notify?.(`Check who ${s.payee.name} is paid to`, reason);
           return { id: s.id, ok: false, reason };
         }
@@ -226,17 +240,22 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       // Last look before anything is signed: a Pause or Cancel tapped while resolving stops it here.
       const fresh = live(s.id);
       if (!fresh || fresh.periodIndex !== s.periodIndex) return null;
+      // The outputs pay the checked destination exactly the scheduled amount, nothing more and nowhere else.
+      const perPeriod = pnee ? units! : sats!;
+      const outputs = Array.from({ length: count }, () => ({ address, amount: perPeriod }));
+      const refused = scheduledOutputsRefusal(outputs, address, perPeriod, count);
+      if (refused) return fail(s, refused, deps);
       let signed: { rawTx: string; txid: string };
       try {
         signed = pnee
           ? await deps.signPnee!(
               s.potId,
-              Array.from({ length: count }, () => ({ address, units: units! })),
+              outputs.map((o) => ({ address: o.address, units: o.amount })),
               s.memo,
             )
           : await deps.sign(
               s.potId,
-              Array.from({ length: count }, () => ({ address, sats: sats! })),
+              outputs.map((o) => ({ address: o.address, sats: o.amount })),
               s.memo,
             );
       } catch (e) {
@@ -252,6 +271,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
         ...signed,
         usd,
         at: now,
+        to: address,
         ...(pnee ? { unit: 'PNEE' as const } : { sats: sats! * count }),
       };
       savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
@@ -288,7 +308,7 @@ async function settlePending(s: Subscription, p: PendingPayment, deps: PayDeps, 
     saveSub({
       ...next,
       status: cur.status === 'paused' || cur.status === 'cancelled' ? cur.status : next.status,
-      lastReceipt: { at: now, txid: p.txid, usd: p.usd, sats: p.sats ?? 0 },
+      lastReceipt: { at: now, txid: p.txid, usd: p.usd, sats: p.sats ?? 0, ...(p.to ? { to: p.to } : {}) },
     });
     appendAgentLog(s.potId, {
       at: now,

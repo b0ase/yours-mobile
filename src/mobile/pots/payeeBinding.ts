@@ -1,15 +1,21 @@
 /**
- * Payee binding for standing orders. A paymail payee is resolved at setup and its identity key is pinned on the
- * order (Payee.pinnedKey). Every automatic payment re-resolves the paymail through destinationFor, the same
- * checks as an interactive send, and must also match the pinned key. Anything else is not paid: the order is
- * flagged needsReview and the user confirms the new destination by hand.
+ * Payee binding for standing orders. A paymail / $name / OpNS payee is resolved when the user approves it, and the
+ * destination they saw is pinned on the order: the address it resolved to (Payee.pinnedAddress) and, when the host
+ * serves one, its identity key (Payee.pinnedKey). Every automatic payment re-resolves the payee through
+ * destinationFor, the same checks as an interactive send, and must match BOTH pins. Anything else is not paid: the
+ * order is flagged needsReview and the user approves the new destination with an explicit tap.
  *
- * Legacy orders saved before pinning have no pinnedKey. They are pinned on their first resolution that passes
- * destinationFor and serves a key (payDue does this), so the first verified key becomes the reference.
- * A paymail whose host serves no identity key can't be pinned; it is still checked by destinationFor each time.
+ * The address is pinned as well as the key because standing orders pay basic paymail address resolution, where the
+ * host serves an address that nothing ties to the key: a host could keep serving the pinned key and swap the address
+ * (b-Aware row 73, open since 25 Oct 2026, reported five times).
+ *
+ * Orders saved before address pinning have no pinnedAddress (legacyPin). They are pinned only when the address that
+ * resolves now is the one their last payment went to; otherwise they stop and ask once. An approved app subscription
+ * to a paymail (pinOnFirstPay) pins what its first payment pays, since nothing has been paid to compare with yet.
  */
 import { destinationFor, proofRefusal, type Resolved } from '../names/names';
-import type { Payee } from './pots';
+import { checkPaymentOutputs } from '../../utils/guardedSendBsv';
+import type { Payee, Subscription } from './pots';
 
 /** The destination could not be verified: don't pay, ask the user to confirm it again. */
 export class PayeeReviewError extends Error {
@@ -17,6 +23,10 @@ export class PayeeReviewError extends Error {
     message: string,
     /** The key the paymail serves now, if any (shown on the review card). */
     public readonly servedKey?: string,
+    /** The address the payee resolves to now, if any: what the review card shows and Approve pins. */
+    public readonly servedAddress?: string,
+    /** An order saved before address pinning, with no approved address to compare with. */
+    public readonly legacy = false,
   ) {
     super(message);
     this.name = 'PayeeReviewError';
@@ -27,7 +37,15 @@ export const PAYEE_KEY_CHANGED =
   'This paymail now points to a different wallet than when you set up this subscription. Not paying it until you confirm the new destination.';
 export const PAYEE_KEY_MISSING =
   'This paymail no longer shows the wallet key it had when you set up this subscription. Not paying it until you confirm.';
+export const PAYEE_ADDRESS_CHANGED =
+  'This paymail now gives a different address than the one you approved. Not paying it until you approve the new destination.';
+export const PAYEE_LEGACY_CONFIRM =
+  'This subscription was set up before bWalletX remembered the address it pays. Not paying it until you approve where it goes.';
 export const P2P_ONLY = (paymail: string) => `${paymail} only takes P2P payments, which subscriptions can’t send yet`;
+
+/** The review card's headline (b-Aware row 73). */
+export const pointsSomewhereNew = (payee: string) =>
+  `${payee} now points somewhere new. Approve the new destination to keep paying.`;
 
 /** Short form of an identity key for confirm cards: first 8 and last 6 hex characters. */
 export const keyFingerprint = (key: string) => (key.length > 16 ? `${key.slice(0, 8)}…${key.slice(-6)}` : key);
@@ -36,8 +54,8 @@ export type PayeeDestination = { address: string; pubkey?: string };
 
 /**
  * Where to pay a resolved paymail payee, or throw. destinationFor first (unbound / bad binding / BRC-169 key change
- * all refuse); then the pinned key must match unless `ignorePin` (the user is reviewing a new destination).
- * Bad bindings and key changes throw PayeeReviewError; other refusals throw a plain Error.
+ * all refuse); then the pinned key and the pinned address must both match unless `ignorePin` (the user is reviewing
+ * a new destination). Bad bindings and pin mismatches throw PayeeReviewError; other refusals throw a plain Error.
  */
 export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: boolean } = {}): PayeeDestination => {
   const d = destinationFor(r, 'bsv');
@@ -46,10 +64,58 @@ export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: bool
       throw new PayeeReviewError(d.error, r.pubkey);
     throw new Error(d.error);
   }
-  if (p.pinnedKey && !opts.ignorePin) {
-    if (!r.pubkey) throw new PayeeReviewError(PAYEE_KEY_MISSING);
-    if (r.pubkey !== p.pinnedKey) throw new PayeeReviewError(PAYEE_KEY_CHANGED, r.pubkey);
-  }
   if (r.targetKind !== 'address') throw new Error(P2P_ONLY(p.paymail ?? r.input));
-  return { address: d.to, ...(r.pubkey ? { pubkey: r.pubkey } : {}) };
+  const served = d.to;
+  if (p.pinnedKey && !opts.ignorePin) {
+    if (!r.pubkey) throw new PayeeReviewError(PAYEE_KEY_MISSING, undefined, served);
+    if (r.pubkey !== p.pinnedKey) throw new PayeeReviewError(PAYEE_KEY_CHANGED, r.pubkey, served);
+  }
+  // The key alone proves nothing about a basic-resolution address: the address is pinned too.
+  if (p.pinnedAddress && !opts.ignorePin && served !== p.pinnedAddress)
+    throw new PayeeReviewError(PAYEE_ADDRESS_CHANGED, r.pubkey, served);
+  return { address: served, ...(r.pubkey ? { pubkey: r.pubkey } : {}) };
+};
+
+/**
+ * The pins a resolved payee without a pinned address takes before its next automatic payment, or throw
+ * PayeeReviewError (asked once: payDue stops the order until the user approves).
+ *
+ * - An approved app subscription to a paymail that has never paid (pinOnFirstPay): pin what it pays now.
+ * - An order saved before address pinning: pin only when the address is the one its last payment went to (and the
+ *   key, if one was pinned, still matches: payeeDestination checked that). With no recorded last address, ask.
+ *
+ * Never pins a destination that differs from one already paid or approved.
+ */
+export const legacyPin = (
+  s: Pick<Subscription, 'payee' | 'paidCount' | 'lastReceipt'>,
+  dest: PayeeDestination,
+): Pick<Payee, 'pinnedAddress' | 'pinnedKey'> => {
+  const pins = {
+    pinnedAddress: dest.address,
+    ...(s.payee.pinnedKey || dest.pubkey ? { pinnedKey: s.payee.pinnedKey ?? dest.pubkey } : {}),
+  };
+  if (s.payee.pinOnFirstPay && !s.paidCount && !s.lastReceipt) return pins;
+  const last = s.lastReceipt?.to;
+  if (last && last === dest.address) return pins;
+  throw new PayeeReviewError(last ? PAYEE_ADDRESS_CHANGED : PAYEE_LEGACY_CONFIRM, dest.pubkey, dest.address, !last);
+};
+
+/**
+ * The outputs a scheduled payment is about to sign must pay `address` exactly `count` × `perPeriod` and nothing
+ * else: the check one-off paymail sends run on host outputs (guardedSendBsv.checkPaymentOutputs, 5.2.41), applied
+ * to the pinned destination. Returns null when they match, otherwise why not. Pure.
+ */
+export const scheduledOutputsRefusal = (
+  outputs: readonly { address: string; amount: number }[],
+  address: string,
+  perPeriod: number,
+  count: number,
+): string | null => {
+  if (!address) return 'Payment refused: no destination. Nothing was sent.';
+  if (!Number.isSafeInteger(count) || count < 1) return 'Payment refused: no periods to pay. Nothing was sent.';
+  const why = checkPaymentOutputs(
+    [{ paymail: address, satoshis: perPeriod * count }],
+    outputs.map((o) => ({ satoshis: o.amount, outputDescription: `Paymail payment to ${o.address}` })),
+  );
+  return why ? `Payment refused: ${why}. Nothing was sent.` : null;
 };

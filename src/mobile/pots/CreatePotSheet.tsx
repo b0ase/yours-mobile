@@ -116,7 +116,10 @@ export const AddOrderSheet = ({
         ...(recipient.includes('@') || recipient.startsWith('$')
           ? {
               paymail: recipient,
-              ...(checked?.forTo === recipient && checked.pubkey ? { pinnedKey: checked.pubkey } : {}),
+              // Pin what the confirm card showed: the address, and the wallet key when the host serves one.
+              ...(checked?.forTo === recipient
+                ? { pinnedAddress: checked.address, ...(checked.pubkey ? { pinnedKey: checked.pubkey } : {}) }
+                : {}),
             }
           : { address: recipient }),
       };
@@ -138,7 +141,7 @@ export const AddOrderSheet = ({
     const p = subProblem(n);
     if (p) return setError(p);
     if (needsCheck) {
-      // Resolve and verify the paymail now, show who it is, and pin that key on Set up.
+      // Resolve and verify the paymail now, show who it is, and pin that address (and key) on Set up.
       setChecking(true);
       setError('');
       try {
@@ -256,9 +259,9 @@ export const AddOrderSheet = ({
           <div className="text-white">Pays {recipient}</div>
           <div style={{ color: MUTED }}>To address {checked.address}</div>
           <div style={{ color: MUTED }}>
-            {checked.pubkey
-              ? `Wallet key ${keyFingerprint(checked.pubkey)}. If this paymail ever points elsewhere, payments stop until you confirm.`
-              : 'This paymail shows no wallet key, so a change of wallet can’t be detected.'}
+            {checked.pubkey ? `Wallet key ${keyFingerprint(checked.pubkey)}. ` : ''}
+            If this paymail ever gives a different address{checked.pubkey ? ' or wallet key' : ''}, payments stop until
+            you approve the new destination.
           </div>
         </div>
       )}

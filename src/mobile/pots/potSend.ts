@@ -66,6 +66,24 @@ export const payeeAddress = async (p: Payee): Promise<string> => (await resolveP
 
 export type PotPayment = { address: string; sats: number };
 
+/**
+ * A pot tx's paying outputs (all but its change) are exactly the requested payments, each a P2PKH to the requested
+ * address for the requested sats, plus 0-sat data (the memo). Null when they are; otherwise why not. Pure.
+ */
+export const potTxRefusal = (
+  built: readonly { lockingScript: string; satoshis: number }[],
+  requested: readonly PotPayment[],
+): string | null => {
+  const want = requested.map((o) => `${new P2PKH().lock(o.address).toHex()}:${o.sats}`);
+  for (const o of built) {
+    if (o.satoshis === 0) continue;
+    const i = want.indexOf(`${o.lockingScript}:${o.satoshis}`);
+    if (i < 0) return 'Payment refused: the pot payment does not match the scheduled amount. Nothing was sent.';
+    want.splice(i, 1);
+  }
+  return want.length ? 'Payment refused: the pot payment does not match the scheduled amount. Nothing was sent.' : null;
+};
+
 /** Sign (but don't broadcast) one tx from the pot paying `outputs`. payDue records it before broadcasting. */
 export const signFromPot = async (
   store: ChromeStorageService,
@@ -112,6 +130,15 @@ export const signFromPot = async (
   }
   if (added < need) throw new Error('Not enough in the pot');
   await tx.fee(new SatoshisPerKilobyte(store.getCustomFeeRate()));
+  // What is signed pays exactly the requested outputs (the pinned destination, the scheduled amount) besides the
+  // pot's own change and the memo: nothing else can pay out (b-Aware row 73).
+  const why = potTxRefusal(
+    tx.outputs
+      .filter((o) => !o.change)
+      .map((o) => ({ lockingScript: o.lockingScript.toHex(), satoshis: o.satoshis ?? 0 })),
+    outputs,
+  );
+  if (why) throw new Error(why);
   await tx.sign();
   return { rawTx: tx.toHex(), txid: tx.id('hex') };
 };
