@@ -180,7 +180,7 @@ export async function cancelListing(
     },
   ];
   const fee = details?.status;
-  const overlayFee = cappedOverlayFee(fee?.fee_address, fee?.fee_per_output, 1); // H-5: capped
+  const overlayFee = cappedOverlayFee(tokenId, fee?.fee_address, fee?.fee_per_output, 1); // H-5: capped; row 123: token's own fee address
   if (overlayFee) {
     outputs.push({
       lockingScript: new P2PKH().lock(overlayFee.address).toHex(),

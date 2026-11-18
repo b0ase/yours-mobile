@@ -505,7 +505,7 @@ export const AttachSheet = ({
   files: File[];
   onRemove: (i: number) => void;
   onAddMore: (() => void) | null;
-  upload: (file: File, onProgress: (f: number) => void) => Promise<void>;
+  upload: (file: File, onProgress: (f: number) => void) => Promise<unknown>;
   onDone: () => void;
   onClose: () => void;
 }) => {

@@ -313,6 +313,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
       const guarded = withTokenSendGuard(
         apiContext.wallet,
         fee ? { feeScript: new P2PKH().lock(fee.address).toHex(), maxSats: fee.sats } : null,
+        token.info.id!,
       );
       const ctx = {
         ...apiContext,

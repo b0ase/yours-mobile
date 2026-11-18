@@ -10,7 +10,16 @@ import type { WalletInterface } from '@bsv/sdk';
 import { BWALLET_PAYMAIL_API } from '../names/config';
 import type { Fetch } from '../names/names';
 import { paymailEnabled, signRequest } from '../names/paymail';
-import { EMPTY_PROFILE, parseBooking, parseProfile, type Booking, type BPhoneProfile, type Category } from './rateCard';
+import {
+  EMPTY_PROFILE,
+  parseBooking,
+  parseProfile,
+  parseRateCard,
+  type Booking,
+  type BPhoneProfile,
+  type Category,
+  type RateCard,
+} from './rateCard';
 
 type Signer = Pick<WalletInterface, 'getPublicKey' | 'createSignature'>;
 
@@ -74,6 +83,33 @@ const writeMyProfileCache = (identityKey: string, p: BPhoneProfile) => {
   }
 };
 
+/**
+ * The rate card the owner last saved on this device from bPhone settings (or confirmed in its prompt): a record of its
+ * own, written only by saveMyProfile with { ownerSaved: true }. loadMyProfile and every other save leave it alone,
+ * so it is never the server's copy (re-review of b-Aware row 114: the profile cache above is overwritten by every
+ * load). undefined: no record on this device; { rate: null }: the owner made calls free.
+ */
+const ownerCardKey = (identityKey: string) => `bwallet.bphone.ownerCard.${identityKey}`;
+
+export const readOwnerCard = (identityKey: string): { rate: RateCard | null } | undefined => {
+  try {
+    const raw = localStorage.getItem(ownerCardKey(identityKey.toLowerCase()));
+    if (!raw) return undefined;
+    const o = JSON.parse(raw) as { rate?: unknown };
+    return { rate: o.rate == null ? null : parseRateCard(o.rate) };
+  } catch {
+    return undefined;
+  }
+};
+
+const rememberOwnerCard = (identityKey: string, rate: RateCard | null) => {
+  try {
+    localStorage.setItem(ownerCardKey(identityKey.toLowerCase()), JSON.stringify({ rate }));
+  } catch {
+    /* storage unavailable: the next open prompts */
+  }
+};
+
 /** What the callee side of a call needs without a network trip: my own rate card. */
 export const myRateCard = (identityKey: string) => readMyProfileCache(identityKey)?.rate ?? null;
 
@@ -93,7 +129,16 @@ export const loadMyProfile = async (f: Fetch, identityKey: string): Promise<BPho
   }
 };
 
-export const saveMyProfile = async (f: Fetch, wallet: Signer, profile: BPhoneProfile): Promise<BPhoneProfile> => {
+/**
+ * Save my profile. `ownerSaved`: the owner set this card themselves (bPhone settings Save, or Yes on its prompt), so
+ * it becomes the card the quiet payout re-sign compares against (readOwnerCard). No other caller passes it.
+ */
+export const saveMyProfile = async (
+  f: Fetch,
+  wallet: Signer,
+  profile: BPhoneProfile,
+  opts: { ownerSaved?: boolean } = {},
+): Promise<BPhoneProfile> => {
   if (!bphoneEnabled()) throw new Error('bPhone needs a bWallet paymail');
   const identityKey = (await wallet.getPublicKey({ identityKey: true })).publicKey.toLowerCase();
   const body = { v: 1, rate: profile.rate, listing: profile.listing, ...(profile.mail ? { mail: profile.mail } : {}) };
@@ -104,6 +149,9 @@ export const saveMyProfile = async (f: Fetch, wallet: Signer, profile: BPhonePro
   );
   const saved = parseProfile(j.profile);
   writeMyProfileCache(identityKey, saved);
+  // The card the owner submitted, never the server's reply: a reply with other terms must not become "what the owner
+  // chose" (review of 85ef98d8). If the server stored something else, the next settings open asks instead.
+  if (opts.ownerSaved) rememberOwnerCard(identityKey, profile.rate);
   peerCache.delete(identityKey);
   return saved;
 };

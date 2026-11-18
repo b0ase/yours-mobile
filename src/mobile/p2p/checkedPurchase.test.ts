@@ -18,12 +18,13 @@ import { MODULE_FINISHES, purchaseContext } from '../market/walletOutpoint';
 import { checkedOrdinalPurchaseContext, checkedPurchaseContext, feeFromOptions } from './checkedPurchase';
 import { TradeCheckError, verifyOrdinalPurchaseArgs, type ArgOutput } from './verify';
 import { captureConsole, type Captured } from '../../testing/captureConsole';
+import { deriveFeeAddress } from '../tokens/indexFund';
 
 const ID = 'd5ffbbfd8310dcb6763c7180b8dbc725b708d0ce990f93cd27d00ff24aa0de02_1';
 const addr = () => PrivateKey.fromRandom().toAddress();
 const SELLER = addr();
 const CANCEL = addr();
-const FEE = addr();
+const FEE = deriveFeeAddress(ID) as string; // the indexer's fee address for ID (what it serves)
 const MARKET = addr();
 const BUYER = PrivateKey.fromRandom().toPublicKey();
 const pay = (to: string, sats: number): ArgOutput => ({ lockingScript: new P2PKH().lock(to).toHex(), satoshis: sats });
@@ -42,7 +43,7 @@ const tokenListing = (price: number) =>
 const nftListing = (price: number) => listingTx(new LockingScript(OrdLockV2.lock(CANCEL, SELLER, price).chunks));
 
 /** A module-wrapped wallet stand-in: records every createAction it is asked to sign. */
-const fakeCtx = (beef: Beef) => {
+const fakeCtx = (beef: Beef, servedFee = FEE) => {
   const signed: unknown[] = [];
   const ctx = {
     chain: 'main',
@@ -56,7 +57,7 @@ const fakeCtx = (beef: Beef) => {
         getOutputStatus: async () => [{ state: 'valid' }],
         getTokenDetails: async () => ({
           token: { id: ID, sym: 'TEST', dec: 0 },
-          status: { fee_address: FEE, fee_per_output: 1000 },
+          status: { fee_address: servedFee, fee_per_output: 1000 },
         }),
       },
       ordfs: {
@@ -110,6 +111,15 @@ describe('token listing buy (buyBsv21)', () => {
     expect(res.error).toBeUndefined();
     expect(signed).toHaveLength(1);
     expectNoLogs(logs);
+  });
+  // Review of b-Aware row 123: the indexer serves fee_address; any address but the token's own is refused.
+  test("refuses, before anything is built, an indexer fee address that isn't the token's own", async () => {
+    const { beef, outpoint } = tokenListing(10_000);
+    const { ctx, signed } = fakeCtx(beef, addr());
+    await expect(
+      checkedPurchaseContext(ctx, { tokenId: ID, outpoint, amount: 100n, priceSats: 10_000 }),
+    ).rejects.toThrow("isn't this token's fee address");
+    expect(signed).toHaveLength(0);
   });
   test('refuses, before signing, a listing that asks more than shown', async () => {
     const { res, signed, logs } = await run(25_000, 10_000);

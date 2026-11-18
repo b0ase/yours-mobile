@@ -72,6 +72,7 @@ import {
   syncStateFor,
   tailUnderWay,
   updateMark,
+  type FullPassMark,
   type SyncStateRow,
 } from './fullPass';
 
@@ -407,6 +408,33 @@ const parseSyncMap = (raw: unknown): IdMaps | undefined => {
   }
 };
 
+/**
+ * One page's reading of the sync state's map (the guard makes one per page and hands it to each check). The map holds
+ * every backup id this device has merged, so its text grows with the wallet, and the guard, the unfiled check and the
+ * inbound check each parsed it for every page: three parses of the whole map per page, on a pass of many pages. The
+ * same text is parsed once; another text (another sync state row, or the row after a write) is parsed as before.
+ * Nothing that reads it changes it, and it is never kept past its page.
+ */
+export type PageSyncMap = { raw?: string; maps?: IdMaps };
+const syncMapOnce = (once: PageSyncMap | undefined, raw: unknown): IdMaps | undefined => {
+  if (!once || typeof raw !== 'string') return parseSyncMap(raw);
+  if (once.raw !== raw) {
+    once.maps = parseSyncMap(raw);
+    once.raw = raw;
+  }
+  return once.maps;
+};
+
+/**
+ * The pass mark markOf(row) reads, taken from the page's one parse. Only a parsed OBJECT is handed to markOf; a text
+ * that parses to anything else (a double-encoded row would parse to a string) goes to markOf as the row, so the answer
+ * is always markOf(row)'s (pageMark.test.ts).
+ */
+export const pageMark = (row: SyncStateRow | undefined, once: PageSyncMap | undefined): FullPassMark => {
+  const parsed = typeof row?.syncMap === 'string' ? syncMapOnce(once, row.syncMap) : undefined;
+  return markOf(parsed && typeof parsed === 'object' ? { syncMap: parsed } : row);
+};
+
 /** A record as JSON (the verifier decrypts what the manager encrypted); undefined when it can't be read. */
 async function recordOf(v: InboundVerifier, ci: string): Promise<Record<string, unknown> | undefined> {
   try {
@@ -464,6 +492,8 @@ export async function verifyInboundChunk(
      * after 3 days). The chain still decides.
      */
     requeueHeld?: boolean;
+    /** This page's reading of the sync map, when the caller has one (the guard): the same text is not parsed again. */
+    syncMap?: PageSyncMap;
   } = {},
 ): Promise<InboundReport> {
   const report: InboundReport = {
@@ -493,7 +523,7 @@ export async function verifyInboundChunk(
   const state = args.fromStorageIdentityKey
     ? (await store.findSyncStates({ partial: { storageIdentityKey: args.fromStorageIdentityKey, userId } }))[0]
     : undefined;
-  const maps = parseSyncMap(state?.syncMap);
+  const maps = syncMapOnce(opts.syncMap, state?.syncMap);
   const idMap = maps?.transaction?.idMap ?? {};
   const pageTx = new Map<number, TxRow>();
   for (const t of chunk.transactions ?? []) if (typeof t.transactionId === 'number') pageTx.set(t.transactionId, t);
@@ -1688,13 +1718,14 @@ export async function unfiledTransactions(
   args: SyncArgs,
   chunk: SyncChunk,
   row?: SyncStateRow,
+  once?: PageSyncMap,
 ): Promise<number[]> {
   const rows = [
     ...(chunk?.outputs ?? []),
     ...((chunk as { commissions?: { transactionId?: number }[] })?.commissions ?? []),
   ];
   if (!rows.length) return [];
-  const idMap = parseSyncMap((row ?? (await readerSyncState(store, args)))?.syncMap)?.transaction?.idMap ?? {};
+  const idMap = syncMapOnce(once, (row ?? (await readerSyncState(store, args)))?.syncMap)?.transaction?.idMap ?? {};
   const onPage = new Set((chunk.transactions ?? []).map((t) => t?.transactionId));
   const unfiled = new Set<number>();
   for (const r of rows) {
@@ -1801,6 +1832,8 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
     const deviceSik = this.getSettings?.()?.storageIdentityKey ?? '';
     const passKey = `${deviceSik}|${args?.fromStorageIdentityKey ?? ''}`;
     let row = await readerSyncState(this, args);
+    /** This page's one reading of the sync map (it grows with the wallet): shared by the checks below. */
+    const once: PageSyncMap = {};
     const fromStart = args?.since == null;
     const more = () => {
       try {
@@ -1809,7 +1842,10 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
         // scheduling only
       }
     };
-    const mark = markOf(row);
+    // The same mark markOf(row) reads, from this page's one parse (markOf takes a map already parsed as it is). Only a
+    // parsed OBJECT is handed over: a text that parses to anything else (a double-encoded row) goes to markOf as the
+    // row, exactly as before the memo.
+    const mark = pageMark(row, once);
     /** A tail pass (rows that reached the backup late with old times: services/pullTail.ts), not one from the start. */
     const tail = fromStart && tailUnderWay(mark);
     /** A deep, full or tail pass this device started: the device-sync pulls carry it (services/fullPass.ts). */
@@ -1833,7 +1869,7 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
           endsHere = true;
         }
     }
-    const unfiled = await unfiledTransactions(this, args, chunk, row);
+    const unfiled = await unfiledTransactions(this, args, chunk, row, once);
     if (unfiled.length) {
       const id = typeof row?.syncStateId === 'number' ? row : undefined;
       // Escalate, never loop: an incremental pass goes back DEEP_OVERLAP_MS; a deep pass goes back to the start when
@@ -1870,7 +1906,7 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       }
       return { done: false, inserts: 0, updates: 0 };
     }
-    const report = await verifyInboundChunk(this, args, chunk, v, { requeueHeld: fromStart });
+    const report = await verifyInboundChunk(this, args, chunk, v, { requeueHeld: fromStart, syncMap: once });
     if (report.admissions.length) {
       // Written before the merge: a page whose admissions can't be kept is not taken (it is fetched again).
       const sik = this.getSettings?.()?.storageIdentityKey;

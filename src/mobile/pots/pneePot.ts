@@ -7,6 +7,8 @@
  * check repairUnsignableTokenOutputs (tokenSendHeal.ts, PR 121) does, so a send never fails on an input this key
  * can't sign.
  */
+import { PNEE_TOKEN_ID } from '../notes/pnee';
+import { deriveFeeAddress } from '../tokens/indexFund';
 
 export type PneeCandidate = {
   outpoint: string;
@@ -64,10 +66,16 @@ export const pneeUnitsToUsd = (units: bigint | number) => Number(units) / 100;
  */
 export const MAX_PNEE_OVERLAY_FEE_PER_OUTPUT = 10_000;
 
-/** The overlay fee for `tokenOuts` token outputs, 0 when the token has none; throws when the fee is out of bounds. */
+/**
+ * The overlay fee for `tokenOuts` token outputs, 0 when the token has none; throws when the fee is out of bounds, or
+ * when `feeAddr` (read from the network) isn't the PNEE token's own fee address (deriveFeeAddress; review of b-Aware
+ * row 123): a pot pays it with no prompt.
+ */
 export const pneeOverlayFee = (feeAddr: unknown, feePer: unknown, tokenOuts: number): number => {
   if (typeof feeAddr !== 'string' || !feeAddr || typeof feePer !== 'number' || !(feePer > 0)) return 0;
   if (!Number.isInteger(feePer) || feePer > MAX_PNEE_OVERLAY_FEE_PER_OUTPUT)
     throw new Error('The PNEE network fee looks wrong, so nothing was paid');
+  if (feeAddr !== deriveFeeAddress(PNEE_TOKEN_ID))
+    throw new Error("The PNEE network fee address isn't PNEE's own, so nothing was paid");
   return feePer * tokenOuts;
 };

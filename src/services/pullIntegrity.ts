@@ -141,11 +141,15 @@ export async function noteAwaiting(
   const mark = markOf(row);
   const awaiting: Record<string, AwaitOutputs> = { ...(mark.awaitOutputs ?? {}) };
   const empty = emptyOkOf(mark, now);
+  // The list's size, counted once and kept in step with each new key: listing the keys again for each id made a page
+  // of new payments cost the square of the list.
+  let size = Object.keys(awaiting).length;
   let added = 0;
   for (const id of backupTxIds) {
     const k = String(id);
     if (awaiting[k] || empty.has(k)) continue;
-    if (Object.keys(awaiting).length >= MAX_AWAITING) break;
+    if (size >= MAX_AWAITING) break;
+    if (!Object.prototype.hasOwnProperty.call(awaiting, k)) size++;
     awaiting[k] = { at: now };
     added++;
   }
@@ -283,9 +287,13 @@ export async function afterPull(o: AfterPull): Promise<IntegrityReport> {
       transactionId?: number;
     }[])
       if (typeof r.transactionId === 'number') withOutputs.add(r.transactionId);
+    // The list's size, counted once and kept in step with each new key, not listed again for every transaction (the
+    // scan of a few thousand payments froze the wallet for seconds).
+    let size = Object.keys(awaiting).length;
     for (const [backupId, deviceId] of Object.entries(txMap)) {
-      if (Object.keys(awaiting).length >= MAX_AWAITING) break;
+      if (size >= MAX_AWAITING) break;
       if (withOutputs.has(deviceId) || awaiting[backupId] || emptyOk.has(backupId)) continue;
+      if (!Object.prototype.hasOwnProperty.call(awaiting, backupId)) size++;
       awaiting[backupId] = { at: now };
     }
   }

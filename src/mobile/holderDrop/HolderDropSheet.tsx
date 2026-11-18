@@ -287,6 +287,7 @@ export default function HolderDropSheet({
           const guarded = withTokenSendGuard(
             apiContext.wallet,
             f ? { feeScript: new P2PKH().lock(f.address).toHex(), maxSats: f.sats } : null,
+            a.tokenId,
           );
           const wallet = p.note ? withExtraOutput(guarded, noteOutput(p.note, a.tokenId)) : guarded;
           res = await guardedSendBsv21.execute(

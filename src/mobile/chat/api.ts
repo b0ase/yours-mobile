@@ -19,6 +19,7 @@ import type { ChatMessage, ChatRoom } from './messages';
 
 import type { BchatContact } from './contacts';
 import { BCHAT_PRIMARY_ORIGIN, routeBchatUrl } from '../../services/bchatOrigin';
+import { cleanDataUrlForUpload, cleanFileForUpload, type MediaRecorderOnly } from './uploadLocation';
 
 /** Primary bChatX origin; requests are moved to the live one (chat.bwalletx.com fallback) by services/bchatOrigin. */
 export const BCHAT_ORIGIN = BCHAT_PRIMARY_ORIGIN;
@@ -116,6 +117,15 @@ const nativeFormPost: FormPost = async (url, Authorization, parts) => {
     responseType: 'json',
   });
   return { status: res.status, data: res.data };
+};
+
+/** cleanDataUrlForUpload, its refusal as a ChatApiError (nothing is sent). */
+const locationSafeDataUrl = (dataUrl: string) => {
+  try {
+    return cleanDataUrlForUpload(dataUrl);
+  } catch (e) {
+    throw new ChatApiError(e instanceof Error ? e.message : 'This picture could not be checked for location', 422);
+  }
 };
 
 /** A GIF from bit-sign's GIPHY proxy: a small preview for the grid and the GIF URL that is sent. */
@@ -659,11 +669,26 @@ export class BchatClient {
    * Browser builds (web, desktop, extension) post FormData with fetch. The phone apps send the same multipart form
    * through native HTTP (`dataType: 'formData'`, which Capacitor's iOS and Android layers turn into multipart), as
    * every other bChat call there does, so the WebView's origin never meets CORS.
+   * Location first (chat/uploadLocation.ts, b-Aware #288): a JPEG goes without its metadata, a video / HEIC with its
+   * location blanked, anything else that has or may have location is refused before any request.
+   * ⚠ `mediaRecorderOutput` is for the app's own voice recordings only (chat/uploadLocation.ts sendVoiceNote): it
+   * turns refusal off. Never pass it for a picked file. Returns the file actually sent.
    */
-  async uploadMedia(ticker: string, file: File, onProgress?: (fraction: number) => void): Promise<void> {
-    if (file.size > ROOM_UPLOAD_MAX_BYTES)
+  async uploadMedia(
+    ticker: string,
+    original: File,
+    onProgress?: (fraction: number) => void,
+    opts: MediaRecorderOnly = {},
+  ): Promise<File> {
+    if (original.size > ROOM_UPLOAD_MAX_BYTES)
       throw new ChatApiError(`Files can be up to ${ROOM_UPLOAD_MAX_BYTES / 1024 / 1024} MB.`, 413);
     const Authorization = this.bearer();
+    let file: File;
+    try {
+      file = await cleanFileForUpload(original, opts);
+    } catch (e) {
+      throw new ChatApiError(e instanceof Error ? e.message : 'This file could not be checked for location', 422);
+    }
     const base = `${this.origin}${BchatClient.path(ticker)}/media`;
     const send = this.formPost ?? (Capacitor.isNativePlatform() ? nativeFormPost : fetchFormPost);
     const post = async (url: string, parts: FormPart[]) => {
@@ -684,7 +709,7 @@ export class BchatClient {
       onProgress?.(0.1);
       await post(base, [{ key: 'file', file, fileName: name }]);
       onProgress?.(1);
-      return;
+      return file;
     }
     const uploadId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     const total = Math.ceil(file.size / ROOM_CHUNK_BYTES);
@@ -704,6 +729,7 @@ export class BchatClient {
       onProgress?.((seq + 1) / total);
       if (seq === total - 1 && !data?.assembled) throw new ChatApiError('Upload did not complete', 500);
     }
+    return file;
   }
 
   /** Tests: replace the multipart transport. */
@@ -757,9 +783,10 @@ export class BchatClient {
    * Upload my own picture (bit-sign PUT /api/bitsign/me/avatar, PR #264): the file's original bytes as a data URL,
    * animated GIF / WebP / APNG kept as they are. The server checks type (magic bytes), ≤ 512 px and ≤ 2 MB, stores
    * it and sets my avatar_url. 503 until its migration runs: the caller treats that as "not available yet".
+   * Public, so the location gate runs first (chat/uploadLocation.ts): a JPEG goes without metadata, else refused.
    */
   async uploadAvatar(dataUrl: string): Promise<AvatarUploaded> {
-    return this.call('PUT', '/api/bitsign/me/avatar', { avatar: dataUrl });
+    return this.call('PUT', '/api/bitsign/me/avatar', { avatar: locationSafeDataUrl(dataUrl) });
   }
 
   /** My public bio (bit-sign GET /api/bitsign/me/bio, PR #270). 404 until that ships: the caller hides the field. */
@@ -1051,9 +1078,9 @@ export class BchatClient {
     await this.call('POST', `${BchatClient.path(ticker)}/history`, { history_visibility: visibility });
   }
 
-  /** Issuer only (token rooms): set or clear (null) the cover image, an image data URL. */
+  /** Issuer only (token rooms): set or clear (null) the cover image, an image data URL (location gate first). */
   async setRoomCover(ticker: string, dataUrl: string | null): Promise<void> {
-    await this.call('POST', `${BchatClient.path(ticker)}/cover`, { dataUrl });
+    await this.call('POST', `${BchatClient.path(ticker)}/cover`, { dataUrl: dataUrl && locationSafeDataUrl(dataUrl) });
   }
 
   /** Link wallet keys to the account: each proof is a DER signature over `message` by that key. */
