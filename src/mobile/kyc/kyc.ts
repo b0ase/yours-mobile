@@ -1,4 +1,4 @@
-import { INVESTOR_CERT_VALID_MONTHS, PURCHASE_BLOCKED_COUNTRIES } from './config';
+import { INVESTOR_CERT_VALID_MONTHS, INVESTOR_SELF_CERT_ENABLED, PURCHASE_BLOCKED_COUNTRIES } from './config';
 
 /**
  * Verified identity + investor qualification: the pure part (no wallet, no network, no clock —
@@ -69,33 +69,36 @@ export interface InvestorStatement {
 /**
  * Placeholders shown only when bit-sign's own statements cannot be fetched. NOT the statutory
  * wording — every one is marked [LEGAL REVIEW] and must be replaced by counsel-approved text.
+ * Empty while INVESTOR_SELF_CERT_ENABLED is off, so the placeholder text is not even in the shipped bundle.
  */
-export const PLACEHOLDER_STATEMENTS: InvestorStatement[] = [
-  {
-    category: 'hnw',
-    article: 'FPO art. 48',
-    label: 'Certified high net worth individual',
-    statement:
-      '[LEGAL REVIEW] Placeholder for the FPO art. 48 high net worth statement (income / net asset thresholds as currently in force). Replace with counsel-approved wording.',
-    placeholder: true,
-  },
-  {
-    category: 'sophisticated',
-    article: 'FPO art. 50',
-    label: 'Certified sophisticated investor',
-    statement:
-      '[LEGAL REVIEW] Placeholder for the FPO art. 50 certified sophisticated investor statement (certificate from an authorised person). Replace with counsel-approved wording.',
-    placeholder: true,
-  },
-  {
-    category: 'self-cert-sophisticated',
-    article: 'FPO art. 50A',
-    label: 'Self-certified sophisticated investor',
-    statement:
-      '[LEGAL REVIEW] Placeholder for the FPO art. 50A self-certified sophisticated investor statement. Replace with counsel-approved wording.',
-    placeholder: true,
-  },
-];
+export const PLACEHOLDER_STATEMENTS: InvestorStatement[] = !INVESTOR_SELF_CERT_ENABLED
+  ? []
+  : [
+      {
+        category: 'hnw',
+        article: 'FPO art. 48',
+        label: 'Certified high net worth individual',
+        statement:
+          '[LEGAL REVIEW] Placeholder for the FPO art. 48 high net worth statement (income / net asset thresholds as currently in force). Replace with counsel-approved wording.',
+        placeholder: true,
+      },
+      {
+        category: 'sophisticated',
+        article: 'FPO art. 50',
+        label: 'Certified sophisticated investor',
+        statement:
+          '[LEGAL REVIEW] Placeholder for the FPO art. 50 certified sophisticated investor statement (certificate from an authorised person). Replace with counsel-approved wording.',
+        placeholder: true,
+      },
+      {
+        category: 'self-cert-sophisticated',
+        article: 'FPO art. 50A',
+        label: 'Self-certified sophisticated investor',
+        statement:
+          '[LEGAL REVIEW] Placeholder for the FPO art. 50A self-certified sophisticated investor statement. Replace with counsel-approved wording.',
+        placeholder: true,
+      },
+    ];
 
 const ARTICLE: Record<InvestorCategory, string> = {
   hnw: 'FPO art. 48',
