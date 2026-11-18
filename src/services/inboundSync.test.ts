@@ -1815,6 +1815,27 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     );
   });
 
+  for (const status of ['unprocessed', 'unsent', 'sending'])
+    test(`b-Aware 310/316: a '${status}' request new to the device is admitted as 'nosend', never sent on a page's word`, async () => {
+      const d = await phoneWithBackup();
+      const X = await backupTx(d, 'completed');
+      const at = later();
+      await d.remote.insertProvenTxReq({
+        provenTxReqId: 0,
+        created_at: at,
+        updated_at: at,
+        txid: X.txid,
+        status,
+        attempts: 0,
+        notified: false,
+        history: '{}',
+        notify: '{}',
+        rawTx: [1, 2, 3],
+      } as never);
+      await d.pull();
+      expect((await d.phone.findProvenTxReqs({ partial: { txid: X.txid } })).map((q) => q.status)).toEqual(['nosend']);
+    });
+
   test("a page whose admissions can't be written to the device's list is not taken (fetched again), and isn't a broken backup", async () => {
     const d = await phoneWithBackup();
     d.chain.answer = 'unspent';

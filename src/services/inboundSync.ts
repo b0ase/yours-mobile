@@ -133,6 +133,27 @@ type ReqRow = { txid?: string; status?: string };
 export const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail']);
 /** Proof-request states in which the toolbox's monitor fails the transaction. */
 const REQ_FAILED = new Set(['invalid', 'doubleSpend']);
+/**
+ * Proof-request states in which this device's Monitor (SendWaiting) posts the payment to the network. A request new to
+ * this device arriving in one is admitted as 'nosend' (b-Aware 310/316): only this device's own createAction/signAction
+ * (or a release it makes) may arm a send, never a page from a backup, which a hostile one could have written.
+ */
+export const REQ_SENDABLE = new Set(['unprocessed', 'unsent', 'sending']);
+/**
+ * A page as another store or file should keep it: a proof request in a state that makes a copy's Monitor send the
+ * payment ('unprocessed', 'unsent', 'sending') goes as 'nosend'. This device's own rows are untouched (it still sends
+ * what it queued); the toolbox never changes a request's status in a store that has it, so what is written here is what
+ * every copy keeps. Same rewrite as the write-ahead push (changeWriteAhead.ts asSending), now on every push path.
+ */
+export function noSendRequests<T extends { provenTxReqs?: ReqRow[] }>(chunk: T): T {
+  if (!chunk?.provenTxReqs?.some((q) => q && REQ_SENDABLE.has(String(q.status)))) return chunk;
+  return {
+    ...chunk,
+    provenTxReqs: chunk.provenTxReqs.map((q) =>
+      q && REQ_SENDABLE.has(String(q.status)) ? { ...q, status: 'nosend' } : q,
+    ),
+  };
+}
 type TagRow = { outputTagId?: number; tag?: string };
 type TagMapRow = { outputId?: number; outputTagId?: number; isDeleted?: boolean; updated_at?: Date };
 export type SyncChunk = {
@@ -669,12 +690,20 @@ export async function verifyInboundChunk(
   for (const q of chunk.provenTxReqs ?? []) {
     if (!q?.txid) continue;
     const status = String(q.status);
-    if (!REQ_FAILED.has(status) && status !== 'unfail') continue;
+    const sendable = REQ_SENDABLE.has(status);
+    if (!REQ_FAILED.has(status) && status !== 'unfail' && !sendable) continue;
     if (
       typeof store.findProvenTxReqs === 'function' &&
       (await store.findProvenTxReqs({ partial: { txid: q.txid } }))[0]
     )
       continue;
+    if (sendable) {
+      // Never sent from here on a page's word: 'nosend' is no copy's to send, and the toolbox's CheckNoSends collects
+      // its proof once the chain has the payment (the chain decides through the existing proof and no-send checks).
+      q.status = 'nosend';
+      report.keptTx++;
+      continue;
+    }
     if (
       status !== 'unfail' &&
       !pageTxids.has(q.txid) &&
@@ -1800,11 +1829,15 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       const own = (this as unknown as Record<string, unknown>).processSyncChunk;
       if (Object.prototype.hasOwnProperty.call(this, 'processSyncChunk') && own === original)
         return (await read.call(this, args)) as SyncChunk;
-      return (await readPushPage(
-        this as unknown as ParentStore,
-        args as PushArgs,
-        async (a) => (await read.call(this, a)) as PushPage,
-      )) as SyncChunk;
+      // Every page this device hands on (a routine sync, BackupSync, updateBackups, setActive, a file export or USB
+      // backup) carries its sendable requests as 'nosend', so no copy it reaches ever sends them (b-Aware 310/316).
+      return noSendRequests(
+        (await readPushPage(
+          this as unknown as ParentStore,
+          args as PushArgs,
+          async (a) => (await read.call(this, a)) as PushPage,
+        )) as SyncChunk,
+      );
     };
   }
   // A pull starts a little before the newest time it has seen (review 23, M1): a row another copy pushed a few minutes

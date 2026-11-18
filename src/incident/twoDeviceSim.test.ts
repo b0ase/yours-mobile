@@ -153,6 +153,42 @@ describe('two devices, one seed: named cases', () => {
     expect(w.B.expiry.reports.flatMap((r) => r.released)).toContain(p.txid);
   });
 
+  for (const status of ['unsent', 'sending', 'unprocessed'] as const)
+    sim(
+      `b-Aware 310/316: a pulled '${status}' request for a noSend payment posts nothing from the other device`,
+      async () => {
+        const w = await threeCoins();
+        const p = await w.storePay('A', 20_000, { outbox: false }); // signed, withheld: never to be broadcast
+        await w.sync('A');
+        // A hostile backup: the request goes out as one the Monitor would post.
+        const [q] = await w.backup.findProvenTxReqs({ partial: { txid: p.txid } });
+        expect(q).toBeDefined();
+        await w.backup.updateProvenTxReq(q.provenTxReqId, {
+          status,
+          updated_at: new Date(Date.now() + 60_000),
+        } as never);
+        await w.wipe('B'); // B is new to it: restored from the backup
+        await w.sync('B');
+        expect((await w.statusOf('B', p.txid)).req).not.toMatch(/^(unsent|sending|unprocessed)$/);
+        expect(await w.sendWaiting('B')).toEqual([]);
+        expect(w.chain.unspent('bsv').size).toBeGreaterThan(0);
+      },
+    );
+
+  sim(
+    "b-Aware 310/316: a delayed send's request goes to the backup as 'nosend' on a routine sync; this device still sends it",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.sendDelayed('A', 20_000);
+      await w.sync('A');
+      expect((await w.statusOf('A', p.txid)).req).toBe('unsent');
+      expect((await w.statusOf('backup', p.txid)).req).toBe('nosend');
+      await w.sync('B');
+      expect(await w.sendWaiting('B')).toEqual([]);
+      expect((await w.sendWaiting('A')).length).toBeGreaterThan(0);
+    },
+  );
+
   sim('abort: a payment created but never signed, then aborted, leaves both balances whole', async () => {
     const w = await threeCoins();
     await w.createThenAbort('A', 30_000);
