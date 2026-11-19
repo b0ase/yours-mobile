@@ -22,6 +22,30 @@ const bindingFrom = async (w: ReturnType<typeof wallet>, alias: string, seq: num
   const r = await signRequest(w, 'bind', { alias, seq: String(seq) });
   return { alias, identityKey: r.identityKey, seq, timestamp: String(r.timestamp), signature: r.signature };
 };
+// A forward signed by the typed name's owner (key `w`), with that name's own binding riding along.
+const signedForward = async (
+  w: ReturnType<typeof wallet>,
+  from: string,
+  to: string,
+  expiresAt: number | null,
+  over: Record<string, unknown> = {},
+) => {
+  const r = await signRequest(w, 'forward', {
+    from,
+    to,
+    expiresAt: expiresAt === null ? '' : String(expiresAt),
+  });
+  return {
+    from: `${from}@bwalletx.com`,
+    to: `${to}@bwalletx.com`,
+    expiresAt,
+    identityKey: r.identityKey,
+    timestamp: String(r.timestamp),
+    signature: r.signature,
+    fromBinding: await bindingFrom(w, from, 1),
+    ...over,
+  };
+};
 const OURS = {
   capabilities: {
     pki: 'https://pay.bwallet.space/api/paymail/id/{alias}@{domain.tld}',
@@ -76,7 +100,7 @@ describe('forwarded names', () => {
       handle: 'b0asex@bwalletx.com',
       pubkey: owner.key,
       binding: await bindingFrom(owner, 'b0asex', 1),
-      forward: { from: 'boase@bwalletx.com', to: 'b0asex@bwalletx.com', expiresAt: null },
+      forward: await signedForward(owner, 'boase', 'b0asex', null),
     });
     const r = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
     expect(r.forwardsTo).toBe('b0asex');
@@ -108,10 +132,93 @@ describe('forwarded names', () => {
       handle: 'b0asex@bwalletx.com',
       pubkey: now.key,
       binding: await bindingFrom(now, 'b0asex', 1),
-      forward: { from: 'boase@bwalletx.com', to: 'b0asex@bwalletx.com', expiresAt: null },
+      forward: await signedForward(was, 'boase', 'b0asex', null),
     });
     const r = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
     expect(r.nameBinding).toBe('changed');
     expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: KEY_CHANGED });
+  });
+
+  // The attack: a hostile host serves the attacker's name (and key) for a well-bound typed name.
+  const attack = async (
+    forward: (victim: ReturnType<typeof wallet>, attacker: ReturnType<typeof wallet>) => unknown,
+  ) => {
+    mem.clear();
+    const victim = wallet(51);
+    const attacker = wallet(52);
+    const f = host({
+      handle: 'mallory@bwalletx.com',
+      pubkey: attacker.key,
+      binding: await bindingFrom(attacker, 'mallory', 1),
+      forward: await forward(victim, attacker),
+    });
+    return resolveRecipient(f, parseRecipient('boase@bwallet.space'));
+  };
+  const refused = (r: Awaited<ReturnType<typeof attack>>) => {
+    expect(r.forwardsTo).toBeUndefined();
+    expect(forwardLabel(r)).toBeUndefined();
+    expect(r.nameBinding).toBe('mismatch');
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: NAME_MISMATCH });
+    expect(JSON.parse(mem.get('bwallet.names.seenKeys') ?? '{}')).toEqual({}); // nothing pinned
+  };
+
+  test('an unsigned forward is ignored: the typed name is checked and the swap refuses', async () => {
+    refused(await attack(() => ({ from: 'boase@bwalletx.com', to: 'mallory@bwalletx.com', expiresAt: null })));
+  });
+
+  test("a forward signed by the attacker, not the typed name's owner, refuses", async () => {
+    refused(
+      await attack(async (victim, attacker) =>
+        signedForward(attacker, 'boase', 'mallory', null, { fromBinding: await bindingFrom(victim, 'boase', 1) }),
+      ),
+    );
+  });
+
+  test('an expired forward refuses', async () => {
+    refused(await attack((victim) => signedForward(victim, 'boase', 'mallory', Date.now() - 1000)));
+  });
+
+  test('a forward whose signed target differs from the served one refuses', async () => {
+    refused(
+      await attack((victim) =>
+        signedForward(victim, 'boase', 'mallory', null, { to: 'mallory@bwalletx.com', signature: '00' }),
+      ),
+    );
+    refused(
+      await attack(async (victim) => ({
+        ...(await signedForward(victim, 'boase', 'someoneelse', null)),
+        to: 'mallory@bwalletx.com',
+      })),
+    );
+  });
+
+  test('a signed forward that has not expired is followed', async () => {
+    mem.clear();
+    const owner = wallet(53);
+    const f = host({
+      handle: 'b0asex@bwalletx.com',
+      pubkey: owner.key,
+      binding: await bindingFrom(owner, 'b0asex', 1),
+      forward: await signedForward(owner, 'boase', 'b0asex', Date.now() + 60_000),
+    });
+    const r = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
+    expect(r.forwardsTo).toBe('b0asex');
+    expect(forwardLabel(r)).toBe('boase@ forwards to b0asex@ (same owner)');
+  });
+
+  test('a forward whose typed-name key is not the one this wallet knows refuses', async () => {
+    mem.clear();
+    const known = wallet(54);
+    const owner = wallet(55);
+    trustCurrentKey('boase', known.key);
+    const f = host({
+      handle: 'b0asex@bwalletx.com',
+      pubkey: owner.key,
+      binding: await bindingFrom(owner, 'b0asex', 1),
+      forward: await signedForward(owner, 'boase', 'b0asex', null),
+    });
+    const r = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
+    expect(r.forwardsTo).toBeUndefined();
+    expect(r.nameBinding).toBe('mismatch');
   });
 });

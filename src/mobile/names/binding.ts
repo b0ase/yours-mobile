@@ -67,6 +67,53 @@ export async function checkBinding(alias: string, pubkey: string | undefined, b:
   }
 }
 
+/**
+ * A forward the typed name's owner signed (b-Aware 312, 18 Nov 2026): "from -> to, until expiresAt". The signer is the
+ * key bound to the TYPED name, shown by that name's own signed binding (`fromBinding`) riding with the forward, so a
+ * host can't make one up and an attacker's own key can't speak for someone else's name. Returns the target alias only
+ * when all of it checks out and it hasn't expired; anything else is no forward.
+ */
+export async function checkForward(
+  alias: string,
+  fw: unknown,
+  shape: (alias: string, fw: unknown) => string | undefined,
+  now = Date.now(),
+): Promise<string | undefined> {
+  const to = shape(alias, fw);
+  if (!to) return undefined;
+  const f = fw as {
+    from?: unknown;
+    expiresAt?: unknown;
+    identityKey?: unknown;
+    timestamp?: unknown;
+    signature?: unknown;
+    fromBinding?: unknown;
+  };
+  const key = typeof f.identityKey === 'string' ? f.identityKey : '';
+  if (!key || typeof f.signature !== 'string' || !f.signature || !['string', 'number'].includes(typeof f.timestamp))
+    return undefined;
+  if (f.expiresAt !== null && f.expiresAt !== undefined) {
+    const at = typeof f.expiresAt === 'number' ? f.expiresAt : Date.parse(String(f.expiresAt));
+    if (!Number.isFinite(at) || at <= now) return undefined;
+  }
+  try {
+    // The signer must be the key the typed name is bound to, and not a key change this wallet hasn't accepted.
+    const binding = f.fromBinding as { handover?: Handover } | undefined;
+    if ((await checkBinding(alias, key, binding)) !== 'signed') return undefined;
+    if (keyChange(alias, key, 'signed', binding?.handover?.from) !== 'signed') return undefined;
+    const fields = {
+      from: String(f.from).split('@')[0].toLowerCase(),
+      to,
+      expiresAt: f.expiresAt === null || f.expiresAt === undefined ? '' : String(f.expiresAt),
+      identityKey: key,
+      timestamp: String(f.timestamp),
+    };
+    return (await verifyBy(key, 'forward', fields, f.signature)) ? to : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const SEEN_KEY = 'bwallet.names.seenKeys';
 const readSeen = (): Record<string, string> => {
   try {
