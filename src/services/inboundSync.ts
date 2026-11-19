@@ -161,12 +161,17 @@ export const EXPIRY_FIELDS = [
   'noSendExpiryReclaimDerivationSuffix',
   'noSendExpiryReclaimSatoshis',
 ] as const;
-/** A page row's expiry fields: the device row's when it has one (so the merge changes none), else none at all. */
+/**
+ * A page row's expiry fields, for a transaction the device has: the device row's (so the merge changes none). A new
+ * one keeps the page's (a device restored from its backup needs them to reclaim): its reclaim is only ever activated
+ * or posted once services/reclaimGuard.ts checkReclaim finds it structurally the wallet's own (review round 4).
+ */
 function keepExpiryFields(t: TxRow, d: TxRow | undefined) {
+  if (!d) return;
   const row = t as Record<string, unknown>;
-  const mine = d as Record<string, unknown> | undefined;
+  const mine = d as Record<string, unknown>;
   for (const k of EXPIRY_FIELDS) {
-    if (mine && mine[k] != null) row[k] = mine[k];
+    if (mine[k] != null) row[k] = mine[k];
     else delete row[k];
   }
 }
@@ -773,10 +778,9 @@ export async function verifyInboundChunk(
     if (!t) continue;
     let d = t.txid ? (await store.findTransactions({ partial: { userId, txid: t.txid } }))[0] : undefined;
     if (!d && t.reference) d = (await store.findTransactions({ partial: { userId, reference: t.reference } }))[0];
-    // BRC-177 expiry and reclaim fields are never a page's (review round 3, F2): a page that set a payment's state to
-    // 'revocation-requested' and pointed its reclaim at the payment itself made the Monitor's NoSendExpiry task post a
-    // withheld payment. A transaction the device has keeps its own; a new one arrives with none (only this device's
-    // own createAction arms one).
+    // BRC-177 expiry and reclaim fields of a transaction the device has are never a page's (review round 3, F2): a
+    // page that set a payment's state to 'revocation-requested' and pointed its reclaim at the payment itself made the
+    // Monitor's NoSendExpiry task post a withheld payment. A new one keeps the page's, checked before any reclaim.
     keepExpiryFields(t, d);
     if (!d) {
       if (typeof t.transactionId === 'number') (report.newTx ??= []).push(t.transactionId);

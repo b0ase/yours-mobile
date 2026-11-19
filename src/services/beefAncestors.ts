@@ -12,7 +12,7 @@
  * An ancestor is followed through the BEEF until it has a proof (or is a txid-only entry): proven transactions are on
  * chain already, and nothing past them is needed.
  */
-import { Beef, Transaction } from '@bsv/sdk';
+import { Beef, MerklePath, Transaction, type ChainTracker } from '@bsv/sdk';
 
 type Bytes = ArrayLike<number>;
 
@@ -106,11 +106,15 @@ export type PostGuard = {
   /** True when this device's own action released it (services/releaseMarks.ts). */
   released?: (txid: string) => boolean;
   /**
-   * True when the network already has it (in a block or the mempool): posting it again sends nothing new (a restored
-   * device spending the change of a payment another device sent). Asked only for a held, unreleased transaction; an
-   * error counts as not known (refused).
+   * True when the network already has it in a block (knownByServices): posting it again sends nothing new. Asked only
+   * for a held, unreleased transaction; an error counts as not known (refused).
    */
   known?: (txid: string) => Promise<boolean>;
+  /**
+   * Why a posted transaction may not go out as a BRC-177 reclaim (services/reclaimGuard.ts checkReclaim), or undefined
+   * when it is no reclaim or a sound one. An error refuses.
+   */
+  reclaim?: (txid: string) => Promise<string | undefined>;
   log?: (m: string) => void;
 };
 
@@ -120,24 +124,54 @@ export type HeldTxStore = {
   findTransactions(a: { partial: Record<string, unknown>; noRawTx?: boolean }): Promise<{ status?: string }[]>;
 };
 
-/** The network has `txid` (mined or in the mempool), by the services' own status lookup; anything else is no. */
-export async function knownByServices(
-  services: { getStatusForTxids?: (txids: string[]) => Promise<unknown> },
-  txid: string,
-): Promise<boolean> {
-  if (typeof services.getStatusForTxids !== 'function') return false;
-  const r = (await services.getStatusForTxids([txid])) as {
-    status?: string;
-    results?: { txid?: string; status?: string }[];
-  };
-  const mine = r?.status === 'success' ? r.results?.find((x) => x.txid === txid) : undefined;
-  return mine?.status === 'mined' || mine?.status === 'known';
+type ChainServices = {
+  getMerklePath?: (txid: string) => Promise<unknown>;
+  getChainTracker?: () => Promise<unknown>;
+};
+
+/**
+ * The network has `txid` in a block: a merkle path the services return for it, checked against the wallet's own chain
+ * tracker (review round 4, item 5). A mempool "known", a path that doesn't check, or any error is no: a held payment
+ * stays held until it is really mined (CheckNoSends then completes it).
+ */
+export async function knownByServices(services: ChainServices, txid: string): Promise<boolean> {
+  if (typeof services.getMerklePath !== 'function' || typeof services.getChainTracker !== 'function') return false;
+  const r = (await services.getMerklePath(txid)) as { merklePath?: MerklePath | MerklePath[] } | undefined;
+  const path = Array.isArray(r?.merklePath) ? r.merklePath[0] : r?.merklePath;
+  if (!path || typeof (path as MerklePath).computeRoot !== 'function') return false;
+  // Inclusion only: the root this path gives for the txid is a block's at that height (MerklePath.verify also applies
+  // the coinbase 100-block rule to offset 0, which is about spending a coinbase, not about being mined).
+  let root: string;
+  try {
+    if ((path as MerklePath).indexOf(txid) == null) return false;
+    root = (path as MerklePath).computeRoot(txid);
+  } catch {
+    return false;
+  }
+  const tracker = (await services.getChainTracker()) as ChainTracker;
+  return (await tracker.isValidRootForHeight(root, (path as MerklePath).blockHeight)) === true;
 }
 
 /** Is `txid` held on this device: its proof request or a transaction row of it 'nosend' (signed noSend here)? */
 export async function heldOnDevice(sp: HeldTxStore, txid: string): Promise<boolean> {
   if ((await sp.findProvenTxReqs({ partial: { txid } })).some((q) => q.status === 'nosend')) return true;
   return (await sp.findTransactions({ partial: { txid }, noRawTx: true })).some((t) => t.status === 'nosend');
+}
+
+/**
+ * `held` for guardPostBeef from this device's own records only (review round 4, item 6): its record of payments it
+ * signed noSend (services/releaseMarks.ts) or, when it has one, its own store's rows. Never the active store's, which
+ * may be remote and say anything.
+ */
+export function heldLocally(
+  marks: { heldHere: (txid: string) => boolean },
+  own: () => HeldTxStore | undefined,
+): (txid: string) => Promise<boolean> {
+  return async (txid) => {
+    if (marks.heldHere(txid)) return true;
+    const s = own();
+    return s ? heldOnDevice(s, txid) : false;
+  };
 }
 
 /** What a refused post answers: a service error for every txid (nothing is failed; the send stays queued). */
@@ -184,6 +218,13 @@ export function guardPostBeef(services: unknown, guard: PostGuard = {}): boolean
     const pruned = pruneBeef(beef, txids);
     if (pruned.dropped.length)
       log(`[postBeef] left ${pruned.dropped.length} transaction(s) that are not ancestors out of the broadcast`);
+    for (const t of guard.reclaim ? txids : []) {
+      const why = await guard.reclaim!(t).catch((e: unknown) => `the check failed: ${String(e)}`);
+      if (why) {
+        log(`[postBeef] refused the reclaim ${t}: ${why}`);
+        return refusal(txids);
+      }
+    }
     const held = await heldUnreleased(pruned.beef, guard);
     if (held.length) {
       log(

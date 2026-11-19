@@ -35,6 +35,14 @@ describe('held payments under the balance (task 54 review, rounds 2 and 3)', () 
     expect(html).toContain(`${RESTORED_LABEL} · 20000 sats`);
     expect(html).not.toContain('Totally your rent');
   });
+  test('round 4 (4): no recipients or nothing paid out: Send now disabled', () => {
+    for (const p of [
+      { ...queued, recipients: [], amountSats: 0 },
+      { ...queued, recipients: [{ to: ADDR, sats: 0 }], amountSats: 0 },
+    ])
+      expect(view([p])).toMatch(/<button[^>]*disabled=""[^>]*>Send now<\/button>/);
+    expect(view([queued])).not.toMatch(/<button[^>]*disabled=""[^>]*>Send now<\/button>/);
+  });
   test("bytes that can't be read: amount unreadable and Send now disabled", () => {
     const html = view([{ ...queued, recipients: undefined, amountSats: undefined }]);
     expect(html).toContain('amount unreadable');

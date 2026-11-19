@@ -298,29 +298,43 @@ describe('task 54 round 3 (d): a held payment shows what its own bytes pay, and 
     t.addOutput({ lockingScript: change, satoshis: 79_000 });
     return t;
   };
-  test("decodePayment: the recipients are the outputs that aren't the wallet's, with their address and amount", () => {
+  test("decodePayment: the recipients are the outputs that aren't the wallet's, with their address and amount", async () => {
     const t = pay();
-    const r = decodePayment(t.toBinary(), new Set([change.toHex()]));
+    const r = await decodePayment(t.toBinary(), (_vout, script) => script === change.toHex());
     expect(r).toEqual({
       recipients: [{ to: Utils.toBase58Check(stranger.chunks[2].data!, [0]), sats: 20_000 }],
       amountSats: 20_000,
     });
-    expect(decodePayment([1, 2, 3], new Set())).toBeUndefined();
+    expect(await decodePayment([1, 2, 3], () => false)).toBeUndefined();
   });
+  const queueStore = (t: Transaction, rows: { vout: number; change: boolean; basketId: number | null }[]) => ({
+    findTransactions: async () => [
+      { transactionId: 1, txid: t.id('hex'), created_at: new Date(0), description: 'Coffee', satoshis: -5 },
+    ],
+    findProvenTxReqs: async () => [{ status: 'nosend', attempts: 0, rawTx: t.toBinary() }],
+    findOutputs: async () => rows,
+  });
+  /** This wallet's keys derive only the change script (inboundSync walletOwnership in the app). */
+  const owns = async (_row: never, script: string) => script === change.toHex();
   test("listQueuedSends: amount and recipients from the request's bytes (not the row's), and queuedHere from this device's marks", async () => {
     const t = pay();
-    const sp = {
-      findTransactions: async () => [
-        { transactionId: 1, txid: t.id('hex'), created_at: new Date(0), description: 'Coffee', satoshis: -5 },
-      ],
-      findProvenTxReqs: async () => [{ status: 'nosend', attempts: 0, rawTx: t.toBinary() }],
-      findOutputs: async () => [
-        { lockingScript: change.toBinary(), change: true, basketId: 1 },
-        { lockingScript: stranger.toBinary(), change: false, basketId: null }, // quarantined: not the wallet's
-      ],
-    };
-    const [q] = await listQueuedSends(sp, () => false);
+    const sp = queueStore(t, [
+      { vout: 1, change: true, basketId: 1 },
+      { vout: 0, change: false, basketId: null },
+    ]);
+    const [q] = await listQueuedSends(sp, () => false, owns);
     expect([q.amountSats, q.recipients?.length, q.queuedHere, q.satoshis]).toEqual([20_000, 1, false, -5]);
-    expect((await listQueuedSends(sp, (x) => x === t.id('hex')))[0].queuedHere).toBe(true);
+    expect((await listQueuedSends(sp, (x) => x === t.id('hex'), owns))[0].queuedHere).toBe(true);
+  });
+  test("round 4 (4): a backup that marks the recipient's output as the wallet's change doesn't hide it: our keys decide", async () => {
+    const t = pay();
+    const sp = queueStore(t, [
+      { vout: 0, change: true, basketId: 1 }, // the stranger's output, flagged as change by the backup
+      { vout: 1, change: true, basketId: 1 },
+    ]);
+    const [q] = await listQueuedSends(sp, () => false, owns);
+    expect([q.amountSats, q.recipients?.map((r) => r.sats)]).toEqual([20_000, [20_000]]);
+    // Without a way to tell, nothing counts as ours: every output is shown as paid out.
+    expect((await listQueuedSends(sp))[0].amountSats).toBe(99_000);
   });
 });

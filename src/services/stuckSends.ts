@@ -60,13 +60,13 @@ export type QueuedSend = {
 export type Recipient = { to: string; sats: number };
 
 /**
- * The outputs of `rawTx` that pay someone else: every output whose script isn't one of `walletScripts` (lower-case
- * hex), shown as its P2PKH address or "a script". Undefined when the bytes don't parse.
+ * The outputs of `rawTx` that pay someone else: every output `isOurs` doesn't claim, shown as its P2PKH address or
+ * "a script". Undefined when the bytes don't parse.
  */
-export function decodePayment(
+export async function decodePayment(
   rawTx: ArrayLike<number> | null | undefined,
-  walletScripts: Set<string>,
-): { recipients: Recipient[]; amountSats: number } | undefined {
+  isOurs: (vout: number, scriptHex: string) => boolean | Promise<boolean>,
+): Promise<{ recipients: Recipient[]; amountSats: number } | undefined> {
   if (!rawTx?.length) return undefined;
   let tx: Transaction;
   try {
@@ -75,9 +75,9 @@ export function decodePayment(
     return undefined;
   }
   const recipients: Recipient[] = [];
-  for (const out of tx.outputs) {
+  for (const [vout, out] of tx.outputs.entries()) {
     const script = out.lockingScript.toHex().toLowerCase();
-    if (walletScripts.has(script)) continue;
+    if (await isOurs(vout, script)) continue;
     const chunks = out.lockingScript.chunks;
     const p2pkh =
       chunks.length === 5 &&
@@ -109,31 +109,33 @@ export type QueueStore = {
   findProvenTxReqs(a: {
     partial: Record<string, unknown>;
   }): Promise<{ status?: string; attempts?: number; rawTx?: Bytes | null }[]>;
-  findOutputs(a: {
-    partial: Record<string, unknown>;
-  }): Promise<{ lockingScript?: Bytes | null; change?: boolean; basketId?: number | null }[]>;
+  findOutputs(a: { partial: Record<string, unknown> }): Promise<{ vout?: number }[]>;
 };
-
-const hexOf = (b: Bytes | null | undefined) =>
-  b ? Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('') : '';
+/**
+ * Is this output row's script (hex) one this wallet's own keys derive (inboundSync walletOwnership)? A backup's
+ * change / basket flags never decide it (review round 4, item 4).
+ */
+export type OwnsOutput = (row: never, scriptHex: string) => Promise<boolean>;
 
 /**
  * Outgoing payments in status 'sending' with their request's attempts and status, and what each pays, read from its
- * own bytes (the request's rawTx): outputs this wallet keeps (change, or in a basket) aren't recipients. `released`:
- * this device's own marks (services/releaseMarks.ts), for `queuedHere`.
+ * own bytes (the request's rawTx): an output is the wallet's only when `owns` says this wallet's keys derive its
+ * script (without `owns`, none is). `released`: this device's own marks (services/releaseMarks.ts), for `queuedHere`.
  */
-export async function listQueuedSends(sp: QueueStore, released?: (txid: string) => boolean): Promise<QueuedSend[]> {
+export async function listQueuedSends(
+  sp: QueueStore,
+  released?: (txid: string) => boolean,
+  owns?: OwnsOutput,
+): Promise<QueuedSend[]> {
   const out: QueuedSend[] = [];
   for (const t of await sp.findTransactions({ partial: { status: 'sending', isOutgoing: true }, noRawTx: true })) {
     if (!t.txid) continue;
     const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
-    const mine = new Set(
-      (await sp.findOutputs({ partial: { transactionId: t.transactionId } }))
-        .filter((o) => o.change === true || o.basketId != null)
-        .map((o) => hexOf(o.lockingScript).toLowerCase())
-        .filter(Boolean),
-    );
-    const paid = decodePayment(req?.rawTx, mine);
+    const rows = await sp.findOutputs({ partial: { transactionId: t.transactionId } });
+    const paid = await decodePayment(req?.rawTx, async (vout, script) => {
+      const row = rows.find((o) => o.vout === vout);
+      return !!row && !!owns && (await owns(row as never, script).catch(() => false));
+    });
     out.push({
       transactionId: t.transactionId,
       txid: t.txid,

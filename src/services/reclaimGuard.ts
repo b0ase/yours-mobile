@@ -1,139 +1,171 @@
 /**
- * A BRC-177 reclaim posts only what this device armed itself (review round 3, F2).
+ * A BRC-177 reclaim goes out only when it is plainly the wallet's own revocation (review rounds 3 and 4, F2).
  *
- * The toolbox's NoSendExpiry task posts a transaction's reclaim (insertReclaim → attemptToPostReqsToNetwork) once the
- * row says 'revocation-requested' and the anchor is unspent; its validateReclaim checks only the reclaim's shape. A page
- * that pointed the reclaim at a withheld payment itself made the task post that payment. Pages can no longer set these
- * fields (services/inboundSync.ts keepExpiryFields); this is the local check before any reclaim post: before each run
- * of the task, every transaction in a state the task acts on whose reclaim is not plainly this device's own is set
- * 'cancelled' (a state the task ignores), so nothing of it is posted. Its own means all of:
- *  - this device armed it (createAction with a BRC-177 expiry label: services/releaseMarks.ts `armed`);
- *  - the reclaim is another transaction than the payment, and its bytes are the reclaim txid's;
- *  - it spends exactly one input, the anchor, and that anchor is an output of this device's own store.
+ * The toolbox's NoSendExpiry task activates a transaction's reclaim (compareAndSetNoSendExpiryState → 'reclaiming',
+ * insertReclaim) and posts it; its validateReclaim checks only the reclaim's shape. A page that pointed the reclaim at
+ * a withheld payment itself made the task post that payment. Round 3 cancelled every reclaim this device hadn't marked
+ * as armed, which also cancelled real ones (two-step actions through the permissions manager, ones made before the
+ * release, restores) and left their coins locked. Now nothing is cancelled and nothing is written: before activation
+ * (guardReclaimActivation) and before any post of a reclaim (services/beefAncestors.ts guardPostBeef `reclaim`), the
+ * reclaim must be, structurally, the wallet's own:
+ *  - another transaction than the payment, whose bytes hash to the reclaim txid;
+ *  - exactly one input, the anchor: an output in this device's store that the payment itself spends;
+ *  - exactly one output, the amount recorded, a P2PKH to the key its derivation prefix/suffix gives with this wallet's
+ *    own key deriver (the same lock the toolbox's armReclaim requires);
+ *  - its signature verifies against the anchor's locking script (the script interpreter).
+ * A reclaim that fails is not activated or posted; the row is left as it is, and the failure logged once.
  */
-import { Transaction } from '@bsv/sdk';
-
-/** The states the toolbox's NoSendExpiry task acts on (noSendExpiryLifecycle ACTIVE_STATES). */
-export const ACTIVE_EXPIRY_STATES = [
-  'reclaiming',
-  'broadcast',
-  'conflicted',
-  'revocation-requested',
-  'signed',
-  'unsigned',
-  'preparing',
-] as const;
+import { LockingScript, Spend, Transaction } from '@bsv/sdk';
+import { ScriptTemplateBRC29 } from '@bsv/wallet-toolbox-client';
 
 type Bytes = ArrayLike<number>;
 export type ExpiryRow = {
-  transactionId: number;
-  userId?: number;
+  transactionId?: number;
   txid?: string | null;
+  rawTx?: Bytes | null;
   noSendExpiryState?: string | null;
   noSendExpiryAnchorTxid?: string | null;
   noSendExpiryAnchorVout?: number | null;
   noSendExpiryReclaimTxid?: string | null;
   noSendExpiryReclaimRawTx?: Bytes | null;
-  updated_at?: Date | string;
+  noSendExpiryReclaimDerivationPrefix?: string | null;
+  noSendExpiryReclaimDerivationSuffix?: string | null;
+  noSendExpiryReclaimSatoshis?: number | null;
 };
-/** States a createAction of this device's own passes through before it returns (and is armed). */
-const IN_CREATION = new Set(['preparing', 'unsigned', 'signed']);
-/** How long a row in one of those states is left alone: a createAction in progress is not marked armed yet. */
-export const CREATION_GRACE_MS = 10 * 60_000;
+export type ReclaimStore = {
+  findTransactions(a: { partial: Record<string, unknown>; trx?: unknown }): Promise<ExpiryRow[]>;
+  findOutputs(a: {
+    partial: Record<string, unknown>;
+    trx?: unknown;
+  }): Promise<{ lockingScript?: Bytes | null; satoshis?: number | null }[]>;
+  findProvenTxReqs?(a: { partial: Record<string, unknown>; trx?: unknown }): Promise<{ rawTx?: Bytes | null }[]>;
+};
+/** The locking script (hex) the wallet's own reclaim output has for this derivation. */
+export type LockFor = (derivationPrefix: string, derivationSuffix: string) => string;
 
-/** Why a row's reclaim isn't this device's own, or undefined when it is (or it has none yet). */
-export function foreignReclaim(
-  t: ExpiryRow,
-  o: { armed: (txid: string) => boolean; anchorIsOurs: boolean },
-): string | undefined {
-  const target = String(t.txid ?? '').toLowerCase();
-  const hasReclaim = t.noSendExpiryReclaimTxid != null || t.noSendExpiryReclaimRawTx != null;
-  if (!target || !o.armed(target)) return 'not armed on this device';
-  if (!hasReclaim) return undefined;
-  const reclaimTxid = String(t.noSendExpiryReclaimTxid ?? '').toLowerCase();
-  if (!reclaimTxid || reclaimTxid === target) return 'the reclaim is the payment itself';
-  let reclaim: Transaction;
+/** armReclaim's expected lock, from the wallet's own key deriver and change key pair. */
+export function reclaimLockFor(wallet: {
+  keyDeriver: unknown;
+  getClientChangeKeyPair: () => { privateKey: string; publicKey: string };
+}): LockFor {
+  return (derivationPrefix, derivationSuffix) => {
+    const keys = wallet.getClientChangeKeyPair();
+    return new ScriptTemplateBRC29({ derivationPrefix, derivationSuffix, keyDeriver: wallet.keyDeriver as never })
+      .lock(keys.privateKey, keys.publicKey)
+      .toHex();
+  };
+}
+
+const outpointOf = (i: Transaction['inputs'][number]) =>
+  `${(i.sourceTXID ?? i.sourceTransaction?.id('hex') ?? '').toLowerCase()}.${i.sourceOutputIndex}`;
+const parse = (raw: Bytes | null | undefined) => {
   try {
-    reclaim = Transaction.fromBinary(Array.from(t.noSendExpiryReclaimRawTx ?? []));
+    return raw?.length ? Transaction.fromBinary(Array.from(raw)) : undefined;
   } catch {
-    return 'the reclaim bytes do not parse';
+    return undefined;
   }
+};
+
+/** Why `t`'s reclaim is not the wallet's own, structurally; undefined when it is. Reads only; writes nothing. */
+export async function checkReclaim(
+  sp: ReclaimStore,
+  t: ExpiryRow,
+  lockFor: LockFor,
+  trx?: unknown,
+): Promise<string | undefined> {
+  const target = String(t.txid ?? '').toLowerCase();
+  const reclaimTxid = String(t.noSendExpiryReclaimTxid ?? '').toLowerCase();
+  if (!target || !reclaimTxid) return 'no payment or reclaim txid';
+  if (reclaimTxid === target) return 'the reclaim is the payment itself';
+  const reclaim = parse(t.noSendExpiryReclaimRawTx);
+  if (!reclaim) return 'the reclaim bytes do not parse';
   if (reclaim.id('hex') !== reclaimTxid) return 'the reclaim bytes are not the reclaim txid';
-  const anchor = `${String(t.noSendExpiryAnchorTxid ?? '').toLowerCase()}.${t.noSendExpiryAnchorVout}`;
-  const ins = reclaim.inputs.map(
-    (i) => `${(i.sourceTXID ?? i.sourceTransaction?.id('hex') ?? '').toLowerCase()}.${i.sourceOutputIndex}`,
-  );
-  if (ins.length !== 1 || ins[0] !== anchor) return 'the reclaim spends something other than the anchor';
-  if (anchor.split('.')[0] === target) return 'the anchor is an output of the payment itself';
-  if (!o.anchorIsOurs) return 'the anchor is not an output of this device';
+  const anchorTxid = String(t.noSendExpiryAnchorTxid ?? '').toLowerCase();
+  const vout = t.noSendExpiryAnchorVout;
+  if (!anchorTxid || typeof vout !== 'number') return 'no anchor';
+  const anchor = `${anchorTxid}.${vout}`;
+  if (reclaim.inputs.length !== 1 || outpointOf(reclaim.inputs[0]) !== anchor)
+    return 'the reclaim spends something other than the anchor';
+  const [row] = await sp.findOutputs({ partial: { txid: anchorTxid, vout }, trx });
+  if (!row?.lockingScript?.length || typeof row.satoshis !== 'number')
+    return 'the anchor is not an output in this store';
+  let targetTx = parse(t.rawTx);
+  if (!targetTx && sp.findProvenTxReqs)
+    targetTx = parse((await sp.findProvenTxReqs({ partial: { txid: target }, trx }))[0]?.rawTx);
+  if (!targetTx || targetTx.id('hex') !== target) return 'the payment bytes are not here';
+  if (!targetTx.inputs.some((i) => outpointOf(i) === anchor)) return 'the payment does not spend the anchor';
+  const prefix = t.noSendExpiryReclaimDerivationPrefix;
+  const suffix = t.noSendExpiryReclaimDerivationSuffix;
+  if (!prefix || !suffix) return 'no reclaim derivation';
+  if (reclaim.outputs.length !== 1) return 'the reclaim has more than one output';
+  const out = reclaim.outputs[0];
+  if (out.lockingScript.toHex() !== lockFor(prefix, suffix)) return "the reclaim doesn't pay this wallet's own key";
+  if (typeof t.noSendExpiryReclaimSatoshis === 'number' && out.satoshis !== t.noSendExpiryReclaimSatoshis)
+    return 'the reclaim amount is not the one recorded';
+  try {
+    const ok = new Spend({
+      sourceTXID: anchorTxid,
+      sourceOutputIndex: vout,
+      sourceSatoshis: row.satoshis,
+      lockingScript: LockingScript.fromBinary(Array.from(row.lockingScript)),
+      transactionVersion: reclaim.version,
+      otherInputs: [],
+      outputs: reclaim.outputs,
+      inputIndex: 0,
+      unlockingScript: reclaim.inputs[0].unlockingScript!,
+      inputSequence: reclaim.inputs[0].sequence ?? 0xffffffff,
+      lockTime: reclaim.lockTime,
+    }).validate();
+    if (!ok) return 'the reclaim signature does not verify';
+  } catch {
+    return 'the reclaim signature does not verify';
+  }
   return undefined;
 }
 
-export type ReclaimStore = {
-  findTransactions(a: { partial: Record<string, unknown>; noRawTx?: boolean }): Promise<ExpiryRow[]>;
-  findOutputs(a: { partial: Record<string, unknown>; noScript?: boolean }): Promise<unknown[]>;
-  updateTransaction(id: number, update: Record<string, unknown>): Promise<unknown>;
-};
-
-/** Set every active row whose reclaim is not this device's own 'cancelled'. Returns the txids it stopped. */
-export async function stopForeignReclaims(
-  sp: ReclaimStore,
-  armed: (txid: string) => boolean,
-  log: (m: string) => void = (m) => console.warn(m),
-  now: number = Date.now(),
-): Promise<string[]> {
-  const stopped: string[] = [];
-  for (const state of ACTIVE_EXPIRY_STATES) {
-    for (const t of await sp.findTransactions({ partial: { noSendExpiryState: state } })) {
-      const at = t.updated_at ? new Date(t.updated_at).getTime() : NaN;
-      if (IN_CREATION.has(state) && Number.isFinite(at) && now - at < CREATION_GRACE_MS) continue;
-      const anchorIsOurs =
-        !!t.noSendExpiryAnchorTxid &&
-        typeof t.noSendExpiryAnchorVout === 'number' &&
-        (
-          await sp.findOutputs({
-            partial: { txid: t.noSendExpiryAnchorTxid, vout: t.noSendExpiryAnchorVout },
-            noScript: true,
-          })
-        ).length > 0;
-      const why = foreignReclaim(t, { armed, anchorIsOurs });
-      if (!why) continue;
-      await sp.updateTransaction(t.transactionId, { noSendExpiryState: 'cancelled' });
-      stopped.push(String(t.txid));
-      log(`[reclaimGuard] stopped the expiry/reclaim of ${t.txid}: ${why}`);
-    }
-  }
-  return stopped;
+/** The transaction whose reclaim `txid` is, if any, checked: why it may not go out, or undefined. */
+export async function reclaimVerdict(sp: ReclaimStore, txid: string, lockFor: LockFor): Promise<string | undefined> {
+  const [t] = await sp.findTransactions({ partial: { noSendExpiryReclaimTxid: txid } });
+  return t ? checkReclaim(sp, t, lockFor) : undefined;
 }
 
-type MonitorLike = { _tasks?: { name: string; runTask: () => Promise<string> }[] };
-type StorageLike = {
-  isActiveStorageProvider?: () => boolean;
-  runAsStorageProvider: <T>(f: (sp: ReclaimStore) => Promise<T>) => Promise<T>;
+type ActivationStore = ReclaimStore & {
+  compareAndSetNoSendExpiryState: (id: number, expected: string, next: string, trx?: unknown) => Promise<boolean>;
 };
-const GUARDED = Symbol.for('bwx.reclaimGuard');
+const GUARDED = Symbol.for('bwx.reclaimActivation');
 
 /**
- * Run stopForeignReclaims before every run of the Monitor's NoSendExpiry task. A run whose check fails does not run
- * the task (nothing is posted). Idempotent; false when the monitor has no such task.
+ * Wrap this device's store (in place): the toolbox's move of a payment to 'reclaiming' (the step before it inserts
+ * and posts the reclaim) happens only when checkReclaim passes. Otherwise it answers "not moved": nothing is posted,
+ * the row stays as it is, and the reason is logged once per payment. Idempotent; false without such a method.
  */
-export function guardReclaims(monitor: unknown, storage: StorageLike, armed: (txid: string) => boolean): boolean {
-  const task = (monitor as MonitorLike | null)?._tasks?.find((t) => t.name === 'NoSendExpiry') as
-    | ({ runTask: () => Promise<string> } & { [GUARDED]?: true })
-    | undefined;
-  if (!task) return false;
-  if (task[GUARDED]) return true;
-  const original = task.runTask.bind(task);
-  task.runTask = async () => {
-    if (storage.isActiveStorageProvider && !storage.isActiveStorageProvider()) return original();
-    try {
-      await storage.runAsStorageProvider((sp) => stopForeignReclaims(sp, armed));
-    } catch (e) {
-      console.warn('[reclaimGuard] check failed; the expiry task waits for the next run', e);
-      return '';
+export function guardReclaimActivation(
+  store: unknown,
+  lockFor: LockFor,
+  log: (m: string) => void = (m) => console.warn(m),
+): boolean {
+  const s = store as (ActivationStore & { [GUARDED]?: true }) | null;
+  if (!s || typeof s.compareAndSetNoSendExpiryState !== 'function') return false;
+  if (s[GUARDED]) return true;
+  const original = s.compareAndSetNoSendExpiryState.bind(s);
+  const logged = new Set<string>();
+  s.compareAndSetNoSendExpiryState = async (id, expected, next, trx) => {
+    if (next === 'reclaiming') {
+      const [t] = await s.findTransactions({ partial: { transactionId: id }, trx });
+      const why = t
+        ? await checkReclaim(s, t, lockFor, trx).catch((e: unknown) => `the check failed: ${String(e)}`)
+        : 'no such payment';
+      if (why) {
+        const key = `${t?.txid ?? id}|${why}`;
+        if (!logged.has(key)) {
+          logged.add(key);
+          log(`[reclaimGuard] not reclaiming ${t?.txid ?? id}: ${why} (left as it is)`);
+        }
+        return false;
+      }
     }
-    return original();
+    return original(id, expected, next, trx);
   };
-  task[GUARDED] = true;
+  s[GUARDED] = true;
   return true;
 }

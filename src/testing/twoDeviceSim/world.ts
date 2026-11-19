@@ -79,8 +79,8 @@ import {
   type UnsentDeps,
 } from '../../services/stuckSends';
 import { createReleaseMarks, markReleases, type ReleaseMarks } from '../../services/releaseMarks';
-import { guardPostBeef, heldOnDevice, knownByServices } from '../../services/beefAncestors';
-import { guardReclaims } from '../../services/reclaimGuard';
+import { guardPostBeef, heldLocally, knownByServices } from '../../services/beefAncestors';
+import { guardReclaimActivation, reclaimLockFor, reclaimVerdict } from '../../services/reclaimGuard';
 import {
   AUTO_RESYNC_GAP_MS,
   OWN_PENDING_STATUSES,
@@ -143,6 +143,8 @@ export type Device = {
 };
 
 let dbn = 0;
+/** The wallet's own originator in the sim (initWallet's ADMIN_ORIGINATOR); a call with none is the wallet's too. */
+export const SIM_ADMIN = 'admin.sim';
 /** The real clock, captured before any World moves Date.now. */
 const realNow = Date.now.bind(Date);
 let uninstallGuard: (() => void) | undefined;
@@ -342,21 +344,24 @@ export class World {
       maxRebroadcastAttempts: 0,
     } as never);
     monitor.addDefaultTasks();
-    // initWallet's broadcast stack (task 54 review, round 3, e): the wallet's own actions make this device's release
-    // marks; every post keeps only the named transactions and their ancestors and refuses one carrying a payment held
-    // here without a release; a BRC-177 reclaim posts only what this device armed.
+    // initWallet's broadcast stack (task 54 review, rounds 3 and 4): the wallet's own actions make this device's
+    // records (held, released, who made what); every post keeps only the named transactions and their ancestors and
+    // refuses one carrying a payment held here without a release, or a reclaim that isn't structurally the wallet's
+    // own; the toolbox activates a reclaim only when that same check passes.
     const marks = createReleaseMarks();
-    markReleases(wallet, marks);
+    markReleases(wallet, marks, { admin: SIM_ADMIN });
+    const lockFor = reclaimLockFor(wallet as never);
     if (
       !guardPostBeef(svc, {
         released: (txid) => marks.released(txid),
         known: (txid) => knownByServices(svc as never, txid),
-        held: (txid) => heldOnDevice(s as never, txid),
+        held: heldLocally(marks, () => s as never),
+        reclaim: (txid) => reclaimVerdict(s as never, txid, lockFor),
         log: (m) => this.log(`[${name}] ${m}`),
       })
     )
       throw new Error('postBeef not guarded');
-    if (!guardReclaims(monitor, sm as never, (txid) => marks.armed(txid))) throw new Error('reclaims not guarded');
+    if (!guardReclaimActivation(s, lockFor, (m) => this.log(`[${name}] ${m}`))) throw new Error('reclaims not guarded');
     const log = (...a: unknown[]) => this.log(`[${name}]`, ...a);
     // initWallet's checkBackupRows verifier, over the fake chain (WhatsOnChain first, then the 1Sat stack).
     const verifier: IS.InboundVerifier = {
@@ -817,7 +822,13 @@ export class World {
     const sm = d.sm as unknown as { runAsStorageProvider: <T>(fn: (sp: StorageIdb) => Promise<T>) => Promise<T> };
     return {
       listQueued: () =>
-        sm.runAsStorageProvider((sp) => listQueuedSends(sp as unknown as QueueStore, (t) => d.marks.released(t))),
+        sm.runAsStorageProvider((sp) =>
+          listQueuedSends(
+            sp as unknown as QueueStore,
+            (t) => d.marks.released(t),
+            IS.walletOwnership(this.root) as never,
+          ),
+        ),
       knownOnChain: (txid) => knownOnChain(txid, chainLookups(f)),
       cancel: (q) =>
         sm.runAsStorageProvider(async (sp) => {

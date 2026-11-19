@@ -37,9 +37,11 @@
  */
 import 'fake-indexeddb/auto';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { inputsOf, teardownSim, World } from '../testing/twoDeviceSim/world';
+import { inputsOf, SIM_ADMIN, teardownSim, World } from '../testing/twoDeviceSim/world';
 import { rng } from '../testing/twoDeviceSim/chain';
-import { Beef, Transaction } from '@bsv/sdk';
+import { Beef, Script, Transaction } from '@bsv/sdk';
+import { Wallet, WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
+import { NOT_YOURS } from '../services/releaseMarks';
 import { isHeld, NEEDS_CONFIRMATION, resolveUnsent } from '../services/stuckSends';
 
 // The Store client (mobile/themeOrder/api.ts, imported by the Store open) reads its API base once, when it is first
@@ -306,6 +308,8 @@ describe('two devices, one seed: named cases', () => {
       await w.wipe('B'); // B is new to S1: restored from the backup
       await w.sync('B');
       await w.admit(w.B);
+      // S1 is mined (a payment held on B goes out with B's send only once the chain has it in a block: round 4, item 5).
+      w.chain.mine();
       // B spends more than its untouched coin: S1's change goes in, and S1's request builds the BEEF it is posted in.
       const s2 = await w.send('B', 150_000);
       expect(s2.inputs.some((o) => o.startsWith(`${S1.txid}.`))).toBe(true);
@@ -411,14 +415,185 @@ describe('two devices, one seed: named cases', () => {
         await w.sync(on);
         const [t] = await w.dev(on).s.findTransactions({ partial: { txid: wid }, noRawTx: true });
         expect(t).toBeDefined();
-        expect(t.noSendExpiryState ?? null).toBeNull();
-        expect(t.noSendExpiryReclaimTxid ?? null).toBeNull();
+        // A transaction the device has keeps its own expiry fields; a new one (a restore) keeps the page's, which are
+        // checked structurally before any reclaim is activated or posted (round 4).
+        if (on === 'A') expect([t.noSendExpiryState ?? null, t.noSendExpiryReclaimTxid ?? null]).toEqual([null, null]);
+        else expect(t.noSendExpiryReclaimTxid).toBe(wid);
         const m = w.dev(on).monitor as unknown as { runTask: (n: string) => Promise<string> };
         await m.runTask('NoSendExpiry');
         await w.sendWaiting(on);
         expect(w.chain.has(wid)).toBe(false);
+        // Not activated and never cancelled: the row is left as it was.
+        const [after] = await w.dev(on).s.findTransactions({ partial: { txid: wid }, noRawTx: true });
+        expect(after.noSendExpiryState ?? null).toBe(on === 'A' ? null : 'revocation-requested');
       },
     );
+
+  /** The permissions manager with no prompts (every grant given), as a site's calls reach the wallet in the app. */
+  const NO_PROMPTS = Object.fromEntries(
+    [
+      'seekProtocolPermissionsForSigning',
+      'seekProtocolPermissionsForEncrypting',
+      'seekProtocolPermissionsForHMAC',
+      'seekPermissionsForKeyLinkageRevelation',
+      'seekPermissionsForPublicKeyRevelation',
+      'seekPermissionsForIdentityKeyRevelation',
+      'seekPermissionsForIdentityResolution',
+      'seekBasketInsertionPermissions',
+      'seekBasketRemovalPermissions',
+      'seekBasketListingPermissions',
+      'seekPermissionWhenApplyingActionLabels',
+      'seekPermissionWhenListingActionsByLabel',
+      'seekCertificateDisclosurePermissions',
+      'seekCertificateAcquisitionPermissions',
+      'seekCertificateRelinquishmentPermissions',
+      'seekCertificateListingPermissions',
+      'encryptWalletMetadata',
+      'seekSpendingPermissions',
+      'differentiatePrivilegedOperations',
+    ].map((k) => [k, false]),
+  );
+  const pmOf = (w: World, on: 'A' | 'B') =>
+    new WalletPermissionsManager(w.dev(on).wallet as never, SIM_ADMIN, NO_PROMPTS as never);
+  const expiringArgs = (w: World) => ({
+    description: 'Expiring payment',
+    outputs: [{ lockingScript: w.externalScript(), satoshis: 20_000, outputDescription: 'payment' }],
+    labels: ['p nosend expiry seconds 60'],
+    options: { noSend: true },
+  });
+  /** A BRC-177 expiring noSend payment on `on`: through the permissions manager (two-step), or the bare toolbox. */
+  const expiring = async (w: World, on: 'A' | 'B', how: 'site' | 'legacy') => {
+    const r = (
+      how === 'site'
+        ? await pmOf(w, on).createAction(expiringArgs(w) as never, 'shop.example')
+        : // Made before this release: straight through the toolbox's own createAction, none of this device's records.
+          await (Wallet.prototype.createAction as (a: unknown) => Promise<unknown>).call(
+            w.dev(on).wallet,
+            expiringArgs(w),
+          )
+    ) as { txid: string };
+    const [t] = await w.dev(on).s.findTransactions({ partial: { txid: r.txid }, noRawTx: true });
+    expect(t.noSendExpiryState).toBe('signed');
+    return { txid: r.txid, reclaimTxid: t.noSendExpiryReclaimTxid as string };
+  };
+  /** Past the deadline, the Monitor's NoSendExpiry task; then the reclaim mined, proved and settled. */
+  const expireAndReclaim = async (w: World, on: 'A' | 'B', reclaimTxid: string) => {
+    w.advance(11 * 60_000);
+    const m = w.dev(on).monitor as unknown as { runTask: (n: string) => Promise<string> };
+    await m.runTask('NoSendExpiry');
+    const posted = w.chain.has(reclaimTxid);
+    if (posted) {
+      w.chain.mine();
+      await w.prove(on);
+      await m.runTask('NoSendExpiry');
+    }
+    return posted;
+  };
+  const reclaimSettled = async (w: World, on: 'A' | 'B', target: string, reclaimTxid: string) => {
+    const s = w.dev(on).s;
+    const [t] = await s.findTransactions({ partial: { txid: target }, noRawTx: true });
+    const [r] = await s.findTransactions({ partial: { txid: reclaimTxid }, noRawTx: true });
+    const outs = r ? await s.findOutputs({ partial: { transactionId: r.transactionId }, noScript: true }) : [];
+    return { state: t.noSendExpiryState, coinsBack: outs.some((o) => o.spendable === true) };
+  };
+
+  for (const how of ['site', 'legacy'] as const)
+    sim(
+      `task 54 round 4 (1): a BRC-177 action ${how === 'site' ? 'made by a site through the permissions manager (two-step)' : 'made before this release (no records of it here)'} is reclaimed after expiry and its coins come back`,
+      async () => {
+        const w = await threeCoins();
+        const { txid, reclaimTxid } = await expiring(w, 'A', how);
+        expect(await expireAndReclaim(w, 'A', reclaimTxid)).toBe(true);
+        expect(await reclaimSettled(w, 'A', txid, reclaimTxid)).toEqual({ state: 'reclaimed', coinsBack: true });
+        expect(w.chain.has(txid)).toBe(false);
+      },
+    );
+
+  sim('task 54 round 4 (1): a BRC-177 action restored onto a wiped device is reclaimed there', async () => {
+    const w = await threeCoins();
+    const { txid, reclaimTxid } = await expiring(w, 'A', 'site');
+    await w.sync('A');
+    await w.wipe('B');
+    await w.sync('B');
+    await w.admit(w.B);
+    // The funding transaction (the anchor's) is mined by the deadline: on a restored device it came back held, and a held
+    // parent goes out with the reclaim only once the chain has it in a block (round 4, item 5).
+    w.chain.mine();
+    expect(await expireAndReclaim(w, 'B', reclaimTxid)).toBe(true);
+    expect(w.chain.has(txid)).toBe(false);
+  });
+
+  for (const forge of ['pays a foreign key', 'an extra input'] as const)
+    sim(
+      `task 54 round 4 (1): a forged reclaim (${forge}) restored from a backup is not posted, and its row is not cancelled`,
+      async () => {
+        const w = await threeCoins();
+        const { txid, reclaimTxid } = await expiring(w, 'A', 'site');
+        await w.sync('A');
+        // The hostile backup rewrites the reclaim it hands a restored device.
+        const [bt] = await w.backup.findTransactions({ partial: { txid } });
+        const real = Transaction.fromBinary(Array.from(bt.noSendExpiryReclaimRawTx as number[]));
+        const forged = new Transaction(real.version, [], [], real.lockTime);
+        forged.addInput({ ...real.inputs[0] });
+        if (forge === 'an extra input')
+          forged.addInput({
+            sourceTXID: 'ab'.repeat(32),
+            sourceOutputIndex: 0,
+            unlockingScript: real.inputs[0].unlockingScript,
+            sequence: 0xffffffff,
+          });
+        forged.addOutput({
+          lockingScript:
+            forge === 'pays a foreign key' ? Script.fromHex(w.externalScript()) : real.outputs[0].lockingScript,
+          satoshis: real.outputs[0].satoshis,
+        });
+        w.advance(60_000);
+        await w.backup.updateTransaction(bt.transactionId, {
+          noSendExpiryReclaimTxid: forged.id('hex'),
+          noSendExpiryReclaimRawTx: forged.toBinary(),
+          updated_at: new Date(Date.now()),
+        } as never);
+        await w.wipe('B');
+        await w.sync('B');
+        await w.admit(w.B);
+        w.chain.mine(); // the funding transaction is mined: only the reclaim check stands in the way
+        expect(await expireAndReclaim(w, 'B', forged.id('hex'))).toBe(false);
+        await w.sendWaiting('B');
+        expect([w.chain.has(forged.id('hex')), w.chain.has(txid), w.chain.has(reclaimTxid)]).toEqual([
+          false,
+          false,
+          false,
+        ]);
+        const [t] = await w.B.s.findTransactions({ partial: { txid }, noRawTx: true });
+        expect(t.noSendExpiryState).not.toBe('cancelled');
+      },
+    );
+
+  sim(
+    "task 54 round 4 (2): a site can't send a noSend payment the wallet or another site made; its own it can",
+    async () => {
+      const w = await threeCoins();
+      const pm = pmOf(w, 'A');
+      const noSend = (sats: number) => ({
+        description: 'Held payment',
+        outputs: [{ lockingScript: w.externalScript(), satoshis: sats, outputDescription: 'payment' }],
+        options: { noSend: true },
+      });
+      const byWallet = (await w.A.wallet.createAction(noSend(10_000) as never)) as { txid: string };
+      const byB = (await pm.createAction(noSend(11_000) as never, 'b.example')) as { txid: string };
+      const byA = (await pm.createAction(noSend(12_000) as never, 'a.example')) as { txid: string };
+      for (const W of [byWallet.txid, byB.txid])
+        await expect(
+          pm.createAction({ description: 'Send it now', options: { sendWith: [W] } } as never, 'a.example'),
+        ).rejects.toThrow(NOT_YOURS);
+      expect([w.chain.has(byWallet.txid), w.chain.has(byB.txid)]).toEqual([false, false]);
+      await pm.createAction(
+        { description: 'Send it now', options: { sendWith: [byA.txid], acceptDelayedBroadcast: false } } as never,
+        'a.example',
+      );
+      expect(w.chain.has(byA.txid)).toBe(true);
+    },
+  );
 
   sim('abort: a payment created but never signed, then aborted, leaves both balances whole', async () => {
     const w = await threeCoins();
@@ -578,6 +753,9 @@ describe('two devices, one seed: named cases', () => {
       await w.failAbandoned('B');
       await w.settleAndCheck('after the restore from the backup');
       // The restored phone spends everything it has, the change included: signed with the derivation from the backup.
+      // Its parent came back from the backup held ('nosend'), so it goes out as a parent only once it is mined (task 54
+      // review, round 4, item 5: a mempool "known" is not enough).
+      w.chain.mine();
       const all = (await w.view(w.A)).shown;
       const s2 = await w.send('A', all - 5_000);
       expect(s2.inputs.some((i) => i.startsWith(`${s.txid}.`))).toBe(true);

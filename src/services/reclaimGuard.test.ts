@@ -1,117 +1,139 @@
 import { describe, expect, test } from 'bun:test';
-import { P2PKH, PrivateKey, Random, Transaction, Utils } from '@bsv/sdk';
-import { CREATION_GRACE_MS, foreignReclaim, guardReclaims, stopForeignReclaims, type ExpiryRow } from './reclaimGuard';
+import { KeyDeriver, P2PKH, PrivateKey, Random, Script, Transaction, Utils } from '@bsv/sdk';
+import { checkReclaim, guardReclaimActivation, reclaimLockFor, reclaimVerdict, type ExpiryRow } from './reclaimGuard';
 
-const spend = (txid: string, vout: number, sats = 900) => {
-  const t = new Transaction();
-  t.addInput({
-    sourceTXID: txid,
-    sourceOutputIndex: vout,
-    unlockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()),
+const root = PrivateKey.fromRandom();
+const wallet = {
+  keyDeriver: new KeyDeriver(root),
+  getClientChangeKeyPair: () => ({ privateKey: root.toString(), publicKey: root.toPublicKey().toString() }),
+};
+const lockFor = reclaimLockFor(wallet);
+const anchorKey = PrivateKey.fromRandom();
+const p2pkh = (k: PrivateKey) => new P2PKH().lock(k.toAddress());
+
+/** funding (its output 0 is the anchor) → W (the payment, spends the anchor) and R (the reclaim, spends it too). */
+const scene = async (o: { pay?: 'ours' | 'foreign'; extraInput?: boolean; signer?: PrivateKey } = {}) => {
+  const funding = new Transaction();
+  funding.addInput({
+    sourceTXID: Utils.toHex(Random(32)),
+    sourceOutputIndex: 0,
+    unlockingScript: p2pkh(anchorKey),
     sequence: 0xffffffff,
   });
-  t.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: sats });
-  return t;
-};
-const ANCHOR_TX = Utils.toHex(Random(32));
-const W = spend(Utils.toHex(Random(32)), 0, 20_000); // the payment (withheld)
-const R = spend(ANCHOR_TX, 1); // its own reclaim: spends the anchor
-const row = (o: Partial<ExpiryRow> = {}): ExpiryRow => ({
-  transactionId: 7,
-  txid: W.id('hex'),
-  noSendExpiryState: 'revocation-requested',
-  noSendExpiryAnchorTxid: ANCHOR_TX,
-  noSendExpiryAnchorVout: 1,
-  noSendExpiryReclaimTxid: R.id('hex'),
-  noSendExpiryReclaimRawTx: R.toBinary(),
-  ...o,
-});
-const armedW = (t: string) => t === W.id('hex');
-
-describe('task 54 round 3 F2: a reclaim posts only what this device armed', () => {
-  test("this device's own reclaim (armed here, another tx, spends only our anchor) passes", () => {
-    expect(foreignReclaim(row(), { armed: armedW, anchorIsOurs: true })).toBeUndefined();
+  funding.addOutput({ lockingScript: p2pkh(anchorKey), satoshis: 1_000 });
+  const W = new Transaction();
+  W.addInput({
+    sourceTransaction: funding,
+    sourceOutputIndex: 0,
+    unlockingScript: p2pkh(anchorKey),
+    sequence: 0xffffffff,
   });
-  test('the page attack: the reclaim pointed at the payment itself', () => {
-    const attack = row({
-      noSendExpiryReclaimTxid: W.id('hex'),
-      noSendExpiryReclaimRawTx: W.toBinary(),
-      noSendExpiryAnchorTxid: W.inputs[0].sourceTXID,
-      noSendExpiryAnchorVout: 0,
+  W.addOutput({ lockingScript: p2pkh(PrivateKey.fromRandom()), satoshis: 900 });
+  const R = new Transaction();
+  R.addInput(
+    o.extraInput
+      ? { sourceTransaction: funding, sourceOutputIndex: 0, unlockingScript: p2pkh(anchorKey), sequence: 0xffffffff }
+      : {
+          sourceTransaction: funding,
+          sourceOutputIndex: 0,
+          unlockingScriptTemplate: new P2PKH().unlock(o.signer ?? anchorKey),
+          sequence: 0xffffffff,
+        },
+  );
+  if (o.extraInput)
+    R.addInput({
+      sourceTXID: Utils.toHex(Random(32)),
+      sourceOutputIndex: 1,
+      unlockingScript: p2pkh(anchorKey),
+      sequence: 0xffffffff,
     });
-    expect(foreignReclaim(attack, { armed: armedW, anchorIsOurs: true })).toBe('the reclaim is the payment itself');
+  R.addOutput({
+    lockingScript: o.pay === 'foreign' ? p2pkh(PrivateKey.fromRandom()) : Script.fromHex(lockFor('pre', 'suf')),
+    satoshis: 990,
   });
-  test('not armed here, bytes not the txid, other inputs, or an anchor not ours: refused', () => {
-    expect(foreignReclaim(row(), { armed: () => false, anchorIsOurs: true })).toBe('not armed on this device');
-    expect(
-      foreignReclaim(row({ noSendExpiryReclaimRawTx: spend(ANCHOR_TX, 1).toBinary() }), {
-        armed: armedW,
-        anchorIsOurs: true,
-      }),
-    ).toBe('the reclaim bytes are not the reclaim txid');
-    const other = spend(Utils.toHex(Random(32)), 0);
-    expect(
-      foreignReclaim(row({ noSendExpiryReclaimTxid: other.id('hex'), noSendExpiryReclaimRawTx: other.toBinary() }), {
-        armed: armedW,
-        anchorIsOurs: true,
-      }),
-    ).toBe('the reclaim spends something other than the anchor');
-    expect(foreignReclaim(row(), { armed: armedW, anchorIsOurs: false })).toBe(
-      'the anchor is not an output of this device',
+  if (!o.extraInput) await R.sign();
+  const row: ExpiryRow = {
+    transactionId: 7,
+    txid: W.id('hex'),
+    rawTx: W.toBinary(),
+    noSendExpiryState: 'revocation-requested',
+    noSendExpiryAnchorTxid: funding.id('hex'),
+    noSendExpiryAnchorVout: 0,
+    noSendExpiryReclaimTxid: R.id('hex'),
+    noSendExpiryReclaimRawTx: R.toBinary(),
+    noSendExpiryReclaimDerivationPrefix: 'pre',
+    noSendExpiryReclaimDerivationSuffix: 'suf',
+    noSendExpiryReclaimSatoshis: 990,
+  };
+  const store = (anchorHere = true) => ({
+    findTransactions: async (a: { partial: Record<string, unknown> }) =>
+      [row].filter((r) => Object.entries(a.partial).every(([k, v]) => (r as Record<string, unknown>)[k] === v)),
+    findOutputs: async () =>
+      anchorHere ? [{ lockingScript: funding.outputs[0].lockingScript.toBinary(), satoshis: 1_000 }] : [],
+  });
+  return { funding, W, R, row, store };
+};
+
+describe('task 54 round 4: a reclaim goes out only when it is structurally the wallet’s own', () => {
+  test("the wallet's own reclaim (no marks of any kind needed: two-step, made before this release, restored) passes", async () => {
+    const { row, store } = await scene();
+    expect(await checkReclaim(store(), row, lockFor)).toBeUndefined();
+  });
+  test('forged: the reclaim is the payment itself', async () => {
+    const { row, store, W } = await scene();
+    const forged = { ...row, noSendExpiryReclaimTxid: W.id('hex'), noSendExpiryReclaimRawTx: W.toBinary() };
+    expect(await checkReclaim(store(), forged, lockFor)).toBe('the reclaim is the payment itself');
+  });
+  test('forged: pays a foreign key', async () => {
+    const { row, store } = await scene({ pay: 'foreign' });
+    expect(await checkReclaim(store(), row, lockFor)).toBe("the reclaim doesn't pay this wallet's own key");
+  });
+  test('forged: an extra input', async () => {
+    const { row, store } = await scene({ extraInput: true });
+    expect(await checkReclaim(store(), row, lockFor)).toBe('the reclaim spends something other than the anchor');
+  });
+  test("forged: a signature that doesn't unlock the anchor", async () => {
+    const { row, store } = await scene({ signer: PrivateKey.fromRandom() });
+    expect(await checkReclaim(store(), row, lockFor)).toBe('the reclaim signature does not verify');
+  });
+  test("an anchor that isn't in this store, or that the payment doesn't spend", async () => {
+    const { row, store } = await scene();
+    expect(await checkReclaim(store(false), row, lockFor)).toBe('the anchor is not an output in this store');
+    const other = await scene();
+    expect(await checkReclaim(store(), { ...row, rawTx: other.W.toBinary(), txid: other.W.id('hex') }, lockFor)).toBe(
+      'the payment does not spend the anchor',
     );
   });
+  test('reclaimVerdict: a posted txid that is some payment’s reclaim is checked; any other txid passes', async () => {
+    const { row, store, W } = await scene({ pay: 'foreign' });
+    expect(await reclaimVerdict(store(), row.noSendExpiryReclaimTxid!, lockFor)).toBe(
+      "the reclaim doesn't pay this wallet's own key",
+    );
+    expect(await reclaimVerdict(store(), W.id('hex'), lockFor)).toBeUndefined();
+  });
 
-  const store = (rows: ExpiryRow[], anchors = true) => {
-    const updates: [number, Record<string, unknown>][] = [];
-    return {
-      updates,
-      sp: {
-        findTransactions: async (a: { partial: Record<string, unknown> }) =>
-          rows.filter((r) => r.noSendExpiryState === a.partial.noSendExpiryState),
-        findOutputs: async () => (anchors ? [{}] : []),
-        updateTransaction: async (id: number, u: Record<string, unknown>) => void updates.push([id, u]),
+  const activation = async (o: Parameters<typeof scene>[0]) => {
+    const { row, store } = await scene(o);
+    const moved: string[] = [];
+    const s = {
+      ...store(),
+      compareAndSetNoSendExpiryState: async (_id: number, _e: string, next: string) => {
+        moved.push(next);
+        return true;
       },
     };
+    const logs: string[] = [];
+    expect(guardReclaimActivation(s, lockFor, (m) => logs.push(m))).toBe(true);
+    const r = await s.compareAndSetNoSendExpiryState(7, 'revocation-requested', 'reclaiming');
+    return { r, moved, logs, row };
   };
-  test("stopForeignReclaims: a foreign one is set 'cancelled' (the task ignores it); our own is left", async () => {
-    const { sp, updates } = store([row(), row({ transactionId: 8, txid: Utils.toHex(Random(32)) })]);
-    const stopped = await stopForeignReclaims(sp, armedW, () => undefined);
-    expect(stopped).toHaveLength(1);
-    expect(updates).toEqual([[8, { noSendExpiryState: 'cancelled' }]]);
+  test("activation of a forged reclaim: refused (not moved, nothing written, never 'cancelled'), logged", async () => {
+    const { r, moved, logs, row } = await activation({ pay: 'foreign' });
+    expect([r, moved, row.noSendExpiryState]).toEqual([false, [], 'revocation-requested']);
+    expect(logs).toHaveLength(1);
   });
-  test('a createAction of our own still in progress (fresh preparing/unsigned/signed row) is left alone', async () => {
-    const now = Date.now();
-    const fresh = row({ txid: Utils.toHex(Random(32)), noSendExpiryState: 'signed', updated_at: new Date(now) });
-    const old = row({
-      transactionId: 9,
-      txid: Utils.toHex(Random(32)),
-      noSendExpiryState: 'signed',
-      updated_at: new Date(now - CREATION_GRACE_MS - 1),
-    });
-    const { sp, updates } = store([fresh, old]);
-    await stopForeignReclaims(sp, armedW, () => undefined, now);
-    expect(updates).toEqual([[9, { noSendExpiryState: 'cancelled' }]]);
-  });
-  test('guardReclaims: the check runs before every run of the NoSendExpiry task', async () => {
-    const order: string[] = [];
-    const task = {
-      name: 'NoSendExpiry',
-      runTask: async () => {
-        order.push('task');
-        return '';
-      },
-    };
-    const monitor = { _tasks: [task] };
-    const { sp } = store([row({ transactionId: 5, txid: Utils.toHex(Random(32)) })]);
-    const storage = {
-      runAsStorageProvider: async <T>(f: (s: never) => Promise<T>) => {
-        order.push('check');
-        return f(sp as never);
-      },
-    };
-    expect(guardReclaims(monitor, storage, armedW)).toBe(true);
-    await task.runTask();
-    expect(order).toEqual(['check', 'task']);
-    expect(guardReclaims({ _tasks: [] }, storage, armedW)).toBe(false);
+  test("activation of the wallet's own reclaim goes ahead", async () => {
+    const { r, moved } = await activation({});
+    expect([r, moved]).toEqual([true, ['reclaiming']]);
   });
 });

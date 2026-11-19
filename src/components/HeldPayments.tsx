@@ -64,7 +64,7 @@ export const HeldPaymentsView = ({
           <span className="flex gap-1" style={{ flexShrink: 0 }}>
             <button
               type="button"
-              disabled={!!busy || !p.recipients}
+              disabled={!!busy || !p.recipients?.length || !p.amountSats}
               onClick={() => onSend(p.txid)}
               className="rounded-md px-2 py-0.5 border-0 cursor-pointer font-semibold"
               style={{ background: GOLD, color: '#000', fontSize: 11 }}

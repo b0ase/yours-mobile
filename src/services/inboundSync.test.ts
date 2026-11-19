@@ -2012,7 +2012,7 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     Object.fromEntries(Object.keys(RECLAIM).map((k) => [k, t[k] ?? null]));
   const NONE = Object.fromEntries(Object.keys(RECLAIM).map((k) => [k, null]));
 
-  test("task 54 round 3 F2: a page's BRC-177 expiry / reclaim fields never reach a new transaction", async () => {
+  test("task 54 round 4: a new transaction (a restore) keeps the page's BRC-177 fields (checked before any reclaim)", async () => {
     const d = await phoneWithBackup();
     const X = await backupTx(d, 'nosend');
     const [rt] = await d.remote.findTransactions({ partial: { txid: X.txid }, noRawTx: true });
@@ -2020,7 +2020,7 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     await d.pull();
     const userId = await userOf(d.phone, d);
     const [t] = await d.phone.findTransactions({ partial: { userId, txid: X.txid } });
-    expect(expiryOf(t as never)).toEqual(NONE);
+    expect(expiryOf(t as never)).toEqual(RECLAIM);
   });
 
   test('task 54 round 3 F2: …nor change a transaction the device has', async () => {

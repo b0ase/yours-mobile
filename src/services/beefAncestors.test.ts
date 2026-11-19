@@ -3,6 +3,7 @@ import { Beef, MerklePath, P2PKH, PrivateKey, Random, Transaction, Utils } from 
 import {
   ancestorsOnly,
   guardPostBeef,
+  heldLocally,
   heldOnDevice,
   knownByServices,
   pruneBeef,
@@ -198,14 +199,47 @@ describe('task 54 round 2: a BEEF carries only what its transaction needs', () =
     });
   });
 
-  test('knownByServices: mined or in the mempool by the services; anything else is no', async () => {
-    const svc = (status: string, ok = 'success') => ({
-      getStatusForTxids: async (t: string[]) => ({ status: ok, results: [{ txid: t[0], status }] }),
+  test('knownByServices (round 4, item 5): only a mined txid whose merkle path checks against the chain tracker', async () => {
+    const t = tx();
+    const id = t.id('hex');
+    const goodPath = new MerklePath(900_000, [[{ offset: 0, hash: id, txid: true }]]);
+    const tracker = (ok: boolean) => ({ isValidRootForHeight: async () => ok, currentHeight: async () => 900_001 });
+    const svc = (merklePath: unknown, ok = true) => ({
+      getMerklePath: async () => ({ merklePath }),
+      getChainTracker: async () => tracker(ok),
     });
-    expect(await knownByServices(svc('mined'), 'x')).toBe(true);
-    expect(await knownByServices(svc('known'), 'x')).toBe(true);
-    expect(await knownByServices(svc('unknown'), 'x')).toBe(false);
-    expect(await knownByServices(svc('known', 'error'), 'x')).toBe(false);
-    expect(await knownByServices({}, 'x')).toBe(false);
+    expect(await knownByServices(svc(goodPath), id)).toBe(true);
+    expect(await knownByServices(svc(goodPath, false), id)).toBe(false); // a root the chain doesn't have
+    expect(await knownByServices(svc(undefined), id)).toBe(false); // mempool only: not mined
+    const other = new MerklePath(900_000, [[{ offset: 0, hash: tx().id('hex'), txid: true }]]);
+    expect(await knownByServices(svc(other), id)).toBe(false); // a path for another txid
+    expect(await knownByServices({}, id)).toBe(false);
+  });
+
+  test("heldLocally (round 4, item 6): this device's record decides, whatever the active store says", async () => {
+    const W = 'f'.repeat(64);
+    const notHeldStore = {
+      findProvenTxReqs: async () => [{ status: 'unsent' }], // a remote store moved it
+      findTransactions: async () => [{ status: 'sending' }],
+    };
+    expect(await heldLocally({ heldHere: (t) => t === W }, () => notHeldStore)(W)).toBe(true);
+    expect(await heldLocally({ heldHere: () => false }, () => undefined)(W)).toBe(false);
+    const heldStore = { findProvenTxReqs: async () => [{ status: 'nosend' }], findTransactions: async () => [] };
+    expect(await heldLocally({ heldHere: () => false }, () => heldStore)(W)).toBe(true);
+  });
+
+  test('a posted reclaim that fails the structural check refuses the whole post', async () => {
+    const { P, A } = scene();
+    const S = tx(A);
+    const b = new Beef();
+    for (const t of [P, A, S]) add(b, t);
+    const posted: unknown[] = [];
+    const services = { postBeef: async () => void posted.push(1) };
+    guardPostBeef(services, {
+      reclaim: async (t) => (t === S.id('hex') ? 'pays a foreign key' : undefined),
+      log: () => undefined,
+    });
+    const r = (await services.postBeef(b as never, [S.id('hex')] as never)) as unknown as { status: string }[];
+    expect([posted.length, r[0].status]).toEqual([0, 'error']);
   });
 });

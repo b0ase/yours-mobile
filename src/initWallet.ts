@@ -58,9 +58,9 @@ import {
   type UnbackedRecord,
   type WriteAheadStorage,
 } from './services/changeWriteAhead';
-import { guardPostBeef, heldOnDevice, knownByServices, type HeldTxStore } from './services/beefAncestors';
+import { guardPostBeef, heldLocally, knownByServices, type HeldTxStore } from './services/beefAncestors';
 import { createReleaseMarks, markReleases, type ReleaseRecord } from './services/releaseMarks';
-import { guardReclaims } from './services/reclaimGuard';
+import { guardReclaimActivation, reclaimLockFor, reclaimVerdict, type ReclaimStore } from './services/reclaimGuard';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
 import { ensureBackupConnected, keepDeviceStoreActive, switchActiveAs } from './services/deviceActive';
@@ -1112,7 +1112,12 @@ export const initWallet = async (
     save: (r) => chrome.storage.local.set({ [releaseKey]: r }),
   });
   await releaseMarks.hydrate();
-  markReleases(baseWallet, releaseMarks);
+  markReleases(baseWallet, releaseMarks, { admin: ADMIN_ORIGINATOR });
+  /** An output is the wallet's when this account's own keys derive its script (held payments' recipients, stuckSends). */
+  const ownsOutput = walletOwnership(parsePrivateKey(keys.identityWif), [
+    legacyOrdKey(keys.ordWif, account?.addresses?.ordAddress),
+    legacyPayKey(keys.walletWif, account?.addresses?.bsvAddress),
+  ]);
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
@@ -1151,20 +1156,24 @@ export const initWallet = async (
   // 54 review, round 2).
   // …and it refuses any post carrying a payment held here (signed noSend) that this device's own action did not release
   // (review round 3, F1b: a backup can't send a withheld payment as a parent of the next send, nor as a reclaim).
+  // Held is this device's own record (signed noSend here, by releaseMarks) or its own store's: never the active
+  // store's, which may be remote (review round 4, item 6). A reclaim goes out only when it is structurally the wallet's
+  // own revocation (services/reclaimGuard.ts).
+  const reclaimLock = reclaimLockFor(baseWallet as never);
   if (
     !guardPostBeef(toolboxServices, {
       released: (txid) => releaseMarks.released(txid),
       known: (txid) => knownByServices(toolboxServices as never, txid),
-      held: async (txid) =>
-        storage.isActiveStorageProvider()
-          ? storage.runAsStorageProvider((sp) => heldOnDevice(sp as unknown as HeldTxStore, txid))
-          : false,
+      held: heldLocally(releaseMarks, () => ownStore() as unknown as HeldTxStore | undefined),
+      reclaim: async (txid) => {
+        const own = ownStore();
+        return own ? reclaimVerdict(own as unknown as ReclaimStore, txid, reclaimLock) : undefined;
+      },
     })
   )
     console.error('[initWallet] broadcasts are not held to their own transactions');
-  // A BRC-177 reclaim posts only what this device armed itself (services/reclaimGuard.ts; review round 3, F2).
-  if (walletMonitor && !guardReclaims(walletMonitor, storage as never, (txid) => releaseMarks.armed(txid)))
-    console.warn('[initWallet] no NoSendExpiry task to guard');
+  // The toolbox activates a BRC-177 reclaim (then posts it) only when the same check passes; nothing is cancelled.
+  if (!guardReclaimActivation(ownStore(), reclaimLock)) console.warn('[initWallet] BRC-177 reclaims are not checked');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
   // The wallet's own sends check the coins storage picked against the chain before signing; coins another device
@@ -2183,7 +2192,9 @@ export const initWallet = async (
   /** The queued-send review and the by-hand send/cancel share these (services/stuckSends.ts). */
   const stuckDeps: Parameters<typeof releaseStuckSends>[0] & { listQueued: () => Promise<QueuedSend[]> } = {
     listQueued: () =>
-      storage.runAsStorageProvider((sp) => listQueuedSends(sp as unknown as QueueStore, releaseMarks.released)),
+      storage.runAsStorageProvider((sp) =>
+        listQueuedSends(sp as unknown as QueueStore, releaseMarks.released, ownsOutput as never),
+      ),
     knownOnChain: (txid) => knownOnChain(txid),
     cancel: (q) =>
       storage.runAsStorageProvider(async (sp) => {
