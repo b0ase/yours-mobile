@@ -128,28 +128,68 @@ type TxRow = {
   updated_at?: Date;
 };
 type ProvenRow = { txid?: string; rawTx?: Bytes | null };
-type ReqRow = { txid?: string; status?: string };
+type ReqRow = {
+  txid?: string;
+  status?: string;
+  attempts?: number;
+  history?: string;
+  wasBroadcast?: boolean;
+  rebroadcastAttempts?: number;
+};
 /** Transaction states of a payment this device has made but the network may not have yet ('unfail': being re-checked). */
 export const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail']);
 /** Proof-request states in which the toolbox's monitor fails the transaction. */
 const REQ_FAILED = new Set(['invalid', 'doubleSpend']);
 /**
  * Proof-request states in which this device's Monitor (SendWaiting) posts the payment to the network. A request new to
- * this device arriving in one is admitted as 'nosend' (b-Aware 310/316): only this device's own createAction/signAction
- * (or a release it makes) may arm a send, never a page from a backup, which a hostile one could have written.
+ * this device is never admitted in one (b-Aware 310/316): only this device's own createAction/signAction (or a release it
+ * makes) may arm a send, never a page from a backup, which a hostile one could have written.
  */
 export const REQ_SENDABLE = new Set(['unprocessed', 'unsent', 'sending']);
+/**
+ * A request new to this device starts its proof bookkeeping afresh (b-Aware 310/316, review of task 54, F1). The toolbox's
+ * proof timeout (EntityProvenTxReq.applyProofTimeout, run by CheckForProofs / CheckNoSends once `attempts` passes the
+ * limit) puts a request it thinks "was broadcast" (its `wasBroadcast` flag, an 'unmined' / 'callback' / 'unconfirmed'
+ * status, or such a status note in its `history`) back to 'unsent', and SendWaiting then posts it; the app sets no
+ * rebroadcast limit. None of those fields is a page's to set: this device counts its own attempts and has broadcast
+ * nothing it did not send itself.
+ */
+const freshProofState = (q: ReqRow) => {
+  q.attempts = 0;
+  q.wasBroadcast = false;
+  q.rebroadcastAttempts = 0;
+  q.history = '{}';
+};
 /**
  * A page as another store or file should keep it: a proof request in a state that makes a copy's Monitor send the
  * payment ('unprocessed', 'unsent', 'sending') goes as 'nosend'. This device's own rows are untouched (it still sends
  * what it queued); the toolbox never changes a request's status in a store that has it, so what is written here is what
  * every copy keeps. Same rewrite as the write-ahead push (changeWriteAhead.ts asSending), now on every push path.
  */
+const hasSendableRequest = (chunk: { provenTxReqs?: ReqRow[] } | undefined) =>
+  !!chunk?.provenTxReqs?.some((q) => q && REQ_SENDABLE.has(String(q.status)));
+/**
+ * Is this page going to the store the account has made active? WalletStorageManager.setActive writes the new active's key
+ * into the reading store's user row (StorageProvider.setActive) before it syncs that store's rows to every other store,
+ * so during a switch the user row names the target. An unreadable row counts as no (the page goes as 'nosend').
+ */
+async function toActiveStore(store: DeviceStore, args: PushArgs | undefined): Promise<boolean> {
+  const to = args?.toStorageIdentityKey;
+  if (!to || !args?.identityKey || to === store.getSettings?.()?.storageIdentityKey) return false;
+  try {
+    const [user] = (await store.findUsers({ partial: { identityKey: args.identityKey } })) as {
+      activeStorage?: string;
+    }[];
+    return user?.activeStorage === to;
+  } catch {
+    return false;
+  }
+}
 export function noSendRequests<T extends { provenTxReqs?: ReqRow[] }>(chunk: T): T {
-  if (!chunk?.provenTxReqs?.some((q) => q && REQ_SENDABLE.has(String(q.status)))) return chunk;
+  if (!hasSendableRequest(chunk)) return chunk;
   return {
     ...chunk,
-    provenTxReqs: chunk.provenTxReqs.map((q) =>
+    provenTxReqs: (chunk.provenTxReqs ?? []).map((q) =>
       q && REQ_SENDABLE.has(String(q.status)) ? { ...q, status: 'nosend' } : q,
     ),
   };
@@ -686,22 +726,28 @@ export async function verifyInboundChunk(
   // linked to it), and 'unfail' restores a failed one's outputs on the chain's word alone. Such a request, new to the
   // device, arrives as one to be checked again (R3): for a transaction the device holds or this page brings, and any
   // 'unfail'. A request the device has keeps its own status (EntityProvenTxReq.mergeExisting never changes it).
+  // Every other request new to the device that isn't settled ('completed') arrives as 'nosend' (b-Aware 310/316): no
+  // copy's Monitor sends it on a page's word, and CheckNoSends collects its proof once the chain has the payment. Both
+  // start their attempts, rebroadcast count, "was broadcast" flag and history afresh (freshProofState), so the proof
+  // timeout can never turn one back into a send.
   const pageTxids = new Set((chunk.transactions ?? []).map((t) => t?.txid).filter((x): x is string => !!x));
   for (const q of chunk.provenTxReqs ?? []) {
-    if (!q?.txid) continue;
+    if (!q) continue;
+    // A page adds no history to any request (EntityProvenTxReq.mergeExisting merges a page's notes into the device's
+    // row, and a status note such as 'unmined' makes the toolbox count it as broadcast: review of task 54, F1).
+    q.history = '{}';
+    if (!q.txid) continue;
     const status = String(q.status);
-    const sendable = REQ_SENDABLE.has(status);
-    if (!REQ_FAILED.has(status) && status !== 'unfail' && !sendable) continue;
+    if (status === 'completed') continue;
     if (
       typeof store.findProvenTxReqs === 'function' &&
       (await store.findProvenTxReqs({ partial: { txid: q.txid } }))[0]
     )
       continue;
-    if (sendable) {
-      // Never sent from here on a page's word: 'nosend' is no copy's to send, and the toolbox's CheckNoSends collects
-      // its proof once the chain has the payment (the chain decides through the existing proof and no-send checks).
+    if (!REQ_FAILED.has(status) && status !== 'unfail') {
+      // Not counted as a kept transaction: every request new to the device arrives this way, its own included.
       q.status = 'nosend';
-      report.keptTx++;
+      freshProofState(q);
       continue;
     }
     if (
@@ -711,6 +757,7 @@ export async function verifyInboundChunk(
     )
       continue;
     q.status = 'unknown';
+    freshProofState(q);
     report.keptTx++;
   }
 
@@ -1829,15 +1876,17 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       const own = (this as unknown as Record<string, unknown>).processSyncChunk;
       if (Object.prototype.hasOwnProperty.call(this, 'processSyncChunk') && own === original)
         return (await read.call(this, args)) as SyncChunk;
-      // Every page this device hands on (a routine sync, BackupSync, updateBackups, setActive, a file export or USB
-      // backup) carries its sendable requests as 'nosend', so no copy it reaches ever sends them (b-Aware 310/316).
-      return noSendRequests(
-        (await readPushPage(
-          this as unknown as ParentStore,
-          args as PushArgs,
-          async (a) => (await read.call(this, a)) as PushPage,
-        )) as SyncChunk,
-      );
+      const page = (await readPushPage(
+        this as unknown as ParentStore,
+        args as PushArgs,
+        async (a) => (await read.call(this, a)) as PushPage,
+      )) as SyncChunk;
+      // Every page this device hands on to a copy (a routine sync, BackupSync, updateBackups, a file export or USB
+      // backup) carries its sendable requests as 'nosend', so no copy it reaches ever sends them (b-Aware 310/316). A
+      // page to the store this account has made active (setActive) carries them as they are: that store's Monitor sends
+      // this device's queued payments from now on, and a 'nosend' there would strand them (review of task 54, F2).
+      if (!hasSendableRequest(page) || (await toActiveStore(this, args as PushArgs))) return page;
+      return noSendRequests(page);
     };
   }
   // A pull starts a little before the newest time it has seen (review 23, M1): a row another copy pushed a few minutes

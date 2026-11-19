@@ -24,6 +24,7 @@ import {
   Utils,
 } from '@bsv/sdk';
 import {
+  EntityProvenTxReq,
   Services,
   StorageIdb,
   StorageProvider,
@@ -1835,6 +1836,79 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
       await d.pull();
       expect((await d.phone.findProvenTxReqs({ partial: { txid: X.txid } })).map((q) => q.status)).toEqual(['nosend']);
     });
+
+  /** A history whose status note makes the toolbox count the request as broadcast (EntityProvenTxReq.wasBroadcast). */
+  const BROADCAST_HISTORY = JSON.stringify({
+    notes: [{ what: 'status', status_was: 'sending', status_now: 'unmined', when: '2026-11-01T00:00:00.000Z' }],
+  });
+  /** What the proof timeout reads to decide between 'invalid' and a resend ('unsent'). */
+  const proofState = async (d: D, txid: string) => {
+    const [q] = await d.phone.findProvenTxReqs({ partial: { txid } });
+    const e = new EntityProvenTxReq(q as never);
+    return { status: q.status, attempts: q.attempts, wasBroadcast: e.wasBroadcast, rebroadcast: e.rebroadcastAttempts };
+  };
+  const tamperedReq = async (d: D, txid: string, status: string) => {
+    const at = later();
+    await d.remote.insertProvenTxReq({
+      provenTxReqId: 0,
+      created_at: at,
+      updated_at: at,
+      txid,
+      status,
+      attempts: 10_000,
+      wasBroadcast: true,
+      rebroadcastAttempts: 3,
+      notified: false,
+      history: BROADCAST_HISTORY,
+      notify: '{}',
+      rawTx: [1, 2, 3],
+    } as never);
+  };
+
+  for (const status of ['nosend', 'unmined', 'unknown', 'callback', 'unconfirmed', 'unsigned', 'nonfinal', 'unsent'])
+    test(`task 54 F1: a '${status}' request new to the device, with attempts / wasBroadcast / history forged, is admitted as 'nosend' with its proof state afresh`, async () => {
+      const d = await phoneWithBackup();
+      const X = await backupTx(d, 'completed');
+      await tamperedReq(d, X.txid, status);
+      await d.pull();
+      expect(await proofState(d, X.txid)).toEqual({
+        status: 'nosend',
+        attempts: 0,
+        wasBroadcast: false,
+        rebroadcast: 0,
+      });
+    });
+
+  for (const status of ['invalid', 'unfail'])
+    test(`task 54 F1: a forged '${status}' request new to the device is re-checked ('unknown') with its proof state afresh`, async () => {
+      const d = await phoneWithBackup();
+      const X = await backupTx(d, 'failed');
+      await tamperedReq(d, X.txid, status);
+      await d.pull();
+      expect(await proofState(d, X.txid)).toEqual({
+        status: 'unknown',
+        attempts: 0,
+        wasBroadcast: false,
+        rebroadcast: 0,
+      });
+    });
+
+  test("task 54 F1: a page adds no 'was broadcast' history to a request the device already has", async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'failed');
+    await tamperedReq(d, X.txid, 'invalid');
+    await d.pull();
+    expect((await proofState(d, X.txid)).wasBroadcast).toBe(false);
+    const [rq] = await d.remote.findProvenTxReqs({ partial: { txid: X.txid } });
+    await d.remote.updateProvenTxReq(rq.provenTxReqId, { history: BROADCAST_HISTORY, updated_at: later() } as never);
+    await d.pull();
+    expect(await proofState(d, X.txid)).toEqual({
+      status: 'unknown',
+      attempts: 0,
+      wasBroadcast: false,
+      rebroadcast: 0,
+    });
+  });
 
   test("a page whose admissions can't be written to the device's list is not taken (fetched again), and isn't a broken backup", async () => {
     const d = await phoneWithBackup();

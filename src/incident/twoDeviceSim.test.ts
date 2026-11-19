@@ -189,6 +189,93 @@ describe('two devices, one seed: named cases', () => {
     },
   );
 
+  /** A history whose status note makes the toolbox count a request as broadcast (EntityProvenTxReq.wasBroadcast). */
+  const BROADCAST_HISTORY = JSON.stringify({
+    notes: [{ what: 'status', status_was: 'sending', status_now: 'unmined', when: '2026-11-01T00:00:00.000Z' }],
+  });
+  /** A hostile backup rewrites the request for `txid` (with a newer time, so the next pull carries it). */
+  const tamper = async (w: World, txid: string, patch: Record<string, unknown>) => {
+    const [q] = await w.backup.findProvenTxReqs({ partial: { txid } });
+    expect(q).toBeDefined();
+    w.advance(60_000);
+    await w.backup.updateProvenTxReq(q.provenTxReqId, { ...patch, updated_at: new Date(Date.now()) } as never);
+  };
+  /** `on`'s proof task, `runs` times, each counted as an attempt (as each new block does in the app). */
+  const proveTimes = async (w: World, on: 'A' | 'B', runs: number) => {
+    for (let i = 0; i < runs; i++) await w.prove(on);
+  };
+
+  for (const status of ['nosend', 'unmined', 'unknown', 'callback', 'unconfirmed', 'unsent', 'invalid'] as const)
+    sim(
+      `task 54 F1: a pulled '${status}' request for a noSend payment, forged attempts / wasBroadcast / history, posts nothing after the proof tasks`,
+      async () => {
+        const w = await threeCoins();
+        const p = await w.storePay('A', 20_000, { outbox: false }); // signed, withheld: never to be broadcast
+        await w.sync('A');
+        await tamper(w, p.txid, {
+          status,
+          attempts: 10_000,
+          wasBroadcast: true,
+          rebroadcastAttempts: 0,
+          history: BROADCAST_HISTORY,
+        });
+        await w.wipe('B'); // B is new to it: restored from the backup
+        await w.sync('B');
+        await w.prove('B', { noSends: true }); // the proof timeout runs here (CheckForProofs / CheckNoSends)
+        expect(await w.sendWaiting('B')).toEqual([]);
+        expect(w.chain.has(p.txid)).toBe(false);
+      },
+    );
+
+  sim(
+    "task 54 F1: a pulled 'unmined' request (attempts, flags and history untouched) posts nothing after 150 proof runs",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.storePay('A', 20_000, { outbox: false });
+      await w.sync('A');
+      await tamper(w, p.txid, { status: 'unmined' });
+      await w.wipe('B');
+      await w.sync('B');
+      await proveTimes(w, 'B', 150); // past unprovenAttemptsLimitMain (144)
+      await w.prove('B', { noSends: true });
+      expect(await w.sendWaiting('B')).toEqual([]);
+      expect(w.chain.has(p.txid)).toBe(false);
+    },
+  );
+
+  sim(
+    "task 54 F1: a later page's 'was broadcast' history on a request B already re-checks ('unknown') posts nothing after 150 proof runs",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.storePay('A', 20_000, { outbox: false });
+      await w.sync('A');
+      await tamper(w, p.txid, { status: 'invalid' });
+      await w.wipe('B');
+      await w.sync('B');
+      expect((await w.statusOf('B', p.txid)).req).toBe('unknown');
+      await tamper(w, p.txid, { history: BROADCAST_HISTORY });
+      await w.sync('B');
+      await proveTimes(w, 'B', 150);
+      expect(await w.sendWaiting('B')).toEqual([]);
+      expect(w.chain.has(p.txid)).toBe(false);
+    },
+  );
+
+  sim(
+    "task 54 F2: a delayed send queued before setActive reaches the new active store as 'unsent' and is sent from there",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.sendDelayed('A', 20_000);
+      expect((await w.statusOf('A', p.txid)).req).toBe('unsent');
+      await w.A.sm.setActive(w.backup.getSettings().storageIdentityKey);
+      expect((await w.statusOf('backup', p.txid)).req).toBe('unsent');
+      expect(w.chain.has(p.txid)).toBe(false);
+      // A's Monitor now works on the backup store; the backup's own services post (not A's, so not in A's list).
+      await w.sendWaiting('A');
+      expect(w.chain.has(p.txid)).toBe(true);
+    },
+  );
+
   sim('abort: a payment created but never signed, then aborted, leaves both balances whole', async () => {
     const w = await threeCoins();
     await w.createThenAbort('A', 30_000);
