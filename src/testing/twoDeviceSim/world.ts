@@ -71,7 +71,7 @@ import {
 } from '../../services/unsentExpiry';
 import { chainLookups, expiryLookups, releaseLookups } from '../../services/unsentGuard';
 import { abortTargetKnownOnChain, knownOnChain } from '../../services/recoverFailed';
-import { releaseStuckSends, type QueuedSend } from '../../services/stuckSends';
+import { releaseStuckSends, sendHeld, type QueuedSend, type UnsentDeps } from '../../services/stuckSends';
 import {
   AUTO_RESYNC_GAP_MS,
   OWN_PENDING_STATUSES,
@@ -765,9 +765,30 @@ export class World {
   async releaseStuck(on: Device | 'A' | 'B') {
     const d = this.dev(on);
     this.step(`${d.name} gives up on queued sends the network never had`);
+    return releaseStuckSends({ ...this.stuckDeps(d), log: (m) => this.log(`[${d.name}] ${m}`) });
+  }
+
+  /**
+   * initWallet's by-hand send/cancel deps on `on` (resolveUnsent): its stuck-send deps, the Monitor's SendWaiting, the
+   * wallet's own post of a held payment (sendHeld), and the spending kill switch (`paused`: it refuses).
+   */
+  unsentDeps(on: Device | 'A' | 'B', o: { paused?: boolean } = {}): UnsentDeps {
+    const d = this.dev(on);
+    const m = d.monitor as unknown as { runTask: (n: string) => Promise<string> };
+    return {
+      ...this.stuckDeps(d),
+      sendWaiting: () => m.runTask('SendWaiting'),
+      sendWith: sendHeld(d.wallet as never),
+      assertSpending: async () => {
+        if (o.paused) throw new Error('Payments are paused for now');
+      },
+    };
+  }
+
+  private stuckDeps(d: Device) {
     const f = this.chain.fetch;
     const sm = d.sm as unknown as { runAsStorageProvider: <T>(fn: (sp: StorageIdb) => Promise<T>) => Promise<T> };
-    return releaseStuckSends({
+    return {
       listQueued: () =>
         sm.runAsStorageProvider(async (sp) => {
           const out: QueuedSend[] = [];
@@ -796,8 +817,7 @@ export class World {
             await sp.updateProvenTxReq(req.provenTxReqId, { status: 'invalid' });
           await sp.updateTransactionStatus('failed', q.transactionId);
         }),
-      log: (m) => this.log(`[${d.name}] ${m}`),
-    });
+    } satisfies Parameters<typeof releaseStuckSends>[0];
   }
 
   /** `on` gives up on a payment (as the stuck-send release does): request 'invalid', payment failed, inputs freed. */

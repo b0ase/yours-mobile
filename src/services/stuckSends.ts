@@ -140,7 +140,31 @@ export function releasedMessage(released: Pick<QueuedSend, 'description'>[]): st
 export type UnsentDeps = Pick<ReleaseDeps, 'listQueued' | 'knownOnChain' | 'cancel' | 'available'> & {
   /** Run the Monitor's SendWaiting now (it re-posts every queued send). */
   sendWaiting: () => Promise<unknown>;
+  /**
+   * Post one payment this device holds as 'nosend' (createAction with sendWith: `sendHeld`). SendWaiting never posts
+   * such a request, so without this a held payment can only be cancelled.
+   */
+  sendWith?: (txid: string) => Promise<unknown>;
+  /** Throws while spending is paused (the kill switch: assertNotPaused('spending')). */
+  assertSpending?: () => Promise<void>;
 };
+
+/** A queued payment this device holds back: restored from a backup, or a copy of another device's. */
+export const isHeld = (s: Pick<QueuedSend, 'reqStatus'>): boolean => s.reqStatus === 'nosend';
+
+/**
+ * The wallet's own broadcast of one held payment, by its txid (BRC-100 createAction with sendWith and nothing new):
+ * only ever called from resolveUnsent, on the user's "Send now".
+ */
+export const sendHeld =
+  (wallet: { createAction: (args: never) => Promise<unknown> }) =>
+  (txid: string): Promise<unknown> =>
+    wallet.createAction({
+      description: 'Send a held payment',
+      options: { sendWith: [txid], acceptDelayedBroadcast: false },
+    } as never);
+
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export type UnsentOutcome =
   | { ok: true; txid: string; result: 'network-may-have-it' | 'still-queued' | 'cancelled' }
@@ -150,7 +174,10 @@ export type UnsentOutcome =
  * The bvideox.com mint b6963e8c… (24 Oct 2026) was queued ('sending'), answered as sent, and never posted; its
  * inputs stay locked until it goes out or is given up on (24 h and 6 attempts, above). This lets the wallet's own
  * screen act on ONE queued send now:
- *  - 'send': run SendWaiting (re-posts it), then report whether the network has (or may have) it.
+ *  - 'send': run SendWaiting (re-posts it), then report whether the network has (or may have) it. A payment held here
+ *    as 'nosend' (restored from a backup: services/inboundSync.ts admits every request new to the device that way, so
+ *    a queued send came back held and would only ever be cancelled, a week on) is posted by itself instead
+ *    (deps.sendWith), and only while spending is not paused. Never run without the user asking.
  *  - 'cancel': only when the network has no copy (knownOnChain fails closed: any doubt keeps it). Then the request
  *    is marked 'invalid' and the action 'failed', which releases its inputs: the same cancel the 24 h review does.
  * Only sends in the queued list are touched; anything else is refused.
@@ -167,6 +194,20 @@ export async function resolveUnsent(deps: UnsentDeps, txid: string, how: 'send' 
   };
   const queued = (await deps.listQueued()).find((s) => s.txid.toLowerCase() === txid.toLowerCase());
   if (!queued) return { ok: false, txid, error: 'That payment is not waiting to send' };
+  if (how === 'send' && isHeld(queued)) {
+    if (!deps.sendWith) return { ok: false, txid, error: 'This payment can’t be sent from here' };
+    try {
+      await deps.assertSpending?.();
+    } catch (e) {
+      return { ok: false, txid, error: errText(e) || 'Payments are paused' };
+    }
+    try {
+      await deps.sendWith(queued.txid);
+    } catch (e) {
+      if (!(await known())) return { ok: false, txid, error: `It was not sent: ${errText(e)}` };
+    }
+    return { ok: true, txid, result: (await known()) ? 'network-may-have-it' : 'still-queued' };
+  }
   if (how === 'send') {
     await deps.sendWaiting().catch(() => undefined);
     return { ok: true, txid, result: (await known()) ? 'network-may-have-it' : 'still-queued' };
@@ -174,4 +215,13 @@ export async function resolveUnsent(deps: UnsentDeps, txid: string, how: 'send' 
   if (await known()) return { ok: false, txid, error: 'The network may already have it, so it is kept' };
   await deps.cancel(queued);
   return { ok: true, txid, result: 'cancelled' };
+}
+
+/** What the user is told after a Send now / Cancel choice (components/HeldPayments.tsx), in plain words. */
+export function unsentOutcomeText(o: UnsentOutcome | undefined, error?: string): string {
+  if (!o) return error || 'That didn’t work. Try again.';
+  if (!o.ok) return o.error;
+  if (o.result === 'cancelled') return 'Cancelled. Nothing was paid, and the money is spendable again.';
+  if (o.result === 'network-may-have-it') return 'Sent.';
+  return 'Not on the network yet. Try again in a few minutes.';
 }

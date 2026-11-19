@@ -338,6 +338,12 @@ export class FakeChain {
             },
           ];
         const refused: { txid: string; reason: string }[] = [];
+        // ARC processes every unproven transaction a BEEF carries, not only the ones named (task 54 review, round 2):
+        // a transaction riding in a BEEF reaches the network whether or not it is an ancestor of the named ones.
+        for (const b of beef.txs) {
+          if (b.hasProof || !b.tx || txids.includes(b.txid)) continue;
+          this.accept(b.tx, { walletBroadcast: true });
+        }
         for (const t of txids) {
           const tx = beef.findTxid(t)?.tx;
           if (!tx) continue;

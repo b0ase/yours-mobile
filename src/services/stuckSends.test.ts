@@ -204,3 +204,58 @@ describe('resolveUnsent: send now or cancel one queued send by hand', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe("task 54 round 2: a held payment (restored as 'nosend') goes out only on the user's Send now", () => {
+  const TX = 'c'.repeat(64);
+  const held = { transactionId: 9, txid: TX, createdAt: 0, attempts: 0, reqStatus: 'nosend', description: 'Rent' };
+  const deps = (o: { paused?: boolean; onChain?: () => boolean; sendThrows?: boolean } = {}) => {
+    const calls = { sendWith: [] as string[], sendWaiting: 0 };
+    let posted = false;
+    return {
+      calls,
+      d: {
+        listQueued: async () => [held],
+        knownOnChain: async () => (o.onChain ? o.onChain() : posted),
+        cancel: async () => undefined,
+        sendWaiting: async () => void calls.sendWaiting++,
+        sendWith: async (txid: string) => {
+          calls.sendWith.push(txid);
+          if (o.sendThrows) throw new Error('broadcast refused');
+          posted = true;
+        },
+        assertSpending: async () => {
+          if (o.paused) throw new Error('Payments are paused for now');
+        },
+      },
+    };
+  };
+  test('Send now posts exactly that payment (sendWith), not SendWaiting', async () => {
+    const { d, calls } = deps();
+    expect(await resolveUnsent(d, TX, 'send')).toEqual({ ok: true, txid: TX, result: 'network-may-have-it' });
+    expect(calls).toEqual({ sendWith: [TX], sendWaiting: 0 });
+  });
+  test('refused while spending is paused: nothing posted', async () => {
+    const { d, calls } = deps({ paused: true });
+    expect(await resolveUnsent(d, TX, 'send')).toEqual({ ok: false, txid: TX, error: 'Payments are paused for now' });
+    expect(calls).toEqual({ sendWith: [], sendWaiting: 0 });
+  });
+  test('a refused post is reported as not sent', async () => {
+    const { d } = deps({ sendThrows: true });
+    expect(await resolveUnsent(d, TX, 'send')).toEqual({
+      ok: false,
+      txid: TX,
+      error: 'It was not sent: broadcast refused',
+    });
+  });
+  test('without a way to post it, it is not sent (and SendWaiting, which ignores it, is not pretended)', async () => {
+    const { d, calls } = deps();
+    const { sendWith: _omit, ...noSend } = d;
+    expect((await resolveUnsent(noSend, TX, 'send')).ok).toBe(false);
+    expect(calls).toEqual({ sendWith: [], sendWaiting: 0 });
+  });
+  test('Cancel still releases it when the network has no copy', async () => {
+    const { d, calls } = deps({ onChain: () => false });
+    expect(await resolveUnsent(d, TX, 'cancel')).toEqual({ ok: true, txid: TX, result: 'cancelled' });
+    expect(calls.sendWith).toEqual([]);
+  });
+});

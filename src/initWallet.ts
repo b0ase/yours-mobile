@@ -30,6 +30,7 @@ import { sizeAwareBroadcast } from './services/bigBroadcast';
 import {
   releaseStuckSends,
   resolveUnsent,
+  sendHeld,
   type QueuedSend,
   type ReleaseReport,
   type UnsentOutcome,
@@ -55,6 +56,7 @@ import {
   type UnbackedRecord,
   type WriteAheadStorage,
 } from './services/changeWriteAhead';
+import { guardPostBeef } from './services/beefAncestors';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
 import { ensureBackupConnected, keepDeviceStoreActive, switchActiveAs } from './services/deviceActive';
@@ -140,7 +142,7 @@ import {
   watchStoreConnections,
 } from './services/ownBackendKeys';
 import { normalizeOriginator, parsePrivateKey, type StoragePaymentHook } from '@1sat/wallet';
-import { guardSpending } from './mobile/config/killSwitch';
+import { assertNotPaused, guardSpending } from './mobile/config/killSwitch';
 import { trackSpendsInFlight } from './services/spendsInFlight';
 import {
   syncMessages,
@@ -1130,6 +1132,10 @@ export const initWallet = async (
   // Last postBeef wrapper (outermost): the backup push before a payment's broadcast is not timed as the broadcast.
   if (!onBroadcast(toolboxServices, writeAhead))
     console.warn('[initWallet] payments are not backed up before broadcast');
+  // Outermost of all: every BEEF posted holds only the transactions named and their ancestors, so a payment signed and
+  // withheld (noSend) that rides in another payment's BEEF never reaches the network (services/beefAncestors.ts; task
+  // 54 review, round 2).
+  if (!guardPostBeef(toolboxServices)) console.error('[initWallet] broadcasts are not held to their own transactions');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
   // The wallet's own sends check the coins storage picked against the chain before signing; coins another device
@@ -2520,7 +2526,14 @@ export const initWallet = async (
     listUnsent: () => stuckDeps.listQueued(),
     resolveUnsent: (txid: string, how: 'send' | 'cancel') =>
       resolveUnsent(
-        { ...stuckDeps, sendWaiting: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : '') },
+        {
+          ...stuckDeps,
+          sendWaiting: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : ''),
+          // A held payment (restored from a backup as 'nosend') goes out only on the user's own "Send now", only while
+          // spending is not paused, through the guarded wallet (task 54 review, round 2).
+          sendWith: sendHeld(baseWallet as never),
+          assertSpending: () => assertNotPaused('spending'),
+        },
         txid,
         how,
       ),

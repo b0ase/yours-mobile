@@ -58,6 +58,7 @@ import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
 import { readPushPage, type ParentStore, type PushArgs, type PushPage } from './pushParents';
 import { noteAwaiting } from './pullIntegrity';
+import { ancestorsOnly, txidOfRaw } from './beefAncestors';
 import {
   abandonTail,
   afterPage,
@@ -131,6 +132,8 @@ type ProvenRow = { txid?: string; rawTx?: Bytes | null };
 type ReqRow = {
   txid?: string;
   status?: string;
+  rawTx?: Bytes | null;
+  inputBEEF?: Bytes | null;
   attempts?: number;
   history?: string;
   wasBroadcast?: boolean;
@@ -166,6 +169,46 @@ const freshProofState = (q: ReqRow) => {
  * what it queued); the toolbox never changes a request's status in a store that has it, so what is written here is what
  * every copy keeps. Same rewrite as the write-ahead push (changeWriteAhead.ts asSending), now on every push path.
  */
+const sameBytes = (a: Bytes | null | undefined, b: number[] | undefined) =>
+  !!a && !!b && a.length === b.length && Array.from(a).every((x, i) => x === b[i]);
+/** One row's inputBEEF cut to its own transaction's ancestors: true when it changed (trimmed or cleared). */
+function trimInputBeef(row: { inputBEEF?: Bytes | null }, rawTx: Bytes | null | undefined): boolean {
+  if (!row.inputBEEF?.length) return false;
+  const cut = ancestorsOnly(row.inputBEEF, rawTx);
+  if (sameBytes(row.inputBEEF, cut)) return false;
+  row.inputBEEF = cut;
+  return true;
+}
+/** See verifyInboundChunk: a page's rows carry only their own bytes. Mutates the page; returns what it changed. */
+function sanitizeRows(chunk: SyncChunk) {
+  const out = { reqsDropped: 0, rawCleared: 0, beefTrimmed: 0 };
+  for (const t of chunk.transactions ?? []) {
+    if (!t) continue;
+    if (t.rawTx?.length) {
+      const id = txidOfRaw(t.rawTx);
+      if (!id || (t.txid && id !== t.txid.toLowerCase())) {
+        t.rawTx = undefined;
+        out.rawCleared++;
+      }
+    }
+    if (trimInputBeef(t, t.rawTx)) out.beefTrimmed++;
+  }
+  const reqs = chunk.provenTxReqs;
+  if (reqs?.length) {
+    const keep = reqs.filter((q) => {
+      if (!q) return true;
+      const id = txidOfRaw(q.rawTx);
+      if (!id || !q.txid || id !== q.txid.toLowerCase()) {
+        out.reqsDropped++;
+        return false;
+      }
+      if (trimInputBeef(q, q.rawTx)) out.beefTrimmed++;
+      return true;
+    });
+    if (keep.length !== reqs.length) reqs.splice(0, reqs.length, ...keep);
+  }
+  return out;
+}
 const hasSendableRequest = (chunk: { provenTxReqs?: ReqRow[] } | undefined) =>
   !!chunk?.provenTxReqs?.some((q) => q && REQ_SENDABLE.has(String(q.status)));
 /**
@@ -294,6 +337,11 @@ export type InboundReport = {
   linksDropped: number;
   /** Transaction rows kept as the device has them, and failed proof requests taken as to be checked again. */
   keptTx: number;
+  /**
+   * Proof requests left out because their raw bytes don't hash to their txid, transaction rows whose such bytes were
+   * cleared, and inputBEEFs cut to the ancestors of their own transaction (task 54 review, round 2).
+   */
+  forged?: { reqsDropped: number; rawCleared: number; beefTrimmed: number };
   /**
    * Wallet change the backup holds as spendable that this page leaves NOT spendable here (kept spent, held, not taken).
    * For the log: the restore switch checks the device's store itself (restoreFromRemote.outpointsOnDevice).
@@ -578,6 +626,18 @@ export async function verifyInboundChunk(
     !args?.identityKey
   )
     return report;
+  // No row brings bytes that aren't its own (task 54 review, round 2): a request whose raw bytes don't hash to its txid
+  // is left out of the page, a transaction row's such bytes are cleared, and every inputBEEF keeps only the ancestors
+  // of its own transaction (the toolbox merges a request's inputBEEF into the BEEF of every payment spending its
+  // outputs, and the broadcaster sends every unproven transaction a BEEF carries: a withheld payment slipped into one
+  // went out with this device's next send). An inputBEEF whose transaction can't be read is cleared.
+  const forged = sanitizeRows(chunk);
+  if (forged.reqsDropped || forged.rawCleared || forged.beefTrimmed) {
+    report.forged = forged;
+    v.log?.(
+      `[inbound-sync] backup page: left out ${forged.reqsDropped} proof request(s) whose bytes aren't their txid's, cleared ${forged.rawCleared} transaction row's bytes, trimmed ${forged.beefTrimmed} inputBEEF(s) to their ancestors`,
+    );
+  }
   const user = (await store.findUsers({ partial: { identityKey: args.identityKey } }))[0];
   if (!user) return report; // the toolbox refuses a page for an unknown user on its own
   const userId = user.userId;

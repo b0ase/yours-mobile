@@ -39,6 +39,8 @@ import 'fake-indexeddb/auto';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { teardownSim, World } from '../testing/twoDeviceSim/world';
 import { rng } from '../testing/twoDeviceSim/chain';
+import { Beef } from '@bsv/sdk';
+import { isHeld, resolveUnsent } from '../services/stuckSends';
 
 // The Store client (mobile/themeOrder/api.ts, imported by the Store open) reads its API base once, when it is first
 // loaded. bun runs every file in one process: whichever file loads it first fixes it for the rest, so this file sets
@@ -272,6 +274,70 @@ describe('two devices, one seed: named cases', () => {
       expect(w.chain.has(p.txid)).toBe(false);
       // A's Monitor now works on the backup store; the backup's own services post (not A's, so not in A's list).
       await w.sendWaiting('A');
+      expect(w.chain.has(p.txid)).toBe(true);
+    },
+  );
+
+  sim(
+    "task 54 round 2: a withheld payment the backup slips into another payment's inputBEEF never reaches the network",
+    async () => {
+      const w = await threeCoins();
+      const W = await w.storePay('A', 20_000, { outbox: false }); // signed, withheld: never to be broadcast
+      const S1 = await w.send('A', 20_000); // a normal send: on the network, its change A's to spend
+      await w.sync('A');
+      // A hostile backup adds W (with its parents) to S1's request inputBEEF.
+      const [wq] = await w.backup.findProvenTxReqs({ partial: { txid: W.txid } });
+      const [sq] = await w.backup.findProvenTxReqs({ partial: { txid: S1.txid } });
+      expect(wq && sq).toBeTruthy();
+      const beef = Beef.fromBinary(Array.from(sq.inputBEEF!));
+      for (const parent of new Set(W.inputs.map((o) => o.split('.')[0]))) {
+        const path = w.chain.merklePath(parent);
+        expect(path).toBeDefined(); // the coins W spends are mined
+        beef.mergeRawTx(w.chain.txs.get(parent)!.raw, beef.mergeBump(path!));
+      }
+      beef.mergeRawTx(Array.from(wq.rawTx));
+      expect(beef.isValid()).toBe(true);
+      expect(beef.findTxid(W.txid)).toBeDefined();
+      w.advance(60_000);
+      await w.backup.updateProvenTxReq(sq.provenTxReqId, {
+        inputBEEF: beef.toBinary(),
+        updated_at: new Date(Date.now()),
+      } as never);
+      await w.wipe('B'); // B is new to S1: restored from the backup
+      await w.sync('B');
+      await w.admit(w.B);
+      // B spends more than its untouched coin: S1's change goes in, and S1's request builds the BEEF it is posted in.
+      const s2 = await w.send('B', 150_000);
+      expect(s2.inputs.some((o) => o.startsWith(`${S1.txid}.`))).toBe(true);
+      expect(w.chain.has(s2.txid)).toBe(true);
+      expect(w.chain.has(W.txid)).toBe(false);
+    },
+  );
+
+  sim(
+    "task 54 round 2: a queued send restored from a backup is listed as held and goes out only on the user's Send now, never while paused",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.sendDelayed('A', 20_000); // queued on A; A's device is then lost before it sends
+      await w.sync('A');
+      await w.wipe('B'); // B restored from the backup: the queued send arrives held ('nosend')
+      await w.sync('B');
+      const listed = (await w.unsentDeps('B').listQueued()).find((q) => q.txid === p.txid);
+      expect(listed?.reqStatus).toBe('nosend');
+      expect(isHeld(listed!)).toBe(true);
+      // Nothing goes out without the user: B's Monitor, the stuck-send review.
+      expect(await w.sendWaiting('B')).toEqual([]);
+      await w.releaseStuck('B');
+      expect(w.chain.has(p.txid)).toBe(false);
+      // Spending paused: refused, nothing sent.
+      const paused = await resolveUnsent(w.unsentDeps('B', { paused: true }), p.txid, 'send');
+      expect(paused).toEqual({ ok: false, txid: p.txid, error: 'Payments are paused for now' });
+      expect(w.chain.has(p.txid)).toBe(false);
+      // The user's Send now: exactly that payment goes out, from B.
+      const before = w.B.posted.length;
+      const sent = await resolveUnsent(w.unsentDeps('B'), p.txid, 'send');
+      expect(sent).toEqual({ ok: true, txid: p.txid, result: 'network-may-have-it' });
+      expect(w.B.posted.slice(before)).toEqual([p.txid]);
       expect(w.chain.has(p.txid)).toBe(true);
     },
   );
