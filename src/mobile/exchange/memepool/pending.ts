@@ -41,14 +41,38 @@ export type PendingRecord = {
   doneAt?: number;
   spentBy?: string;
   returnedBy?: string;
+  /** A tombstone older than TOMBSTONE_KEEP_MS, cut down to what re-derives the key (kept indefinitely, capped). */
+  compact?: boolean;
+  /** An 'empty' tombstone: when its address was last looked at again. */
+  checkedAt?: number;
 };
 
 const DONE: readonly PendingState[] = ['returned', 'spent', 'empty'];
 export const isDone = (r: PendingRecord) => DONE.includes(r.state);
 /** Records still waiting on something (tombstones left out). */
 export const liveRecords = (rs: PendingRecord[]) => rs.filter((r) => !isDone(r));
-/** Tombstones are pruned this long after they were written. */
+/**
+ * Tombstones are compacted this long after they were written: the nonce (which alone re-derives the key) is never
+ * dropped, only the rest. Compacted entries are kept indefinitely, the most recent COMPACT_KEEP_MAX of them.
+ */
 export const TOMBSTONE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+export const COMPACT_KEEP_MAX = 5_000;
+/** An 'empty' tombstone's address is looked at again at most this often, and at most this many per sweep. */
+export const EMPTY_RECHECK_MS = 24 * 60 * 60 * 1000;
+export const EMPTY_RECHECKS_PER_SWEEP = 20;
+
+/** The minimal entry an old tombstone becomes: id, nonce, state, times. */
+const compactOf = (r: PendingRecord): PendingRecord => ({
+  id: r.id,
+  prefix: r.prefix,
+  suffix: r.suffix,
+  sats: 0,
+  state: r.state,
+  createdAt: r.createdAt,
+  doneAt: r.doneAt ?? r.createdAt,
+  compact: true,
+  ...(r.checkedAt ? { checkedAt: r.checkedAt } : {}),
+});
 
 /**
  * Where records live: the page's localStorage in the app, a Map in tests. `put` and `remove` report whether the write
@@ -300,6 +324,27 @@ export async function giveBackIfSafe(
   return giveBack(wallet, store, f);
 }
 
+/**
+ * Take in every unspent coin at a nonce's address (only ever for a nonce nothing was signed for). 'none': the
+ * address is empty; 'unknown': the network couldn't be read; 'failed': a coin is there but didn't go back.
+ */
+async function takeInAt(
+  wallet: TradeWallet,
+  chain: Chain,
+  pay: { address: string; key: Funding['pay']['key'] } & Funding['pay'],
+  pkh: string,
+): Promise<'returned' | 'none' | 'unknown' | 'failed'> {
+  const coins = await chain.unspentAt(pay.address).catch(() => null);
+  if (!coins) return 'unknown';
+  if (!coins.length) return 'none';
+  let all = true;
+  for (const c of coins) {
+    const f: Funding = { coin: { ...c, script: p2pkhScript(pkh), key: pay.key }, beef: [], pay };
+    if (!(await giveBack(wallet, undefined, f).catch(() => false))) all = false;
+  }
+  return all ? 'returned' : 'failed';
+}
+
 /** `spent`: records closed with nothing to give back (the coin's spend proven and confirmed, or a lone nonce's coin never appeared). */
 export type SweepResult = { returned: number; spent: number; kept: number };
 
@@ -323,18 +368,38 @@ export async function sweepPending(
 ): Promise<SweepResult> {
   const out: SweepResult = { returned: 0, spent: 0, kept: 0 };
   const now = opts.now ?? Date.now();
+  let rechecks = 0;
   for (const r of store.list()) {
     if (isDone(r)) {
-      // Tombstones are hidden; pruned once old. A 'spent' one only after its spend is proven again: the same spender,
-      // still proven in a block (else it stays, with its nonce).
-      if (now - (r.doneAt ?? r.createdAt) <= TOMBSTONE_KEEP_MS) continue;
+      // An 'empty' nonce's address is looked at again now and then (throttled): a coin landing there later still
+      // comes back. Nothing was ever signed for such a nonce.
+      if (
+        r.state === 'empty' &&
+        rechecks < EMPTY_RECHECKS_PER_SWEEP &&
+        now - (r.checkedAt ?? r.doneAt ?? r.createdAt) > EMPTY_RECHECK_MS
+      ) {
+        rechecks++;
+        const pay = await wallet.newPayKey({ prefix: r.prefix, suffix: r.suffix }).catch(() => null);
+        const pkh = pay ? addressPkh(pay.address) : null;
+        const got = pay && pkh ? await takeInAt(wallet, chain, pay, pkh) : 'unknown';
+        if (got === 'returned') {
+          safePut(store, { ...r, state: 'returned', returnedBy: 'internalize', doneAt: now });
+          out.returned++;
+          continue;
+        }
+        if (got === 'none') safePut(store, { ...r, checkedAt: now });
+      }
+      // Old tombstones are compacted, never dropped (the nonce stays). A 'spent' one only after its spend is proven
+      // again: the same spender, still proven in a block (else it stays whole).
+      if (r.compact || now - (r.doneAt ?? r.createdAt) <= TOMBSTONE_KEEP_MS) continue;
       if (r.state === 'spent') {
         const again = r.funding
           ? await provenSpender(chain, { ...r.funding }).catch(() => 'unknown' as const)
           : ('unknown' as const);
         if (typeof again !== 'object' || !again.confirmed || again.txid !== r.spentBy) continue;
       }
-      safeRemove(store, r.id);
+      const latest = store.list().find((x) => x.id === r.id) ?? r; // keep a checkedAt written just above
+      safePut(store, compactOf(latest));
       continue;
     }
     // Young records may belong to a sheet open in another tab.
@@ -355,24 +420,15 @@ export async function sweepPending(
         out.kept++;
         continue;
       }
-      const coins = await chain.unspentAt(pay.address).catch(() => null);
-      if (!coins) {
-        out.kept++;
-        continue;
-      }
-      if (!coins.length) {
+      const got = await takeInAt(wallet, chain, pay, pkh);
+      if (got === 'none') {
         if (now - r.createdAt > NONCE_ONLY_DROP_MS) {
           tombstone(store, r.id, 'empty', {}, now);
           out.spent++;
         } else out.kept++;
         continue;
       }
-      let all = true;
-      for (const c of coins) {
-        const f: Funding = { coin: { ...c, script: p2pkhScript(pkh), key: pay.key }, beef: [], pay };
-        if (!(await giveBack(wallet, undefined, f).catch(() => false))) all = false;
-      }
-      if (all) {
+      if (got === 'returned') {
         tombstone(store, r.id, 'returned', { returnedBy: 'internalize' }, now);
         out.returned++;
       } else out.kept++;
@@ -414,5 +470,17 @@ export async function sweepPending(
     if (back) out.returned++;
     else out.kept++;
   }
+  // Storage stays bounded: the most recent COMPACT_KEEP_MAX compacted tombstones are kept, older ones go.
+  let compacted: PendingRecord[] = [];
+  try {
+    compacted = store.list().filter((r) => r.compact);
+  } catch {
+    /* unreadable: nothing to trim */
+  }
+  if (compacted.length > COMPACT_KEEP_MAX)
+    compacted
+      .sort((a, b) => (b.doneAt ?? b.createdAt) - (a.doneAt ?? a.createdAt))
+      .slice(COMPACT_KEEP_MAX)
+      .forEach((r) => safeRemove(store, r.id));
   return out;
 }

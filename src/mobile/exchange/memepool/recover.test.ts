@@ -514,7 +514,7 @@ describe('Recover now: block proofs and refused recoveries', () => {
     expect(byId(t.store, r.id)).toMatchObject({ state: 'spent', spentBy: won });
   });
 
-  test("2: a 'spent' tombstone is pruned after 30 days only if the same spender is still proven", async () => {
+  test("2: a 'spent' tombstone is compacted after 30 days only if the same spender is still proven", async () => {
     const t = await rig();
     const r = t.record();
     const won = await t.memepoolSpend('valid');
@@ -531,10 +531,13 @@ describe('Recover now: block proofs and refused recoveries', () => {
     t.store.put({ ...byId(t.store, r.id)!, spentBy: 'ee'.repeat(32) });
     await sweepFundings(t.d);
     expect(byId(t.store, r.id)).toBeDefined();
-    // The same spender, proven again: pruned.
+    expect(byId(t.store, r.id)?.compact).toBeUndefined();
+    // The same spender, proven again: compacted (the nonce stays, the rest goes).
     t.store.put({ ...byId(t.store, r.id)!, spentBy: won });
     await sweepFundings(t.d);
-    expect(byId(t.store, r.id)).toBeUndefined();
+    const c = byId(t.store, r.id)!;
+    expect(c).toMatchObject({ state: 'spent', compact: true, prefix: t.nonce.prefix, suffix: t.nonce.suffix });
+    expect(c.funding).toBeUndefined();
   });
 
   test("1: a double-spend refusal leaves the recovery coin's record as nonce-only; 'empty' only after the drop time", async () => {
@@ -564,5 +567,54 @@ describe('Recover now: block proofs and refused recoveries', () => {
     expect(await sweepFundings(t.d)).toEqual({ returned: 1, spent: 0, kept: 0 });
     expect(byId(t.store, note.id)).toMatchObject({ state: 'returned' });
     expect(t.log.internalized.length).toBe(1);
+  });
+});
+
+// Round 6: a tombstone's nonce is never dropped.
+describe('tombstones keep their nonce', () => {
+  const DAY = 24 * HOUR;
+  const emptyTomb = (t: Awaited<ReturnType<typeof rig>>, ageMs: number) =>
+    t.record({
+      state: 'empty',
+      funding: undefined,
+      signed: undefined,
+      createdAt: Date.now() - ageMs - DAY,
+      doneAt: Date.now() - ageMs,
+    });
+
+  test("an 'empty' tombstone older than 30 days is compacted with its nonce, and a coin landing at its address later is taken in", async () => {
+    const t = await rig();
+    const r = emptyTomb(t, TOMBSTONE_KEEP_MS + DAY);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 0, kept: 0 });
+    const c = byId(t.store, r.id)!;
+    expect(c).toMatchObject({ state: 'empty', compact: true, prefix: t.nonce.prefix, suffix: t.nonce.suffix });
+    // Months later a coin turns up at the nonce's address.
+    const key = await t.d.wallet.newPayKey({ prefix: c.prefix, suffix: c.suffix });
+    t.utxos.set(key.address, [{ tx_hash: t.fundTx().id('hex'), tx_pos: 0, value: SATS }]);
+    t.later(90 * DAY);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 1, spent: 0, kept: 0 });
+    expect(t.log.internalized.length).toBe(1);
+    expect(byId(t.store, r.id)).toMatchObject({ state: 'returned', prefix: t.nonce.prefix });
+  });
+
+  test('compacted tombstones are capped at the most recent 5,000', async () => {
+    const t = await rig();
+    const old = Date.now() - TOMBSTONE_KEEP_MS - DAY;
+    for (let i = 0; i < 5_003; i++)
+      t.store.put({
+        id: `p${i}.s${i}`,
+        prefix: `p${i}`,
+        suffix: `s${i}`,
+        sats: 0,
+        state: 'returned',
+        createdAt: old - i,
+        doneAt: old - i,
+      });
+    await sweepFundings(t.d);
+    const left = t.store.list();
+    expect(left.length).toBe(5_000);
+    expect(left.every((x) => x.compact)).toBe(true);
+    expect(left.some((x) => x.id === 'p5002.s5002')).toBe(false); // the oldest went
+    expect(left.some((x) => x.id === 'p0.s0')).toBe(true);
   });
 });
