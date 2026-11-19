@@ -38,7 +38,8 @@ const HEIGHT = 900_000;
 
 /** What the stub wallet does with the transaction it builds. */
 type Build = 'ok' | 'foreign-output' | 'no-output';
-type Mode = 'ok' | 'double' | 'fail';
+/** 'double-ours': the broadcaster flags our recovery as a double spend, yet it is our recovery that gets mined. */
+type Mode = 'ok' | 'double' | 'double-ours' | 'fail';
 
 async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}) {
   let now = Date.now();
@@ -56,6 +57,8 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
   const txs = new Map<string, { raw: string; confirmed: boolean }>();
   /** Address → unspent coins (WhatsOnChain /address/../unspent/all). */
   const utxos = new Map<string, { tx_hash: string; tx_pos: number; value: number }[]>();
+  /** Addresses whose lookup always fails (HTTP 500). */
+  const failing = new Set<string>();
   /** Transactions with a merkle path (services.getBeefForTxid), and the block roots the ChainTracker accepts. */
   const proofs = new Map<string, Transaction>();
   const roots = new Set<string>();
@@ -121,6 +124,16 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
     signAction: async (a: { reference: string; spends: Record<number, { unlockingScript: string }> }) => {
       log.signed.push(a);
       const key = `${fundTx!.id('hex')}_0`;
+      if (mode === 'double-ours') {
+        spendTx!.inputs[0].unlockingScript = UnlockingScript.fromHex(a.spends[0].unlockingScript);
+        const ours = spendTx!.id('hex');
+        txs.set(ours, { raw: spendTx!.toHex(), confirmed: true });
+        prove(spendTx!);
+        spent.set(key, ours);
+        throw Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
+          reviewActionResults: [{ txid: ours, status: 'doubleSpend' }],
+        });
+      }
       if (mode === 'double') {
         const won = await memepoolSpend('valid'); // Memepool's trade got there first, proven in a block
         throw Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
@@ -234,6 +247,7 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
       return t ? new Response(t.raw, { status: 200 }) : new Response('', { status: 404 });
     }
     m = /\/address\/(\w+)\/unspent\/all$/.exec(url);
+    if (m && failing.has(m[1])) return new Response('', { status: 500 });
     if (m) return new Response(JSON.stringify({ result: utxos.get(m[1]) ?? [], error: '' }), { status: 200 });
     return new Response('', { status: 404 });
   }) as Deps['fetch'];
@@ -259,6 +273,7 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
     txs,
     memepoolSpend,
     utxos,
+    failing,
     roots,
     later: (ms: number) => (now += ms),
     fundTx: () => fundTx!,
@@ -616,5 +631,70 @@ describe('tombstones keep their nonce', () => {
     expect(left.every((x) => x.compact)).toBe(true);
     expect(left.some((x) => x.id === 'p5002.s5002')).toBe(false); // the oldest went
     expect(left.some((x) => x.id === 'p0.s0')).toBe(true);
+  });
+});
+
+// Round 7: recheck fairness, which compacted entries go first, and our own recovery mined despite a flag.
+describe('recheck fairness, eviction order, own recovery', () => {
+  const DAY = 24 * HOUR;
+  const tomb = (i: number, over: Partial<PendingRecord> = {}): PendingRecord => ({
+    id: `p${i}.s${i}`,
+    prefix: `p${i}`,
+    suffix: `s${i}`,
+    sats: 0,
+    state: 'empty',
+    createdAt: Date.now() - 40 * DAY,
+    doneAt: Date.now() - 31 * DAY,
+    ...over,
+  });
+
+  test("1: 20 'empty' entries that always fail don't starve the 21st: its coin is taken in within 2 sweeps", async () => {
+    const t = await rig();
+    for (let i = 0; i < 25; i++) {
+      t.store.put(tomb(i));
+      const key = await t.d.wallet.newPayKey({ prefix: `p${i}`, suffix: `s${i}` });
+      if (i < 20) t.failing.add(key.address);
+      if (i === 20) t.utxos.set(key.address, [{ tx_hash: t.fundTx().id('hex'), tx_pos: 0, value: SATS }]);
+    }
+    await sweepFundings(t.d);
+    t.later(HOUR); // well inside a day: the 20 failing ones are not due again yet
+    await sweepFundings(t.d);
+    expect(byId(t.store, 'p20.s20')?.state).toBe('returned');
+    expect(t.log.internalized.length).toBe(1);
+  });
+
+  test("2: over the cap, settled entries ('returned', proven 'spent') go before 'empty' nonces, oldest first", async () => {
+    const t = await rig();
+    const fresh = Date.now();
+    // 5,000 'empty' nonces (older), then 3 settled ones (newest): 3 over the cap.
+    for (let i = 0; i < 5_000; i++)
+      t.store.put(tomb(i, { compact: true, doneAt: fresh - DAY - 10_000 + i, checkedAt: fresh }));
+    t.store.put(tomb(9_001, { compact: true, state: 'returned', doneAt: fresh - DAY + 1 }));
+    t.store.put(tomb(9_002, { compact: true, state: 'spent', doneAt: fresh - DAY + 2 }));
+    t.store.put(tomb(9_003, { compact: true, state: 'returned', doneAt: fresh - DAY + 3 }));
+    await sweepFundings(t.d);
+    const left = t.store.list();
+    expect(left.length).toBe(5_000);
+    expect(left.every((x) => x.state === 'empty')).toBe(true); // every nonce kept
+    // Still over with only 'empty' left: then the oldest 'empty' go.
+    t.store.put(tomb(9_004, { compact: true, doneAt: fresh, checkedAt: fresh }));
+    await sweepFundings(t.d);
+    expect(t.store.list().length).toBe(5_000);
+    expect(byId(t.store, 'p0.s0')).toBeUndefined();
+    expect(byId(t.store, 'p9004.s9004')).toBeDefined();
+  });
+
+  test('3: the network proves our own recovery mined despite a double-spend flag: "recovered", not "went through"', async () => {
+    const t = await rig({ mode: 'double-ours' });
+    const r = t.record();
+    const res = await recoverNow(t.d, r.id);
+    expect(res.kind).toBe('recovered');
+    expect(recoverMessage(res)).toMatch(/back in your wallet/);
+    expect(byId(t.store, r.id)).toMatchObject({ state: 'returned' });
+    // The recovered coin keeps its record (with funding) and is taken in.
+    const note = t.store.list().find((x) => x.id !== r.id)!;
+    expect(note.funding?.txid).toBe((res as { txid: string }).txid);
+    expect(note.state).toBe('returned');
+    expect(t.log.internalized.length).toBe(1);
   });
 });

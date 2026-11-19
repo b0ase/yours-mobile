@@ -387,7 +387,9 @@ export async function sweepPending(
           out.returned++;
           continue;
         }
-        if (got === 'none') safePut(store, { ...r, checkedAt: now });
+        // Every attempt counts, whatever came back ('none', 'failed', 'unknown'): an entry that keeps failing waits
+        // its turn like the rest instead of taking a recheck slot on every sweep.
+        safePut(store, { ...r, checkedAt: now });
       }
       // Old tombstones are compacted, never dropped (the nonce stays). A 'spent' one only after its spend is proven
       // again: the same spender, still proven in a block (else it stays whole).
@@ -477,10 +479,17 @@ export async function sweepPending(
   } catch {
     /* unreadable: nothing to trim */
   }
-  if (compacted.length > COMPACT_KEEP_MAX)
-    compacted
-      .sort((a, b) => (b.doneAt ?? b.createdAt) - (a.doneAt ?? a.createdAt))
-      .slice(COMPACT_KEEP_MAX)
-      .forEach((r) => safeRemove(store, r.id));
+  // Settled entries go first ('returned', and 'spent', which is only compacted once its spend is proven again),
+  // oldest first; 'empty' nonces, whose coin could still turn up, only if the cap still can't be met.
+  let excess = compacted.length - COMPACT_KEEP_MAX;
+  if (excess > 0) {
+    const oldestFirst = (a: PendingRecord, b: PendingRecord) => (a.doneAt ?? a.createdAt) - (b.doneAt ?? b.createdAt);
+    const settled = compacted.filter((r) => r.state !== 'empty').sort(oldestFirst);
+    const empty = compacted.filter((r) => r.state === 'empty').sort(oldestFirst);
+    for (const r of [...settled, ...empty]) {
+      if (excess-- <= 0) break;
+      safeRemove(store, r.id);
+    }
+  }
   return out;
 }

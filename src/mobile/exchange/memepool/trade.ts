@@ -740,8 +740,8 @@ async function recoverOnce(d: Deps, id: string): Promise<RecoverResult> {
   if (parseP2pkh(funding.script) !== addressPkh(pay.address)) plain('That BSV isn’t held by this wallet account.');
   const chain = wocChain(d);
   const coin = { txid: funding.txid, vout: funding.vout, satoshis: funding.satoshis, script: funding.script };
-  const wentThrough = async (): Promise<RecoverResult | null> => {
-    const by = await provenSpender(chain, coin);
+  const wentThrough = async (given?: Awaited<ReturnType<typeof provenSpender>>): Promise<RecoverResult | null> => {
+    const by = given ?? (await provenSpender(chain, coin));
     if (by === 'unspent' || by === 'unknown') return null;
     if (!by.confirmed) plain("Memepool's trade got there first. Check back once the network confirms it.");
     tombstone(store, id, 'spent', { spentBy: by.txid }, now);
@@ -784,17 +784,26 @@ async function recoverOnce(d: Deps, id: string): Promise<RecoverResult> {
       return { kind: 'already-back' };
     }
     if (isDoubleSpend(e)) {
-      // The broadcaster flagged our recovery, but it can still be mined, so its coin may yet exist: keep its nonce
-      // as a nonce-only record. The sweep finds the coin by address, or marks it 'empty' only after
-      // NONCE_ONLY_DROP_MS with the address still empty.
-      if (noted) {
-        const rec = store.list().find((x) => x.id === noted);
-        if (rec) {
-          const { funding: _gone, ...nonceOnly } = rec;
-          safePut(store, { ...nonceOnly, state: 'pending', createdAt: now });
-        }
+      const rec = noted ? store.list().find((x) => x.id === noted) : undefined;
+      const by = await provenSpender(chain, coin);
+      // The broadcaster flagged our recovery, yet the spender the network proves IS our recovery (its txid): the BSV
+      // came back. Its coin is real, so its record keeps the funding and is taken in now (or by the sweep).
+      if (rec?.funding && typeof by === 'object' && by.txid === rec.funding.txid) {
+        tombstone(store, id, 'returned', { returnedBy: by.txid }, now);
+        const key = await d.wallet.newPayKey({ prefix: rec.prefix, suffix: rec.suffix }).catch(() => null);
+        if (key)
+          await giveBack(d.wallet, store, { coin: { ...rec.funding, key: key.key }, beef: [], pay: key }).catch(
+            () => false,
+          );
+        return { kind: 'recovered', txid: by.txid };
       }
-      const won = await wentThrough();
+      // Otherwise it can still be mined, so its coin may yet exist: keep its nonce as a nonce-only record. The sweep
+      // finds the coin by address, or marks it 'empty' only after NONCE_ONLY_DROP_MS with the address still empty.
+      if (rec) {
+        const { funding: _gone, ...nonceOnly } = rec;
+        safePut(store, { ...nonceOnly, state: 'pending', createdAt: now });
+      }
+      const won = await wentThrough(by);
       if (won) return won;
     }
     throw e;
