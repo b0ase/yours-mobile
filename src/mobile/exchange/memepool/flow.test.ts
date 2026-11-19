@@ -287,6 +287,7 @@ function fakeWallet(side: 'buy' | 'sell', account = 'A') {
     spendBack: async () => {
       throw new Error('not in these tests');
     },
+    inBlock: async (txid) => PROVEN.has(txid),
     tokenCoins: async () =>
       side === 'sell'
         ? [
@@ -356,11 +357,17 @@ const onNet = (inner: Deps['fetch'], net: Net): Deps['fetch'] =>
     if (m) return ok({ address: m[1], result: net.utxos.get(m[1]) ?? [], error: '' });
     return inner(url, init);
   }) as Deps['fetch'];
-/** Another trader's transaction takes the first pool coin of `p`'s template (confirmed unless said otherwise). */
+/**
+ * Transactions with a merkle proof the wallet's ChainTracker accepts (the fake wallet's inBlock). The indexer's own
+ * "confirmed" flag is set for every transaction in Net and must never matter.
+ */
+const PROVEN = new Set<string>();
+
+/** Another trader's transaction takes the first pool coin of `p`'s template; `proven` = has a valid merkle proof. */
 const killPool = (
   net: Net,
   p: { template: Template },
-  confirmed = true,
+  proven = true,
   alsoSpends: { txid: string; vout: number }[] = [],
 ): string => {
   const pool = p.template.inputs.find((i) => i.owner !== 'user')!;
@@ -378,7 +385,8 @@ const killPool = (
   const spender = tx.id('hex');
   net.spent.set(`${pool.txid}_${pool.vout}`, spender);
   for (const o of alsoSpends) net.spent.set(`${o.txid}_${o.vout}`, spender);
-  net.txs.set(spender, { confirmed, raw: tx.toHex() });
+  net.txs.set(spender, { confirmed: true, raw: tx.toHex() }); // the indexer always says "confirmed"
+  if (proven) PROVEN.add(spender);
   return spender;
 };
 
@@ -989,7 +997,7 @@ describe('funding recovery: re-review fixes', () => {
     const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
     await executeTrade(d, p);
     clock.set(Date.now() + 60 * 60_000);
-    killPool(net, p, false); // in the mempool only
+    killPool(net, p, false); // the indexer says "confirmed", but there is no merkle proof
     expect(await closeUnsure(d, p)).toBe(false);
     // Our own trade spent it (it also spends our coin): the buy happened, nothing goes back.
     killPool(net, p, true, [{ txid: p.funding!.coin.txid, vout: p.funding!.coin.vout }]);
@@ -1100,5 +1108,60 @@ describe('funding recovery: re-review fixes', () => {
     clock.set(Date.now() + 25 * 60 * 60_000);
     expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 1, kept: 0 });
     expect(liveRecords(store.list())).toEqual([]);
+  });
+});
+
+// Round 5 (review of 1d80b95e): being in a block is only ever a merkle proof, never the indexer's word.
+describe('funding recovery: block proofs', () => {
+  const rig = () => {
+    const mp = fakeMemepool({ build: buildBuy(), submit: [{ status: 502, body: {} }] });
+    const fw = fakeWallet('buy');
+    const rows = new Map<string, PendingRecord>();
+    const store: PendingStore = {
+      list: () => [...rows.values()],
+      put: (r) => void rows.set(r.id, structuredClone(r)),
+      remove: (id) => void rows.delete(id),
+    };
+    const net = newNet();
+    let t = Date.now();
+    const d: Deps = {
+      fetch: onNet(mp.fetch, net),
+      wallet: fw.w,
+      sleep: async () => undefined,
+      pending: store,
+      now: () => t,
+    };
+    return { fw, store, net, d, later: () => (t = Date.now() + 60 * 60_000) };
+  };
+
+  test('3: a made-up pool spend (junk unlock, indexer says "confirmed", no proof): the signature is not dead', async () => {
+    const { fw, net, d, later } = rig();
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    expect((await executeTrade(d, p)).kind).toBe('unsure');
+    later();
+    killPool(net, p, false);
+    expect(await closeUnsure(d, p)).toBe(false);
+    expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 0, kept: 1 });
+    expect(fw.log.returned).toBe(0);
+  });
+
+  test("3: a proven spender whose own hex doesn't spend the pool coin does not count", async () => {
+    const { fw, net, d, later } = rig();
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    await executeTrade(d, p);
+    later();
+    // The indexer names a proven transaction as the pool coin's spender, but that transaction spends something else.
+    const other = killPool(net, {
+      template: {
+        ...p.template,
+        inputs: [{ ...p.template.inputs[0], txid: 'ab'.repeat(32), owner: 'pool' }],
+      } as Template,
+    });
+    const pool = p.template.inputs.find((i) => i.owner !== 'user')!;
+    net.spent.set(`${pool.txid}_${pool.vout}`, other);
+    expect(await closeUnsure(d, p)).toBe(false);
+    expect(fw.log.returned).toBe(0);
+    killPool(net, p); // a proven spend of the real pool coin
+    expect(await closeUnsure(d, p)).toBe(true);
   });
 });

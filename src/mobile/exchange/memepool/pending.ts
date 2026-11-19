@@ -19,7 +19,7 @@ export type Outpoint = { txid: string; vout: number };
 /**
  * 'pending': nothing signed. 'signed': a signature was made (written BEFORE it goes to Memepool). Then unsure/sent.
  * Done (tombstones, hidden from every list, nonce kept): 'returned' (the wallet holds the BSV again), 'spent' (a
- * confirmed transaction validly spent the coin: the buy happened), 'empty' (a lone nonce whose address stayed empty).
+ * transaction proven in a block validly spent the coin: the buy happened), 'empty' (a lone nonce whose address stayed empty).
  */
 export type DoneState = 'returned' | 'spent' | 'empty';
 export type PendingState = 'pending' | 'signed' | 'unsure' | 'sent' | DoneState;
@@ -181,7 +181,8 @@ export const toRecord = (
  * What the recovery needs to know from the network (trade.ts wocChain answers it from WhatsOnChain).
  * WhatsOnChain's plain `/spent` checks confirmed AND unconfirmed (mempool) spends in one call (its docs, Nov 2026),
  * and answers 404 only for a known coin that nothing has spent. Even so, "not spent" is never taken as proof that a
- * signature is dead: that needs a confirmed transaction (see signatureDead).
+ * signature is dead: that needs a transaction proven in a block (see signatureDead). Nothing the indexer says about
+ * blocks ("confirmations") is trusted: being in a block is only ever a merkle proof checked by `inBlock`.
  */
 export type Chain = {
   /** The txid that spent `o`, 'unspent' (index sees no spend, mempool included), or 'unknown' (couldn't tell). */
@@ -190,7 +191,12 @@ export type Chain = {
    * A transaction: whether it is in a block, its raw hex, and its inputs (read from that hex, whose hash must be
    * `txid`); null if it can't be read.
    */
-  tx(txid: string): Promise<{ confirmed: boolean; inputs: Outpoint[]; raw: string } | null>;
+  tx(txid: string): Promise<{ inputs: Outpoint[]; raw: string } | null>;
+  /**
+   * True only when a merkle proof for `txid` verifies against the wallet's ChainTracker (block headers): the
+   * transaction is in a block, so the chain has validated all its scripts. No proof → false (keep waiting).
+   */
+  inBlock(txid: string): Promise<boolean>;
   /** Unspent coins at `address` (mempool included, coins already being spent left out); null if it can't be read. */
   unspentAt(address: string): Promise<{ txid: string; vout: number; satoshis: number }[] | null>;
 };
@@ -198,7 +204,7 @@ export type Chain = {
 const sameOutpoint = (a: Outpoint, b: Outpoint) => a.txid === b.txid && a.vout === b.vout;
 
 /**
- * True only when `spend` can never be broadcast: one of its other inputs was spent by a confirmed transaction that
+ * True only when `spend` can never be broadcast: one of its other inputs was spent by a transaction proven in a block that
  * does not spend our coin (so it isn't ours, and it conflicts with ours forever).
  */
 async function signatureDead(chain: Chain, ours: Outpoint, spend: SignedSpend): Promise<boolean> {
@@ -206,17 +212,18 @@ async function signatureDead(chain: Chain, ours: Outpoint, spend: SignedSpend): 
     const by = await chain.spentBy(o).catch(() => 'unknown' as const);
     if (by === 'unspent' || by === 'unknown') continue;
     const t = await chain.tx(by).catch(() => null);
-    // It must really spend that pool coin (inputs from its own hex), be confirmed, and not spend ours.
-    if (t && t.confirmed && t.inputs.some((i) => sameOutpoint(i, o)) && !t.inputs.some((i) => sameOutpoint(i, ours)))
-      return true;
+    // It must really spend that pool coin (inputs from its own hex, which hashes to `by`), not spend ours, and be
+    // proven in a block (a merkle proof, not the indexer's word): a mined spend is real, its scripts validated.
+    if (!t || !t.inputs.some((i) => sameOutpoint(i, o)) || t.inputs.some((i) => sameOutpoint(i, ours))) continue;
+    if (await chain.inBlock(by).catch(() => false)) return true;
   }
   return false;
 }
 
 /**
  * Who spent our coin, believed only with proof: the claimed spender's own hex (hashing to its txid) spends our exact
- * outpoint with a signature that verifies against our coin's script, so no server can make one up. `confirmed` is
- * the network's word on whether it is in a block. Anything less is 'unknown'.
+ * outpoint with a signature that verifies against our coin's script, so no server can make one up. `confirmed`
+ * means a merkle proof for it verified against the wallet's ChainTracker (chain.inBlock), never the indexer's word. Anything less is 'unknown'.
  */
 export async function provenSpender(
   chain: Chain,
@@ -244,7 +251,8 @@ export async function provenSpender(
       inputSequence: tx.inputs[idx].sequence ?? 0xffffffff,
       lockTime: tx.lockTime,
     }).validate();
-    return valid ? { txid: by, confirmed: t.confirmed } : 'unknown';
+    if (!valid) return 'unknown';
+    return { txid: by, confirmed: await chain.inBlock(by).catch(() => false) };
   } catch {
     return 'unknown';
   }
@@ -317,8 +325,16 @@ export async function sweepPending(
   const now = opts.now ?? Date.now();
   for (const r of store.list()) {
     if (isDone(r)) {
-      // Tombstones are hidden; pruned once old (a 'spent' one is only ever written for a confirmed, proven spend).
-      if (now - (r.doneAt ?? r.createdAt) > TOMBSTONE_KEEP_MS) safeRemove(store, r.id);
+      // Tombstones are hidden; pruned once old. A 'spent' one only after its spend is proven again: the same spender,
+      // still proven in a block (else it stays, with its nonce).
+      if (now - (r.doneAt ?? r.createdAt) <= TOMBSTONE_KEEP_MS) continue;
+      if (r.state === 'spent') {
+        const again = r.funding
+          ? await provenSpender(chain, { ...r.funding }).catch(() => 'unknown' as const)
+          : ('unknown' as const);
+        if (typeof again !== 'object' || !again.confirmed || again.txid !== r.spentBy) continue;
+      }
+      safeRemove(store, r.id);
       continue;
     }
     // Young records may belong to a sheet open in another tab.
@@ -373,7 +389,7 @@ export async function sweepPending(
       continue;
     }
     if (verdict !== 'unspent') {
-      // A proven spend: closed only once confirmed (the buy happened); until then it waits.
+      // A proven spend: closed only once proven in a block (the buy happened); until then it waits.
       if (verdict.confirmed) {
         tombstone(store, r.id, 'spent', { spentBy: verdict.txid }, now);
         out.spent++;

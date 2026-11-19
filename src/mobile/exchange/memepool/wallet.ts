@@ -11,6 +11,8 @@
 import {
   P2PKH,
   PublicKey,
+  type Beef,
+  type ChainTracker,
   Random,
   Transaction,
   UnlockingScript,
@@ -32,7 +34,11 @@ const BRC29: WalletProtocol = [2, '3241645161d8'];
  */
 const MAX_RECOVERY_FEE = 2_000;
 
-type BeefSource = { getBeefForTxid(txid: string): Promise<{ toBinaryAtomic(txid: string): number[] }> };
+type BeefSource = {
+  getBeefForTxid(txid: string): Promise<Beef>;
+  /** The wallet's block-header tracker (wallet-toolbox Services). Without it nothing counts as proven. */
+  getChainTracker?(): Promise<ChainTracker>;
+};
 
 export function memepoolWallet(
   wallet: WalletInterface,
@@ -186,6 +192,19 @@ export function memepoolWallet(
       } catch (e) {
         if (!sent) await wallet.abortAction({ reference: signable.reference }).catch(() => undefined);
         throw e;
+      }
+    },
+    async inBlock(txid: string) {
+      // A merkle proof for `txid` (from the wallet's services) checked against the wallet's own block headers.
+      if (!services?.getChainTracker) return false;
+      try {
+        const beef = await services.getBeefForTxid(txid);
+        const btx = beef.findTxid(txid);
+        const path = btx?.bumpIndex === undefined ? undefined : beef.bumps[btx.bumpIndex];
+        if (!path) return false;
+        return (await path.verify(txid, await services.getChainTracker())) === true;
+      } catch {
+        return false;
       }
     },
     async tokenCoins(tokenId) {

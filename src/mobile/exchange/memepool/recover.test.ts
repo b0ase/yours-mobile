@@ -1,12 +1,14 @@
 /**
  * "Recover now" (trade.ts recoverNow / stuckFundings, wallet.ts spendBack): a user-tapped self-spend of a funding
  * coin the sweep can't return. Real keys and signatures (ProtoWallet); the wallet's createAction / signAction and
- * the network (WhatsOnChain: /spent, /tx/hash, /tx/<id>/hex) are stubbed. Nothing is broadcast.
+ * the network (WhatsOnChain: /spent, /tx/hash, /tx/<id>/hex, /address/../unspent/all) are stubbed, and so are the
+ * wallet's services: BEEF with real merkle paths, checked against a stub ChainTracker. Nothing is broadcast.
  */
 import { describe, expect, test } from 'bun:test';
 import {
   Beef,
   LockingScript,
+  MerklePath,
   P2PKH,
   PrivateKey,
   ProtoWallet,
@@ -16,7 +18,14 @@ import {
   type WalletInterface,
 } from '@bsv/sdk';
 import { FeaturePausedError } from '../../config/killSwitch';
-import { idOf, liveRecords, type PendingRecord, type PendingStore } from './pending';
+import {
+  NONCE_ONLY_DROP_MS,
+  TOMBSTONE_KEEP_MS,
+  idOf,
+  liveRecords,
+  type PendingRecord,
+  type PendingStore,
+} from './pending';
 import { signSelfSpend } from './sign';
 import { recoverMessage, recoverNow, stuckFundings, sweepFundings, type Deps } from './trade';
 import { memepoolWallet } from './wallet';
@@ -25,13 +34,14 @@ const SATS = 1_056_000;
 const POOL = 'aa'.repeat(32);
 const HOUR = 60 * 60_000;
 const MAX_RECOVERY_FEE = 2_000;
+const HEIGHT = 900_000;
 
 /** What the stub wallet does with the transaction it builds. */
 type Build = 'ok' | 'foreign-output' | 'no-output';
 type Mode = 'ok' | 'double' | 'fail';
 
 async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}) {
-  const now = Date.now();
+  let now = Date.now();
   const proto = new ProtoWallet(PrivateKey.fromRandom());
   const log = {
     created: [] as Record<string, unknown>[],
@@ -44,6 +54,24 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
   /** The network: outpoint → spender txid; txid → real transaction. */
   const spent = new Map<string, string>();
   const txs = new Map<string, { raw: string; confirmed: boolean }>();
+  /** Address → unspent coins (WhatsOnChain /address/../unspent/all). */
+  const utxos = new Map<string, { tx_hash: string; tx_pos: number; value: number }[]>();
+  /** Transactions with a merkle path (services.getBeefForTxid), and the block roots the ChainTracker accepts. */
+  const proofs = new Map<string, Transaction>();
+  const roots = new Set<string>();
+  /** Give `tx` a merkle path in block HEIGHT; `valid` = the ChainTracker knows that root. */
+  const prove = (tx: Transaction, valid = true) => {
+    const id = tx.id('hex');
+    const path = new MerklePath(HEIGHT, [
+      [
+        { offset: 0, hash: 'bb'.repeat(32) },
+        { offset: 1, hash: id, txid: true },
+      ],
+    ]);
+    if (valid) roots.add(path.computeRoot(id));
+    tx.merklePath = path;
+    proofs.set(id, tx);
+  };
   let mode: Mode = opts.mode ?? 'ok';
   let createError: Error | null = null;
   let fundTx: Transaction | null = null;
@@ -94,7 +122,7 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
       log.signed.push(a);
       const key = `${fundTx!.id('hex')}_0`;
       if (mode === 'double') {
-        const won = await memepoolSpend(true); // Memepool's trade got there first, and is confirmed
+        const won = await memepoolSpend('valid'); // Memepool's trade got there first, proven in a block
         throw Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
           reviewActionResults: [{ txid: 'dd'.repeat(32), status: 'doubleSpend', competingTxs: [won] }],
         });
@@ -120,17 +148,34 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
     },
   } as unknown as WalletInterface;
 
-  const services = opts.services
-    ? { getBeefForTxid: async () => ({ toBinaryAtomic: () => fundTx!.toBEEF() }) }
-    : undefined;
+  const services =
+    opts.services === false
+      ? undefined
+      : {
+          getBeefForTxid: async (txid: string) => {
+            const b = new Beef();
+            const t = proofs.get(txid) ?? (txid === fundTx!.id('hex') ? fundTx! : null);
+            if (!t) throw new Error('not found');
+            b.mergeTransaction(t);
+            return b;
+          },
+          getChainTracker: async () => ({
+            isValidRootForHeight: async (root: string, h: number) => h === HEIGHT && roots.has(root),
+            currentHeight: async () => HEIGHT + 10,
+          }),
+        };
   const w = memepoolWallet(wallet, services);
   const nonce = { prefix: 'cHJlZml4', suffix: 'c3VmZml4' };
   const pay = await w.newPayKey(nonce);
   const script = new P2PKH().lock(pay.address).toHex();
   fundTx = new Transaction(1, [], [{ lockingScript: LockingScript.fromHex(script), satoshis: SATS }], 0);
 
-  /** Memepool's trade: a real transaction spending our funding coin with OUR valid signature. Returns its txid. */
-  const memepoolSpend = async (confirmed: boolean) => {
+  /**
+   * Memepool's trade: a real transaction spending our funding coin with OUR valid signature. The indexer always
+   * calls it "confirmed"; `proof` decides whether a merkle proof exists ('valid'), is fake ('fake') or is missing.
+   * Returns its txid.
+   */
+  const memepoolSpend = async (proof: 'valid' | 'fake' | 'none') => {
     const t = new Transaction(
       1,
       [
@@ -144,7 +189,8 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
       await signSelfSpend(wallet, t, 1, { satoshis: SATS, script, key: pay.key }),
     );
     const id = t.id('hex');
-    txs.set(id, { raw: t.toHex(), confirmed });
+    txs.set(id, { raw: t.toHex(), confirmed: true });
+    if (proof !== 'none') prove(t, proof === 'valid');
     spent.set(`${fundTx!.id('hex')}_0`, id);
     return id;
   };
@@ -187,6 +233,8 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
       const t = txs.get(m[1]);
       return t ? new Response(t.raw, { status: 200 }) : new Response('', { status: 404 });
     }
+    m = /\/address\/(\w+)\/unspent\/all$/.exec(url);
+    if (m) return new Response(JSON.stringify({ result: utxos.get(m[1]) ?? [], error: '' }), { status: 200 });
     return new Response('', { status: 404 });
   }) as Deps['fetch'];
   let checks = 0;
@@ -210,6 +258,9 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
     spent,
     txs,
     memepoolSpend,
+    utxos,
+    roots,
+    later: (ms: number) => (now += ms),
     fundTx: () => fundTx!,
     spendTx: () => spendTx,
     setMode: (m: Mode) => (mode = m),
@@ -309,7 +360,8 @@ describe('Recover now', () => {
     const res = await recoverNow(t.d, r.id);
     expect(res).toEqual({ kind: 'went-through' });
     expect(recoverMessage(res)).toMatch(/trade went through/);
-    expect(live(t.store)).toEqual([]);
+    // Only the refused recovery's nonce stays live (nonce-only: see the round-5 tests).
+    expect(live(t.store).map((x) => [x.state, x.funding])).toEqual([['pending', undefined]]);
     expect(byId(t.store, r.id)).toMatchObject({ state: 'spent', ...t.nonce });
   });
 
@@ -386,7 +438,7 @@ describe('Recover now: review fixes (7aee65f2)', () => {
   test('1: a real, confirmed spender: tombstoned (not deleted), the nonce survives, hidden from the list', async () => {
     const t = await rig();
     const r = t.record();
-    const won = await t.memepoolSpend(true);
+    const won = await t.memepoolSpend('valid');
     expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 1, kept: 0 });
     const tomb = byId(t.store, r.id)!;
     expect(tomb).toMatchObject({ state: 'spent', spentBy: won, prefix: t.nonce.prefix, suffix: t.nonce.suffix });
@@ -395,10 +447,10 @@ describe('Recover now: review fixes (7aee65f2)', () => {
     await expect(recoverNow(t.d, r.id)).rejects.toThrow(/nothing to recover/);
   });
 
-  test('1: a real spender not yet confirmed: the record waits, and Recover now says to check back', async () => {
+  test('1: a real spender the indexer calls "confirmed" but with no merkle proof: the record waits', async () => {
     const t = await rig();
     const r = t.record();
-    await t.memepoolSpend(false);
+    await t.memepoolSpend('none');
     await expect(recoverNow(t.d, r.id)).rejects.toThrow(/check back/i);
     expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 0, kept: 1 });
     expect(byId(t.store, r.id)?.state).toBe('unsure');
@@ -445,5 +497,72 @@ describe('Recover now: review fixes (7aee65f2)', () => {
     expect(recoverMessage(res)).toMatch(/already back/);
     expect(byId(t.store, r.id)).toMatchObject({ state: 'returned', returnedBy: 'wallet' });
     expect(await stuckFundings(t.d)).toEqual([]);
+  });
+});
+
+// Round 5 (review of 1d80b95e).
+describe('Recover now: block proofs and refused recoveries', () => {
+  test('2: a "confirmed" spender with a fake merkle proof is not spent: record kept; a valid proof closes it', async () => {
+    const t = await rig();
+    const r = t.record();
+    await t.memepoolSpend('fake');
+    await expect(recoverNow(t.d, r.id)).rejects.toThrow(/check back/i);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 0, kept: 1 });
+    expect(byId(t.store, r.id)?.state).toBe('unsure');
+    const won = await t.memepoolSpend('valid');
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 1, kept: 0 });
+    expect(byId(t.store, r.id)).toMatchObject({ state: 'spent', spentBy: won });
+  });
+
+  test("2: a 'spent' tombstone is pruned after 30 days only if the same spender is still proven", async () => {
+    const t = await rig();
+    const r = t.record();
+    const won = await t.memepoolSpend('valid');
+    await sweepFundings(t.d);
+    expect(byId(t.store, r.id)?.state).toBe('spent');
+    t.later(TOMBSTONE_KEEP_MS + HOUR);
+    // The proof no longer checks out: the tombstone (and its nonce) stays.
+    const kept = new Set(t.roots);
+    t.roots.clear();
+    await sweepFundings(t.d);
+    expect(byId(t.store, r.id)?.state).toBe('spent');
+    // A different spender on record than the network now proves: stays too.
+    kept.forEach((x) => t.roots.add(x));
+    t.store.put({ ...byId(t.store, r.id)!, spentBy: 'ee'.repeat(32) });
+    await sweepFundings(t.d);
+    expect(byId(t.store, r.id)).toBeDefined();
+    // The same spender, proven again: pruned.
+    t.store.put({ ...byId(t.store, r.id)!, spentBy: won });
+    await sweepFundings(t.d);
+    expect(byId(t.store, r.id)).toBeUndefined();
+  });
+
+  test("1: a double-spend refusal leaves the recovery coin's record as nonce-only; 'empty' only after the drop time", async () => {
+    const t = await rig({ mode: 'double' });
+    const r = t.record();
+    expect((await recoverNow(t.d, r.id)).kind).toBe('went-through');
+    const note = t.store.list().find((x) => x.id !== r.id)!;
+    expect(note).toMatchObject({ state: 'pending' });
+    expect(note.funding).toBeUndefined(); // nonce only: found by address if the flagged recovery is mined after all
+    expect(await stuckFundings(t.d)).toEqual([]); // no "Recover now" for a coin that may never exist
+    t.later(HOUR);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 0, kept: 1 }); // address empty, inside the drop time
+    expect(byId(t.store, note.id)?.state).toBe('pending');
+    t.later(NONCE_ONLY_DROP_MS);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 1, kept: 0 });
+    expect(byId(t.store, note.id)).toMatchObject({ state: 'empty', prefix: note.prefix, suffix: note.suffix });
+  });
+
+  test('1: ...and if the flagged recovery was mined after all, the sweep finds the coin by address and takes it in', async () => {
+    const t = await rig({ mode: 'double' });
+    const r = t.record();
+    await recoverNow(t.d, r.id);
+    const note = t.store.list().find((x) => x.id !== r.id)!;
+    const key = await t.d.wallet.newPayKey({ prefix: note.prefix, suffix: note.suffix });
+    t.utxos.set(key.address, [{ tx_hash: t.fundTx().id('hex'), tx_pos: 0, value: SATS - MAX_RECOVERY_FEE }]);
+    t.later(HOUR);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 1, spent: 0, kept: 0 });
+    expect(byId(t.store, note.id)).toMatchObject({ state: 'returned' });
+    expect(t.log.internalized.length).toBe(1);
   });
 });

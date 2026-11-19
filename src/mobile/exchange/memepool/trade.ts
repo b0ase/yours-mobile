@@ -90,6 +90,8 @@ export type TradeWallet = {
   newPayKey(nonce?: { prefix: string; suffix: string }): Promise<PayKey>;
   /** Pay `sats` to our own `pay` key; resolves once the wallet has sent it. */
   fund(pay: PayKey, sats: number): Promise<Funding>;
+  /** True only when a merkle proof for `txid` verifies against the wallet's ChainTracker. Never throws. */
+  inBlock(txid: string): Promise<boolean>;
   /** Take a funding coin that wasn't spent back into the wallet's balance. */
   returnFunding(f: Funding): Promise<void>;
   /**
@@ -551,11 +553,10 @@ export function wocChain(d: Deps): Chain {
     },
     async tx(txid) {
       // Inputs come from the raw hex (which must hash to `txid`), never from the JSON's say-so.
-      const [r, h] = await Promise.all([get(`/tx/hash/${txid}`), get(`/tx/${txid}/hex`)]);
-      if (!r?.ok || !h?.ok) return null;
-      const j = await json(r);
+      const h = await get(`/tx/${txid}/hex`);
+      if (!h?.ok) return null;
       const raw = (await h.text().catch(() => '')).trim();
-      if (!j || !/^[0-9a-f]+$/i.test(raw)) return null;
+      if (!/^[0-9a-f]+$/i.test(raw)) return null;
       let parsed: Transaction;
       try {
         parsed = Transaction.fromHex(raw);
@@ -563,10 +564,11 @@ export function wocChain(d: Deps): Chain {
         return null;
       }
       if (parsed.id('hex') !== txid) return null;
-      const confirmed = typeof j.blockhash === 'string' && j.blockhash.length > 0 && Number(j.confirmations) > 0;
       const inputs = parsed.inputs.map((i) => ({ txid: i.sourceTXID ?? '', vout: i.sourceOutputIndex }));
-      return { confirmed, inputs, raw };
+      return { inputs, raw };
     },
+    // In a block only with a merkle proof the wallet checks against its own ChainTracker (wallet.ts inBlock).
+    inBlock: (txid) => d.wallet.inBlock(txid).catch(() => false),
     async unspentAt(address) {
       const r = await get(`/address/${address}/unspent/all`);
       if (!r?.ok) return null;
@@ -782,7 +784,16 @@ async function recoverOnce(d: Deps, id: string): Promise<RecoverResult> {
       return { kind: 'already-back' };
     }
     if (isDoubleSpend(e)) {
-      if (noted) tombstone(store, noted, 'empty', {}, now); // our recovery was refused: its coin never existed
+      // The broadcaster flagged our recovery, but it can still be mined, so its coin may yet exist: keep its nonce
+      // as a nonce-only record. The sweep finds the coin by address, or marks it 'empty' only after
+      // NONCE_ONLY_DROP_MS with the address still empty.
+      if (noted) {
+        const rec = store.list().find((x) => x.id === noted);
+        if (rec) {
+          const { funding: _gone, ...nonceOnly } = rec;
+          safePut(store, { ...nonceOnly, state: 'pending', createdAt: now });
+        }
+      }
       const won = await wentThrough();
       if (won) return won;
     }
