@@ -203,7 +203,7 @@ export const ledgerSpentToday = (id: string, now = Date.now()): number => {
 /**
  * The strategy spend ledger: live dollars spent since the loaded strategy started (`since`), plus per-UTC-day
  * totals. Kept apart from the log (like the day ledger) so the log's size cannot reset a strategy's
- * maxPerDayUsd / maxTotalUsd (b-Aware report, sugiyantono31). Reset only when a strategy is (re)loaded.
+ * maxPerDayUsd / maxTotalUsd (b-Aware report, sugiyantono31). Never reset by a load or a mode change: started with the first strategy, cleared on unload.
  */
 export type StrategySpendLedger = { since: number; totalUsd: number; days: Record<string, number> };
 const STRAT_DAYS_KEPT = 40;

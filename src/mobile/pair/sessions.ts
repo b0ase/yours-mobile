@@ -534,6 +534,7 @@ async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: st
       ctx: agentDeps.ctx,
       currentId: agentDeps.currentId,
       isLive: pairingLiveCheck(l.stored.c, grant, agentDeps.ctx),
+      session: { id: l.stored.c, computer: l.stored.origin },
       bsvUsd,
       feeRate: agentDeps.feeRate,
       saveGrant: (g) => {

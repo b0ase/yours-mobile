@@ -40,6 +40,7 @@ export const CliPairConfirm = ({
   const id = account?.addresses.identityAddress;
   const agent = isPairableAgent(id); // never a pot: pots keep no daily cap
   const [trade, setTrade] = useState(MARKET_ENABLED);
+  const [strategy, setStrategy] = useState(false);
   const [send, setSend] = useState(false);
   const [days, setDays] = useState(7);
   // Minting works on any account (e.g. the owner's main one), within the limits set here.
@@ -49,6 +50,7 @@ export const CliPairConfirm = ({
   const limits = makeMintLimits(maxItems, maxUsd);
   const scopes: AgentScope[] = [
     ...(agent && trade ? ['trade' as AgentScope] : []),
+    ...(agent && MARKET_ENABLED && strategy ? ['strategy' as AgentScope] : []),
     ...(agent && send ? ['send' as AgentScope] : []),
     ...(mint ? ['mint' as AgentScope] : []),
   ];
@@ -141,10 +143,18 @@ export const CliPairConfirm = ({
           toggle(
             trade,
             setTrade,
-            MARKET_ENABLED ? 'Buy tokens and load strategies' : '',
+            MARKET_ENABLED ? 'Buy tokens' : '',
             MARKET_ENABLED
               ? 'Within the account’s limits and its strategy’s rules, except the percent stop, which isn’t active yet'
               : '',
+          )}
+        {agent &&
+          MARKET_ENABLED &&
+          toggle(
+            strategy,
+            setStrategy,
+            'Suggest strategies',
+            'It can only send a strategy for you to read and approve here. Nothing changes until you tap Approve',
           )}
         {agent && toggle(send, setSend, 'Send BSV', "To anyone, up to the account's daily cap")}
         {toggle(mint, setMint, 'Mint NFTs', 'Photos, music, video, PDFs: signed here, within the limits below')}

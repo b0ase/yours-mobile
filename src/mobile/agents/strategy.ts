@@ -11,6 +11,7 @@
 import {
   appendAgentLog,
   getAgentLog,
+  getStrategyLedger,
   spendAllowed,
   getAgentAccount,
   allAgentsStopped,
@@ -229,7 +230,15 @@ export type Loaded = {
   loadedAt: number;
   /** Account value when loaded, for stop.downPct. */
   startValueUsd?: number;
+  /** Who put this strategy here. Missing = the owner, on this phone (strategies loaded before provenance existed). */
+  source?: Provenance;
 };
+
+/** Where a strategy came from: the owner on the phone, or a paired computer (its name and the pairing session id). */
+export type Provenance = { by: 'owner' } | { by: 'computer'; computer: string; session: string };
+
+export const describeProvenance = (p?: Provenance) =>
+  !p || p.by === 'owner' ? 'You, on this phone' : `${p.computer} (session ${p.session.slice(0, 8)})`;
 
 /** Pretend money for paper mode: USD cash plus token holdings, filled at live prices. */
 export type PaperBook = { cashUsd: number; tokens: Record<string, number>; spentUsd: number };
@@ -264,30 +273,39 @@ export const getLoadedStrategy = (id: string) => read<Loaded>(KEY(id));
 export const getPaperBook = (id: string): PaperBook =>
   read<PaperBook>(PAPER(id)) ?? { cashUsd: PAPER_START_USD, tokens: {}, spentUsd: 0 };
 
-/** Account › Load strategy. Replaces any strategy already loaded; paper mode starts a fresh $100 book. */
+/**
+ * Account › Load strategy. Replaces any strategy already loaded; paper mode starts a fresh $100 book.
+ * The spend ledger is never reset by a load: the new strategy keeps the earlier one's start time, so what was already
+ * spent still counts against its maxPerDayUsd / maxTotalUsd (b-Aware 315). A fresh ledger starts only when nothing
+ * was loaded before and there is no ledger yet.
+ */
 export const loadStrategy = (
   id: string,
   strategy: Strategy,
   mode: Loaded['mode'],
   startValueUsd?: number,
   now = Date.now(),
+  source: Provenance = { by: 'owner' },
 ) => {
-  write(KEY(id), { strategy, mode, loadedAt: now, startValueUsd } satisfies Loaded);
-  resetStrategyLedger(id, now);
+  const prev = getLoadedStrategy(id);
+  const since = prev?.loadedAt ?? now;
+  write(KEY(id), { strategy, mode, loadedAt: since, startValueUsd, source } satisfies Loaded);
+  if (!getStrategyLedger(id)) resetStrategyLedger(id, since);
   if (mode === 'paper') write(PAPER(id), null);
   appendAgentLog(id, {
     at: now,
     action: 'strategy',
-    detail: `Loaded ${strategy.name} v${strategy.version} (${mode})`,
+    detail: `Loaded ${strategy.name} v${strategy.version} (${mode}) from ${describeProvenance(source)}`,
     usd: 0,
   });
 };
 
+/** Paper ↔ Live. Never touches the spend ledger. */
 export const setStrategyMode = (id: string, mode: Loaded['mode'], now = Date.now()) => {
   const l = getLoadedStrategy(id);
   if (!l || l.mode === mode) return;
-  write(KEY(id), { ...l, mode, loadedAt: now });
-  resetStrategyLedger(id, now);
+  write(KEY(id), { ...l, mode });
+  if (!getStrategyLedger(id)) resetStrategyLedger(id, l.loadedAt);
   if (mode === 'paper') write(PAPER(id), null);
   appendAgentLog(id, { at: now, action: 'strategy', detail: `${l.strategy.name}: switched to ${mode}`, usd: 0 });
 };

@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { FileUp } from 'lucide-react';
 import {
   exampleStrategy,
+  describeProvenance,
   getLoadedStrategy,
   getPaperBook,
   loadStrategy,
@@ -12,6 +13,7 @@ import {
   unloadStrategy,
   type Loaded,
 } from './strategy';
+import { approveProposal, declineProposal, getProposal, proposalChanges } from './strategyProposal';
 import { saveTextFile } from './saveText';
 import { PublishStrategy } from '../strategies/PublishStrategy';
 import { myStrategies } from '../strategies/myStrategies';
@@ -33,7 +35,7 @@ const download = (l: Loaded) =>
  * Agent account › Strategy (SMART-WALLET-SPEC.md §3): load a strategy file (pick or paste), see its goals
  * and rules, switch Paper ↔ Live, unload. Loading always starts in paper mode; Live needs a second tap.
  */
-export const StrategySection = ({ id }: { id: string }) => {
+const StrategyBody = ({ id }: { id: string }) => {
   const loaded = getLoadedStrategy(id);
   const [text, setText] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
@@ -86,6 +88,9 @@ export const StrategySection = ({ id }: { id: string }) => {
         </div>
         <div className="text-xs whitespace-pre-wrap" style={{ color: '#D0D5DD' }}>
           {s.goals}
+        </div>
+        <div className="text-xs" style={{ color: MUTED }} data-testid="strategy-source">
+          Loaded by: {describeProvenance(loaded.source)}
         </div>
         <StrategyRuleNotes rules={s.rules} paper={!live} />
         {book && (
@@ -249,3 +254,58 @@ export const StrategySection = ({ id }: { id: string }) => {
     </div>
   );
 };
+
+/** A strategy a paired computer sent: what would change, which computer, and the owner's Approve / Decline. */
+const ProposalSheet = ({ id }: { id: string }) => {
+  const p = getProposal(id);
+  if (!p) return null;
+  const changes = proposalChanges(id, p);
+  return (
+    <div
+      className="rounded-2xl p-3 flex flex-col gap-2 mb-2"
+      style={{ background: CARD }}
+      data-testid="strategy-proposal"
+    >
+      <div className="text-sm font-bold text-white">{p.computer} wants to change this strategy</div>
+      <div className="text-xs" style={{ color: MUTED }}>
+        Session {p.session.slice(0, 8)}. Nothing changes until you approve. It loads on paper; going live is a separate
+        tap.
+      </div>
+      {changes.length === 0 && (
+        <div className="text-xs" style={{ color: '#D0D5DD' }}>
+          Same limits as now.
+        </div>
+      )}
+      {changes.map((c) => (
+        <div key={c.what} className="text-xs" style={{ color: '#D0D5DD' }}>
+          <b className="text-white">{c.what}:</b> {c.from} → {c.to}
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className="rounded-lg px-3 py-2 text-sm font-bold border-0 flex-1"
+          style={{ background: GOLD, color: '#000' }}
+          onClick={() => approveProposal(id)}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          className="rounded-lg px-3 py-2 text-sm font-bold border-0 flex-1"
+          style={{ background: LINE, color: '#fff' }}
+          onClick={() => declineProposal(id)}
+        >
+          Decline
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export const StrategySection = ({ id }: { id: string }) => (
+  <>
+    <ProposalSheet id={id} />
+    <StrategyBody id={id} />
+  </>
+);
