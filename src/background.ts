@@ -3988,7 +3988,13 @@ if (!(
           return true;
         // Connections: which sites may see which token balances (services/siteTokens.ts), and revoking that alone.
         case 'SITE_TOKEN_CONSENT_LIST':
-          chromeConsentStore()
+          // The active account's answers only (the same id initWallet files them under).
+          chromeConsentStore(
+            undefined,
+            chromeStorageService.getCurrentAccountObject().selectedAccount ||
+              chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ||
+              'no-account',
+          )
             .list()
             .then((data) => sendResponse({ type: message.action, success: true, data }))
             .catch((e: unknown) => sendResponse({ type: message.action, success: false, error: String(e) }));
@@ -3999,6 +4005,7 @@ if (!(
             sendResponse({ type: message.action, success: false, error: 'No site' });
             return true;
           }
+          // No account id: Revoke drops the site's answers on every account (it must ask again everywhere).
           chromeConsentStore()
             .forget(normalizeOriginator(o))
             .then(() => sendResponse({ type: message.action, success: true }))
