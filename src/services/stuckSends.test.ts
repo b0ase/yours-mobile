@@ -231,17 +231,25 @@ describe("task 54 round 2: a held payment (restored as 'nosend') goes out only o
   };
   test('Send now posts exactly that payment (sendWith), not SendWaiting', async () => {
     const { d, calls } = deps();
-    expect(await resolveUnsent(d, TX, 'send')).toEqual({ ok: true, txid: TX, result: 'network-may-have-it' });
+    expect(await resolveUnsent(d, TX, 'send', { confirmed: true })).toEqual({
+      ok: true,
+      txid: TX,
+      result: 'network-may-have-it',
+    });
     expect(calls).toEqual({ sendWith: [TX], sendWaiting: 0 });
   });
   test('refused while spending is paused: nothing posted', async () => {
     const { d, calls } = deps({ paused: true });
-    expect(await resolveUnsent(d, TX, 'send')).toEqual({ ok: false, txid: TX, error: 'Payments are paused for now' });
+    expect(await resolveUnsent(d, TX, 'send', { confirmed: true })).toEqual({
+      ok: false,
+      txid: TX,
+      error: 'Payments are paused for now',
+    });
     expect(calls).toEqual({ sendWith: [], sendWaiting: 0 });
   });
   test('a refused post is reported as not sent', async () => {
     const { d } = deps({ sendThrows: true });
-    expect(await resolveUnsent(d, TX, 'send')).toEqual({
+    expect(await resolveUnsent(d, TX, 'send', { confirmed: true })).toEqual({
       ok: false,
       txid: TX,
       error: 'It was not sent: broadcast refused',
@@ -250,12 +258,69 @@ describe("task 54 round 2: a held payment (restored as 'nosend') goes out only o
   test('without a way to post it, it is not sent (and SendWaiting, which ignores it, is not pretended)', async () => {
     const { d, calls } = deps();
     const { sendWith: _omit, ...noSend } = d;
-    expect((await resolveUnsent(noSend, TX, 'send')).ok).toBe(false);
+    expect((await resolveUnsent(noSend, TX, 'send', { confirmed: true })).ok).toBe(false);
     expect(calls).toEqual({ sendWith: [], sendWaiting: 0 });
   });
   test('Cancel still releases it when the network has no copy', async () => {
     const { d, calls } = deps({ onChain: () => false });
     expect(await resolveUnsent(d, TX, 'cancel')).toEqual({ ok: true, txid: TX, result: 'cancelled' });
     expect(calls.sendWith).toEqual([]);
+  });
+});
+
+import { P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk';
+import { decodePayment, listQueuedSends, NEEDS_CONFIRMATION } from './stuckSends';
+
+describe('task 54 round 3 (d): a held payment shows what its own bytes pay, and goes out only once confirmed', () => {
+  const TX = 'e'.repeat(64);
+  const held = { transactionId: 3, txid: TX, createdAt: 0, attempts: 0, reqStatus: 'nosend' };
+  test('Send now without confirmation: refused, nothing posted (a row a backup made look like ours included)', async () => {
+    const sent: string[] = [];
+    const d = {
+      listQueued: async () => [{ ...held, queuedHere: true, description: 'Rent (from the backup)' }],
+      knownOnChain: async () => false,
+      cancel: async () => undefined,
+      sendWaiting: async () => undefined,
+      sendWith: async (t: string) => void sent.push(t),
+    };
+    expect(await resolveUnsent(d, TX, 'send')).toEqual({ ok: false, txid: TX, error: NEEDS_CONFIRMATION });
+    expect(sent).toEqual([]);
+    expect((await resolveUnsent(d, TX, 'send', { confirmed: true })).ok).toBe(true);
+    expect(sent).toEqual([TX]);
+  });
+
+  const stranger = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+  const change = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+  const pay = () => {
+    const t = new Transaction();
+    t.addInput({ sourceTXID: 'f'.repeat(64), sourceOutputIndex: 0, unlockingScript: change, sequence: 0xffffffff });
+    t.addOutput({ lockingScript: stranger, satoshis: 20_000 });
+    t.addOutput({ lockingScript: change, satoshis: 79_000 });
+    return t;
+  };
+  test("decodePayment: the recipients are the outputs that aren't the wallet's, with their address and amount", () => {
+    const t = pay();
+    const r = decodePayment(t.toBinary(), new Set([change.toHex()]));
+    expect(r).toEqual({
+      recipients: [{ to: Utils.toBase58Check(stranger.chunks[2].data!, [0]), sats: 20_000 }],
+      amountSats: 20_000,
+    });
+    expect(decodePayment([1, 2, 3], new Set())).toBeUndefined();
+  });
+  test("listQueuedSends: amount and recipients from the request's bytes (not the row's), and queuedHere from this device's marks", async () => {
+    const t = pay();
+    const sp = {
+      findTransactions: async () => [
+        { transactionId: 1, txid: t.id('hex'), created_at: new Date(0), description: 'Coffee', satoshis: -5 },
+      ],
+      findProvenTxReqs: async () => [{ status: 'nosend', attempts: 0, rawTx: t.toBinary() }],
+      findOutputs: async () => [
+        { lockingScript: change.toBinary(), change: true, basketId: 1 },
+        { lockingScript: stranger.toBinary(), change: false, basketId: null }, // quarantined: not the wallet's
+      ],
+    };
+    const [q] = await listQueuedSends(sp, () => false);
+    expect([q.amountSats, q.recipients?.length, q.queuedHere, q.satoshis]).toEqual([20_000, 1, false, -5]);
+    expect((await listQueuedSends(sp, (x) => x === t.id('hex')))[0].queuedHere).toBe(true);
   });
 });

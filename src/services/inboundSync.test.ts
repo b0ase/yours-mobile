@@ -1979,6 +1979,62 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     expect(kept.findTxid(W.id('hex'))).toBeUndefined();
   });
 
+  for (const held of ['nosend', 'unsigned', 'unprocessed'])
+    for (const to of ['unproven', 'sending', 'completed'])
+      test(`task 54 round 3 F1a: a payment the device holds as '${held}' is not moved to '${to}' by a page`, async () => {
+        const d = await phoneWithBackup();
+        const X = await backupTx(d, held);
+        await d.pull(); // the device has it, as the backup had it then
+        const userId = await userOf(d.phone, d);
+        const mine = async () =>
+          (await d.phone.findTransactions({ partial: { userId, txid: X.txid }, noRawTx: true }))[0];
+        expect((await mine()).status).toBe(held);
+        const [rt] = await d.remote.findTransactions({ partial: { txid: X.txid }, noRawTx: true });
+        await d.remote.updateTransaction(rt.transactionId, { status: to, updated_at: later() } as never);
+        await d.pull();
+        expect((await mine()).status).toBe(held);
+      });
+
+  const RECLAIM = {
+    noSendExpiryMode: 'timestamp',
+    noSendExpiryValue: 1,
+    noSendExpiryDeadline: 1,
+    noSendExpiryState: 'revocation-requested',
+    noSendExpiryAnchorTxid: 'ab'.repeat(32),
+    noSendExpiryAnchorVout: 0,
+    noSendExpiryReclaimTxid: 'cd'.repeat(32),
+    noSendExpiryReclaimRawTx: [1, 2, 3],
+    noSendExpiryReclaimDerivationPrefix: 'p',
+    noSendExpiryReclaimDerivationSuffix: 's',
+    noSendExpiryReclaimSatoshis: 1,
+  };
+  const expiryOf = (t: Record<string, unknown>) =>
+    Object.fromEntries(Object.keys(RECLAIM).map((k) => [k, t[k] ?? null]));
+  const NONE = Object.fromEntries(Object.keys(RECLAIM).map((k) => [k, null]));
+
+  test("task 54 round 3 F2: a page's BRC-177 expiry / reclaim fields never reach a new transaction", async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'nosend');
+    const [rt] = await d.remote.findTransactions({ partial: { txid: X.txid }, noRawTx: true });
+    await d.remote.updateTransaction(rt.transactionId, { ...RECLAIM, updated_at: later() } as never);
+    await d.pull();
+    const userId = await userOf(d.phone, d);
+    const [t] = await d.phone.findTransactions({ partial: { userId, txid: X.txid } });
+    expect(expiryOf(t as never)).toEqual(NONE);
+  });
+
+  test('task 54 round 3 F2: …nor change a transaction the device has', async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'nosend');
+    await d.pull();
+    const [rt] = await d.remote.findTransactions({ partial: { txid: X.txid }, noRawTx: true });
+    await d.remote.updateTransaction(rt.transactionId, { ...RECLAIM, updated_at: later() } as never);
+    await d.pull();
+    const userId = await userOf(d.phone, d);
+    const [t] = await d.phone.findTransactions({ partial: { userId, txid: X.txid } });
+    expect(expiryOf(t as never)).toEqual(NONE);
+  });
+
   test("a page whose admissions can't be written to the device's list is not taken (fetched again), and isn't a broken backup", async () => {
     const d = await phoneWithBackup();
     d.chain.answer = 'unspent';

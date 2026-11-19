@@ -37,10 +37,10 @@
  */
 import 'fake-indexeddb/auto';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { teardownSim, World } from '../testing/twoDeviceSim/world';
+import { inputsOf, teardownSim, World } from '../testing/twoDeviceSim/world';
 import { rng } from '../testing/twoDeviceSim/chain';
-import { Beef } from '@bsv/sdk';
-import { isHeld, resolveUnsent } from '../services/stuckSends';
+import { Beef, Transaction } from '@bsv/sdk';
+import { isHeld, NEEDS_CONFIRMATION, resolveUnsent } from '../services/stuckSends';
 
 // The Store client (mobile/themeOrder/api.ts, imported by the Store open) reads its API base once, when it is first
 // loaded. bun runs every file in one process: whichever file loads it first fixes it for the rest, so this file sets
@@ -330,17 +330,95 @@ describe('two devices, one seed: named cases', () => {
       await w.releaseStuck('B');
       expect(w.chain.has(p.txid)).toBe(false);
       // Spending paused: refused, nothing sent.
-      const paused = await resolveUnsent(w.unsentDeps('B', { paused: true }), p.txid, 'send');
+      const paused = await resolveUnsent(w.unsentDeps('B', { paused: true }), p.txid, 'send', { confirmed: true });
       expect(paused).toEqual({ ok: false, txid: p.txid, error: 'Payments are paused for now' });
       expect(w.chain.has(p.txid)).toBe(false);
-      // The user's Send now: exactly that payment goes out, from B.
+      // Send now without the confirmation sheet's yes: refused, nothing sent (review round 3, d).
+      expect(await resolveUnsent(w.unsentDeps('B'), p.txid, 'send')).toEqual({
+        ok: false,
+        txid: p.txid,
+        error: NEEDS_CONFIRMATION,
+      });
+      expect(w.chain.has(p.txid)).toBe(false);
+      // The user's confirmed Send now: exactly that payment goes out, from B.
       const before = w.B.posted.length;
-      const sent = await resolveUnsent(w.unsentDeps('B'), p.txid, 'send');
+      const sent = await resolveUnsent(w.unsentDeps('B'), p.txid, 'send', { confirmed: true });
       expect(sent).toEqual({ ok: true, txid: p.txid, result: 'network-may-have-it' });
       expect(w.B.posted.slice(before)).toEqual([p.txid]);
       expect(w.chain.has(p.txid)).toBe(true);
     },
   );
+
+  for (const to of ['unproven', 'sending', 'completed'] as const)
+    sim(
+      `task 54 round 3 F1: a page moving A's own withheld payment to '${to}' frees none of its change and never sends it`,
+      async () => {
+        const w = await threeCoins();
+        const W = await w.storePay('A', 20_000, { outbox: false }); // signed on A, withheld
+        await w.sync('A');
+        const [bt] = await w.backup.findTransactions({ partial: { txid: W.txid }, noRawTx: true });
+        w.advance(60_000);
+        await w.backup.updateTransaction(bt.transactionId, { status: to, updated_at: new Date(Date.now()) } as never);
+        await w.sync('A'); // A pulls the backup's word on its own payment
+        expect((await w.statusOf('A', W.txid)).tx).toBe('nosend');
+        // An ordinary send needing more than A's two untouched coins: W's change is not there to take.
+        let s2: Awaited<ReturnType<typeof w.send>> | undefined;
+        try {
+          s2 = await w.send('A', 250_000);
+        } catch {
+          // refused: not enough spendable coins without W's change
+        }
+        if (s2) expect(s2.inputs.some((o) => o.startsWith(`${W.txid}.`))).toBe(false);
+        await w.sendWaiting('A');
+        expect(w.chain.has(W.txid)).toBe(false);
+      },
+    );
+
+  for (const on of ['A', 'B'] as const)
+    sim(
+      `task 54 round 3 F2: a page's BRC-177 reclaim pointed at a withheld payment itself never posts it (${on === 'A' ? 'the device that signed it' : 'a device restored from the backup'})`,
+      async () => {
+        const w = await threeCoins();
+        // A withheld payment with one input and one output (the shape the toolbox's validateReclaim accepts).
+        const r = await w.A.wallet.createAction({
+          description: 'Withheld payment',
+          outputs: [{ lockingScript: w.externalScript(), satoshis: 99_950, outputDescription: 'payment' }],
+          options: { noSend: true, randomizeOutputs: false },
+        });
+        const W = Transaction.fromAtomicBEEF(r.tx as number[]);
+        const wid = W.id('hex');
+        expect([W.inputs.length, W.outputs.length]).toEqual([1, 1]);
+        const [anchor] = inputsOf(W);
+        await w.sync('A');
+        // The hostile backup: W's expiry "revocation-requested", its reclaim W itself, anchored on W's own input.
+        const [bt] = await w.backup.findTransactions({ partial: { txid: wid }, noRawTx: true });
+        w.advance(60_000);
+        await w.backup.updateTransaction(bt.transactionId, {
+          noSendExpiryMode: 'timestamp',
+          noSendExpiryValue: 1,
+          noSendExpiryDeadline: 1,
+          noSendExpiryState: 'revocation-requested',
+          noSendExpiryAnchorTxid: anchor.split('.')[0],
+          noSendExpiryAnchorVout: Number(anchor.split('.')[1]),
+          noSendExpiryReclaimTxid: wid,
+          noSendExpiryReclaimRawTx: W.toBinary(),
+          noSendExpiryReclaimDerivationPrefix: 'p',
+          noSendExpiryReclaimDerivationSuffix: 's',
+          noSendExpiryReclaimSatoshis: 99_950,
+          updated_at: new Date(Date.now()),
+        } as never);
+        if (on === 'B') await w.wipe('B'); // W new to B: restored from the backup with the forged fields
+        await w.sync(on);
+        const [t] = await w.dev(on).s.findTransactions({ partial: { txid: wid }, noRawTx: true });
+        expect(t).toBeDefined();
+        expect(t.noSendExpiryState ?? null).toBeNull();
+        expect(t.noSendExpiryReclaimTxid ?? null).toBeNull();
+        const m = w.dev(on).monitor as unknown as { runTask: (n: string) => Promise<string> };
+        await m.runTask('NoSendExpiry');
+        await w.sendWaiting(on);
+        expect(w.chain.has(wid)).toBe(false);
+      },
+    );
 
   sim('abort: a payment created but never signed, then aborted, leaves both balances whole', async () => {
     const w = await threeCoins();

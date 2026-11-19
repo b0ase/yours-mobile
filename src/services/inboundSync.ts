@@ -143,6 +143,33 @@ type ReqRow = {
 export const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail']);
 /** Proof-request states in which the toolbox's monitor fails the transaction. */
 const REQ_FAILED = new Set(['invalid', 'doubleSpend']);
+/** Transaction states of a payment this device holds back or is still building: a page never moves them forward. */
+export const HELD_TX = new Set(['nosend', 'unsigned', 'unprocessed']);
+/** Every BRC-177 expiry / reclaim field of a transaction row (the toolbox's noSendExpirySnapshot). */
+export const EXPIRY_FIELDS = [
+  'noSendExpiryMode',
+  'noSendExpiryValue',
+  'noSendExpiryDeadline',
+  'noSendExpiryState',
+  'noSendExpiryAnchorTxid',
+  'noSendExpiryAnchorVout',
+  'noSendExpiryReleasedAt',
+  'noSendExpiryObservedAt',
+  'noSendExpiryReclaimTxid',
+  'noSendExpiryReclaimRawTx',
+  'noSendExpiryReclaimDerivationPrefix',
+  'noSendExpiryReclaimDerivationSuffix',
+  'noSendExpiryReclaimSatoshis',
+] as const;
+/** A page row's expiry fields: the device row's when it has one (so the merge changes none), else none at all. */
+function keepExpiryFields(t: TxRow, d: TxRow | undefined) {
+  const row = t as Record<string, unknown>;
+  const mine = d as Record<string, unknown> | undefined;
+  for (const k of EXPIRY_FIELDS) {
+    if (mine && mine[k] != null) row[k] = mine[k];
+    else delete row[k];
+  }
+}
 /**
  * Proof-request states in which this device's Monitor (SendWaiting) posts the payment to the network. A request new to
  * this device is never admitted in one (b-Aware 310/316): only this device's own createAction/signAction (or a release it
@@ -746,6 +773,11 @@ export async function verifyInboundChunk(
     if (!t) continue;
     let d = t.txid ? (await store.findTransactions({ partial: { userId, txid: t.txid } }))[0] : undefined;
     if (!d && t.reference) d = (await store.findTransactions({ partial: { userId, reference: t.reference } }))[0];
+    // BRC-177 expiry and reclaim fields are never a page's (review round 3, F2): a page that set a payment's state to
+    // 'revocation-requested' and pointed its reclaim at the payment itself made the Monitor's NoSendExpiry task post a
+    // withheld payment. A transaction the device has keeps its own; a new one arrives with none (only this device's
+    // own createAction arms one).
+    keepExpiryFields(t, d);
     if (!d) {
       if (typeof t.transactionId === 'number') (report.newTx ??= []).push(t.transactionId);
       continue;
@@ -779,7 +811,15 @@ export async function verifyInboundChunk(
       keepTx();
       if (toFailed && !offCompleted && d.provenTxId == null && txid)
         report.admissions.push({ kind: 'tx', txid, claim: 'failed' });
+      continue;
     }
+    // A payment this device holds back or is still building ('nosend', 'unsigned', 'unprocessed') never moves forward
+    // on a page's word (review round 3, F1a): a page that set a withheld payment 'unproven' made its change spendable
+    // here (the toolbox picks change by its transaction's status), and the next ordinary send carried the withheld
+    // payment out as a parent. Only this device's own action moves it, or the chain (CheckNoSends takes its proof once
+    // the network has it).
+    const addsProof = t.provenTxId != null && d.provenTxId == null;
+    if (HELD_TX.has(String(d.status)) && ((t.status !== undefined && t.status !== d.status) || addsProof)) keepTx();
   }
 
   // A proof request is what the device's monitor fails a transaction by ('invalid' -> failed, which frees the coins

@@ -289,6 +289,9 @@ export class FakeChain {
           return t.raw;
         },
       },
+      // A coin is unspent when the network has it and nothing spends it (the BRC-177 expiry task's anchor check).
+      isUtxo: async (o: { txid?: string; vout?: number }) =>
+        !!o?.txid && this.has(o.txid) && !this.spentBy.has(op(o.txid, Number(o.vout))),
       getChainTracker: async () => tracker,
       getHeight: async () => this.height,
       getHeaderForHeight: async () => new Array(80).fill(0),

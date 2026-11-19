@@ -29,8 +29,10 @@ import { guardIntake } from './services/guardIntake';
 import { sizeAwareBroadcast } from './services/bigBroadcast';
 import {
   releaseStuckSends,
+  listQueuedSends,
   resolveUnsent,
   sendHeld,
+  type QueueStore,
   type QueuedSend,
   type ReleaseReport,
   type UnsentOutcome,
@@ -56,7 +58,9 @@ import {
   type UnbackedRecord,
   type WriteAheadStorage,
 } from './services/changeWriteAhead';
-import { guardPostBeef } from './services/beefAncestors';
+import { guardPostBeef, heldOnDevice, knownByServices, type HeldTxStore } from './services/beefAncestors';
+import { createReleaseMarks, markReleases, type ReleaseRecord } from './services/releaseMarks';
+import { guardReclaims } from './services/reclaimGuard';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
 import { ensureBackupConnected, keepDeviceStoreActive, switchActiveAs } from './services/deviceActive';
@@ -400,7 +404,8 @@ export interface AccountContext {
   /** Cancel queued sends that never reached the network after GIVE_UP_MS, releasing inputs (stuckSends.ts). */
   releaseStuckSends: () => Promise<ReleaseReport>;
   /** Send one queued payment now, or cancel it when the network never got it (services/stuckSends.ts). */
-  resolveUnsent: (txid: string, how: 'send' | 'cancel') => Promise<UnsentOutcome>;
+  /** `confirmed`: a held payment's Send now, after the confirmation sheet showed what it pays (stuckSends.ts). */
+  resolveUnsent: (txid: string, how: 'send' | 'cancel', opts?: { confirmed?: boolean }) => Promise<UnsentOutcome>;
   /** The queued (not yet accepted) sends, read only. */
   listUnsent: () => Promise<QueuedSend[]>;
   /** Run the Monitor's SendWaiting task now (a big send was queued: services/bigDelayed.ts). */
@@ -1099,6 +1104,15 @@ export const initWallet = async (
   if (!watchStorage(storage, writeAhead)) console.warn('[initWallet] payments are not backed up before broadcast');
   // Big mints need longer than the broadcaster's fixed 30 s to upload (services/bigBroadcast.ts, vexvoid 12 Oct 2026).
   if (!sizeAwareBroadcast(toolboxServices)) console.warn('[initWallet] broadcaster timeout not tunable');
+  // This device's own word on what may go out (services/releaseMarks.ts; task 54 review, round 3): never synced, kept
+  // on this device only. Its actions make the marks; inside the kill switch below, so a paused wallet marks nothing.
+  const releaseKey = `releaseMarks:${keys.identityAddress}`;
+  const releaseMarks = createReleaseMarks({
+    load: async () => ((await chrome.storage.local.get(releaseKey))?.[releaseKey] as ReleaseRecord) ?? null,
+    save: (r) => chrome.storage.local.set({ [releaseKey]: r }),
+  });
+  await releaseMarks.hydrate();
+  markReleases(baseWallet, releaseMarks);
   // Every payment ends here: our screens and dApps through the permissions manager, send-all and background jobs
   // directly. The `spending` kill switch pauses createAction/signAction on it (mobile/config/killSwitch.ts).
   guardSpending(baseWallet);
@@ -1135,7 +1149,22 @@ export const initWallet = async (
   // Outermost of all: every BEEF posted holds only the transactions named and their ancestors, so a payment signed and
   // withheld (noSend) that rides in another payment's BEEF never reaches the network (services/beefAncestors.ts; task
   // 54 review, round 2).
-  if (!guardPostBeef(toolboxServices)) console.error('[initWallet] broadcasts are not held to their own transactions');
+  // …and it refuses any post carrying a payment held here (signed noSend) that this device's own action did not release
+  // (review round 3, F1b: a backup can't send a withheld payment as a parent of the next send, nor as a reclaim).
+  if (
+    !guardPostBeef(toolboxServices, {
+      released: (txid) => releaseMarks.released(txid),
+      known: (txid) => knownByServices(toolboxServices as never, txid),
+      held: async (txid) =>
+        storage.isActiveStorageProvider()
+          ? storage.runAsStorageProvider((sp) => heldOnDevice(sp as unknown as HeldTxStore, txid))
+          : false,
+    })
+  )
+    console.error('[initWallet] broadcasts are not held to their own transactions');
+  // A BRC-177 reclaim posts only what this device armed itself (services/reclaimGuard.ts; review round 3, F2).
+  if (walletMonitor && !guardReclaims(walletMonitor, storage as never, (txid) => releaseMarks.armed(txid)))
+    console.warn('[initWallet] no NoSendExpiry task to guard');
   // UnFail's output verdicts read getUtxoStatus: parse api.1sat.app's "txid.vout" (dkg, 14 Oct 2026; services/utxoStatus.ts).
   if (!fixUtxoStatus(toolboxServices)) console.warn('[initWallet] getUtxoStatus not patched (no txo client)');
   // The wallet's own sends check the coins storage picked against the chain before signing; coins another device
@@ -2154,26 +2183,7 @@ export const initWallet = async (
   /** The queued-send review and the by-hand send/cancel share these (services/stuckSends.ts). */
   const stuckDeps: Parameters<typeof releaseStuckSends>[0] & { listQueued: () => Promise<QueuedSend[]> } = {
     listQueued: () =>
-      storage.runAsStorageProvider(async (sp) => {
-        const out: QueuedSend[] = [];
-        for (const t of await sp.findTransactions({
-          partial: { status: 'sending', isOutgoing: true },
-          noRawTx: true,
-        })) {
-          if (!t.txid) continue;
-          const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
-          out.push({
-            transactionId: t.transactionId,
-            txid: t.txid,
-            createdAt: new Date(t.created_at).getTime(),
-            attempts: req?.attempts ?? 0,
-            reqStatus: req?.status,
-            description: t.description,
-            satoshis: t.satoshis,
-          });
-        }
-        return out;
-      }),
+      storage.runAsStorageProvider((sp) => listQueuedSends(sp as unknown as QueueStore, releaseMarks.released)),
     knownOnChain: (txid) => knownOnChain(txid),
     cancel: (q) =>
       storage.runAsStorageProvider(async (sp) => {
@@ -2524,18 +2534,21 @@ export const initWallet = async (
       }),
     releaseStuckSends: () => releaseStuckSends(stuckDeps),
     listUnsent: () => stuckDeps.listQueued(),
-    resolveUnsent: (txid: string, how: 'send' | 'cancel') =>
+    resolveUnsent: (txid: string, how: 'send' | 'cancel', opts?: { confirmed?: boolean }) =>
       resolveUnsent(
         {
           ...stuckDeps,
           sendWaiting: async () => (walletMonitor ? await walletMonitor.runTask('SendWaiting') : ''),
           // A held payment (restored from a backup as 'nosend') goes out only on the user's own "Send now", only while
           // spending is not paused, through the guarded wallet (task 54 review, round 2).
+          // The release mark is made by the wallet's own createAction (services/releaseMarks.ts markReleases), only
+          // once resolveUnsent has the user's confirmation.
           sendWith: sendHeld(baseWallet as never),
           assertSpending: () => assertNotPaused('spending'),
         },
         txid,
         how,
+        opts,
       ),
     close,
   };

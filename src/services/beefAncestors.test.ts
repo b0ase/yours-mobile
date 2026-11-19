@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { Beef, MerklePath, P2PKH, PrivateKey, Random, Transaction, Utils } from '@bsv/sdk';
-import { ancestorsOnly, guardPostBeef, pruneBeef, txidOfRaw } from './beefAncestors';
+import {
+  ancestorsOnly,
+  guardPostBeef,
+  heldOnDevice,
+  knownByServices,
+  pruneBeef,
+  REFUSED_HELD,
+  txidOfRaw,
+} from './beefAncestors';
 
 const script = () => new P2PKH().lock(PrivateKey.fromRandom().toAddress());
 /** A transaction spending `parent`'s first output (or a random outpoint); proven when `proven`. */
@@ -81,7 +89,7 @@ describe('task 54 round 2: a BEEF carries only what its transaction needs', () =
       },
     };
     const logs: string[] = [];
-    expect(guardPostBeef(services, (m) => logs.push(m))).toBe(true);
+    expect(guardPostBeef(services, { log: (m) => logs.push(m) })).toBe(true);
     expect(guardPostBeef(services)).toBe(true); // once only
     const r = await services.postBeef(beef, [S.id('hex')]);
     expect(r).toEqual([{ name: 'stub', status: 'success' }]);
@@ -100,5 +108,104 @@ describe('task 54 round 2: a BEEF carries only what its transaction needs', () =
   test('guardPostBeef: false when there is no postBeef to wrap', () => {
     expect(guardPostBeef({})).toBe(false);
     expect(guardPostBeef(null)).toBe(false);
+  });
+
+  describe("task 54 round 3: a payment held here goes out only with this device's release", () => {
+    const setup = (released: Set<string>) => {
+      const { P, A, S, W, beef } = scene();
+      // W rides as S's parent: S spends W's change (what a page moving W forward made possible).
+      const S2 = tx(W);
+      const b = new Beef();
+      for (const t of [P, A, W, S2]) add(b, t);
+      void S;
+      void beef;
+      const posted: string[][] = [];
+      const services = {
+        postBeef: async (pb: Beef, txids: string[]) => {
+          posted.push(pb.txs.map((x) => x.txid));
+          return [{ name: 'stub', status: 'success', txids }];
+        },
+      };
+      guardPostBeef(services, {
+        held: async (txid) => txid === W.id('hex'), // W is 'nosend' on this device
+        released: (txid) => released.has(txid),
+        log: () => undefined,
+      });
+      return { services, posted, b, S2, W };
+    };
+    test('an unreleased held ancestor: the whole post is refused, nothing reaches the broadcaster', async () => {
+      const { services, posted, b, S2 } = setup(new Set());
+      const r = (await services.postBeef(b, [S2.id('hex')])) as { status: string; error: Error }[];
+      expect(posted).toEqual([]);
+      expect(r[0].status).toBe('error');
+      expect(r[0].error.message).toBe(REFUSED_HELD);
+    });
+    test('released by this device: it posts, W with it', async () => {
+      const released = new Set<string>();
+      const { services, posted, b, S2, W } = setup(released);
+      released.add(W.id('hex'));
+      await services.postBeef(b, [S2.id('hex')]);
+      expect(posted).toHaveLength(1);
+      expect(posted[0]).toContain(W.id('hex'));
+    });
+    test('held but already on the network (another device sent it): posting it again is allowed; a failed check refuses', async () => {
+      for (const [known, posts] of [
+        [async () => true, 1],
+        [async () => false, 0],
+        [
+          async () => {
+            throw new Error('woc down');
+          },
+          0,
+        ],
+      ] as const) {
+        const { P, A } = scene();
+        const S = tx(A);
+        const b = new Beef();
+        for (const t of [P, A, S]) add(b, t);
+        const posted: unknown[] = [];
+        const services = { postBeef: async () => void posted.push(1) };
+        guardPostBeef(services, { held: async (t) => t === A.id('hex'), known, log: () => undefined });
+        await services.postBeef(b as never, [S.id('hex')] as never);
+        expect(posted).toHaveLength(posts);
+      }
+    });
+    test('a lookup that fails counts as held (refused)', async () => {
+      const { P, A } = scene();
+      const S = tx(A);
+      const b = new Beef();
+      for (const t of [P, A, S]) add(b, t);
+      const posted: unknown[] = [];
+      const services = { postBeef: async () => void posted.push(1) };
+      guardPostBeef(services, {
+        held: async () => {
+          throw new Error('store closed');
+        },
+        log: () => undefined,
+      });
+      await services.postBeef(b as never, [S.id('hex')] as never);
+      expect(posted).toEqual([]);
+    });
+    test('heldOnDevice: its request or a transaction row of it is nosend', async () => {
+      const store = (req?: string, txs: string[] = []) => ({
+        findProvenTxReqs: async () => (req ? [{ status: req }] : []),
+        findTransactions: async () => txs.map((status) => ({ status })),
+      });
+      expect(await heldOnDevice(store('nosend'), 'x')).toBe(true);
+      expect(await heldOnDevice(store('unmined', ['nosend']), 'x')).toBe(true);
+      expect(await heldOnDevice(store('unsent', ['sending']), 'x')).toBe(false);
+      expect(await heldOnDevice(store(), 'x')).toBe(false);
+    });
+  });
+
+  test('knownByServices: mined or in the mempool by the services; anything else is no', async () => {
+    const svc = (status: string, ok = 'success') => ({
+      getStatusForTxids: async (t: string[]) => ({ status: ok, results: [{ txid: t[0], status }] }),
+    });
+    expect(await knownByServices(svc('mined'), 'x')).toBe(true);
+    expect(await knownByServices(svc('known'), 'x')).toBe(true);
+    expect(await knownByServices(svc('unknown'), 'x')).toBe(false);
+    expect(await knownByServices(svc('known', 'error'), 'x')).toBe(false);
+    expect(await knownByServices({}, 'x')).toBe(false);
   });
 });

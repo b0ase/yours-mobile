@@ -71,7 +71,16 @@ import {
 } from '../../services/unsentExpiry';
 import { chainLookups, expiryLookups, releaseLookups } from '../../services/unsentGuard';
 import { abortTargetKnownOnChain, knownOnChain } from '../../services/recoverFailed';
-import { releaseStuckSends, sendHeld, type QueuedSend, type UnsentDeps } from '../../services/stuckSends';
+import {
+  listQueuedSends,
+  releaseStuckSends,
+  sendHeld,
+  type QueueStore,
+  type UnsentDeps,
+} from '../../services/stuckSends';
+import { createReleaseMarks, markReleases, type ReleaseMarks } from '../../services/releaseMarks';
+import { guardPostBeef, heldOnDevice, knownByServices } from '../../services/beefAncestors';
+import { guardReclaims } from '../../services/reclaimGuard';
 import {
   AUTO_RESYNC_GAP_MS,
   OWN_PENDING_STATUSES,
@@ -129,6 +138,8 @@ export type Device = {
   monitor: Monitor;
   /** The push before a broadcast (services/changeWriteAhead.ts), on builds that have it. */
   writeAhead?: WriteAheadLike;
+  /** This device's release / arm marks (services/releaseMarks.ts; chrome.storage.local in the app, lost on a wipe). */
+  marks: ReleaseMarks;
 };
 
 let dbn = 0;
@@ -331,6 +342,21 @@ export class World {
       maxRebroadcastAttempts: 0,
     } as never);
     monitor.addDefaultTasks();
+    // initWallet's broadcast stack (task 54 review, round 3, e): the wallet's own actions make this device's release
+    // marks; every post keeps only the named transactions and their ancestors and refuses one carrying a payment held
+    // here without a release; a BRC-177 reclaim posts only what this device armed.
+    const marks = createReleaseMarks();
+    markReleases(wallet, marks);
+    if (
+      !guardPostBeef(svc, {
+        released: (txid) => marks.released(txid),
+        known: (txid) => knownByServices(svc as never, txid),
+        held: (txid) => heldOnDevice(s as never, txid),
+        log: (m) => this.log(`[${name}] ${m}`),
+      })
+    )
+      throw new Error('postBeef not guarded');
+    if (!guardReclaims(monitor, sm as never, (txid) => marks.armed(txid))) throw new Error('reclaims not guarded');
     const log = (...a: unknown[]) => this.log(`[${name}]`, ...a);
     // initWallet's checkBackupRows verifier, over the fake chain (WhatsOnChain first, then the 1Sat stack).
     const verifier: IS.InboundVerifier = {
@@ -470,6 +496,7 @@ export class World {
       svc,
       monitor,
       writeAhead,
+      marks,
     };
   }
 
@@ -790,26 +817,7 @@ export class World {
     const sm = d.sm as unknown as { runAsStorageProvider: <T>(fn: (sp: StorageIdb) => Promise<T>) => Promise<T> };
     return {
       listQueued: () =>
-        sm.runAsStorageProvider(async (sp) => {
-          const out: QueuedSend[] = [];
-          for (const t of await sp.findTransactions({
-            partial: { status: 'sending', isOutgoing: true },
-            noRawTx: true,
-          })) {
-            if (!t.txid) continue;
-            const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
-            out.push({
-              transactionId: t.transactionId,
-              txid: t.txid,
-              createdAt: new Date(t.created_at).getTime(),
-              attempts: req?.attempts ?? 0,
-              reqStatus: req?.status,
-              description: t.description,
-              satoshis: t.satoshis,
-            });
-          }
-          return out;
-        }),
+        sm.runAsStorageProvider((sp) => listQueuedSends(sp as unknown as QueueStore, (t) => d.marks.released(t))),
       knownOnChain: (txid) => knownOnChain(txid, chainLookups(f)),
       cancel: (q) =>
         sm.runAsStorageProvider(async (sp) => {

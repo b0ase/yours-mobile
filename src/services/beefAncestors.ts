@@ -97,21 +97,100 @@ export function pruneBeef(beef: Beef, txids: string[]): { beef: Beef; dropped: s
 type PostBeef = (beef: Beef, txids: string[], ...rest: unknown[]) => Promise<unknown>;
 const GUARDED = Symbol.for('bwx.postBeef.ancestorsOnly');
 
+export type PostGuard = {
+  /**
+   * True when this device holds the transaction back: signed noSend here (its transaction or proof request is
+   * 'nosend'). An error counts as held (the post is refused).
+   */
+  held?: (txid: string) => Promise<boolean>;
+  /** True when this device's own action released it (services/releaseMarks.ts). */
+  released?: (txid: string) => boolean;
+  /**
+   * True when the network already has it (in a block or the mempool): posting it again sends nothing new (a restored
+   * device spending the change of a payment another device sent). Asked only for a held, unreleased transaction; an
+   * error counts as not known (refused).
+   */
+  known?: (txid: string) => Promise<boolean>;
+  log?: (m: string) => void;
+};
+
+/** The store reads heldOnDevice needs (a StorageProvider: StorageIdb). */
+export type HeldTxStore = {
+  findProvenTxReqs(a: { partial: Record<string, unknown> }): Promise<{ status?: string }[]>;
+  findTransactions(a: { partial: Record<string, unknown>; noRawTx?: boolean }): Promise<{ status?: string }[]>;
+};
+
+/** The network has `txid` (mined or in the mempool), by the services' own status lookup; anything else is no. */
+export async function knownByServices(
+  services: { getStatusForTxids?: (txids: string[]) => Promise<unknown> },
+  txid: string,
+): Promise<boolean> {
+  if (typeof services.getStatusForTxids !== 'function') return false;
+  const r = (await services.getStatusForTxids([txid])) as {
+    status?: string;
+    results?: { txid?: string; status?: string }[];
+  };
+  const mine = r?.status === 'success' ? r.results?.find((x) => x.txid === txid) : undefined;
+  return mine?.status === 'mined' || mine?.status === 'known';
+}
+
+/** Is `txid` held on this device: its proof request or a transaction row of it 'nosend' (signed noSend here)? */
+export async function heldOnDevice(sp: HeldTxStore, txid: string): Promise<boolean> {
+  if ((await sp.findProvenTxReqs({ partial: { txid } })).some((q) => q.status === 'nosend')) return true;
+  return (await sp.findTransactions({ partial: { txid }, noRawTx: true })).some((t) => t.status === 'nosend');
+}
+
+/** What a refused post answers: a service error for every txid (nothing is failed; the send stays queued). */
+export const REFUSED_HELD = 'a payment held on this device (signed noSend) was not released for broadcast';
+const refusal = (txids: string[]) => [
+  {
+    name: 'bwx-release-guard',
+    status: 'error',
+    error: new Error(REFUSED_HELD),
+    txidResults: txids.map((txid) => ({ txid, status: 'error', serviceError: true })),
+  },
+];
+
+/**
+ * Unproven transactions in `beef` held on this device, not released by it, and unknown to the network (review round
+ * 3, F1b). Each is a payment signed noSend here that something other than this device's own action is trying to send.
+ */
+export async function heldUnreleased(beef: Beef, guard: PostGuard): Promise<string[]> {
+  if (!guard.held) return [];
+  const out: string[] = [];
+  for (const b of beef.txs) {
+    if (b.hasProof || !b.tx || guard.released?.(b.txid)) continue;
+    const held = await guard.held(b.txid).catch(() => true);
+    if (!held) continue;
+    if (guard.known && (await guard.known(b.txid).catch(() => false))) continue;
+    out.push(b.txid);
+  }
+  return out;
+}
+
 /**
  * Wrap services.postBeef: every BEEF goes out holding only the transactions it names and their ancestors, so no
- * transaction riding in it (one withheld, signed noSend) reaches the network. Idempotent; false when there is no
- * postBeef to wrap.
+ * transaction riding in it reaches the network; and the whole post is refused when any unproven transaction left in
+ * it is held on this device without this device's release (`guard`). Idempotent; false when there is no postBeef.
  */
-export function guardPostBeef(services: unknown, log: (m: string) => void = (m) => console.warn(m)): boolean {
+export function guardPostBeef(services: unknown, guard: PostGuard = {}): boolean {
   const s = services as ({ postBeef?: PostBeef } & { [GUARDED]?: true }) | null;
   if (!s || typeof s.postBeef !== 'function') return false;
   if (s[GUARDED]) return true;
+  const log = guard.log ?? ((m: string) => console.warn(m));
   const original = s.postBeef.bind(s);
   s.postBeef = async (beef: Beef, txids: string[], ...rest: unknown[]) => {
     if (!beef || typeof beef.findTxid !== 'function' || !Array.isArray(txids)) return original(beef, txids, ...rest);
     const pruned = pruneBeef(beef, txids);
     if (pruned.dropped.length)
       log(`[postBeef] left ${pruned.dropped.length} transaction(s) that are not ancestors out of the broadcast`);
+    const held = await heldUnreleased(pruned.beef, guard);
+    if (held.length) {
+      log(
+        `[postBeef] refused: ${held.length} transaction(s) held on this device and not released (${held.join(', ')})`,
+      );
+      return refusal(txids);
+    }
     return original(pruned.beef, txids, ...rest);
   };
   s[GUARDED] = true;

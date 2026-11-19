@@ -21,6 +21,7 @@
  * The repeat guard (repeatGuard.ts) is unchanged: its window (1 h) ends long before GIVE_UP_MS, so a cancel here
  * can't let a site build an identical second payment while the first is still going out.
  */
+import { OP, Transaction, Utils } from '@bsv/sdk';
 
 /** How long a queued send may stay unconfirmed before the wallet gives up on it. */
 export const GIVE_UP_MS = 24 * 60 * 60 * 1000;
@@ -46,7 +47,107 @@ export type QueuedSend = {
   reqStatus?: string;
   description?: string;
   satoshis?: number;
+  /**
+   * What the payment pays, read from its own signed bytes (never a backup's description or amount: review round 3,
+   * d): every output that is not this wallet's, as an address (or "a script"), and their total.
+   */
+  recipients?: Recipient[];
+  amountSats?: number;
+  /** This device queued it itself (services/releaseMarks.ts): not one restored from a backup. */
+  queuedHere?: boolean;
 };
+
+export type Recipient = { to: string; sats: number };
+
+/**
+ * The outputs of `rawTx` that pay someone else: every output whose script isn't one of `walletScripts` (lower-case
+ * hex), shown as its P2PKH address or "a script". Undefined when the bytes don't parse.
+ */
+export function decodePayment(
+  rawTx: ArrayLike<number> | null | undefined,
+  walletScripts: Set<string>,
+): { recipients: Recipient[]; amountSats: number } | undefined {
+  if (!rawTx?.length) return undefined;
+  let tx: Transaction;
+  try {
+    tx = Transaction.fromBinary(Array.from(rawTx));
+  } catch {
+    return undefined;
+  }
+  const recipients: Recipient[] = [];
+  for (const out of tx.outputs) {
+    const script = out.lockingScript.toHex().toLowerCase();
+    if (walletScripts.has(script)) continue;
+    const chunks = out.lockingScript.chunks;
+    const p2pkh =
+      chunks.length === 5 &&
+      chunks[0].op === OP.OP_DUP &&
+      chunks[1].op === OP.OP_HASH160 &&
+      chunks[2].data?.length === 20 &&
+      chunks[3].op === OP.OP_EQUALVERIFY &&
+      chunks[4].op === OP.OP_CHECKSIG;
+    recipients.push({
+      to: p2pkh ? Utils.toBase58Check(chunks[2].data!, [0x00]) : 'a script',
+      sats: out.satoshis ?? 0,
+    });
+  }
+  return { recipients, amountSats: recipients.reduce((n, r) => n + r.sats, 0) };
+}
+
+type Bytes = ArrayLike<number>;
+/** The store reads listQueuedSends needs (a StorageProvider: StorageIdb). */
+export type QueueStore = {
+  findTransactions(a: { partial: Record<string, unknown>; noRawTx?: boolean }): Promise<
+    {
+      transactionId: number;
+      txid?: string | null;
+      created_at: Date | string;
+      description?: string;
+      satoshis?: number;
+    }[]
+  >;
+  findProvenTxReqs(a: {
+    partial: Record<string, unknown>;
+  }): Promise<{ status?: string; attempts?: number; rawTx?: Bytes | null }[]>;
+  findOutputs(a: {
+    partial: Record<string, unknown>;
+  }): Promise<{ lockingScript?: Bytes | null; change?: boolean; basketId?: number | null }[]>;
+};
+
+const hexOf = (b: Bytes | null | undefined) =>
+  b ? Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('') : '';
+
+/**
+ * Outgoing payments in status 'sending' with their request's attempts and status, and what each pays, read from its
+ * own bytes (the request's rawTx): outputs this wallet keeps (change, or in a basket) aren't recipients. `released`:
+ * this device's own marks (services/releaseMarks.ts), for `queuedHere`.
+ */
+export async function listQueuedSends(sp: QueueStore, released?: (txid: string) => boolean): Promise<QueuedSend[]> {
+  const out: QueuedSend[] = [];
+  for (const t of await sp.findTransactions({ partial: { status: 'sending', isOutgoing: true }, noRawTx: true })) {
+    if (!t.txid) continue;
+    const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
+    const mine = new Set(
+      (await sp.findOutputs({ partial: { transactionId: t.transactionId } }))
+        .filter((o) => o.change === true || o.basketId != null)
+        .map((o) => hexOf(o.lockingScript).toLowerCase())
+        .filter(Boolean),
+    );
+    const paid = decodePayment(req?.rawTx, mine);
+    out.push({
+      transactionId: t.transactionId,
+      txid: t.txid,
+      createdAt: new Date(t.created_at).getTime(),
+      attempts: req?.attempts ?? 0,
+      reqStatus: req?.status,
+      description: t.description,
+      satoshis: t.satoshis,
+      ...(paid ?? {}),
+      queuedHere: released ? released(t.txid) : undefined,
+    });
+  }
+  return out;
+}
 
 export type StuckVerdict = 'wait' | 'give-up';
 
@@ -164,6 +265,9 @@ export const sendHeld =
       options: { sendWith: [txid], acceptDelayedBroadcast: false },
     } as never);
 
+/** A held payment's Send now without the confirmation sheet's yes. */
+export const NEEDS_CONFIRMATION = 'Confirm the payment first';
+
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export type UnsentOutcome =
@@ -182,7 +286,12 @@ export type UnsentOutcome =
  *    is marked 'invalid' and the action 'failed', which releases its inputs: the same cancel the 24 h review does.
  * Only sends in the queued list are touched; anything else is refused.
  */
-export async function resolveUnsent(deps: UnsentDeps, txid: string, how: 'send' | 'cancel'): Promise<UnsentOutcome> {
+export async function resolveUnsent(
+  deps: UnsentDeps,
+  txid: string,
+  how: 'send' | 'cancel',
+  opts: { confirmed?: boolean } = {},
+): Promise<UnsentOutcome> {
   if (!/^[0-9a-f]{64}$/i.test(txid)) return { ok: false, txid, error: 'Not a transaction id' };
   if (deps.available && !deps.available()) return { ok: false, txid, error: 'This account’s storage is remote' };
   const known = async () => {
@@ -196,6 +305,8 @@ export async function resolveUnsent(deps: UnsentDeps, txid: string, how: 'send' 
   if (!queued) return { ok: false, txid, error: 'That payment is not waiting to send' };
   if (how === 'send' && isHeld(queued)) {
     if (!deps.sendWith) return { ok: false, txid, error: 'This payment can’t be sent from here' };
+    // Only after the user saw what it pays, read from its own bytes, and confirmed it (review round 3, d).
+    if (!opts.confirmed) return { ok: false, txid, error: NEEDS_CONFIRMATION };
     try {
       await deps.assertSpending?.();
     } catch (e) {

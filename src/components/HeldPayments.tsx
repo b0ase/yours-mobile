@@ -1,7 +1,10 @@
 import { useCallback, useContext, useEffect, useState } from 'react';
 import { isHeld, unsentOutcomeText, type QueuedSend, type UnsentOutcome } from '../services/stuckSends';
 import { sendMessageAsync } from '../utils/chromeHelpers';
+import { ThemeContext } from '../contexts/ColorThemeContext';
 import { TruthLinesOn } from './truthLinesContext';
+import { SendConfirmation } from './SendConfirmation';
+import { heldLineItems, RESTORED_LABEL } from './heldPaymentLines';
 
 const MUTED = 'var(--bw-muted, #98A2B3)';
 const GOLD = 'var(--bw-accent, #D4AF37)';
@@ -11,9 +14,11 @@ type Send = (m: object) => Promise<Answer<unknown>>;
 const defaultSend: Send = (m) => sendMessageAsync<Answer<unknown>>(m);
 
 /**
- * Payments this device holds back and never sends by itself (task 54 review, round 2): a queued send restored from a
- * backup arrives held, so it can't be sent from a backup's word. Each gets its own "Send now" / "Cancel": nothing
- * happens until the user picks one. Pure (tests render this).
+ * Payments this device holds back and never sends by itself (task 54 review, rounds 2 and 3): a queued send restored
+ * from a backup arrives held, so it can't be sent on a backup's word. Each shows what its own signed bytes pay (the
+ * amount; the recipients are on the confirmation sheet), never the backup's description or amount for one this device
+ * didn't queue: that one is labelled "Restored from backup". "Send now" opens the wallet's confirmation sheet; nothing
+ * happens until the user confirms or picks Cancel. Pure (tests render this).
  */
 export const HeldPaymentsView = ({
   items,
@@ -24,7 +29,7 @@ export const HeldPaymentsView = ({
   onSend,
   onCancel,
 }: {
-  items: Pick<QueuedSend, 'txid' | 'description' | 'satoshis' | 'createdAt'>[];
+  items: Pick<QueuedSend, 'txid' | 'description' | 'createdAt' | 'recipients' | 'amountSats' | 'queuedHere'>[];
   fmt: (sats: number) => string;
   hidden?: boolean;
   busy?: string;
@@ -50,13 +55,16 @@ export const HeldPaymentsView = ({
       {items.map((p) => (
         <div key={p.txid} className="flex gap-2 items-center justify-between" style={{ marginTop: 4 }}>
           <span className="overflow-hidden text-ellipsis whitespace-nowrap select-text">
-            {p.description || 'Payment'}
-            {!hidden && typeof p.satoshis === 'number' ? ` · ${fmt(Math.abs(p.satoshis))}` : ''}
+            {p.queuedHere ? p.description || 'Payment' : RESTORED_LABEL}
+            {hidden ? '' : typeof p.amountSats === 'number' ? ` · ${fmt(p.amountSats)}` : ' · amount unreadable'}
+            {p.recipients?.length
+              ? ` to ${p.recipients.length === 1 ? p.recipients[0].to.slice(0, 10) + '…' : `${p.recipients.length} recipients`}`
+              : ''}
           </span>
           <span className="flex gap-1" style={{ flexShrink: 0 }}>
             <button
               type="button"
-              disabled={!!busy}
+              disabled={!!busy || !p.recipients}
               onClick={() => onSend(p.txid)}
               className="rounded-md px-2 py-0.5 border-0 cursor-pointer font-semibold"
               style={{ background: GOLD, color: '#000', fontSize: 11 }}
@@ -105,7 +113,11 @@ export const HeldPayments = ({
   send?: Send;
 }) => {
   const on = useContext(TruthLinesOn);
+  // Read directly (not useTheme, which throws): a view rendered without a ThemeProvider still shows the card.
+  const theme = useContext(ThemeContext)?.theme;
   const [items, setItems] = useState<QueuedSend[]>([]);
+  /** The payment whose confirmation sheet is open. */
+  const [confirming, setConfirming] = useState<QueuedSend>();
   const [busy, setBusy] = useState<string>();
   const [note, setNote] = useState<string>();
 
@@ -130,11 +142,11 @@ export const HeldPayments = ({
     };
   }, [on, load, refreshKey]);
 
-  const act = async (txid: string, how: 'send' | 'cancel') => {
+  const act = async (txid: string, how: 'send' | 'cancel', confirmed = false) => {
     setBusy(txid);
     setNote(undefined);
     try {
-      const r = (await send({ action: 'UNSENT_SENDS', txid, how })) as Answer<UnsentOutcome>;
+      const r = (await send({ action: 'UNSENT_SENDS', txid, how, confirmed })) as Answer<UnsentOutcome>;
       setNote(unsentOutcomeText(r?.success ? r.data : undefined, r?.error));
     } catch (e) {
       setNote(unsentOutcomeText(undefined, e instanceof Error ? e.message : String(e)));
@@ -146,14 +158,32 @@ export const HeldPayments = ({
 
   if (!on) return null;
   return (
-    <HeldPaymentsView
-      items={items}
-      fmt={fmt}
-      hidden={hidden}
-      busy={busy}
-      note={note}
-      onSend={(t) => void act(t, 'send')}
-      onCancel={(t) => void act(t, 'cancel')}
-    />
+    <>
+      <HeldPaymentsView
+        items={items}
+        fmt={fmt}
+        hidden={hidden}
+        busy={busy}
+        note={note}
+        onSend={(t) => setConfirming(items.find((p) => p.txid === t))}
+        onCancel={(t) => void act(t, 'cancel')}
+      />
+      {/* Send now: the wallet's own confirmation sheet, with what the payment's bytes pay; sent only on Confirm. */}
+      {theme && (
+        <SendConfirmation
+          show={!!confirming}
+          theme={theme}
+          lineItems={confirming ? heldLineItems(confirming, fmt) : []}
+          totalSats={confirming?.amountSats}
+          isProcessing={!!busy}
+          onConfirm={() => {
+            const p = confirming;
+            setConfirming(undefined);
+            if (p) void act(p.txid, 'send', true);
+          }}
+          onCancel={() => setConfirming(undefined)}
+        />
+      )}
+    </>
   );
 };
