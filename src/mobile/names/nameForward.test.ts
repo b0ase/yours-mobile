@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
-import { trustCurrentKey, trustForwardSigner } from './binding';
+import { trustCurrentKey } from './binding';
 import {
   KEY_CHANGED,
   NAME_MISMATCH,
@@ -9,6 +9,7 @@ import {
   forwardTarget,
   parseRecipient,
   resolveRecipient,
+  trustResolvedKey,
   type Fetch,
 } from './names';
 import { signRequest } from './paymail';
@@ -207,11 +208,64 @@ describe('forwarded names', () => {
   });
 
   // What NameInput confirm() remembers for the typed name: the paid key, and a followed forward's signer.
-  const confirmed = (r: Awaited<ReturnType<typeof resolveRecipient>>) => {
-    const typed = r.input.replace(/^\$/, '').split('@')[0];
-    trustCurrentKey(typed, r.pubkey as string);
-    if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
-  };
+  const confirmed = (r: Awaited<ReturnType<typeof resolveRecipient>>) => trustResolvedKey(r);
+  const alice = 'alice@bwallet.space';
+
+  // Second re-review (F1): the owner (the remembered signer) re-forwards to a new name and key: a key change with the
+  // override, not a dead-end name mismatch.
+  test('the remembered signer forwards to a new name and key: key change, override, then pays (same owner)', async () => {
+    mem.clear();
+    const owner = wallet(68);
+    const kb = wallet(69);
+    const kc = wallet(70);
+    const toBob = host({
+      pubkey: kb.key,
+      binding: await bindingFrom(kb, 'bob', 1),
+      forward: await signedForward(owner, 'alice', 'bob', null),
+    });
+    confirmed(await resolveRecipient(toBob, parseRecipient(alice)));
+    const toCarol = host({
+      pubkey: kc.key,
+      binding: await bindingFrom(kc, 'carol', 1),
+      forward: await signedForward(owner, 'alice', 'carol', null),
+    });
+    const r = await resolveRecipient(toCarol, parseRecipient(alice));
+    expect(r.forwardsTo).toBe('carol');
+    expect(r.nameBinding).toBe('changed');
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: KEY_CHANGED });
+    trustResolvedKey(r); // "I've checked with them: trust the new wallet"
+    const again = await resolveRecipient(toCarol, parseRecipient(alice));
+    expect(again.nameBinding).toBe('signed');
+    expect(again.pubkey).toBe(kc.key);
+    expect(forwardLabel(again)).toBe('alice@ forwards to carol@ (same owner)');
+    expect(destinationFor(again, 'bsv').ok).toBe(true);
+  });
+
+  // F2: paid alice directly, then she forwards to a new key; trusting the change must also remember the signer.
+  test('paid directly, then a signed forward to a new key: trust pressed, next resolve pays', async () => {
+    mem.clear();
+    const k1 = wallet(71);
+    const kb = wallet(72);
+    const direct = await resolveRecipient(
+      host({ pubkey: k1.key, binding: await bindingFrom(k1, 'alice', 1) }),
+      parseRecipient(alice),
+    );
+    expect(direct.nameBinding).toBe('signed');
+    confirmed(direct);
+    const toBob = host({
+      pubkey: kb.key,
+      binding: await bindingFrom(kb, 'bob', 1),
+      forward: await signedForward(k1, 'alice', 'bob', null),
+    });
+    const r = await resolveRecipient(toBob, parseRecipient(alice));
+    expect(r.forwardsTo).toBe('bob');
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: KEY_CHANGED });
+    trustResolvedKey(r); // "I've checked with them: trust the new wallet"
+    const again = await resolveRecipient(toBob, parseRecipient(alice));
+    expect(again.forwardsTo).toBe('bob');
+    expect(again.nameBinding).toBe('signed');
+    expect(destinationFor(again, 'bsv').ok).toBe(true);
+  });
 
   // Re-review (P3): a binding is self-signed, so "served key = remembered key" must not let ANY key sign a forward.
   test('served key = remembered key, forward signed by another key: not followed, no "same owner"', async () => {
