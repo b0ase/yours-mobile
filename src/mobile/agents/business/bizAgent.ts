@@ -7,7 +7,7 @@
  * always gives the same agent account and the owner can recover its coins from the seed alone. Our server never
  * sees it. Storage keeps only { ticker, address, cap, stopped } and the activity log.
  *
- * ⚠ Every agent payment goes through `bizAgentPay`, which checks Stop and the daily cap BEFORE fetching coins and
+ * ⚠ Every agent payment goes through `bizAgentPay`, which checks Stop, the daily cap and the operator spending pause BEFORE fetching coins and
  * AGAIN immediately before signing, and books the spend (as 'pending') before broadcasting, so a Stop pressed
  * mid-payment or two payments racing can never go past the cap.
  */
@@ -24,6 +24,7 @@ import {
   type WalletInterface,
 } from '@bsv/sdk';
 import { allAgentsStopped } from '../agentAccounts';
+import { assertNotPaused } from '../../config/killSwitch';
 
 export const BIZ_AGENT_PROTOCOL: [2, string] = [2, 'bwalletx business agent'];
 export const DEFAULT_DAILY_CAP_USD = 10;
@@ -268,6 +269,9 @@ export async function bizAgentPay(p: BizPayment, d: BizPayDeps): Promise<BizPayR
   if (inFlight.has(t)) return refuse('Another agent payment is in progress');
   inFlight.add(t);
   try {
+    // Operator pause: this key signs outside createAction/signAction, so the wallet's guard never sees it.
+    // A FeaturePausedError lands in the catch below and is logged as a refused payment.
+    await assertNotPaused('spending');
     const a = getBizAgent(t, s)!;
     const key = await deriveBizAgentKey(d.wallet, t);
     if (key.toAddress() !== a.address) return refuse('Agent key does not match this wallet');
@@ -290,9 +294,10 @@ export async function bizAgentPay(p: BizPayment, d: BizPayDeps): Promise<BizPayR
     if (added < p.sats + 50) return refuse('Not enough in the agent account');
     await tx.fee(new SatoshisPerKilobyte(FEE_SATS_PER_KB));
 
-    // Stop / cap again, right before signing: a Stop pressed while coins were fetched wins.
+    // Stop / cap / operator pause again, right before signing: one that arrived while coins were fetched wins.
     const last = gate();
     if (!last.ok) return refuse(last.reason);
+    await assertNotPaused('spending');
     await tx.sign();
     const txid = tx.id('hex') as string;
     const id = txid;
