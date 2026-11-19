@@ -1,4 +1,4 @@
-import { trustCurrentKey } from './binding';
+import { trustCurrentKey, trustForwardSigner } from './binding';
 import { provenByLabel, trustProofSub } from './proof';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
@@ -96,8 +96,12 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     emit(d.to);
     status.current?.('ready', r);
     // Remember who this name was when you chose to pay it (BRC-169 4.4 key-change check next time).
-    if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad' && r.nameBinding !== 'mismatch')
+    if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad' && r.nameBinding !== 'mismatch') {
       trustCurrentKey(r.input.replace(/^\$/, '').split('@')[0], r.pubkey);
+      // ...and, for a followed forward, who signed it: only that key may speak for the typed name next time.
+      if (r.forwardsTo && r.forwardSigner)
+        trustForwardSigner(r.input.replace(/^\$/, '').split('@')[0], r.forwardSigner);
+    }
     // ...and which provider account proved it (a different one next time stops the payment).
     if (r.nameProof?.status === 'proven' && r.nameProof.sub)
       trustProofSub(r.input.replace(/^\$/, '').split('@')[0], r.nameProof.sub);

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
-import { trustCurrentKey } from './binding';
+import { trustCurrentKey, trustForwardSigner } from './binding';
 import {
   KEY_CHANGED,
   NAME_MISMATCH,
@@ -206,6 +206,52 @@ describe('forwarded names', () => {
     expect(forwardLabel(r)).toBe('boase@ forwards to b0asex@ (same owner)');
   });
 
+  // What NameInput confirm() remembers for the typed name: the paid key, and a followed forward's signer.
+  const confirmed = (r: Awaited<ReturnType<typeof resolveRecipient>>) => {
+    const typed = r.input.replace(/^\$/, '').split('@')[0];
+    trustCurrentKey(typed, r.pubkey as string);
+    if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
+  };
+
+  // Re-review (P3): a binding is self-signed, so "served key = remembered key" must not let ANY key sign a forward.
+  test('served key = remembered key, forward signed by another key: not followed, no "same owner"', async () => {
+    mem.clear();
+    const k1 = wallet(63); // the key this wallet paid for alice.gmail before
+    const attacker = wallet(64);
+    trustCurrentKey('alice.gmail', k1.key);
+    const f = host({ pubkey: k1.key, forward: await signedForward(attacker, 'alice.gmail', 'mallory', null) });
+    const r = await resolveRecipient(f, parseRecipient('alice.gmail@bwallet.space'));
+    expect(r.forwardsTo).toBeUndefined();
+    expect(r.forwardSigner).toBeUndefined();
+    expect(forwardLabel(r)).toBeUndefined();
+    // The provable typed name's own proof is checked (none served), not the target's (mallory isn't provable).
+    expect(r.nameProof?.status).toBe('unproven');
+  });
+
+  test('after a confirmed forward, only its signer may forward the name again (P3b)', async () => {
+    mem.clear();
+    const old = wallet(65);
+    const now = wallet(66);
+    const attacker = wallet(67);
+    const legit = await resolveRecipient(
+      host({
+        pubkey: now.key,
+        binding: await bindingFrom(now, 'bob', 1),
+        forward: await signedForward(old, 'alice', 'bob', null),
+      }),
+      parseRecipient('alice@bwallet.space'),
+    );
+    expect(legit.forwardsTo).toBe('bob');
+    expect(legit.forwardSigner).toBe(old.key.toLowerCase());
+    confirmed(legit);
+    const r = await resolveRecipient(
+      host({ pubkey: now.key, forward: await signedForward(attacker, 'alice', 'mallory', null) }),
+      parseRecipient('alice@bwallet.space'),
+    );
+    expect(r.forwardsTo).toBeUndefined();
+    expect(forwardLabel(r)).toBeUndefined();
+  });
+
   // Review fix: confirm() saves the TARGET's key under the typed name; the next resolve must still follow the forward.
   test('a forward between two different keys still pays after the payer confirmed it once', async () => {
     mem.clear();
@@ -220,7 +266,7 @@ describe('forwarded names', () => {
     const first = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
     expect(first.forwardsTo).toBe('b0asex');
     expect(first.nameBinding).toBe('signed');
-    trustCurrentKey('boase', first.pubkey as string); // what NameInput confirm() remembers
+    confirmed(first);
     const again = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
     expect(again.forwardsTo).toBe('b0asex');
     expect(again.nameBinding).toBe('signed');

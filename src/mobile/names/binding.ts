@@ -79,10 +79,13 @@ export async function checkBinding(alias: string, pubkey: string | undefined, b:
  * - a string = an ISO 8601 date (Date.parse), e.g. "2026-12-01T00:00:00.000Z"; signed exactly as sent.
  * Anything else, or a time not in the future, is no forward.
  *
- * `servedKey` is the key the host serves (the one that would be paid). This wallet may already remember it for the
- * typed name: after a followed forward, confirm() saves the TARGET's key under the typed name. So the signer passes the
- * key-change check when the remembered key is unset, is the signer, or is the served key; resolvePaymail still runs
- * keyChange on the served key itself.
+ * `servedKey` is the key the host serves (the one that would be paid). After a followed forward, confirm() saves the
+ * TARGET's key under the typed name, and the forward's signer beside it (trustForwardSigner). So the signer passes when:
+ * - nothing is remembered for the typed name (first use, as with any first payment), or
+ * - the remembered key is the signer (or a valid handover from it), or
+ * - the served key is the remembered key AND the signer is the one remembered for this name's last followed forward.
+ *   A binding is self-signed, so without that second half any key could sign a forward here (re-review, 19 Nov 2026).
+ * resolvePaymail still runs keyChange on the served key itself. Returns the target alias and the verified signer.
  */
 export async function checkForward(
   alias: string,
@@ -90,7 +93,7 @@ export async function checkForward(
   shape: (alias: string, fw: unknown) => string | undefined,
   servedKey?: string,
   now = Date.now(),
-): Promise<string | undefined> {
+): Promise<{ to: string; signer: string } | undefined> {
   const to = shape(alias, fw);
   if (!to) return undefined;
   const f = fw as {
@@ -113,9 +116,12 @@ export async function checkForward(
     // The signer must be the key the typed name is bound to, and not a key change this wallet hasn't accepted.
     const binding = f.fromBinding as { handover?: Handover } | undefined;
     if ((await checkBinding(alias, key, binding)) !== 'signed') return undefined;
-    const seen = readSeen()[alias.toLowerCase()];
-    const paidServed = !!seen && !!servedKey && seen === servedKey.toLowerCase();
-    if (!paidServed && keyChange(alias, key, 'signed', binding?.handover?.from) !== 'signed') return undefined;
+    if (keyChange(alias, key, 'signed', binding?.handover?.from) !== 'signed') {
+      const a = alias.toLowerCase();
+      const seen = readSeen()[a];
+      const paidServed = !!seen && !!servedKey && seen === servedKey.toLowerCase();
+      if (!paidServed || readSigners()[a] !== key.toLowerCase()) return undefined;
+    }
     const fields = {
       from: String(f.from).split('@')[0].toLowerCase(),
       to,
@@ -123,7 +129,7 @@ export async function checkForward(
       identityKey: key,
       timestamp: String(f.timestamp),
     };
-    return (await verifyBy(key, 'forward', fields, f.signature)) ? to : undefined;
+    return (await verifyBy(key, 'forward', fields, f.signature)) ? { to, signer: key.toLowerCase() } : undefined;
   } catch {
     return undefined;
   }
@@ -141,6 +147,23 @@ const readSeen = (): Record<string, string> => {
 export const trustCurrentKey = (alias: string, key: string) => {
   try {
     localStorage.setItem(SEEN_KEY, JSON.stringify({ ...readSeen(), [alias.toLowerCase()]: key.toLowerCase() }));
+  } catch {
+    /* private mode: nothing remembered */
+  }
+};
+
+const SIGNER_KEY = 'bwallet.names.forwardSigners';
+const readSigners = (): Record<string, string> => {
+  try {
+    return JSON.parse(localStorage.getItem(SIGNER_KEY) ?? '{}') as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+/** Remember who signed the forward the payer confirmed for this typed name (checkForward accepts only them again). */
+export const trustForwardSigner = (alias: string, key: string) => {
+  try {
+    localStorage.setItem(SIGNER_KEY, JSON.stringify({ ...readSigners(), [alias.toLowerCase()]: key.toLowerCase() }));
   } catch {
     /* private mode: nothing remembered */
   }
