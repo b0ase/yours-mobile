@@ -8,7 +8,16 @@
  *    taken in as an ordinary wallet payment and show in the balance.
  * Signing goes through createSignature (sign.ts); nothing here sees a private key.
  */
-import { P2PKH, PublicKey, Random, Transaction, Utils, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
+import {
+  P2PKH,
+  PublicKey,
+  Random,
+  Transaction,
+  UnlockingScript,
+  Utils,
+  type WalletInterface,
+  type WalletProtocol,
+} from '@bsv/sdk';
 import { noteFor, tokenCoins, tokenOutputTags } from '../../market/launchpad/tokens';
 import { signOurInputs, signSelfSpend } from './sign';
 import { bsv21TransferScript, addressPkh, parseBsv21Transfer, parseP2pkh } from './script';
@@ -17,7 +26,10 @@ import type { Template } from './validate';
 
 const ONESAT: WalletProtocol = [0, 'onesat'];
 const BRC29: WalletProtocol = [2, '3241645161d8'];
-/** The most a "Recover now" self-spend may pay the network (a 1-in, 1-out transaction costs far less). */
+/**
+ * The most of a "Recover now" that may go anywhere but our explicit output: the network fee plus the wallet's own
+ * change from what the fee doesn't need (a 1-in, 2-out transaction costs far less).
+ */
 const MAX_RECOVERY_FEE = 2_000;
 
 type BeefSource = { getBeefForTxid(txid: string): Promise<{ toBinaryAtomic(txid: string): number[] }> };
@@ -96,6 +108,20 @@ export function memepoolWallet(
           .getBeefForTxid(f.coin.txid)
           .then((b) => b.toBinaryAtomic(f.coin.txid))
           .catch(() => undefined);
+      // The BSV comes back as an explicit output to a fresh BRC-29 key of ours; at most MAX_RECOVERY_FEE goes anywhere
+      // else (the network fee, and the wallet's own change from what the fee doesn't need).
+      const amount = f.coin.satoshis - MAX_RECOVERY_FEE;
+      if (amount < 1) throw new Error('This coin is too small to recover.');
+      const derivationPrefix = Utils.toBase64(Random(10));
+      const derivationSuffix = Utils.toBase64(Random(10));
+      const keyID = `${derivationPrefix} ${derivationSuffix}`;
+      const pay: PayKey = {
+        address: await addressOf(BRC29, keyID),
+        key: { protocolID: BRC29, keyID },
+        derivationPrefix,
+        derivationSuffix,
+      };
+      const script = new P2PKH().lock(pay.address).toHex();
       const created = await wallet.createAction({
         description: 'Recover BSV from an unfinished Memepool buy',
         ...(inputBEEF ? { inputBEEF } : {}),
@@ -106,7 +132,7 @@ export function memepoolWallet(
             inputDescription: 'BSV set aside for a Memepool buy',
           },
         ],
-        outputs: [], // everything comes back as the wallet's own change, less the network fee
+        outputs: [{ lockingScript: script, satoshis: amount, outputDescription: 'Your BSV back from a Memepool buy' }],
         labels: ['memepool'],
         options: { signAndProcess: false, randomizeOutputs: false, acceptDelayedBroadcast: false, trustSelf: 'known' },
       });
@@ -115,22 +141,48 @@ export function memepoolWallet(
       let sent = false;
       try {
         const tx = Transaction.fromAtomicBEEF(signable.tx);
-        // Fail closed: exactly one input, our funding coin; the rest comes back less a normal fee.
+        // Fail closed: exactly one input (our funding coin), our output exactly once, everything else within the cap.
         const idx = tx.inputs.findIndex(
           (i) =>
             (i.sourceTXID ?? i.sourceTransaction?.id('hex')) === f.coin.txid && i.sourceOutputIndex === f.coin.vout,
         );
-        if (idx !== 0 || tx.inputs.length !== 1 || !tx.outputs.length)
+        if (idx !== 0 || tx.inputs.length !== 1)
           throw new Error('Refusing to sign: the wallet changed the recovery transaction.');
-        const back = tx.outputs.reduce((s, o) => s + (o.satoshis ?? 0), 0);
-        if (back < f.coin.satoshis - MAX_RECOVERY_FEE)
-          throw new Error('Refusing to sign: the network fee is too high.');
+        const ours = tx.outputs.flatMap((o, i) =>
+          o.lockingScript.toHex() === script && o.satoshis === amount ? [i] : [],
+        );
+        if (ours.length !== 1) throw new Error('Refusing to sign: the recovery output is missing.');
+        const vout = ours[0];
+        const elsewhere = tx.outputs.reduce((s, o, i) => (i === vout ? s : s + (o.satoshis ?? 0)), 0);
+        if (elsewhere > MAX_RECOVERY_FEE)
+          throw new Error('Refusing to sign: the transaction pays more than the fee allowance elsewhere.');
         await guard.beforeSign();
         const unlockingScript = await signSelfSpend(wallet, tx, idx, f.coin);
+        tx.inputs[idx].unlockingScript = UnlockingScript.fromHex(unlockingScript);
+        const txid = tx.id('hex');
         await guard.beforeBroadcast();
+        const out = { txid, vout, satoshis: amount, script, pay };
+        if (guard.note && !guard.note(out))
+          throw new Error("This wallet couldn't save a note it needs, so nothing was sent.");
         sent = true;
         const done = await wallet.signAction({ reference: signable.reference, spends: { [idx]: { unlockingScript } } });
-        return done.txid ?? tx.id('hex');
+        // Take the coin in as an ordinary wallet payment; if that fails, the noted record lets the sweep do it later.
+        let internalized = false;
+        try {
+          const beef = done.tx ?? (services ? (await services.getBeefForTxid(txid)).toBinaryAtomic(txid) : undefined);
+          if (beef) {
+            await wallet.internalizeAction({
+              tx: beef,
+              outputs: [await payment(pay, vout)],
+              description: 'Memepool buy recovered: BSV back in your wallet',
+              labels: ['memepool'],
+            });
+            internalized = true;
+          }
+        } catch {
+          /* left for the sweep */
+        }
+        return { txid: done.txid ?? txid, out, internalized };
       } catch (e) {
         if (!sent) await wallet.abortAction({ reference: signable.reference }).catch(() => undefined);
         throw e;

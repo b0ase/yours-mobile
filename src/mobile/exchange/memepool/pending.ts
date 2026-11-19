@@ -11,12 +11,18 @@
  * Such funding is only given back once that signature is dead for good: another, CONFIRMED transaction spent one of
  * its other inputs (the pool's coins) without spending ours, and Memepool's quote (and ours) ended a margin ago.
  */
+import { LockingScript, Spend, Transaction } from '@bsv/sdk';
 import { addressPkh, parseP2pkh } from './script';
 import type { Funding, TradeWallet } from './trade';
 
 export type Outpoint = { txid: string; vout: number };
-/** 'pending': nothing signed. 'signed': a signature was made (written BEFORE it goes to Memepool). Then unsure/sent. */
-export type PendingState = 'pending' | 'signed' | 'unsure' | 'sent';
+/**
+ * 'pending': nothing signed. 'signed': a signature was made (written BEFORE it goes to Memepool). Then unsure/sent.
+ * Done (tombstones, hidden from every list, nonce kept): 'returned' (the wallet holds the BSV again), 'spent' (a
+ * confirmed transaction validly spent the coin: the buy happened), 'empty' (a lone nonce whose address stayed empty).
+ */
+export type DoneState = 'returned' | 'spent' | 'empty';
+export type PendingState = 'pending' | 'signed' | 'unsure' | 'sent' | DoneState;
 /** One signature we handed (or were about to hand) to Memepool: the transaction's other inputs, and when it can die. */
 export type SignedSpend = { others: Outpoint[]; notBefore: number };
 export type PendingRecord = {
@@ -31,7 +37,18 @@ export type PendingRecord = {
   funding?: { txid: string; vout: number; satoshis: number; script: string };
   /** Every signature made over this funding coin. Absent = never signed. */
   signed?: SignedSpend[];
+  /** Tombstones: when it was marked done, and by what (a txid, or 'internalize' / 'wallet'). */
+  doneAt?: number;
+  spentBy?: string;
+  returnedBy?: string;
 };
+
+const DONE: readonly PendingState[] = ['returned', 'spent', 'empty'];
+export const isDone = (r: PendingRecord) => DONE.includes(r.state);
+/** Records still waiting on something (tombstones left out). */
+export const liveRecords = (rs: PendingRecord[]) => rs.filter((r) => !isDone(r));
+/** Tombstones are pruned this long after they were written. */
+export const TOMBSTONE_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * Where records live: the page's localStorage in the app, a Map in tests. `put` and `remove` report whether the write
@@ -60,6 +77,30 @@ export const safeRemove = (store: PendingStore | undefined, id: string): boolean
     return false;
   }
 };
+
+/**
+ * Mark a record done instead of deleting it: the nonce is the only way to re-derive the funding key, so it is kept
+ * (hidden) for TOMBSTONE_KEEP_MS. Never throws.
+ */
+export function tombstone(
+  store: PendingStore | undefined,
+  id: string,
+  state: DoneState,
+  by: { spentBy?: string; returnedBy?: string } = {},
+  now = Date.now(),
+  fallback?: PendingRecord,
+): boolean {
+  if (!store) return false;
+  let r: PendingRecord | undefined;
+  try {
+    r = store.list().find((x) => x.id === id);
+  } catch {
+    /* unreadable: use the fallback */
+  }
+  const base = r ?? fallback;
+  if (!base) return false;
+  return safePut(store, { ...base, state, doneAt: now, ...by });
+}
 
 /** Pre-account-keying records (one key for every account). Only swept with a proof of ownership (see sweepPending). */
 const LEGACY_KEY = 'memepool.pending.v1';
@@ -145,8 +186,11 @@ export const toRecord = (
 export type Chain = {
   /** The txid that spent `o`, 'unspent' (index sees no spend, mempool included), or 'unknown' (couldn't tell). */
   spentBy(o: Outpoint): Promise<string | 'unspent' | 'unknown'>;
-  /** A transaction's inputs and whether it is in a block; null if it can't be read. */
-  tx(txid: string): Promise<{ confirmed: boolean; inputs: Outpoint[] } | null>;
+  /**
+   * A transaction: whether it is in a block, its raw hex, and its inputs (read from that hex, whose hash must be
+   * `txid`); null if it can't be read.
+   */
+  tx(txid: string): Promise<{ confirmed: boolean; inputs: Outpoint[]; raw: string } | null>;
   /** Unspent coins at `address` (mempool included, coins already being spent left out); null if it can't be read. */
   unspentAt(address: string): Promise<{ txid: string; vout: number; satoshis: number }[] | null>;
 };
@@ -162,9 +206,48 @@ async function signatureDead(chain: Chain, ours: Outpoint, spend: SignedSpend): 
     const by = await chain.spentBy(o).catch(() => 'unknown' as const);
     if (by === 'unspent' || by === 'unknown') continue;
     const t = await chain.tx(by).catch(() => null);
-    if (t && t.confirmed && !t.inputs.some((i) => sameOutpoint(i, ours))) return true;
+    // It must really spend that pool coin (inputs from its own hex), be confirmed, and not spend ours.
+    if (t && t.confirmed && t.inputs.some((i) => sameOutpoint(i, o)) && !t.inputs.some((i) => sameOutpoint(i, ours)))
+      return true;
   }
   return false;
+}
+
+/**
+ * Who spent our coin, believed only with proof: the claimed spender's own hex (hashing to its txid) spends our exact
+ * outpoint with a signature that verifies against our coin's script, so no server can make one up. `confirmed` is
+ * the network's word on whether it is in a block. Anything less is 'unknown'.
+ */
+export async function provenSpender(
+  chain: Chain,
+  coin: Outpoint & { satoshis: number; script: string },
+): Promise<{ txid: string; confirmed: boolean } | 'unspent' | 'unknown'> {
+  const by = await chain.spentBy(coin).catch(() => 'unknown' as const);
+  if (by === 'unspent' || by === 'unknown') return by;
+  const t = await chain.tx(by).catch(() => null);
+  if (!t?.raw) return 'unknown';
+  try {
+    const tx = Transaction.fromHex(t.raw);
+    if (tx.id('hex') !== by) return 'unknown';
+    const idx = tx.inputs.findIndex((i) => i.sourceTXID === coin.txid && i.sourceOutputIndex === coin.vout);
+    if (idx < 0 || !tx.inputs[idx].unlockingScript) return 'unknown';
+    const valid = new Spend({
+      sourceTXID: coin.txid,
+      sourceOutputIndex: coin.vout,
+      sourceSatoshis: coin.satoshis,
+      lockingScript: LockingScript.fromHex(coin.script),
+      transactionVersion: tx.version,
+      otherInputs: tx.inputs.filter((_, j) => j !== idx),
+      outputs: tx.outputs,
+      inputIndex: idx,
+      unlockingScript: tx.inputs[idx].unlockingScript!,
+      inputSequence: tx.inputs[idx].sequence ?? 0xffffffff,
+      lockTime: tx.lockTime,
+    }).validate();
+    return valid ? { txid: by, confirmed: t.confirmed } : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 /** Every signature over `ours` is dead (or none was made), and the latest quote ended a margin ago. */
@@ -187,7 +270,8 @@ export async function giveBack(wallet: TradeWallet, store: PendingStore | undefi
   } catch {
     return false;
   }
-  safeRemove(store, idOf(f.pay.derivationPrefix, f.pay.derivationSuffix));
+  // The wallet holds it now: a tombstone, not a delete.
+  tombstone(store, idOf(f.pay.derivationPrefix, f.pay.derivationSuffix), 'returned', { returnedBy: 'internalize' });
   return true;
 }
 
@@ -208,7 +292,7 @@ export async function giveBackIfSafe(
   return giveBack(wallet, store, f);
 }
 
-/** `spent`: records dropped with nothing to give back (the coin was spent, or a lone nonce's coin never appeared). */
+/** `spent`: records closed with nothing to give back (the coin's spend proven and confirmed, or a lone nonce's coin never appeared). */
 export type SweepResult = { returned: number; spent: number; kept: number };
 
 /** A nonce with no funding txid whose address stays empty this long never funded anything; the record goes. */
@@ -232,6 +316,11 @@ export async function sweepPending(
   const out: SweepResult = { returned: 0, spent: 0, kept: 0 };
   const now = opts.now ?? Date.now();
   for (const r of store.list()) {
+    if (isDone(r)) {
+      // Tombstones are hidden; pruned once old (a 'spent' one is only ever written for a confirmed, proven spend).
+      if (now - (r.doneAt ?? r.createdAt) > TOMBSTONE_KEEP_MS) safeRemove(store, r.id);
+      continue;
+    }
     // Young records may belong to a sheet open in another tab.
     if (opts.minAgeMs && now - r.createdAt < opts.minAgeMs) {
       out.kept++;
@@ -257,7 +346,7 @@ export async function sweepPending(
       }
       if (!coins.length) {
         if (now - r.createdAt > NONCE_ONLY_DROP_MS) {
-          safeRemove(store, r.id);
+          tombstone(store, r.id, 'empty', {}, now);
           out.spent++;
         } else out.kept++;
         continue;
@@ -268,7 +357,7 @@ export async function sweepPending(
         if (!(await giveBack(wallet, undefined, f).catch(() => false))) all = false;
       }
       if (all) {
-        safeRemove(store, r.id);
+        tombstone(store, r.id, 'returned', { returnedBy: 'internalize' }, now);
         out.returned++;
       } else out.kept++;
       continue;
@@ -278,14 +367,17 @@ export async function sweepPending(
       continue;
     }
     const coin = { txid: r.funding.txid, vout: r.funding.vout };
-    const verdict = await chain.spentBy(coin).catch(() => 'unknown' as const);
+    const verdict = await provenSpender(chain, { ...coin, satoshis: r.funding.satoshis, script: r.funding.script });
     if (verdict === 'unknown') {
       out.kept++;
       continue;
     }
     if (verdict !== 'unspent') {
-      safeRemove(store, r.id);
-      out.spent++;
+      // A proven spend: closed only once confirmed (the buy happened); until then it waits.
+      if (verdict.confirmed) {
+        tombstone(store, r.id, 'spent', { spentBy: verdict.txid }, now);
+        out.spent++;
+      } else out.kept++;
       continue;
     }
     // A signed record from before signatures were written down can't be proven dead: keep it.

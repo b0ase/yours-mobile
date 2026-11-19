@@ -1,7 +1,7 @@
 /**
  * "Recover now" (trade.ts recoverNow / stuckFundings, wallet.ts spendBack): a user-tapped self-spend of a funding
  * coin the sweep can't return. Real keys and signatures (ProtoWallet); the wallet's createAction / signAction and
- * the network are stubbed. Nothing is broadcast.
+ * the network (WhatsOnChain: /spent, /tx/hash, /tx/<id>/hex) are stubbed. Nothing is broadcast.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -16,18 +16,21 @@ import {
   type WalletInterface,
 } from '@bsv/sdk';
 import { FeaturePausedError } from '../../config/killSwitch';
-import { idOf, type PendingRecord, type PendingStore } from './pending';
+import { idOf, liveRecords, type PendingRecord, type PendingStore } from './pending';
+import { signSelfSpend } from './sign';
 import { recoverMessage, recoverNow, stuckFundings, sweepFundings, type Deps } from './trade';
 import { memepoolWallet } from './wallet';
 
 const SATS = 1_056_000;
 const POOL = 'aa'.repeat(32);
-const MEMEPOOL_TX = 'cc'.repeat(32);
 const HOUR = 60 * 60_000;
+const MAX_RECOVERY_FEE = 2_000;
 
+/** What the stub wallet does with the transaction it builds. */
+type Build = 'ok' | 'foreign-output' | 'no-output';
 type Mode = 'ok' | 'double' | 'fail';
 
-async function rig(opts: { services?: boolean; mode?: Mode } = {}) {
+async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}) {
   const now = Date.now();
   const proto = new ProtoWallet(PrivateKey.fromRandom());
   const log = {
@@ -36,10 +39,13 @@ async function rig(opts: { services?: boolean; mode?: Mode } = {}) {
     signatures: 0,
     aborted: 0,
     broadcast: [] as string[],
+    internalized: [] as { outputs: { outputIndex: number; protocol: string }[] }[],
   };
-  /** The network: outpoint → spender txid. */
+  /** The network: outpoint → spender txid; txid → real transaction. */
   const spent = new Map<string, string>();
+  const txs = new Map<string, { raw: string; confirmed: boolean }>();
   let mode: Mode = opts.mode ?? 'ok';
+  let createError: Error | null = null;
   let fundTx: Transaction | null = null;
   let spendTx: Transaction | null = null;
 
@@ -49,9 +55,23 @@ async function rig(opts: { services?: boolean; mode?: Mode } = {}) {
       log.signatures++;
       return proto.createSignature(a);
     },
-    createAction: async (a: Record<string, unknown>) => {
-      log.created.push(a);
+    createAction: async (a: { outputs: { lockingScript: string; satoshis: number }[] }) => {
+      log.created.push(a as never);
+      await new Promise((r) => setTimeout(r, 5)); // a real wallet takes a moment: lets a second call overlap
+      if (createError) throw createError;
+      const requested = (opts.build === 'no-output' ? [] : a.outputs).map((o) => ({
+        lockingScript: LockingScript.fromHex(o.lockingScript),
+        satoshis: o.satoshis,
+      }));
+      const asked = requested.reduce((s, o) => s + o.satoshis, 0);
       const change = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+      // A stranger's output beyond the fee allowance. (Inside the allowance it can't be told from the wallet's own
+      // change, which is why the allowance is a small fixed cap: at most MAX_RECOVERY_FEE can go anywhere else.)
+      const extra =
+        opts.build === 'foreign-output'
+          ? [{ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 5_000 }]
+          : [];
+      const rest = SATS - asked - 120 - extra.reduce((s, o) => s + o.satoshis, 0);
       spendTx = new Transaction(
         1,
         [
@@ -62,7 +82,7 @@ async function rig(opts: { services?: boolean; mode?: Mode } = {}) {
             unlockingScript: new UnlockingScript(),
           },
         ],
-        [{ lockingScript: change, satoshis: SATS - 120 }],
+        [...requested, ...extra, ...(rest > 0 ? [{ lockingScript: change, satoshis: rest }] : [])],
         0,
       );
       const b = new Beef();
@@ -74,22 +94,30 @@ async function rig(opts: { services?: boolean; mode?: Mode } = {}) {
       log.signed.push(a);
       const key = `${fundTx!.id('hex')}_0`;
       if (mode === 'double') {
-        spent.set(key, MEMEPOOL_TX); // Memepool's trade got there first
+        const won = await memepoolSpend(true); // Memepool's trade got there first, and is confirmed
         throw Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
-          reviewActionResults: [{ txid: 'dd'.repeat(32), status: 'doubleSpend', competingTxs: [MEMEPOOL_TX] }],
+          reviewActionResults: [{ txid: 'dd'.repeat(32), status: 'doubleSpend', competingTxs: [won] }],
         });
       }
       if (mode === 'fail') throw new Error('storage offline');
+      spendTx!.inputs[0].unlockingScript = UnlockingScript.fromHex(a.spends[0].unlockingScript);
       const txid = spendTx!.id('hex');
       log.broadcast.push(txid);
       spent.set(key, txid);
-      return { txid };
+      txs.set(txid, { raw: spendTx!.toHex(), confirmed: false });
+      const b = new Beef();
+      b.mergeTransaction(fundTx!);
+      b.mergeTransaction(spendTx!);
+      return { txid, tx: b.toBinaryAtomic(txid) };
     },
     abortAction: async () => {
       log.aborted++;
       return { aborted: true };
     },
-    internalizeAction: async () => ({ accepted: true }),
+    internalizeAction: async (a: { outputs: { outputIndex: number; protocol: string }[] }) => {
+      log.internalized.push(a);
+      return { accepted: true };
+    },
   } as unknown as WalletInterface;
 
   const services = opts.services
@@ -100,6 +128,26 @@ async function rig(opts: { services?: boolean; mode?: Mode } = {}) {
   const pay = await w.newPayKey(nonce);
   const script = new P2PKH().lock(pay.address).toHex();
   fundTx = new Transaction(1, [], [{ lockingScript: LockingScript.fromHex(script), satoshis: SATS }], 0);
+
+  /** Memepool's trade: a real transaction spending our funding coin with OUR valid signature. Returns its txid. */
+  const memepoolSpend = async (confirmed: boolean) => {
+    const t = new Transaction(
+      1,
+      [
+        { sourceTXID: POOL, sourceOutputIndex: 0, sequence: 0xffffffff, unlockingScript: new UnlockingScript() },
+        { sourceTransaction: fundTx!, sourceOutputIndex: 0, sequence: 0xffffffff },
+      ],
+      [{ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: SATS - 300 }],
+      0,
+    );
+    t.inputs[1].unlockingScript = UnlockingScript.fromHex(
+      await signSelfSpend(wallet, t, 1, { satoshis: SATS, script, key: pay.key }),
+    );
+    const id = t.id('hex');
+    txs.set(id, { raw: t.toHex(), confirmed });
+    spent.set(`${fundTx!.id('hex')}_0`, id);
+    return id;
+  };
 
   const rows = new Map<string, PendingRecord>();
   const store: PendingStore = {
@@ -122,10 +170,22 @@ async function rig(opts: { services?: boolean; mode?: Mode } = {}) {
     return r;
   };
   const fetch = (async (url: string) => {
-    const m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(url);
+    let m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(url);
     if (m) {
       const by = spent.get(`${m[1]}_${m[2]}`);
       return by ? new Response(JSON.stringify({ txid: by }), { status: 200 }) : new Response('', { status: 404 });
+    }
+    m = /\/tx\/hash\/([0-9a-f]{64})$/.exec(url);
+    if (m) {
+      const t = txs.get(m[1]);
+      if (!t) return new Response('', { status: 404 });
+      const body = { txid: m[1], ...(t.confirmed ? { blockhash: '00'.repeat(32), confirmations: 3 } : {}) };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }
+    m = /\/tx\/([0-9a-f]{64})\/hex$/.exec(url);
+    if (m) {
+      const t = txs.get(m[1]);
+      return t ? new Response(t.raw, { status: 200 }) : new Response('', { status: 404 });
     }
     return new Response('', { status: 404 });
   }) as Deps['fetch'];
@@ -147,16 +207,24 @@ async function rig(opts: { services?: boolean; mode?: Mode } = {}) {
     log,
     store,
     record,
+    spent,
+    txs,
+    memepoolSpend,
     fundTx: () => fundTx!,
     spendTx: () => spendTx,
     setMode: (m: Mode) => (mode = m),
+    failCreate: (e: Error) => (createError = e),
     pauseWhen: (f: (n: number) => boolean) => (pauseOn = f),
     checks: () => checks,
+    nonce,
   };
 }
 
+const live = (s: PendingStore) => liveRecords(s.list());
+const byId = (s: PendingStore, id: string) => s.list().find((r) => r.id === id);
+
 describe('Recover now', () => {
-  test('a stuck signed record: exactly one self-spend of the funding coin, signed validly, then the record goes', async () => {
+  test('a stuck signed record: one self-spend of the funding coin to a fresh key of ours, signed validly', async () => {
     const t = await rig({ services: true });
     const r = t.record();
     const rows = await stuckFundings(t.d);
@@ -165,9 +233,15 @@ describe('Recover now', () => {
     expect(res.kind).toBe('recovered');
     expect(recoverMessage(res)).toMatch(/back in your wallet/);
     expect(t.log.created.length).toBe(1);
-    const args = t.log.created[0] as { inputs: { outpoint: string }[]; outputs: unknown[]; inputBEEF?: number[] };
+    const args = t.log.created[0] as {
+      inputs: { outpoint: string }[];
+      outputs: { lockingScript: string; satoshis: number }[];
+      inputBEEF?: number[];
+    };
     expect(args.inputs.map((i) => i.outpoint)).toEqual([`${t.fundTx().id('hex')}.0`]);
-    expect(args.outputs).toEqual([]); // all of it comes back as the wallet's own change
+    expect(args.outputs.length).toBe(1); // an explicit output to a fresh BRC-29 key of ours
+    expect(args.outputs[0].satoshis).toBe(SATS - MAX_RECOVERY_FEE);
+    expect(args.outputs[0].lockingScript).not.toBe(r.funding!.script);
     expect(args.inputBEEF?.length).toBeGreaterThan(0);
     expect(t.log.signed.length).toBe(1);
     expect(t.log.broadcast.length).toBe(1);
@@ -188,7 +262,12 @@ describe('Recover now', () => {
     });
     expect(spend.validate()).toBe(true);
     expect(t.checks()).toBe(2); // the kill switch, before signing and before broadcast
-    expect(t.store.list()).toEqual([]);
+    // The recovered coin was taken in as a wallet payment, and both records are tombstones now (never deleted).
+    expect(t.log.internalized.length).toBe(1);
+    expect(t.log.internalized[0].outputs).toMatchObject([{ outputIndex: 0, protocol: 'wallet payment' }]);
+    expect(live(t.store)).toEqual([]);
+    expect(byId(t.store, r.id)).toMatchObject({ state: 'returned', returnedBy: t.log.broadcast[0], ...t.nonce });
+    expect(t.store.list().filter((x) => x.state === 'returned').length).toBe(2);
   });
 
   test('spending paused before signing: refused, nothing signed, the record kept', async () => {
@@ -199,7 +278,7 @@ describe('Recover now', () => {
     expect(t.log.signatures).toBe(0);
     expect(t.log.signed.length).toBe(0);
     expect(t.log.aborted).toBe(1);
-    expect(t.store.list().length).toBe(1);
+    expect(live(t.store).length).toBe(1);
   });
 
   test('spending paused just before broadcast: never sent, the record kept', async () => {
@@ -210,7 +289,7 @@ describe('Recover now', () => {
     expect(t.log.signed.length).toBe(0);
     expect(t.log.broadcast.length).toBe(0);
     expect(t.log.aborted).toBe(1);
-    expect(t.store.list().length).toBe(1);
+    expect(t.store.list().map((x) => x.id)).toEqual([r.id]); // and no note of a coin that was never made
   });
 
   test('no tap, nothing: opening Memepool (sweep + list) never spends', async () => {
@@ -221,23 +300,24 @@ describe('Recover now', () => {
     await stuckFundings(t.d);
     expect(t.log.created.length).toBe(0);
     expect(t.log.signatures).toBe(0);
-    expect(t.store.list().length).toBe(2);
+    expect(live(t.store).length).toBe(2);
   });
 
-  test("a double-spend refusal: Memepool's trade won, the record goes, and the user is told the buy happened", async () => {
+  test("a double-spend refusal: Memepool's proven, confirmed trade won; tombstoned and the user told", async () => {
     const t = await rig({ mode: 'double' });
     const r = t.record();
     const res = await recoverNow(t.d, r.id);
     expect(res).toEqual({ kind: 'went-through' });
     expect(recoverMessage(res)).toMatch(/trade went through/);
-    expect(t.store.list()).toEqual([]);
+    expect(live(t.store)).toEqual([]);
+    expect(byId(t.store, r.id)).toMatchObject({ state: 'spent', ...t.nonce });
   });
 
   test('any other failure keeps the record', async () => {
     const t = await rig({ mode: 'fail' });
     const r = t.record();
     await expect(recoverNow(t.d, r.id)).rejects.toThrow(/offline/);
-    expect(t.store.list().length).toBe(1);
+    expect(byId(t.store, r.id)?.state).toBe('unsure');
   });
 
   test('a record from before signatures were noted (no signature info) gets Recover now', async () => {
@@ -266,5 +346,104 @@ describe('Recover now', () => {
     const args = t.log.created[0] as { inputBEEF?: unknown; options: { trustSelf?: string } };
     expect(args.inputBEEF).toBeUndefined();
     expect(args.options.trustSelf).toBe('known');
+  });
+});
+
+describe('Recover now: review fixes (7aee65f2)', () => {
+  test('1: a lying /spent (a txid with no transaction behind it) never closes the record', async () => {
+    const t = await rig();
+    const r = t.record();
+    t.spent.set(`${r.funding!.txid}_0`, 'ee'.repeat(32));
+    await expect(recoverNow(t.d, r.id)).rejects.toThrow(/can't confirm/);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 0, kept: 1 });
+    expect(byId(t.store, r.id)?.state).toBe('unsure');
+    expect(t.log.created.length).toBe(0);
+  });
+
+  test('1: a made-up "confirmed" spender that spends our coin without our signature is not believed', async () => {
+    const t = await rig();
+    const r = t.record();
+    const fake = new Transaction(
+      1,
+      [
+        {
+          sourceTXID: r.funding!.txid,
+          sourceOutputIndex: 0,
+          sequence: 0xffffffff,
+          unlockingScript: new UnlockingScript(),
+        },
+      ],
+      [{ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 5 }],
+      0,
+    );
+    t.txs.set(fake.id('hex'), { raw: fake.toHex(), confirmed: true });
+    t.spent.set(`${r.funding!.txid}_0`, fake.id('hex'));
+    await expect(recoverNow(t.d, r.id)).rejects.toThrow(/can't confirm/);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 0, kept: 1 });
+    expect(live(t.store).length).toBe(1);
+  });
+
+  test('1: a real, confirmed spender: tombstoned (not deleted), the nonce survives, hidden from the list', async () => {
+    const t = await rig();
+    const r = t.record();
+    const won = await t.memepoolSpend(true);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 1, kept: 0 });
+    const tomb = byId(t.store, r.id)!;
+    expect(tomb).toMatchObject({ state: 'spent', spentBy: won, prefix: t.nonce.prefix, suffix: t.nonce.suffix });
+    expect(tomb.funding?.txid).toBe(r.funding!.txid);
+    expect(await stuckFundings(t.d)).toEqual([]);
+    await expect(recoverNow(t.d, r.id)).rejects.toThrow(/nothing to recover/);
+  });
+
+  test('1: a real spender not yet confirmed: the record waits, and Recover now says to check back', async () => {
+    const t = await rig();
+    const r = t.record();
+    await t.memepoolSpend(false);
+    await expect(recoverNow(t.d, r.id)).rejects.toThrow(/check back/i);
+    expect(await sweepFundings(t.d)).toEqual({ returned: 0, spent: 0, kept: 1 });
+    expect(byId(t.store, r.id)?.state).toBe('unsure');
+  });
+
+  test('2: two recoveries of the same record at once: one createAction, the second refused', async () => {
+    const t = await rig();
+    const r = t.record();
+    const [a, b] = await Promise.allSettled([recoverNow(t.d, r.id), recoverNow(t.d, r.id)]);
+    expect(a.status).toBe('fulfilled');
+    expect(b.status).toBe('rejected');
+    expect(String((b as PromiseRejectedResult).reason?.why ?? (b as PromiseRejectedResult).reason)).toMatch(
+      /Already recovering/,
+    );
+    expect(t.log.created.length).toBe(1);
+    expect(t.log.broadcast.length).toBe(1);
+  });
+
+  test('3: the wallet adds a foreign output: refused before signing', async () => {
+    const t = await rig({ build: 'foreign-output' });
+    const r = t.record();
+    await expect(recoverNow(t.d, r.id)).rejects.toThrow(/Refusing to sign/);
+    expect(t.log.signatures).toBe(0);
+    expect(t.log.aborted).toBe(1);
+    expect(byId(t.store, r.id)?.state).toBe('unsure');
+  });
+
+  test('3: our explicit output missing (all as "change"): refused before signing', async () => {
+    const t = await rig({ build: 'no-output' });
+    const r = t.record();
+    await expect(recoverNow(t.d, r.id)).rejects.toThrow(/Refusing to sign/);
+    expect(t.log.signatures).toBe(0);
+    expect(live(t.store).length).toBe(1);
+  });
+
+  test('4: the sweep already took the coin in (unmanaged input): tombstoned as returned and hidden', async () => {
+    const t = await rig();
+    const r = t.record();
+    t.failCreate(
+      new Error('The 1234.0 parameter must be an unmanaged input. Change outputs are managed by your wallet.'),
+    );
+    const res = await recoverNow(t.d, r.id);
+    expect(res).toEqual({ kind: 'already-back' });
+    expect(recoverMessage(res)).toMatch(/already back/);
+    expect(byId(t.store, r.id)).toMatchObject({ state: 'returned', returnedBy: 'wallet' });
+    expect(await stuckFundings(t.d)).toEqual([]);
   });
 });

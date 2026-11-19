@@ -9,7 +9,7 @@
  * is taken back into the wallet's balance (cancel). Rules the owner set: one sheet; 409 = re-prepare once, and after
  * a signature never sign again silently (a fresh sheet instead); after submit, never re-sign, only watch.
  */
-import { Random, Utils } from '@bsv/sdk';
+import { Random, Transaction, Utils } from '@bsv/sdk';
 import {
   CAP_SATS,
   DEFAULT_SLIPPAGE_BPS,
@@ -39,9 +39,11 @@ import {
   giveBack,
   giveBackIfSafe,
   idOf,
+  isDone,
+  provenSpender,
   safePut,
-  safeRemove,
   sweepPending,
+  tombstone,
   toRecord,
   type Chain,
   type Outpoint,
@@ -69,8 +71,17 @@ export type OfferedCoin = { txid: string; vout: number; satoshis: number; script
 export type PayKey = { address: string; key: CoinKey; derivationPrefix: string; derivationSuffix: string };
 export type OrdKey = { address: string; key: CoinKey };
 export type Funding = { coin: OfferedCoin; beef: number[]; pay: PayKey };
-/** Checks run inside a spend: each throws to stop it (the kill switch). */
-export type SpendGuard = { beforeSign(): Promise<void>; beforeBroadcast(): Promise<void> };
+/** The coin a "Recover now" pays back to this wallet (a fresh BRC-29 key of ours). */
+export type RecoveryOut = { txid: string; vout: number; satoshis: number; script: string; pay: PayKey };
+/**
+ * Checks run inside a spend: each throws to stop it (the kill switch). `note` writes the recovered coin down after
+ * the last check and before broadcast; false stops the spend.
+ */
+export type SpendGuard = {
+  beforeSign(): Promise<void>;
+  beforeBroadcast(): Promise<void>;
+  note?(out: RecoveryOut): boolean;
+};
 
 /** What the flow needs from the wallet (memepool/wallet.ts builds it from the in-app BRC-100 wallet). */
 export type TradeWallet = {
@@ -84,9 +95,9 @@ export type TradeWallet = {
   /**
    * "Recover now": spend the funding coin back to this wallet (createAction + signAction, internal change, normal fee),
    * which double-spends any trade Memepool holds. `guard` runs right before signing and right before broadcast.
-   * Resolves to the txid.
+   * Resolves to the txid, the coin paid back, and whether the wallet took that coin in (internalizeAction).
    */
-  spendBack(f: Funding, guard: SpendGuard): Promise<string>;
+  spendBack(f: Funding, guard: SpendGuard): Promise<{ txid: string; out: RecoveryOut; internalized: boolean }>;
   /** Our token coins of `tokenId` that this wallet can sign, largest first. */
   tokenCoins(tokenId: string): Promise<OfferedCoin[]>;
   /** Unlocking scripts for exactly these input indexes. */
@@ -539,15 +550,22 @@ export function wocChain(d: Deps): Chain {
       return r.status === 404 ? 'unspent' : 'unknown';
     },
     async tx(txid) {
-      const r = await get(`/tx/hash/${txid}`);
-      if (!r?.ok) return null;
+      // Inputs come from the raw hex (which must hash to `txid`), never from the JSON's say-so.
+      const [r, h] = await Promise.all([get(`/tx/hash/${txid}`), get(`/tx/${txid}/hex`)]);
+      if (!r?.ok || !h?.ok) return null;
       const j = await json(r);
-      if (!j || !Array.isArray(j.vin)) return null;
+      const raw = (await h.text().catch(() => '')).trim();
+      if (!j || !/^[0-9a-f]+$/i.test(raw)) return null;
+      let parsed: Transaction;
+      try {
+        parsed = Transaction.fromHex(raw);
+      } catch {
+        return null;
+      }
+      if (parsed.id('hex') !== txid) return null;
       const confirmed = typeof j.blockhash === 'string' && j.blockhash.length > 0 && Number(j.confirmations) > 0;
-      const inputs = (j.vin as { txid?: unknown; vout?: unknown }[])
-        .filter((i) => typeof i?.txid === 'string' && Number.isInteger(i.vout))
-        .map((i) => ({ txid: i.txid as string, vout: i.vout as number }));
-      return { confirmed, inputs };
+      const inputs = parsed.inputs.map((i) => ({ txid: i.sourceTXID ?? '', vout: i.sourceOutputIndex }));
+      return { confirmed, inputs, raw };
     },
     async unspentAt(address) {
       const r = await get(`/address/${address}/unspent/all`);
@@ -638,7 +656,7 @@ export async function stuckFundings(d: Deps): Promise<StuckFunding[]> {
   const now = nowOf(d);
   const out: StuckFunding[] = [];
   for (const r of d.pending.list()) {
-    if (!r.funding || now - r.createdAt < SWEEP_MIN_AGE_MS) continue;
+    if (isDone(r) || !r.funding || now - r.createdAt < SWEEP_MIN_AGE_MS) continue;
     const pay = await d.wallet.newPayKey({ prefix: r.prefix, suffix: r.suffix }).catch(() => null);
     const pkh = pay ? addressPkh(pay.address) : null;
     if (!pkh || parseP2pkh(r.funding.script) !== pkh) continue;
@@ -660,16 +678,20 @@ export async function stuckFundings(d: Deps): Promise<StuckFunding[]> {
 }
 
 export type RecoverResult =
-  /** The BSV is back in the wallet (its own change). */
+  /** The BSV is back in the wallet. */
   | { kind: 'recovered'; txid: string }
-  /** Memepool's trade spent the coin first: the buy went through. */
-  | { kind: 'went-through' };
+  /** Memepool's trade spent the coin first (a proven, confirmed spend): the buy went through. */
+  | { kind: 'went-through' }
+  /** The wallet had already taken the coin in (the sweep got there first). */
+  | { kind: 'already-back' };
 
 /** What the Memepool screen says after "Recover now". */
 export const recoverMessage = (r: RecoverResult): string =>
   r.kind === 'recovered'
     ? 'Done. The BSV is back in your wallet.'
-    : "Memepool's trade went through first, so this buy happened. Its tokens come to your wallet.";
+    : r.kind === 'already-back'
+      ? 'It was already back in your wallet.'
+      : "Memepool's trade went through first, so this buy happened. Its tokens come to your wallet.";
 
 /** The wallet's broadcast refused our spend because the coin was already spent (WERR_REVIEW_ACTIONS doubleSpend). */
 export const isDoubleSpend = (e: unknown): boolean =>
@@ -678,45 +700,91 @@ export const isDoubleSpend = (e: unknown): boolean =>
   ) || /double ?spend/i.test(e instanceof Error ? e.message : String(e));
 
 /**
+ * createAction refused the coin as an input because the wallet already manages it as its own change (toolbox:
+ * "an unmanaged input. Change outputs are managed by your wallet."): it was taken back in already.
+ */
+export const isManagedByWallet = (e: unknown): boolean =>
+  /unmanaged input|managed by your wallet/i.test(e instanceof Error ? e.message : String(e));
+
+/** Recoveries running now, by record id: a second tap (or call) for the same one is refused. */
+const recovering = new Set<string>();
+
+/**
  * "Recover now", only ever from the user's tap on the approval sheet: spend the funding coin back to this wallet,
  * which double-spends any trade Memepool still holds. Refused while spending is paused (checked right before signing
- * and again before broadcast). Success drops the record; a double-spend refusal with the coin seen spent means
- * Memepool's trade won (record dropped); any other failure keeps the record and throws.
+ * and again before broadcast), and while another recovery of the same record runs. Records are never deleted, only
+ * tombstoned: 'returned' on success, 'spent' only for a proven, confirmed spend by someone else. Any other failure
+ * keeps the record and throws.
  */
 export async function recoverNow(d: Deps, id: string): Promise<RecoverResult> {
-  const r = d.pending?.list().find((x) => x.id === id);
+  if (recovering.has(id)) plain('Already recovering this one. Give it a moment.');
+  recovering.add(id);
+  try {
+    return await recoverOnce(d, id);
+  } finally {
+    recovering.delete(id);
+  }
+}
+
+async function recoverOnce(d: Deps, id: string): Promise<RecoverResult> {
+  const r = d.pending?.list().find((x) => x.id === id && !isDone(x));
   if (!d.pending || !r?.funding) plain('There is nothing to recover here any more.');
   const store = d.pending!;
   const funding = r!.funding!;
-  if (r!.signed?.length && r!.signed.some((x) => !(nowOf(d) > x.notBefore)))
+  const now = nowOf(d);
+  if (r!.signed?.length && r!.signed.some((x) => !(now > x.notBefore)))
     plain("Memepool's price for this buy is still open. Try again in a few minutes.");
   const pay = await d.wallet.newPayKey({ prefix: r!.prefix, suffix: r!.suffix });
   if (parseP2pkh(funding.script) !== addressPkh(pay.address)) plain('That BSV isn’t held by this wallet account.');
   const chain = wocChain(d);
-  const coin = { txid: funding.txid, vout: funding.vout };
-  const before = await chain.spentBy(coin).catch(() => 'unknown' as const);
-  if (before === 'unknown') plain("We can't check the network right now. Try again soon.");
-  if (before !== 'unspent') {
-    safeRemove(store, id);
+  const coin = { txid: funding.txid, vout: funding.vout, satoshis: funding.satoshis, script: funding.script };
+  const wentThrough = async (): Promise<RecoverResult | null> => {
+    const by = await provenSpender(chain, coin);
+    if (by === 'unspent' || by === 'unknown') return null;
+    if (!by.confirmed) plain("Memepool's trade got there first. Check back once the network confirms it.");
+    tombstone(store, id, 'spent', { spentBy: by.txid }, now);
     return { kind: 'went-through' };
-  }
-  const check = d.spendingCheck ?? (() => assertNotPaused('spending'));
-  const f: Funding = {
-    coin: { ...coin, satoshis: funding.satoshis, script: funding.script, key: pay.key },
-    beef: [],
-    pay,
   };
+  const before = await provenSpender(chain, coin);
+  if (before === 'unknown')
+    plain("We can't confirm this coin's state on the network right now, so nothing was done. Try again later.");
+  if (before !== 'unspent') return (await wentThrough()) ?? plain('Try again later.');
+  const check = d.spendingCheck ?? (() => assertNotPaused('spending'));
+  let noted: string | null = null;
+  const guard: SpendGuard = {
+    beforeSign: check,
+    beforeBroadcast: check,
+    // The coin coming back is written down before broadcast, like any funding, so it can't be stranded either.
+    note: (o) => {
+      const rec = {
+        id: idOf(o.pay.derivationPrefix, o.pay.derivationSuffix),
+        prefix: o.pay.derivationPrefix,
+        suffix: o.pay.derivationSuffix,
+        sats: o.satoshis,
+        state: 'pending' as const,
+        createdAt: now,
+        funding: { txid: o.txid, vout: o.vout, satoshis: o.satoshis, script: o.script },
+      };
+      if (!safePut(store, rec)) return false;
+      noted = rec.id;
+      return true;
+    },
+  };
+  const f: Funding = { coin: { ...coin, key: pay.key }, beef: [], pay };
   try {
-    const txid = await d.wallet.spendBack(f, { beforeSign: check, beforeBroadcast: check });
-    safeRemove(store, id);
-    return { kind: 'recovered', txid };
+    const res = await d.wallet.spendBack(f, guard);
+    tombstone(store, id, 'returned', { returnedBy: res.txid }, now);
+    if (res.internalized && noted) tombstone(store, noted, 'returned', { returnedBy: 'internalize' }, now);
+    return { kind: 'recovered', txid: res.txid };
   } catch (e) {
+    if (isManagedByWallet(e)) {
+      tombstone(store, id, 'returned', { returnedBy: 'wallet' }, now);
+      return { kind: 'already-back' };
+    }
     if (isDoubleSpend(e)) {
-      const after = await chain.spentBy(coin).catch(() => 'unknown' as const);
-      if (after !== 'unspent' && after !== 'unknown') {
-        safeRemove(store, id);
-        return { kind: 'went-through' };
-      }
+      if (noted) tombstone(store, noted, 'empty', {}, now); // our recovery was refused: its coin never existed
+      const won = await wentThrough();
+      if (won) return won;
     }
     throw e;
   }

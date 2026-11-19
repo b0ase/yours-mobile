@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { fiatLabel, unitPriceLabel, bsvLabel } from './exchangeData';
 import { openExternal } from './useTokenRowActions';
@@ -68,6 +68,7 @@ export const MemepoolMarket = ({ rate }: { rate: number }) => {
   const [recovering, setRecovering] = useState(false);
   const [recoverNote, setRecoverNote] = useState('');
   const [stuckTick, setStuckTick] = useState(0);
+  const recoveringRef = useRef(false); // a double tap must not start a second recovery
 
   // Put back any BSV set aside for a buy that never finished (page closed, unsure submit), then list what is left.
   useEffect(() => {
@@ -99,13 +100,15 @@ export const MemepoolMarket = ({ rate }: { rate: number }) => {
   }, [stuckTick]);
 
   const recover = async () => {
-    if (!asking) return;
+    if (!asking || recoveringRef.current) return;
+    recoveringRef.current = true;
     setRecovering(true);
     try {
       setRecoverNote(recoverMessage(await recoverNow(asking.d, asking.row.id)));
     } catch (e) {
       setRecoverNote(e instanceof TradeRefused ? e.why : plainError(e));
     } finally {
+      recoveringRef.current = false;
       setRecovering(false);
       setAsking(null);
       setStuckTick((t) => t + 1);

@@ -5,6 +5,7 @@ import {
   PrivateKey,
   ProtoWallet,
   Spend,
+  Transaction,
   UnlockingScript,
   Utils,
   type WalletInterface,
@@ -26,7 +27,7 @@ import {
   type Deps,
   type TradeWallet,
 } from './trade';
-import { legacyPendingStore, localPendingStore, type PendingRecord, type PendingStore } from './pending';
+import { legacyPendingStore, liveRecords, localPendingStore, type PendingRecord, type PendingStore } from './pending';
 import { memepoolWallet } from './wallet';
 import { PARAMS, STATE, TOKEN, POOL_ORD, POOL_PAY, INDEXER, honestBuy, honestSell, pay, tok } from './testkit';
 import { addressPkh, bsv21TransferScript, parseBsv21Transfer } from './script';
@@ -327,7 +328,8 @@ const buildBuy = (tweak?: (t: Template) => void) => (body: Record<string, unknow
 type Net = {
   /** `${txid}_${vout}` → the txid that spent it. */
   spent: Map<string, string>;
-  txs: Map<string, { confirmed: boolean; inputs: { txid: string; vout: number }[] }>;
+  /** txid → a real transaction (its hex hashes to the txid) and whether it is in a block. */
+  txs: Map<string, { confirmed: boolean; raw: string }>;
   utxos: Map<string, { tx_hash: string; tx_pos: number; value: number; isSpentInMempoolTx?: boolean }[]>;
 };
 const newNet = (): Net => ({ spent: new Map(), txs: new Map(), utxos: new Map() });
@@ -343,21 +345,41 @@ const onNet = (inner: Deps['fetch'], net: Net): Deps['fetch'] =>
     if (m) {
       const t = net.txs.get(m[1]);
       if (!t) return new Response('', { status: 404 });
-      return ok({
-        txid: m[1],
-        vin: t.inputs,
-        ...(t.confirmed ? { blockhash: '00'.repeat(32), confirmations: 1 } : {}),
-      });
+      return ok({ txid: m[1], ...(t.confirmed ? { blockhash: '00'.repeat(32), confirmations: 1 } : {}) });
+    }
+    m = /\/tx\/([0-9a-f]{64})\/hex$/.exec(url);
+    if (m) {
+      const t = net.txs.get(m[1]);
+      return t ? new Response(t.raw, { status: 200 }) : new Response('', { status: 404 });
     }
     m = /\/address\/(\w+)\/unspent\/all$/.exec(url);
     if (m) return ok({ address: m[1], result: net.utxos.get(m[1]) ?? [], error: '' });
     return inner(url, init);
   }) as Deps['fetch'];
 /** Another trader's transaction takes the first pool coin of `p`'s template (confirmed unless said otherwise). */
-const killPool = (net: Net, p: { template: Template }, confirmed = true, spender = 'ee'.repeat(32)) => {
+const killPool = (
+  net: Net,
+  p: { template: Template },
+  confirmed = true,
+  alsoSpends: { txid: string; vout: number }[] = [],
+): string => {
   const pool = p.template.inputs.find((i) => i.owner !== 'user')!;
+  const tx = new Transaction(
+    1,
+    [{ txid: pool.txid, vout: pool.vout }, ...alsoSpends].map((o) => ({
+      sourceTXID: o.txid,
+      sourceOutputIndex: o.vout,
+      sequence: 0xffffffff,
+      unlockingScript: new UnlockingScript(),
+    })),
+    [{ lockingScript: LockingScript.fromHex(pay(PrivateKey.fromRandom().toAddress())), satoshis: 1 }],
+    0,
+  );
+  const spender = tx.id('hex');
   net.spent.set(`${pool.txid}_${pool.vout}`, spender);
-  net.txs.set(spender, { confirmed, inputs: [{ txid: pool.txid, vout: pool.vout }] });
+  for (const o of alsoSpends) net.spent.set(`${o.txid}_${o.vout}`, spender);
+  net.txs.set(spender, { confirmed, raw: tx.toHex() });
+  return spender;
 };
 
 describe('flow', () => {
@@ -561,7 +583,7 @@ describe('buy funding recovery (b-Aware 511)', () => {
     t = p.quoteExpiresAt + UNSURE_MARGIN_MS + 1; // and the quote is well past use
     expect(await closeUnsure(timed, p)).toBe(true);
     expect(fw.log.returned).toBe(1);
-    expect(store.list()).toEqual([]);
+    expect(liveRecords(store.list())).toEqual([]);
   });
 
   test('unsure submit, closed, but the coin was spent: nothing is returned (the buy happened)', async () => {
@@ -584,18 +606,21 @@ describe('buy funding recovery (b-Aware 511)', () => {
     const res = await sweepFundings(d);
     expect(res).toEqual({ returned: 1, spent: 0, kept: 0 });
     expect(fw.log.returned).toBe(1);
-    expect(store.list()).toEqual([]);
+    expect(liveRecords(store.list())).toEqual([]);
   });
 
-  test('a restart never sweeps a confirmed buy', async () => {
+  test('a restart never sweeps a confirmed buy (and a spend it cannot prove keeps the record)', async () => {
+    // The network says "spent" but serves no transaction to prove it: nothing goes back, nothing is closed.
+    // (A proven, confirmed spend closing a record as a tombstone: recover.test.ts.)
     const { fw, store, d } = setup(new Set([FUND]));
     const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
     expect((await executeTrade(d, p)).kind).toBe('sent');
     const r = store.list()[0];
     expect(r.state).toBe('sent');
     store.put({ ...r, createdAt: r.createdAt - OLD });
-    expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 1, kept: 0 });
+    expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 0, kept: 1 });
     expect(fw.log.returned).toBe(0);
+    expect(store.list()[0].state).toBe('sent');
   });
 
   test('a sent buy whose coin still shows unspent is kept, not swept', async () => {
@@ -704,7 +729,7 @@ describe('funding recovery: review fixes', () => {
     expect(fw.log.funded).toBe(1);
     expect(fw.log.returned).toBe(1);
     expect(fw.log.signed).toBe(0);
-    expect(store.list()).toEqual([]);
+    expect(liveRecords(store.list())).toEqual([]);
   });
 
   test('fix 1: storage throws after a successful submit: still reported as sent, not as a failure', async () => {
@@ -744,7 +769,7 @@ describe('funding recovery: review fixes', () => {
     await expect(executeTrade(d, p)).rejects.toThrow(/expired/);
     expect(fw.log.signed).toBe(0);
     expect(fw.log.returned).toBe(1);
-    expect(store.list()).toEqual([]);
+    expect(liveRecords(store.list())).toEqual([]);
   });
 
   test('fix 2: the wallet fails to sign: nothing submitted, the funding goes back', async () => {
@@ -818,7 +843,7 @@ describe('funding recovery: review fixes', () => {
     // Account A can prove it (its nonce re-derives the key the coin is locked to): it goes back to A.
     expect(await sweepFundings(dA)).toEqual({ returned: 1, spent: 0, kept: 0 });
     expect(a.log.returned).toBe(1);
-    expect(legacy.list()).toEqual([]);
+    expect(liveRecords(legacy.list())).toEqual([]);
   });
 });
 
@@ -909,7 +934,7 @@ describe('funding recovery: re-review fixes', () => {
     expect(await sweepFundings({ ...d, pending: store })).toEqual({ returned: 1, spent: 0, kept: 0 });
     expect(fw.log.back[0].coin).toMatchObject({ txid: '02'.padStart(64, '0'), vout: 0, script: pay(key.address) });
     expect(fw.log.back[0].beef).toEqual([]); // fetched again by the wallet (memepoolWallet.returnFunding)
-    expect(store.list()).toEqual([]);
+    expect(liveRecords(store.list())).toEqual([]);
   });
 
   test('1: memepoolWallet fetches the BEEF again when a swept funding has none', async () => {
@@ -967,10 +992,7 @@ describe('funding recovery: re-review fixes', () => {
     killPool(net, p, false); // in the mempool only
     expect(await closeUnsure(d, p)).toBe(false);
     // Our own trade spent it (it also spends our coin): the buy happened, nothing goes back.
-    const ours = 'ab'.repeat(32);
-    killPool(net, p, true, ours);
-    net.txs.get(ours)!.inputs.push({ txid: p.funding!.coin.txid, vout: p.funding!.coin.vout });
-    net.spent.set(`${p.funding!.coin.txid}_${p.funding!.coin.vout}`, ours);
+    killPool(net, p, true, [{ txid: p.funding!.coin.txid, vout: p.funding!.coin.vout }]);
     expect(await closeUnsure(d, p)).toBe(false);
     expect(fw.log.returned).toBe(0);
   });
@@ -995,7 +1017,7 @@ describe('funding recovery: re-review fixes', () => {
     expect(a).toEqual({ returned: 1, spent: 0, kept: 0 });
     expect(b).toEqual(a);
     expect(fw.log.returned).toBe(1);
-    expect(store.list()).toEqual([]);
+    expect(liveRecords(store.list())).toEqual([]);
   });
 
   test('5: 409 then the reload fails: the signature is recorded (unsure) and the sweep waits for it', async () => {
@@ -1060,7 +1082,7 @@ describe('funding recovery: re-review fixes', () => {
     expect(fw.log.back.map((f) => [f.coin.txid, f.coin.vout, f.coin.satoshis])).toEqual([
       ['02'.padStart(64, '0'), 0, rec.sats],
     ]);
-    expect(store.list()).toEqual([]);
+    expect(liveRecords(store.list())).toEqual([]);
   });
 
   test('6a: a nonce whose address stays empty is kept a day, then dropped', async () => {
@@ -1077,6 +1099,6 @@ describe('funding recovery: re-review fixes', () => {
     expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 0, kept: 1 });
     clock.set(Date.now() + 25 * 60 * 60_000);
     expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 1, kept: 0 });
-    expect(store.list()).toEqual([]);
+    expect(liveRecords(store.list())).toEqual([]);
   });
 });
