@@ -12,6 +12,7 @@ import { plainError } from './api';
 import {
   TradeRefused,
   cancelPrepared,
+  closeUnsure,
   executeTrade,
   loadMarket,
   prepareBuy,
@@ -21,6 +22,7 @@ import {
   type Deps,
   type Prepared,
 } from './trade';
+import { localPendingStore } from './pending';
 import { memepoolWallet } from './wallet';
 
 /**
@@ -38,7 +40,7 @@ type Phase =
   | { k: 'working'; status: string }
   | { k: 'sheet'; p: Prepared; note?: string }
   | { k: 'done'; txid: string; seen: boolean }
-  | { k: 'unsure'; message: string; txid?: string };
+  | { k: 'unsure'; message: string; txid?: string; p?: Prepared };
 
 const fmtInt = (n: bigint) => n.toLocaleString('en-US');
 
@@ -73,6 +75,7 @@ export const MemepoolTradeSheet = ({
         apiContext.services as unknown as Parameters<typeof memepoolWallet>[1],
         coin.iconUrl,
       ),
+      pending: localPendingStore(),
     }),
     [apiContext, coin.iconUrl],
   );
@@ -83,7 +86,9 @@ export const MemepoolTradeSheet = ({
   /** Close: a buy's set-aside BSV goes back into the wallet if the trade wasn't made. */
   const close = async () => {
     if (busy) return;
+    // Anything that can't go back now stays written down, and the next start puts it back (pending.ts).
     if (phase.k === 'sheet') await cancelPrepared(deps, phase.p).catch(() => undefined);
+    else if (phase.k === 'unsure' && phase.p && !phase.txid) await closeUnsure(deps, phase.p).catch(() => undefined);
     onClose();
   };
   useBackClose(!busy, () => void close());
@@ -129,7 +134,7 @@ export const MemepoolTradeSheet = ({
         return;
       }
       if (r.kind === 'unsure') {
-        setPhase({ k: 'unsure', message: r.message });
+        setPhase({ k: 'unsure', message: r.message, p });
         const spentBy = await watchSpend(deps, p.coins[0]);
         if (live.current && spentBy) setPhase({ k: 'unsure', message: 'The network has your trade.', txid: spentBy });
         if (spentBy)

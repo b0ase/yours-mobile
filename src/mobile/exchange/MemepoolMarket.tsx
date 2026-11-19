@@ -5,6 +5,10 @@ import { openExternal } from './useTokenRowActions';
 import { TokenRoomStore } from './TokenRoomStore';
 import { MEMEPOOL_SORTS, fetchMemepoolCoins, memepoolTradeUrl, type MemepoolCoin, type MemepoolSort } from './memepool';
 import { MemepoolTradeSheet } from './memepool/TradeSheet';
+import { sweepFundings } from './memepool/trade';
+import { localPendingStore } from './memepool/pending';
+import { memepoolWallet } from './memepool/wallet';
+import { useServiceContext } from '../../hooks/useServiceContext';
 
 /**
  * Exchange › Memepool: every coin on TX Blaster's MEMEPOOL launchpad. "Buy or sell" trades it from this wallet
@@ -46,6 +50,18 @@ export const MemepoolMarket = ({ rate }: { rate: number }) => {
   const [q, setQ] = useState('');
   const [tick, setTick] = useState(0);
   const [trading, setTrading] = useState<MemepoolCoin | null>(null);
+  const { apiContext } = useServiceContext();
+
+  // Put back any BSV set aside for a buy that never finished (page closed, unsure submit). Runs once on opening.
+  useEffect(() => {
+    if (!apiContext?.wallet) return;
+    const wallet = memepoolWallet(
+      apiContext.wallet,
+      apiContext.services as unknown as Parameters<typeof memepoolWallet>[1],
+    );
+    void sweepFundings({ fetch: (u, i) => fetch(u, i), wallet, pending: localPendingStore() }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let live = true;

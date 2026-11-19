@@ -9,6 +9,7 @@
  * is taken back into the wallet's balance (cancel). Rules the owner set: one sheet; 409 = re-prepare once, and after
  * a signature never sign again silently (a fresh sheet instead); after submit, never re-sign, only watch.
  */
+import { Random, Utils } from '@bsv/sdk';
 import {
   CAP_SATS,
   DEFAULT_SLIPPAGE_BPS,
@@ -33,6 +34,7 @@ import {
 } from './api';
 import { CurveError, buyTokens, minTokensFor, parseCurve, sellSats, type CurveParams, type CurveState } from './curve';
 import { proofVerdict, type ProofVerdict } from './proof';
+import { giveBack, idOf, sweepPending, toRecord, type PendingStore, type SweepResult } from './pending';
 import { isAddress } from './script';
 import type { CoinKey } from './sign';
 import {
@@ -57,7 +59,8 @@ export type Funding = { coin: OfferedCoin; beef: number[]; pay: PayKey };
 /** What the flow needs from the wallet (memepool/wallet.ts builds it from the in-app BRC-100 wallet). */
 export type TradeWallet = {
   newOrdKey(tokenId: string): Promise<OrdKey>;
-  newPayKey(): Promise<PayKey>;
+  /** A BRC-29 payment key to ourselves. With a `nonce` it is re-derived (BRC-42), never random. */
+  newPayKey(nonce?: { prefix: string; suffix: string }): Promise<PayKey>;
   /** Pay `sats` to our own `pay` key; resolves once the wallet has sent it. */
   fund(pay: PayKey, sats: number): Promise<Funding>;
   /** Take a funding coin that wasn't spent back into the wallet's balance. */
@@ -70,7 +73,14 @@ export type TradeWallet = {
   receive(txid: string, t: Template, p: { ord: OrdKey; pay: PayKey; sym: string; tokenId: string }): Promise<void>;
 };
 
-export type Deps = { fetch: Fetcher; wallet: TradeWallet; now?: () => number; sleep?: (ms: number) => Promise<void> };
+export type Deps = {
+  fetch: Fetcher;
+  wallet: TradeWallet;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  /** Where a buy's funding is written down so a restart can recover it (pending.ts). */
+  pending?: PendingStore;
+};
 const nowOf = (d: Deps) => (d.now ?? Date.now)();
 const sleepOf = (d: Deps) => d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
@@ -244,8 +254,19 @@ export async function prepareBuy(d: Deps, m: Market, budget: bigint, slippageBps
   const slip = clampSlip(slippageBps);
   const l = await limitsFor(d, m, 'buy', budget, slip);
   const ord = await d.wallet.newOrdKey(m.tokenId);
-  const pay = await d.wallet.newPayKey();
+  const nonce = { prefix: Utils.toBase64(Random(10)), suffix: Utils.toBase64(Random(10)) };
+  const pay = await d.wallet.newPayKey(nonce);
+  // Write the key's nonce down BEFORE any BSV moves, so a crash can never strand the funding.
+  d.pending?.put({
+    id: idOf(nonce.prefix, nonce.suffix),
+    ...nonce,
+    sats: Number(l.maxSpend),
+    state: 'pending',
+    createdAt: nowOf(d),
+  });
+  // If fund() throws we can't know the BSV didn't go out, so the nonce record stays (it holds no coin to sweep).
   const funding = await d.wallet.fund(pay, Number(l.maxSpend));
+  d.pending?.put(toRecord(funding, Number(l.maxSpend), 'pending', nowOf(d)));
   try {
     const r = await prepareAndVerify(d, m, 'buy', budget, l, ord, pay, [funding.coin]);
     return {
@@ -261,7 +282,7 @@ export async function prepareBuy(d: Deps, m: Market, budget: bigint, slippageBps
       funding,
     };
   } catch (e) {
-    await d.wallet.returnFunding(funding).catch(() => undefined);
+    await giveBack(d.wallet, d.pending, funding);
     throw e;
   }
 }
@@ -335,15 +356,17 @@ export async function executeTrade(d: Deps, p: Prepared): Promise<ExecuteResult>
     }
     if (e instanceof MemepoolHttpError && e.status >= 400 && e.status < 500) {
       // A definite refusal: nothing was broadcast. Put a buy's BSV back.
-      if (p.funding) await d.wallet.returnFunding(p.funding).catch(() => undefined);
+      if (p.funding) await giveBack(d.wallet, d.pending, p.funding);
       plain(plainError(e));
     }
+    markFunding(d, p, 'unsure');
     return {
       kind: 'unsure',
       message: "We sent the trade but Memepool didn't confirm it. We're watching the network for it.",
     };
   }
   const txid = typeof out.txid === 'string' && /^[0-9a-f]{64}$/.test(out.txid) ? out.txid : null;
+  markFunding(d, p, txid ? 'sent' : 'unsure');
   if (!txid)
     return { kind: 'unsure', message: "Memepool took the trade but didn't say its id. We're watching for it." };
   return { kind: 'sent', txid };
@@ -351,7 +374,45 @@ export async function executeTrade(d: Deps, p: Prepared): Promise<ExecuteResult>
 
 /** The user said Cancel (or the sheet closed): a buy's set-aside BSV goes back into the wallet. */
 export async function cancelPrepared(d: Deps, p: Prepared): Promise<void> {
-  if (p.funding) await d.wallet.returnFunding(p.funding);
+  if (!p.funding) return;
+  if (!(await giveBack(d.wallet, d.pending, p.funding))) throw new Error('The BSV could not be put back yet.');
+}
+
+/** Record what became of a buy's funding after we signed (a 'sent' coin is never swept back). */
+function markFunding(d: Deps, p: Prepared, state: 'unsure' | 'sent') {
+  if (p.funding) d.pending?.put(toRecord(p.funding, p.coins[0].satoshis, state, nowOf(d)));
+}
+
+/**
+ * The sheet closed after an unsure submit: if the network shows our coin still unspent, the buy didn't happen and the
+ * BSV goes back now; otherwise it stays recorded and the next start sorts it out. Returns true if it went back.
+ */
+export async function closeUnsure(d: Deps, p: Prepared): Promise<boolean> {
+  if (!p.funding) return false;
+  return giveBack(d.wallet, d.pending, p.funding, (c) => coinSpent(d, c));
+}
+
+/** One look at whether `coin` has been spent. Only a clear "not found" counts as unspent. */
+export async function coinSpent(
+  d: Deps,
+  coin: { txid: string; vout: number },
+): Promise<'spent' | 'unspent' | 'unknown'> {
+  const r = await d.fetch(`${WOC}/tx/${coin.txid}/${coin.vout}/spent`, { credentials: 'omit' }).catch(() => null);
+  if (!r) return 'unknown';
+  if (r.ok) {
+    const j = (await r.json().catch(() => null)) as { txid?: unknown } | null;
+    return typeof j?.txid === 'string' && /^[0-9a-f]{64}$/.test(j.txid) ? 'spent' : 'unknown';
+  }
+  return r.status === 404 ? 'unspent' : 'unknown';
+}
+
+const SWEEP_MIN_AGE_MS = 10 * 60 * 1000; // a younger record may be a sheet open in another tab
+
+/** On start: put back any funding left over from a buy that never finished. */
+export function sweepFundings(d: Deps): Promise<SweepResult> {
+  return d.pending
+    ? sweepPending(d.wallet, d.pending, (c) => coinSpent(d, c), { minAgeMs: SWEEP_MIN_AGE_MS, now: nowOf(d) })
+    : Promise.resolve({ returned: 0, spent: 0, kept: 0 });
 }
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';

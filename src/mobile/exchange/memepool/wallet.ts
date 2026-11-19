@@ -45,9 +45,10 @@ export function memepoolWallet(
       const keyID = `${tokenId}-${Date.now()}`;
       return { address: await addressOf(ONESAT, keyID), key: { protocolID: ONESAT, keyID } };
     },
-    async newPayKey() {
-      const derivationPrefix = Utils.toBase64(Random(10));
-      const derivationSuffix = Utils.toBase64(Random(10));
+    async newPayKey(nonce) {
+      // With a stored nonce the key is re-derivable from the wallet (BRC-42); without, a fresh one (sells).
+      const derivationPrefix = nonce?.prefix ?? Utils.toBase64(Random(10));
+      const derivationSuffix = nonce?.suffix ?? Utils.toBase64(Random(10));
       const keyID = `${derivationPrefix} ${derivationSuffix}`;
       return {
         address: await addressOf(BRC29, keyID),
