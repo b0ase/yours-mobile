@@ -283,6 +283,9 @@ function fakeWallet(side: 'buy' | 'sell', account = 'A') {
       log.returned++;
       log.back.push(f);
     },
+    spendBack: async () => {
+      throw new Error('not in these tests');
+    },
     tokenCoins: async () =>
       side === 'sell'
         ? [

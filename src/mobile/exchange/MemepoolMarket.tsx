@@ -5,7 +5,18 @@ import { openExternal } from './useTokenRowActions';
 import { TokenRoomStore } from './TokenRoomStore';
 import { MEMEPOOL_SORTS, fetchMemepoolCoins, memepoolTradeUrl, type MemepoolCoin, type MemepoolSort } from './memepool';
 import { MemepoolTradeSheet } from './memepool/TradeSheet';
-import { sweepFundings } from './memepool/trade';
+import {
+  STUCK_WHY,
+  TradeRefused,
+  recoverMessage,
+  recoverNow,
+  stuckFundings,
+  sweepFundings,
+  type Deps,
+  type StuckFunding,
+} from './memepool/trade';
+import { plainError } from './memepool/api';
+import { ConfirmSheet } from '../p2p/ConfirmSheet';
 import { legacyPendingStore, localPendingStore, pendingAccountOf } from './memepool/pending';
 import { memepoolWallet } from './memepool/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -51,23 +62,55 @@ export const MemepoolMarket = ({ rate }: { rate: number }) => {
   const [tick, setTick] = useState(0);
   const [trading, setTrading] = useState<MemepoolCoin | null>(null);
   const { apiContext, chromeStorageService } = useServiceContext();
+  // BSV from unfinished buys that the sweep couldn't put back: shown with "Recover now" (user's tap only).
+  const [stuck, setStuck] = useState<{ row: StuckFunding; d: Deps }[]>([]);
+  const [asking, setAsking] = useState<{ row: StuckFunding; d: Deps } | null>(null);
+  const [recovering, setRecovering] = useState(false);
+  const [recoverNote, setRecoverNote] = useState('');
+  const [stuckTick, setStuckTick] = useState(0);
 
-  // Put back any BSV set aside for a buy that never finished (page closed, unsure submit). Runs once on opening.
+  // Put back any BSV set aside for a buy that never finished (page closed, unsure submit), then list what is left.
   useEffect(() => {
     if (!apiContext?.wallet) return;
     const wallet = memepoolWallet(
       apiContext.wallet,
       apiContext.services as unknown as Parameters<typeof memepoolWallet>[1],
     );
-    const d = { fetch: ((u, i) => fetch(u, i)) as Parameters<typeof sweepFundings>[0]['fetch'], wallet };
+    const base: Deps = { fetch: (u, i) => fetch(u, i), wallet };
     // This account's records, then any written before records were kept per account: those are only returned when
     // this wallet re-derives the key the coin is locked to (sweepPending's ownership check), else left alone.
+    const stores = [
+      { ...base, pending: localPendingStore(pendingAccountOf(chromeStorageService)) },
+      { ...base, pending: legacyPendingStore() },
+    ];
+    let live = true;
     void (async () => {
-      await sweepFundings({ ...d, pending: localPendingStore(pendingAccountOf(chromeStorageService)) });
-      await sweepFundings({ ...d, pending: legacyPendingStore() });
-    })().catch(() => undefined);
+      const rows: { row: StuckFunding; d: Deps }[] = [];
+      for (const d of stores) {
+        await sweepFundings(d).catch(() => undefined);
+        for (const row of await stuckFundings(d).catch(() => [])) rows.push({ row, d });
+      }
+      if (live) setStuck(rows);
+    })();
+    return () => {
+      live = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [stuckTick]);
+
+  const recover = async () => {
+    if (!asking) return;
+    setRecovering(true);
+    try {
+      setRecoverNote(recoverMessage(await recoverNow(asking.d, asking.row.id)));
+    } catch (e) {
+      setRecoverNote(e instanceof TradeRefused ? e.why : plainError(e));
+    } finally {
+      setRecovering(false);
+      setAsking(null);
+      setStuckTick((t) => t + 1);
+    }
+  };
 
   useEffect(() => {
     let live = true;
@@ -114,6 +157,53 @@ export const MemepoolMarket = ({ rate }: { rate: number }) => {
           </button>
         ))}
       </div>
+      {(stuck.length > 0 || recoverNote) && (
+        <div className="flex flex-col gap-2 rounded-xl p-3 border" style={{ borderColor: '#2b2f36' }}>
+          <div className="text-sm font-bold text-white">BSV waiting from a Memepool buy</div>
+          {recoverNote && (
+            <p className="text-xs m-0" role="status" style={{ color: GOLD }}>
+              {recoverNote}
+            </p>
+          )}
+          {stuck.map(({ row, d }) => (
+            <div key={row.id} className="flex items-center gap-3">
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-sm font-semibold text-white">{money(row.sats, rate)}</span>
+                <span className="text-xs" style={{ color: MUTED }}>
+                  {STUCK_WHY[row.reason]}
+                </span>
+              </div>
+              {row.canRecover && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecoverNote('');
+                    setAsking({ row, d });
+                  }}
+                  className="shrink-0 rounded-xl px-3 py-2 text-sm font-bold"
+                  style={{ background: GOLD, color: '#000' }}
+                >
+                  Recover now
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {asking && (
+        <ConfirmSheet
+          title="Recover BSV from a Memepool buy"
+          rows={[
+            ['You get back', `${bsvLabel(asking.row.sats)}, less a small network fee`],
+            ['To', 'This wallet'],
+          ]}
+          note="This moves the BSV back to your wallet, which cancels the unfinished trade. If Memepool's trade already went through, you keep what it bought."
+          action="Recover now"
+          busy={recovering}
+          onConfirm={() => void recover()}
+          onClose={() => setAsking(null)}
+        />
+      )}
       <input
         type="search"
         value={q}

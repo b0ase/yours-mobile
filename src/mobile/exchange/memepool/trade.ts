@@ -33,12 +33,14 @@ import {
   type Fetcher,
 } from './api';
 import { CurveError, buyTokens, minTokensFor, parseCurve, sellSats, type CurveParams, type CurveState } from './curve';
+import { assertNotPaused } from '../../config/killSwitch';
 import { proofVerdict, type ProofVerdict } from './proof';
 import {
   giveBack,
   giveBackIfSafe,
   idOf,
   safePut,
+  safeRemove,
   sweepPending,
   toRecord,
   type Chain,
@@ -47,7 +49,7 @@ import {
   type SignedSpend,
   type SweepResult,
 } from './pending';
-import { isAddress } from './script';
+import { addressPkh, isAddress, parseP2pkh } from './script';
 import type { CoinKey } from './sign';
 import {
   TradeRefused,
@@ -67,6 +69,8 @@ export type OfferedCoin = { txid: string; vout: number; satoshis: number; script
 export type PayKey = { address: string; key: CoinKey; derivationPrefix: string; derivationSuffix: string };
 export type OrdKey = { address: string; key: CoinKey };
 export type Funding = { coin: OfferedCoin; beef: number[]; pay: PayKey };
+/** Checks run inside a spend: each throws to stop it (the kill switch). */
+export type SpendGuard = { beforeSign(): Promise<void>; beforeBroadcast(): Promise<void> };
 
 /** What the flow needs from the wallet (memepool/wallet.ts builds it from the in-app BRC-100 wallet). */
 export type TradeWallet = {
@@ -77,6 +81,12 @@ export type TradeWallet = {
   fund(pay: PayKey, sats: number): Promise<Funding>;
   /** Take a funding coin that wasn't spent back into the wallet's balance. */
   returnFunding(f: Funding): Promise<void>;
+  /**
+   * "Recover now": spend the funding coin back to this wallet (createAction + signAction, internal change, normal fee),
+   * which double-spends any trade Memepool holds. `guard` runs right before signing and right before broadcast.
+   * Resolves to the txid.
+   */
+  spendBack(f: Funding, guard: SpendGuard): Promise<string>;
   /** Our token coins of `tokenId` that this wallet can sign, largest first. */
   tokenCoins(tokenId: string): Promise<OfferedCoin[]>;
   /** Unlocking scripts for exactly these input indexes. */
@@ -92,6 +102,8 @@ export type Deps = {
   sleep?: (ms: number) => Promise<void>;
   /** Where a buy's funding is written down so a restart can recover it (pending.ts). */
   pending?: PendingStore;
+  /** The kill switch for "Recover now" (default: assertNotPaused('spending')). Throws to stop the spend. */
+  spendingCheck?: () => Promise<void>;
 };
 const nowOf = (d: Deps) => (d.now ?? Date.now)();
 const sleepOf = (d: Deps) => d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -603,3 +615,109 @@ export async function watchSpend(d: Deps, coin: { txid: string; vout: number }, 
 }
 
 export { DEFAULT_SLIPPAGE_BPS };
+
+/** Why a funding is still waiting, in the words the Memepool screen shows. */
+export type StuckReason = 'quote-running' | 'live-signature' | 'old-record' | 'not-returned';
+export const STUCK_WHY: Record<StuckReason, string> = {
+  'quote-running': "Memepool's price for this buy is still open. Wait a few minutes.",
+  'live-signature':
+    'Memepool may still hold your signed trade, so it can’t come back by itself until another trade on that coin. Recover now cancels the trade by moving the BSV back to your wallet.',
+  'old-record':
+    'Left from an earlier version that didn’t note the trade. Recover now moves the BSV back to your wallet.',
+  'not-returned': 'This wallet couldn’t take it back by itself. Recover now moves the BSV back to your wallet.',
+};
+export type StuckFunding = { id: string; sats: number; reason: StuckReason; canRecover: boolean; waitUntil?: number };
+
+/**
+ * Fundings the sweep could not return (run it first): still unspent on the network, old enough not to be a sheet in
+ * another tab, and this wallet's own. Only reads; nothing here spends. `canRecover` says whether "Recover now" may run.
+ */
+export async function stuckFundings(d: Deps): Promise<StuckFunding[]> {
+  if (!d.pending) return [];
+  const chain = wocChain(d);
+  const now = nowOf(d);
+  const out: StuckFunding[] = [];
+  for (const r of d.pending.list()) {
+    if (!r.funding || now - r.createdAt < SWEEP_MIN_AGE_MS) continue;
+    const pay = await d.wallet.newPayKey({ prefix: r.prefix, suffix: r.suffix }).catch(() => null);
+    const pkh = pay ? addressPkh(pay.address) : null;
+    if (!pkh || parseP2pkh(r.funding.script) !== pkh) continue;
+    if ((await chain.spentBy({ txid: r.funding.txid, vout: r.funding.vout }).catch(() => 'unknown')) !== 'unspent')
+      continue;
+    const base = { id: r.id, sats: r.funding.satoshis };
+    if (r.state === 'pending') out.push({ ...base, reason: 'not-returned', canRecover: true });
+    else if (!r.signed?.length) out.push({ ...base, reason: 'old-record', canRecover: true });
+    else {
+      const until = Math.max(...r.signed.map((x) => x.notBefore));
+      out.push(
+        now > until
+          ? { ...base, reason: 'live-signature', canRecover: true }
+          : { ...base, reason: 'quote-running', canRecover: false, waitUntil: until },
+      );
+    }
+  }
+  return out;
+}
+
+export type RecoverResult =
+  /** The BSV is back in the wallet (its own change). */
+  | { kind: 'recovered'; txid: string }
+  /** Memepool's trade spent the coin first: the buy went through. */
+  | { kind: 'went-through' };
+
+/** What the Memepool screen says after "Recover now". */
+export const recoverMessage = (r: RecoverResult): string =>
+  r.kind === 'recovered'
+    ? 'Done. The BSV is back in your wallet.'
+    : "Memepool's trade went through first, so this buy happened. Its tokens come to your wallet.";
+
+/** The wallet's broadcast refused our spend because the coin was already spent (WERR_REVIEW_ACTIONS doubleSpend). */
+export const isDoubleSpend = (e: unknown): boolean =>
+  !!(e as { reviewActionResults?: { status?: string }[] } | null)?.reviewActionResults?.some(
+    (r) => r?.status === 'doubleSpend',
+  ) || /double ?spend/i.test(e instanceof Error ? e.message : String(e));
+
+/**
+ * "Recover now", only ever from the user's tap on the approval sheet: spend the funding coin back to this wallet,
+ * which double-spends any trade Memepool still holds. Refused while spending is paused (checked right before signing
+ * and again before broadcast). Success drops the record; a double-spend refusal with the coin seen spent means
+ * Memepool's trade won (record dropped); any other failure keeps the record and throws.
+ */
+export async function recoverNow(d: Deps, id: string): Promise<RecoverResult> {
+  const r = d.pending?.list().find((x) => x.id === id);
+  if (!d.pending || !r?.funding) plain('There is nothing to recover here any more.');
+  const store = d.pending!;
+  const funding = r!.funding!;
+  if (r!.signed?.length && r!.signed.some((x) => !(nowOf(d) > x.notBefore)))
+    plain("Memepool's price for this buy is still open. Try again in a few minutes.");
+  const pay = await d.wallet.newPayKey({ prefix: r!.prefix, suffix: r!.suffix });
+  if (parseP2pkh(funding.script) !== addressPkh(pay.address)) plain('That BSV isn’t held by this wallet account.');
+  const chain = wocChain(d);
+  const coin = { txid: funding.txid, vout: funding.vout };
+  const before = await chain.spentBy(coin).catch(() => 'unknown' as const);
+  if (before === 'unknown') plain("We can't check the network right now. Try again soon.");
+  if (before !== 'unspent') {
+    safeRemove(store, id);
+    return { kind: 'went-through' };
+  }
+  const check = d.spendingCheck ?? (() => assertNotPaused('spending'));
+  const f: Funding = {
+    coin: { ...coin, satoshis: funding.satoshis, script: funding.script, key: pay.key },
+    beef: [],
+    pay,
+  };
+  try {
+    const txid = await d.wallet.spendBack(f, { beforeSign: check, beforeBroadcast: check });
+    safeRemove(store, id);
+    return { kind: 'recovered', txid };
+  } catch (e) {
+    if (isDoubleSpend(e)) {
+      const after = await chain.spentBy(coin).catch(() => 'unknown' as const);
+      if (after !== 'unspent' && after !== 'unknown') {
+        safeRemove(store, id);
+        return { kind: 'went-through' };
+      }
+    }
+    throw e;
+  }
+}

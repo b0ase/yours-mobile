@@ -8,15 +8,17 @@
  *    taken in as an ordinary wallet payment and show in the balance.
  * Signing goes through createSignature (sign.ts); nothing here sees a private key.
  */
-import { P2PKH, PublicKey, Random, Utils, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
+import { P2PKH, PublicKey, Random, Transaction, Utils, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
 import { noteFor, tokenCoins, tokenOutputTags } from '../../market/launchpad/tokens';
-import { signOurInputs } from './sign';
+import { signOurInputs, signSelfSpend } from './sign';
 import { bsv21TransferScript, addressPkh, parseBsv21Transfer, parseP2pkh } from './script';
-import type { Funding, OfferedCoin, OrdKey, PayKey, TradeWallet } from './trade';
+import type { Funding, OfferedCoin, OrdKey, PayKey, SpendGuard, TradeWallet } from './trade';
 import type { Template } from './validate';
 
 const ONESAT: WalletProtocol = [0, 'onesat'];
 const BRC29: WalletProtocol = [2, '3241645161d8'];
+/** The most a "Recover now" self-spend may pay the network (a 1-in, 1-out transaction costs far less). */
+const MAX_RECOVERY_FEE = 2_000;
 
 type BeefSource = { getBeefForTxid(txid: string): Promise<{ toBinaryAtomic(txid: string): number[] }> };
 
@@ -84,6 +86,55 @@ export function memepoolWallet(
         description: 'Memepool buy not made: BSV back in your wallet',
         labels: ['memepool'],
       });
+    },
+    async spendBack(f: Funding, guard: SpendGuard) {
+      // The funding transaction's BEEF: in memory, else fetched. Without either, the wallet's own storage vouches for
+      // the transaction it created (trustSelf 'known'), which is the source the guarded createAction itself uses.
+      let inputBEEF: number[] | undefined = f.beef.length ? f.beef : undefined;
+      if (!inputBEEF && services)
+        inputBEEF = await services
+          .getBeefForTxid(f.coin.txid)
+          .then((b) => b.toBinaryAtomic(f.coin.txid))
+          .catch(() => undefined);
+      const created = await wallet.createAction({
+        description: 'Recover BSV from an unfinished Memepool buy',
+        ...(inputBEEF ? { inputBEEF } : {}),
+        inputs: [
+          {
+            outpoint: `${f.coin.txid}.${f.coin.vout}`,
+            unlockingScriptLength: 108,
+            inputDescription: 'BSV set aside for a Memepool buy',
+          },
+        ],
+        outputs: [], // everything comes back as the wallet's own change, less the network fee
+        labels: ['memepool'],
+        options: { signAndProcess: false, randomizeOutputs: false, acceptDelayedBroadcast: false, trustSelf: 'known' },
+      });
+      const signable = created.signableTransaction;
+      if (!signable) throw new Error('The wallet did not return a transaction to sign.');
+      let sent = false;
+      try {
+        const tx = Transaction.fromAtomicBEEF(signable.tx);
+        // Fail closed: exactly one input, our funding coin; the rest comes back less a normal fee.
+        const idx = tx.inputs.findIndex(
+          (i) =>
+            (i.sourceTXID ?? i.sourceTransaction?.id('hex')) === f.coin.txid && i.sourceOutputIndex === f.coin.vout,
+        );
+        if (idx !== 0 || tx.inputs.length !== 1 || !tx.outputs.length)
+          throw new Error('Refusing to sign: the wallet changed the recovery transaction.');
+        const back = tx.outputs.reduce((s, o) => s + (o.satoshis ?? 0), 0);
+        if (back < f.coin.satoshis - MAX_RECOVERY_FEE)
+          throw new Error('Refusing to sign: the network fee is too high.');
+        await guard.beforeSign();
+        const unlockingScript = await signSelfSpend(wallet, tx, idx, f.coin);
+        await guard.beforeBroadcast();
+        sent = true;
+        const done = await wallet.signAction({ reference: signable.reference, spends: { [idx]: { unlockingScript } } });
+        return done.txid ?? tx.id('hex');
+      } catch (e) {
+        if (!sent) await wallet.abortAction({ reference: signable.reference }).catch(() => undefined);
+        throw e;
+      }
     },
     async tokenCoins(tokenId) {
       const { coins } = await tokenCoins(wallet, false);
