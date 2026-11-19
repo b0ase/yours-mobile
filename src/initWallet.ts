@@ -31,6 +31,7 @@ import {
   releaseStuckSends,
   listQueuedSends,
   resolveUnsent,
+  visibleUnsent,
   sendHeld,
   type QueueStore,
   type QueuedSend,
@@ -2544,7 +2545,7 @@ export const initWallet = async (
         return (t?.rawTx?.length ?? 0) + (t?.inputBEEF?.length ?? 0);
       }),
     releaseStuckSends: () => releaseStuckSends(stuckDeps),
-    listUnsent: () => stuckDeps.listQueued(),
+    listUnsent: async () => visibleUnsent(await stuckDeps.listQueued(), (txid) => knownOnChain(txid)),
     resolveUnsent: (txid: string, how: 'send' | 'cancel', opts?: { confirmed?: boolean }) =>
       resolveUnsent(
         {

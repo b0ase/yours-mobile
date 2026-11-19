@@ -42,7 +42,7 @@ import { rng } from '../testing/twoDeviceSim/chain';
 import { Beef, Script, Transaction } from '@bsv/sdk';
 import { Wallet, WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import { NOT_YOURS } from '../services/releaseMarks';
-import { isHeld, NEEDS_CONFIRMATION, resolveUnsent } from '../services/stuckSends';
+import { isHeld, NEEDS_CONFIRMATION, resolveUnsent, visibleUnsent } from '../services/stuckSends';
 
 // The Store client (mobile/themeOrder/api.ts, imported by the Store open) reads its API base once, when it is first
 // loaded. bun runs every file in one process: whichever file loads it first fixes it for the rest, so this file sets
@@ -592,6 +592,78 @@ describe('two devices, one seed: named cases', () => {
         'a.example',
       );
       expect(w.chain.has(byA.txid)).toBe(true);
+    },
+  );
+
+  /** A's payment P reaches B as sent but unconfirmed (B's copy: 'unproven', request 'nosend'), then drops out. */
+  const droppedElsewhere = async () => {
+    const w = await threeCoins();
+    const P = await w.send('A', 20_000);
+    await w.sync('A');
+    await w.sync('B');
+    expect(await w.statusOf('B', P.txid)).toEqual({ tx: 'unproven', req: 'nosend' });
+    const listed = async () =>
+      (await visibleUnsent(await w.unsentDeps('B').listQueued(), (t) => Promise.resolve(w.chain.has(t)))).find(
+        (q) => q.txid === P.txid,
+      );
+    expect(await listed()).toBeUndefined(); // in the mempool: nothing to do
+    w.chain.drop(P.txid); // A's device is gone; the network forgot P
+    return { w, P, listed };
+  };
+
+  sim(
+    "task 54 round 5 (4): another device's payment that dropped out of the mempool is listed; Send now re-posts exactly it",
+    async () => {
+      const { w, P, listed } = await droppedElsewhere();
+      const q = await listed();
+      expect([q?.elsewhere, q?.reqStatus, q?.amountSats]).toEqual([true, 'nosend', 20_000]);
+      expect(await resolveUnsent(w.unsentDeps('B'), P.txid, 'send')).toEqual({
+        ok: false,
+        txid: P.txid,
+        error: NEEDS_CONFIRMATION,
+      });
+      expect(w.chain.has(P.txid)).toBe(false);
+      const before = w.B.posted.length;
+      expect(await resolveUnsent(w.unsentDeps('B'), P.txid, 'send', { confirmed: true })).toEqual({
+        ok: true,
+        txid: P.txid,
+        result: 'network-may-have-it',
+      });
+      expect(w.B.posted.slice(before)).toEqual([P.txid]);
+      expect(w.chain.has(P.txid)).toBe(true);
+    },
+  );
+
+  sim('task 54 round 5 (4): …Cancel releases its inputs with nothing broadcast; paused, Send now refuses', async () => {
+    const { w, P, listed } = await droppedElsewhere();
+    expect((await listed())?.elsewhere).toBe(true);
+    expect((await resolveUnsent(w.unsentDeps('B', { paused: true }), P.txid, 'send', { confirmed: true })).ok).toBe(
+      false,
+    );
+    const before = w.B.posted.length;
+    expect(await resolveUnsent(w.unsentDeps('B'), P.txid, 'cancel')).toEqual({
+      ok: true,
+      txid: P.txid,
+      result: 'cancelled',
+    });
+    expect(w.B.posted.slice(before)).toEqual([]);
+    expect(w.chain.has(P.txid)).toBe(false);
+    for (const o of P.inputs)
+      expect(
+        (await w.B.s.findOutputs({ partial: { txid: o.split('.')[0], vout: Number(o.split('.')[1]) } }))[0]?.spendable,
+      ).toBe(true);
+  });
+
+  sim(
+    'task 54 round 5 (4): …and the stuck-send review gives it up after its window, inputs released, nothing sent',
+    async () => {
+      const { w, P } = await droppedElsewhere();
+      w.advance(8 * 24 * 60 * 60_000);
+      const before = w.B.posted.length;
+      const r = await w.releaseStuck('B');
+      expect(r.released.map((x) => x.txid)).toContain(P.txid);
+      expect(w.B.posted.slice(before)).toEqual([]);
+      expect(await w.statusOf('B', P.txid)).toEqual({ tx: 'failed', req: 'invalid' });
     },
   );
 

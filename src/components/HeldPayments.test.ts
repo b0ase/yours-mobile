@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { HeldPaymentsView } from './HeldPayments';
-import { heldLineItems, RESTORED_LABEL } from './heldPaymentLines';
+import { ELSEWHERE_LABEL, heldLineItems, RESTORED_LABEL } from './heldPaymentLines';
 import { unsentOutcomeText as outcomeText } from '../services/stuckSends';
 
 const sats = (n: number) => `${n} sats`;
@@ -42,6 +42,12 @@ describe('held payments under the balance (task 54 review, rounds 2 and 3)', () 
     ])
       expect(view([p])).toMatch(/<button[^>]*disabled=""[^>]*>Send now<\/button>/);
     expect(view([queued])).not.toMatch(/<button[^>]*disabled=""[^>]*>Send now<\/button>/);
+  });
+  test("round 5 (4): another device's dropped payment is labelled so, with Send now and Cancel", () => {
+    const html = view([{ ...queued, elsewhere: true, queuedHere: false, description: 'From the backup' }]);
+    expect(html).toContain(`${ELSEWHERE_LABEL} · 20000 sats`);
+    expect(html).not.toContain('From the backup');
+    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Send now<\/button>/);
   });
   test("bytes that can't be read: amount unreadable and Send now disabled", () => {
     const html = view([{ ...queued, recipients: undefined, amountSats: undefined }]);

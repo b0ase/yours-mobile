@@ -269,7 +269,14 @@ describe("task 54 round 2: a held payment (restored as 'nosend') goes out only o
 });
 
 import { P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk';
-import { decodePayment, listQueuedSends, NEEDS_CONFIRMATION } from './stuckSends';
+import {
+  decodePayment,
+  listQueuedSends,
+  NEEDS_CONFIRMATION,
+  NOSEND_COPY_GIVE_UP_MS,
+  stuckVerdict,
+  visibleUnsent,
+} from './stuckSends';
 
 describe('task 54 round 3 (d): a held payment shows what its own bytes pay, and goes out only once confirmed', () => {
   const TX = 'e'.repeat(64);
@@ -336,5 +343,30 @@ describe('task 54 round 3 (d): a held payment shows what its own bytes pay, and 
     expect([q.amountSats, q.recipients?.map((r) => r.sats)]).toEqual([20_000, [20_000]]);
     // Without a way to tell, nothing counts as ours: every output is shown as paid out.
     expect((await listQueuedSends(sp))[0].amountSats).toBe(99_000);
+  });
+
+  test("round 5 (4): another device's sent-but-unconfirmed copy ('unproven' + request 'nosend') is listed as elsewhere; this device's own sent one is not", async () => {
+    const t = pay();
+    const mk = (status: string, req: string) => ({
+      findTransactions: async (a: { partial: Record<string, unknown> }) =>
+        a.partial.status === status
+          ? [{ transactionId: 1, txid: t.id('hex'), created_at: new Date(0), description: 'Coffee', satoshis: -5 }]
+          : [],
+      findProvenTxReqs: async () => [{ status: req, attempts: 0, rawTx: t.toBinary() }],
+      findOutputs: async () => [{ vout: 1, change: true, basketId: 1 }],
+    });
+    const [q] = await listQueuedSends(mk('unproven', 'nosend'), () => false, owns);
+    expect([q.elsewhere, q.amountSats, q.reqStatus]).toEqual([true, 20_000, 'nosend']);
+    expect(await listQueuedSends(mk('unproven', 'unmined'), () => false, owns)).toEqual([]);
+    // Shown to the user only once the network has no copy (a failed check keeps it off the list).
+    expect(await visibleUnsent([q], async () => true)).toEqual([]);
+    expect(await visibleUnsent([q], async () => false)).toEqual([q]);
+    expect(
+      await visibleUnsent([q], async () => {
+        throw new Error('woc down');
+      }),
+    ).toEqual([]);
+    // Given up on after the held-copy window like any other, by the same review.
+    expect(stuckVerdict({ ...q, createdAt: 0 }, NOSEND_COPY_GIVE_UP_MS + 1)).toBe('give-up');
   });
 });

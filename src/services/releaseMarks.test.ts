@@ -98,4 +98,31 @@ describe('release marks (this device only, never synced): task 54 review, rounds
     await w.createAction({ options: { sendWith: [A] } } as never, ADMIN as never);
     expect(m.released(A)).toBe(true);
   });
+
+  test('round 5 (3): a send that reached storage and then threw (results require review) keeps its marks', async () => {
+    const m = createReleaseMarks();
+    const review = () =>
+      Object.assign(new Error('Undelayed createAction or signAction results require review'), {
+        txid: C,
+        sendWithResults: [{ txid: A, status: 'failed' }],
+      });
+    const w = {
+      createAction: async () => {
+        throw review();
+      },
+    };
+    markReleases(w, m, { admin: ADMIN });
+    await expect(w.createAction({ options: { sendWith: [A] } } as never)).rejects.toThrow('require review');
+    // The payment it built is this device's own (queued here), and the release it made stands.
+    expect([m.released(C), m.owner(C), m.released(A)]).toEqual([true, '', true]);
+    // A noSend one that reached storage is held here.
+    const w2 = {
+      createAction: async () => {
+        throw Object.assign(new Error('Undelayed createAction or signAction results require review'), { txid: D });
+      },
+    };
+    markReleases(w2, m, { admin: ADMIN });
+    await expect(w2.createAction({ options: { noSend: true } } as never)).rejects.toThrow('require review');
+    expect([m.heldHere(D), m.released(D)]).toEqual([true, false]);
+  });
 });

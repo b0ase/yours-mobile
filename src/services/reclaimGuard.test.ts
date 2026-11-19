@@ -65,11 +65,18 @@ const scene = async (o: { pay?: 'ours' | 'foreign'; extraInput?: boolean; signer
     noSendExpiryReclaimDerivationSuffix: 'suf',
     noSendExpiryReclaimSatoshis: 990,
   };
-  const store = (anchorHere = true) => ({
+  /** This store: the payment's row (and `extra` rows), the funding transaction's own bytes, the anchor's output row. */
+  const store = (anchorHere = true, o: { rowScript?: number[]; fundingBytes?: boolean; extra?: ExpiryRow[] } = {}) => ({
     findTransactions: async (a: { partial: Record<string, unknown> }) =>
-      [row].filter((r) => Object.entries(a.partial).every(([k, v]) => (r as Record<string, unknown>)[k] === v)),
+      [
+        ...(o.extra ?? []),
+        row,
+        ...(o.fundingBytes === false ? [] : [{ txid: funding.id('hex'), rawTx: funding.toBinary() } as ExpiryRow]),
+      ].filter((r) => Object.entries(a.partial).every(([k, v]) => (r as Record<string, unknown>)[k] === v)),
     findOutputs: async () =>
-      anchorHere ? [{ lockingScript: funding.outputs[0].lockingScript.toBinary(), satoshis: 1_000 }] : [],
+      anchorHere
+        ? [{ lockingScript: o.rowScript ?? funding.outputs[0].lockingScript.toBinary(), satoshis: 1_000 }]
+        : [],
   });
   return { funding, W, R, row, store };
 };
@@ -135,5 +142,40 @@ describe('task 54 round 4: a reclaim goes out only when it is structurally the w
   test("activation of the wallet's own reclaim goes ahead", async () => {
     const { r, moved } = await activation({});
     expect([r, moved]).toEqual([true, ['reclaiming']]);
+  });
+
+  test("round 5 (1): a forged row naming the same reclaim doesn't block the real one (any passing row lets it out)", async () => {
+    const { row, store } = await scene();
+    const other = await scene();
+    // A forged payment row that names this reclaim but whose payment doesn't spend the anchor; it sorts first.
+    const forged: ExpiryRow = { ...row, transactionId: 1, txid: other.W.id('hex'), rawTx: other.W.toBinary() };
+    expect(await checkReclaim(store(true, { extra: [forged] }), forged, lockFor)).toBe(
+      'the payment does not spend the anchor',
+    );
+    expect(
+      await reclaimVerdict(store(true, { extra: [forged] }), row.noSendExpiryReclaimTxid!, lockFor),
+    ).toBeUndefined();
+    // Only forged rows: refused, with the first one's reason.
+    const bad = await scene({ pay: 'foreign' });
+    expect(await reclaimVerdict(bad.store(), bad.row.noSendExpiryReclaimTxid!, lockFor)).toBe(
+      "the reclaim doesn't pay this wallet's own key",
+    );
+  });
+
+  test("round 5 (2): the anchor's script comes from the anchor transaction's own bytes, never the output row", async () => {
+    // A reclaim that unlocks nothing (no signature), and an anchor row that says OP_TRUE (anyone can spend).
+    const { row, store } = await scene({ signer: PrivateKey.fromRandom() });
+    const R = Transaction.fromBinary(Array.from(row.noSendExpiryReclaimRawTx!));
+    R.inputs[0].unlockingScript = new Script();
+    const unsigned = { ...row, noSendExpiryReclaimTxid: R.id('hex'), noSendExpiryReclaimRawTx: R.toBinary() };
+    const OP_TRUE = [0x51];
+    expect(await checkReclaim(store(true, { rowScript: OP_TRUE }), unsigned, lockFor)).toBe(
+      'the reclaim signature does not verify',
+    );
+    // No bytes of the anchor transaction here: refused.
+    const good = await scene();
+    expect(await checkReclaim(good.store(true, { fundingBytes: false }), good.row, lockFor)).toBe(
+      "the anchor transaction's bytes are not here",
+    );
   });
 });

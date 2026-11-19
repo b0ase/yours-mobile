@@ -39,6 +39,7 @@ export type ReclaimStore = {
     trx?: unknown;
   }): Promise<{ lockingScript?: Bytes | null; satoshis?: number | null }[]>;
   findProvenTxReqs?(a: { partial: Record<string, unknown>; trx?: unknown }): Promise<{ rawTx?: Bytes | null }[]>;
+  findProvenTxs?(a: { partial: Record<string, unknown>; trx?: unknown }): Promise<{ rawTx?: Bytes | null }[]>;
 };
 /** The locking script (hex) the wallet's own reclaim output has for this derivation. */
 export type LockFor = (derivationPrefix: string, derivationSuffix: string) => string;
@@ -66,6 +67,21 @@ const parse = (raw: Bytes | null | undefined) => {
   }
 };
 
+/** The anchor transaction from this store's own bytes (its row, request or proven record) that hash to `txid`. */
+async function anchorTxOf(sp: ReclaimStore, txid: string, trx?: unknown): Promise<Transaction | undefined> {
+  const sources: (() => Promise<{ rawTx?: Bytes | null }[]>)[] = [
+    () => sp.findTransactions({ partial: { txid }, trx }),
+    ...(sp.findProvenTxReqs ? [() => sp.findProvenTxReqs!({ partial: { txid }, trx })] : []),
+    ...(sp.findProvenTxs ? [() => sp.findProvenTxs!({ partial: { txid }, trx })] : []),
+  ];
+  for (const read of sources)
+    for (const r of await read().catch(() => [])) {
+      const tx = parse(r.rawTx);
+      if (tx && tx.id('hex') === txid) return tx;
+    }
+  return undefined;
+}
+
 /** Why `t`'s reclaim is not the wallet's own, structurally; undefined when it is. Reads only; writes nothing. */
 export async function checkReclaim(
   sp: ReclaimStore,
@@ -87,8 +103,11 @@ export async function checkReclaim(
   if (reclaim.inputs.length !== 1 || outpointOf(reclaim.inputs[0]) !== anchor)
     return 'the reclaim spends something other than the anchor';
   const [row] = await sp.findOutputs({ partial: { txid: anchorTxid, vout }, trx });
-  if (!row?.lockingScript?.length || typeof row.satoshis !== 'number')
-    return 'the anchor is not an output in this store';
+  if (!row) return 'the anchor is not an output in this store';
+  // The anchor's script and amount come from its own transaction's bytes (hashing to its txid), never from the
+  // output row, which a backup could have written (review round 5, item 2).
+  const anchorOut = (await anchorTxOf(sp, anchorTxid, trx))?.outputs[vout];
+  if (!anchorOut || typeof anchorOut.satoshis !== 'number') return "the anchor transaction's bytes are not here";
   let targetTx = parse(t.rawTx);
   if (!targetTx && sp.findProvenTxReqs)
     targetTx = parse((await sp.findProvenTxReqs({ partial: { txid: target }, trx }))[0]?.rawTx);
@@ -106,8 +125,8 @@ export async function checkReclaim(
     const ok = new Spend({
       sourceTXID: anchorTxid,
       sourceOutputIndex: vout,
-      sourceSatoshis: row.satoshis,
-      lockingScript: LockingScript.fromBinary(Array.from(row.lockingScript)),
+      sourceSatoshis: anchorOut.satoshis,
+      lockingScript: LockingScript.fromBinary(anchorOut.lockingScript.toBinary()),
       transactionVersion: reclaim.version,
       otherInputs: [],
       outputs: reclaim.outputs,
@@ -123,10 +142,24 @@ export async function checkReclaim(
   return undefined;
 }
 
-/** The transaction whose reclaim `txid` is, if any, checked: why it may not go out, or undefined. */
+/**
+ * May `txid` go out as a reclaim? Every payment naming it as its reclaim is checked (the one 'reclaiming' first): it
+ * passes when any of them passes (review round 5, item 1: a forged row that sorts first must not block a real one).
+ * Undefined when it passes or is no payment's reclaim; else the first row's reason.
+ */
 export async function reclaimVerdict(sp: ReclaimStore, txid: string, lockFor: LockFor): Promise<string | undefined> {
-  const [t] = await sp.findTransactions({ partial: { noSendExpiryReclaimTxid: txid } });
-  return t ? checkReclaim(sp, t, lockFor) : undefined;
+  const rows = await sp.findTransactions({ partial: { noSendExpiryReclaimTxid: txid } });
+  if (!rows.length) return undefined;
+  const ordered = [...rows].sort(
+    (a, b) => Number(b.noSendExpiryState === 'reclaiming') - Number(a.noSendExpiryState === 'reclaiming'),
+  );
+  let first: string | undefined;
+  for (const t of ordered) {
+    const why = await checkReclaim(sp, t, lockFor);
+    if (!why) return undefined;
+    first ??= why;
+  }
+  return first;
 }
 
 type ActivationStore = ReclaimStore & {

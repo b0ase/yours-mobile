@@ -31,8 +31,11 @@ export type ReleaseMarks = {
   release: (txids: Iterable<string>) => Promise<void>;
   /** Released now: kept, or in flight in a call still running. */
   released: (txid: string) => boolean;
-  /** Count these released while `run` runs; keep them only if it succeeds. */
-  inFlight: <T>(txids: string[], run: () => Promise<T>) => Promise<T>;
+  /**
+   * Count these released while `run` runs; keep them only if it succeeds, or if it throws an error `keep` accepts (one
+   * thrown after the action reached storage).
+   */
+  inFlight: <T>(txids: string[], run: () => Promise<T>, keep?: (e: unknown) => boolean) => Promise<T>;
   hold: (txid: string, owner?: string) => Promise<void>;
   /** Signed noSend on this device (not yet released). */
   heldHere: (txid: string) => boolean;
@@ -80,13 +83,16 @@ export function createReleaseMarks(kv?: ReleaseKV): ReleaseMarks {
       await save();
     },
     released: (txid) => released.has(norm(txid)) || (flying.get(norm(txid)) ?? 0) > 0,
-    inFlight: async (txids, run) => {
+    inFlight: async (txids, run, keep) => {
       const ids = txids.map(norm).filter((t) => TXID.test(t));
       for (const t of ids) flying.set(t, (flying.get(t) ?? 0) + 1);
       try {
         const r = await run();
         await marks.release(ids);
         return r;
+      } catch (e) {
+        if (keep?.(e)) await marks.release(ids);
+        throw e;
       } finally {
         for (const t of ids) {
           const n = (flying.get(t) ?? 1) - 1;
@@ -165,29 +171,47 @@ export function markReleases<T extends object>(wallet: T, marks: ReleaseMarks, o
     w[method] = async (args: ActionArgs, originator?: unknown, ...rest: unknown[]) => {
       const owner = ownerOf(originator);
       if (isSite(owner)) for (const t of namedBy(args)) if (marks.owner(t) !== owner) throw new Error(NOT_YOURS);
-      const r = await marks.inFlight(releasedBy(args), async () =>
-        (original as (...a: unknown[]) => Promise<ActionResult>).apply(wallet, [args, originator, ...rest]),
-      );
-      if (method === 'createAction') {
-        const noSend = !!args?.options?.noSend;
-        if (r?.txid) {
-          await marks.setOwner(r.txid, owner);
-          if (noSend) await marks.hold(r.txid, owner);
-          else await marks.release([r.txid]);
-        } else if (r?.signableTransaction?.reference) pending.set(r.signableTransaction.reference, { noSend, owner });
-      } else if (r?.txid) {
-        // signAction finishes a two-step createAction (every site's, through the permissions manager): its noSend
-        // choice and maker were noted by reference. One not noted (made before this open) is never released by it.
-        const p = args?.reference ? pending.get(args.reference) : undefined;
-        if (args?.reference) pending.delete(args.reference);
-        if (p) {
-          await marks.setOwner(r.txid, p.owner);
-          if (p.noSend) await marks.hold(r.txid, p.owner);
-          else if (!args?.options?.noSend) await marks.release([r.txid]);
-        }
+      let r: ActionResult;
+      try {
+        r = await marks.inFlight(
+          releasedBy(args),
+          async () =>
+            (original as (...a: unknown[]) => Promise<ActionResult>).apply(wallet, [args, originator, ...rest]),
+          reachedStorage,
+        );
+      } catch (e) {
+        // Thrown after the action reached storage ("Undelayed createAction or signAction results require review",
+        // WERR_REVIEW_ACTIONS, carries its txid): its records are kept as for a success (review round 5, item 3).
+        if (reachedStorage(e)) await record(method, args, owner, { txid: (e as { txid: string }).txid });
+        throw e;
       }
+      await record(method, args, owner, r);
       return r;
     };
   }
+  /** This device's records of one action's result: its maker, and held (noSend) or released. */
+  async function record(method: 'createAction' | 'signAction', args: ActionArgs, owner: string, r: ActionResult) {
+    if (method === 'createAction') {
+      const noSend = !!args?.options?.noSend;
+      if (r?.txid) {
+        await marks.setOwner(r.txid, owner);
+        if (noSend) await marks.hold(r.txid, owner);
+        else await marks.release([r.txid]);
+      } else if (r?.signableTransaction?.reference) pending.set(r.signableTransaction.reference, { noSend, owner });
+    } else if (r?.txid) {
+      // signAction finishes a two-step createAction (every site's, through the permissions manager): its noSend
+      // choice and maker were noted by reference. One not noted (made before this open) is never released by it.
+      const p = args?.reference ? pending.get(args.reference) : undefined;
+      if (args?.reference) pending.delete(args.reference);
+      if (p) {
+        await marks.setOwner(r.txid, p.owner);
+        if (p.noSend) await marks.hold(r.txid, p.owner);
+        else if (!args?.options?.noSend) await marks.release([r.txid]);
+      }
+    }
+  }
   return wallet;
 }
+
+/** An error the toolbox throws after the action is in storage: it names the action's txid. */
+const reachedStorage = (e: unknown) => TXID.test(norm(String((e as { txid?: unknown } | null)?.txid ?? '')));

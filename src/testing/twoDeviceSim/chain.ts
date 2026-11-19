@@ -140,6 +140,15 @@ export class FakeChain {
     return { ok: true };
   }
 
+  /** The network forgets an unmined transaction (it dropped out of the mempool): its inputs are unspent again. */
+  drop(txid: string) {
+    const t = this.txs.get(txid);
+    if (!t || t.block !== undefined) throw new Error(`${txid} is not in the mempool`);
+    for (const i of inputsOf(t.tx)) if (this.spentBy.get(i) === txid) this.spentBy.delete(i);
+    for (let v = 0; v < t.tx.outputs.length; v++) this.owned.delete(op(txid, v));
+    this.txs.delete(txid);
+  }
+
   /** Mine everything in the mempool into the next block (one block per call). */
   mine() {
     this.height++;

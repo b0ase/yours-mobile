@@ -4,7 +4,7 @@ import { sendMessageAsync } from '../utils/chromeHelpers';
 import { ThemeContext } from '../contexts/ColorThemeContext';
 import { TruthLinesOn } from './truthLinesContext';
 import { SendConfirmation } from './SendConfirmation';
-import { heldLineItems, RESTORED_LABEL } from './heldPaymentLines';
+import { ELSEWHERE_LABEL, heldLineItems, RESTORED_LABEL } from './heldPaymentLines';
 
 const MUTED = 'var(--bw-muted, #98A2B3)';
 const GOLD = 'var(--bw-accent, #D4AF37)';
@@ -29,7 +29,10 @@ export const HeldPaymentsView = ({
   onSend,
   onCancel,
 }: {
-  items: Pick<QueuedSend, 'txid' | 'description' | 'createdAt' | 'recipients' | 'amountSats' | 'queuedHere'>[];
+  items: Pick<
+    QueuedSend,
+    'txid' | 'description' | 'createdAt' | 'recipients' | 'amountSats' | 'queuedHere' | 'elsewhere'
+  >[];
   fmt: (sats: number) => string;
   hidden?: boolean;
   busy?: string;
@@ -55,7 +58,7 @@ export const HeldPaymentsView = ({
       {items.map((p) => (
         <div key={p.txid} className="flex gap-2 items-center justify-between" style={{ marginTop: 4 }}>
           <span className="overflow-hidden text-ellipsis whitespace-nowrap select-text">
-            {p.queuedHere ? p.description || 'Payment' : RESTORED_LABEL}
+            {p.elsewhere ? ELSEWHERE_LABEL : p.queuedHere ? p.description || 'Payment' : RESTORED_LABEL}
             {hidden ? '' : typeof p.amountSats === 'number' ? ` · ${fmt(p.amountSats)}` : ' · amount unreadable'}
             {p.recipients?.length
               ? ` to ${p.recipients.length === 1 ? p.recipients[0].to.slice(0, 10) + '…' : `${p.recipients.length} recipients`}`

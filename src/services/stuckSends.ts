@@ -55,6 +55,12 @@ export type QueuedSend = {
   amountSats?: number;
   /** This device queued it itself (services/releaseMarks.ts): not one restored from a backup. */
   queuedHere?: boolean;
+  /**
+   * Another device's payment this one holds a copy of as sent but unconfirmed (transaction 'unproven', request
+   * 'nosend'): if it dropped out of the mempool no copy re-sends it, so it is listed for Send now / Cancel once the
+   * network has no copy (review round 5, item 4).
+   */
+  elsewhere?: boolean;
 };
 
 export type Recipient = { to: string; sats: number };
@@ -128,12 +134,24 @@ export async function listQueuedSends(
   owns?: OwnsOutput,
 ): Promise<QueuedSend[]> {
   const out: QueuedSend[] = [];
-  for (const t of await sp.findTransactions({ partial: { status: 'sending', isOutgoing: true }, noRawTx: true })) {
+  const rows = [
+    ...(await sp.findTransactions({ partial: { status: 'sending', isOutgoing: true }, noRawTx: true })).map((t) => ({
+      t,
+      elsewhere: false,
+    })),
+    ...(await sp.findTransactions({ partial: { status: 'unproven', isOutgoing: true }, noRawTx: true })).map((t) => ({
+      t,
+      elsewhere: true,
+    })),
+  ];
+  for (const { t, elsewhere } of rows) {
     if (!t.txid) continue;
     const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
-    const rows = await sp.findOutputs({ partial: { transactionId: t.transactionId } });
+    // A sent payment is listed only as another device's copy held here (its own sends are the Monitor's to settle).
+    if (elsewhere && req?.status !== 'nosend') continue;
+    const outputs = await sp.findOutputs({ partial: { transactionId: t.transactionId } });
     const paid = await decodePayment(req?.rawTx, async (vout, script) => {
-      const row = rows.find((o) => o.vout === vout);
+      const row = outputs.find((o) => o.vout === vout);
       return !!row && !!owns && (await owns(row as never, script).catch(() => false));
     });
     out.push({
@@ -146,8 +164,23 @@ export async function listQueuedSends(
       satoshis: t.satoshis,
       ...(paid ?? {}),
       queuedHere: released ? released(t.txid) : undefined,
+      ...(elsewhere ? { elsewhere: true } : {}),
     });
   }
+  return out;
+}
+
+/**
+ * What the user's list shows: every queued send, and another device's unconfirmed payment only once the network has
+ * no copy of it (`knownOnChain` fails closed: any doubt keeps it off the list). The stuck-send review (releaseStuckSends)
+ * reads the whole list: such a copy is given up on, inputs released, after NOSEND_COPY_GIVE_UP_MS like any held copy.
+ */
+export async function visibleUnsent(
+  queued: QueuedSend[],
+  knownOnChain: (txid: string) => Promise<boolean>,
+): Promise<QueuedSend[]> {
+  const out: QueuedSend[] = [];
+  for (const q of queued) if (!q.elsewhere || !(await knownOnChain(q.txid).catch(() => true))) out.push(q);
   return out;
 }
 
