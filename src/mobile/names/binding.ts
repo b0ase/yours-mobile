@@ -72,11 +72,23 @@ export async function checkBinding(alias: string, pubkey: string | undefined, b:
  * key bound to the TYPED name, shown by that name's own signed binding (`fromBinding`) riding with the forward, so a
  * host can't make one up and an attacker's own key can't speak for someone else's name. Returns the target alias only
  * when all of it checks out and it hasn't expired; anything else is no forward.
+ *
+ * `expiresAt` formats accepted (the server, bit-sign, must send one of these and sign the same string):
+ * - null, absent or "" = no expiry; signed as "".
+ * - a number = Unix time in MILLISECONDS (not seconds); signed as String(n), e.g. "1795000000000".
+ * - a string = an ISO 8601 date (Date.parse), e.g. "2026-12-01T00:00:00.000Z"; signed exactly as sent.
+ * Anything else, or a time not in the future, is no forward.
+ *
+ * `servedKey` is the key the host serves (the one that would be paid). This wallet may already remember it for the
+ * typed name: after a followed forward, confirm() saves the TARGET's key under the typed name. So the signer passes the
+ * key-change check when the remembered key is unset, is the signer, or is the served key; resolvePaymail still runs
+ * keyChange on the served key itself.
  */
 export async function checkForward(
   alias: string,
   fw: unknown,
   shape: (alias: string, fw: unknown) => string | undefined,
+  servedKey?: string,
   now = Date.now(),
 ): Promise<string | undefined> {
   const to = shape(alias, fw);
@@ -92,7 +104,8 @@ export async function checkForward(
   const key = typeof f.identityKey === 'string' ? f.identityKey : '';
   if (!key || typeof f.signature !== 'string' || !f.signature || !['string', 'number'].includes(typeof f.timestamp))
     return undefined;
-  if (f.expiresAt !== null && f.expiresAt !== undefined) {
+  const noExpiry = f.expiresAt === null || f.expiresAt === undefined || f.expiresAt === '';
+  if (!noExpiry) {
     const at = typeof f.expiresAt === 'number' ? f.expiresAt : Date.parse(String(f.expiresAt));
     if (!Number.isFinite(at) || at <= now) return undefined;
   }
@@ -100,11 +113,13 @@ export async function checkForward(
     // The signer must be the key the typed name is bound to, and not a key change this wallet hasn't accepted.
     const binding = f.fromBinding as { handover?: Handover } | undefined;
     if ((await checkBinding(alias, key, binding)) !== 'signed') return undefined;
-    if (keyChange(alias, key, 'signed', binding?.handover?.from) !== 'signed') return undefined;
+    const seen = readSeen()[alias.toLowerCase()];
+    const paidServed = !!seen && !!servedKey && seen === servedKey.toLowerCase();
+    if (!paidServed && keyChange(alias, key, 'signed', binding?.handover?.from) !== 'signed') return undefined;
     const fields = {
       from: String(f.from).split('@')[0].toLowerCase(),
       to,
-      expiresAt: f.expiresAt === null || f.expiresAt === undefined ? '' : String(f.expiresAt),
+      expiresAt: noExpiry ? '' : String(f.expiresAt),
       identityKey: key,
       timestamp: String(f.timestamp),
     };

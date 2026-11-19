@@ -27,7 +27,7 @@ const signedForward = async (
   w: ReturnType<typeof wallet>,
   from: string,
   to: string,
-  expiresAt: number | null,
+  expiresAt: number | string | null,
   over: Record<string, unknown> = {},
 ) => {
   const r = await signRequest(w, 'forward', {
@@ -204,6 +204,74 @@ describe('forwarded names', () => {
     const r = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
     expect(r.forwardsTo).toBe('b0asex');
     expect(forwardLabel(r)).toBe('boase@ forwards to b0asex@ (same owner)');
+  });
+
+  // Review fix: confirm() saves the TARGET's key under the typed name; the next resolve must still follow the forward.
+  test('a forward between two different keys still pays after the payer confirmed it once', async () => {
+    mem.clear();
+    const old = wallet(56); // boase@'s owner key, signs the forward
+    const now = wallet(57); // b0asex@'s key, the one paid
+    const f = host({
+      handle: 'b0asex@bwalletx.com',
+      pubkey: now.key,
+      binding: await bindingFrom(now, 'b0asex', 1),
+      forward: await signedForward(old, 'boase', 'b0asex', null),
+    });
+    const first = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
+    expect(first.forwardsTo).toBe('b0asex');
+    expect(first.nameBinding).toBe('signed');
+    trustCurrentKey('boase', first.pubkey as string); // what NameInput confirm() remembers
+    const again = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
+    expect(again.forwardsTo).toBe('b0asex');
+    expect(again.nameBinding).toBe('signed');
+    expect(destinationFor(again, 'bsv').ok).toBe(true);
+  });
+
+  test('a remembered key that is neither the signer nor the served key still refuses', async () => {
+    mem.clear();
+    const known = wallet(58);
+    const old = wallet(59);
+    const now = wallet(60);
+    trustCurrentKey('boase', known.key);
+    const f = host({
+      handle: 'b0asex@bwalletx.com',
+      pubkey: now.key,
+      binding: await bindingFrom(now, 'b0asex', 1),
+      forward: await signedForward(old, 'boase', 'b0asex', null),
+    });
+    const r = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
+    expect(r.forwardsTo).toBeUndefined();
+    expect(r.nameBinding).toBe('mismatch');
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: NAME_MISMATCH });
+  });
+
+  test('expiresAt "" means no expiry (signed as ""), like null', async () => {
+    mem.clear();
+    const owner = wallet(61);
+    const f = host({
+      handle: 'b0asex@bwalletx.com',
+      pubkey: owner.key,
+      binding: await bindingFrom(owner, 'b0asex', 1),
+      forward: await signedForward(owner, 'boase', 'b0asex', ''),
+    });
+    const r = await resolveRecipient(f, parseRecipient('boase@bwallet.space'));
+    expect(r.forwardsTo).toBe('b0asex');
+    expect(forwardLabel(r)).toBe('boase@ forwards to b0asex@ (same owner)');
+  });
+
+  test('expiresAt as a future ISO string is followed; a past one refuses', async () => {
+    mem.clear();
+    const owner = wallet(62);
+    const f = host({
+      handle: 'b0asex@bwalletx.com',
+      pubkey: owner.key,
+      binding: await bindingFrom(owner, 'b0asex', 1),
+      forward: await signedForward(owner, 'boase', 'b0asex', new Date(Date.now() + 60_000).toISOString()),
+    });
+    expect((await resolveRecipient(f, parseRecipient('boase@bwallet.space'))).forwardsTo).toBe('b0asex');
+    refused(
+      await attack((victim) => signedForward(victim, 'boase', 'mallory', new Date(Date.now() - 1000).toISOString())),
+    );
   });
 
   test('a forward whose typed-name key is not the one this wallet knows refuses', async () => {

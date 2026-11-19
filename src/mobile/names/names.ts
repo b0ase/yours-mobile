@@ -336,7 +336,7 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
     if (!r.external && r.pubkey) {
       // Only a forward the typed name's owner signed (and that hasn't expired) counts; an unsigned one is ignored and
       // the typed name's own binding is checked against the served key below, so a mismatch refuses.
-      const to = await checkForward(alias, id?.forward, forwardTarget);
+      const to = await checkForward(alias, id?.forward, forwardTarget, r.pubkey);
       if (to) r.forwardsTo = to;
       // A forward's binding is the target's: check it against the target name, never the typed one.
       const boundTo = to ?? alias;
