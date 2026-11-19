@@ -317,10 +317,11 @@ export const trustResolvedKey = (r: Pick<Resolved, 'input' | 'pubkey' | 'forward
 
 /**
  * "boase@ forwards to b0asex@ (same owner)": the confirm-card line for a forwarded bWalletX name. `forwardsTo` is set
- * only from a forward the typed name's owner signed, so "same owner" is said only when that signature verified.
+ * only from a forward the typed name's owner signed, so "same owner" is said only when that signature verified AND the
+ * wallet lets the payment proceed. A refused resolve (key changed, name mismatch, bad proof) shows the refusal alone.
  */
-export const forwardLabel = (r: Pick<Resolved, 'input' | 'forwardsTo'>): string | undefined => {
-  if (!r.forwardsTo) return undefined;
+export const forwardLabel = (r: Resolved): string | undefined => {
+  if (!r.forwardsTo || !destinationFor(r, 'bsv').ok) return undefined;
   const from = r.input.replace(/^\$/, '').split('@')[0].toLowerCase();
   return `${from}@ forwards to ${r.forwardsTo}@ (same owner)`;
 };

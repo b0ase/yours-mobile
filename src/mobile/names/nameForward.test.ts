@@ -241,6 +241,37 @@ describe('forwarded names', () => {
     expect(destinationFor(again, 'bsv').ok).toBe(true);
   });
 
+  // Final review (P4): the remembered key (the last forward's target) signs a new forward; the payment stops as a key
+  // change, so the card must not say "(same owner)".
+  test('P4: remembered key signs a new forward: refusal shown, no "(same owner)"', async () => {
+    mem.clear();
+    const owner = wallet(73);
+    const kb = wallet(74);
+    const kx = wallet(75);
+    confirmed(
+      await resolveRecipient(
+        host({
+          pubkey: kb.key,
+          binding: await bindingFrom(kb, 'bob', 1),
+          forward: await signedForward(owner, 'alice', 'bob', null),
+        }),
+        parseRecipient(alice),
+      ),
+    );
+    const r = await resolveRecipient(
+      host({
+        pubkey: kx.key,
+        binding: await bindingFrom(kx, 'carol', 1),
+        forward: await signedForward(kb, 'alice', 'carol', null),
+      }),
+      parseRecipient(alice),
+    );
+    expect(r.forwardsTo).toBe('carol');
+    expect(r.nameBinding).toBe('changed');
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: KEY_CHANGED });
+    expect(forwardLabel(r)).toBeUndefined();
+  });
+
   // F2: paid alice directly, then she forwards to a new key; trusting the change must also remember the signer.
   test('paid directly, then a signed forward to a new key: trust pressed, next resolve pays', async () => {
     mem.clear();
