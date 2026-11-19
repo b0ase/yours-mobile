@@ -73,6 +73,21 @@ describe('legacy MNEE sweep and the spending pause (b-Aware 505)', () => {
     expect(r.error).toBe('No ticket ID returned from MNEE');
   });
 
+  test('paused while the sweep is building: nothing reaches the cosigner (check right before submit)', async () => {
+    setStatus([]);
+    const { client, calls } = makeClient();
+    const inner = (client as { fetchRawTx: () => Promise<string> }).fetchRawTx;
+    (client as { fetchRawTx: () => Promise<string> }).fetchRawTx = async () => {
+      setStatus(['spending']); // the pause lands after the first check, before the submit
+      return inner();
+    };
+    await expect(
+      sweepLegacyMnee({ mneeClient: client, legacyPrivateKey: key, destinationAddress: dest }),
+    ).rejects.toBeInstanceOf(FeaturePausedError);
+    expect(calls.fetchRawTx).toBeGreaterThan(0);
+    expect(calls.submitRawTx).toBe(0);
+  });
+
   test('a different feature paused does not stop the sweep', async () => {
     setStatus(['passkeyCreate']);
     const { client, calls } = makeClient();
