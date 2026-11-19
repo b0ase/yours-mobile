@@ -320,8 +320,9 @@ export const trustResolvedKey = (r: Pick<Resolved, 'input' | 'pubkey' | 'forward
  * only from a forward the typed name's owner signed, so "same owner" is said only when that signature verified AND the
  * wallet lets the payment proceed. A refused resolve (key changed, name mismatch, bad proof) shows the refusal alone.
  */
-export const forwardLabel = (r: Resolved): string | undefined => {
-  if (!r.forwardsTo || !destinationFor(r, 'bsv').ok) return undefined;
+export const forwardLabel = (r: Resolved, asset: Parameters<typeof destinationFor>[1] = 'bsv'): string | undefined => {
+  // Only beside a destination this send can actually pay (the same check the card refuses on).
+  if (!r.forwardsTo || !destinationFor(r, asset).ok) return undefined;
   const from = r.input.replace(/^\$/, '').split('@')[0].toLowerCase();
   return `${from}@ forwards to ${r.forwardsTo}@ (same owner)`;
 };

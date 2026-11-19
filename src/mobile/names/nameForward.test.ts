@@ -108,6 +108,9 @@ describe('forwarded names', () => {
     expect(r.nameBinding).toBe('signed');
     expect(forwardLabel(r)).toBe('boase@ forwards to b0asex@ (same owner)');
     expect(destinationFor(r, 'bsv').ok).toBe(true);
+    // A token send to the same name: the card refuses (no ord address), so no "same owner" line beside the refusal.
+    expect(destinationFor(r, 'token').ok).toBe(false);
+    expect(forwardLabel(r, 'token')).toBeUndefined();
   });
 
   test('another name served with no forward is a mismatch: never paid, clear message', async () => {
