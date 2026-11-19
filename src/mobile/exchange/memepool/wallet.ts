@@ -72,8 +72,14 @@ export function memepoolWallet(
       return { coin, beef: Array.from(r.tx), pay };
     },
     async returnFunding(f: Funding) {
+      // Records keep no BEEF (it can fill the storage quota): a swept funding fetches it again from the network.
+      let tx = f.beef;
+      if (!tx.length) {
+        if (!services) throw new Error('No way to fetch the funding transaction right now.');
+        tx = (await services.getBeefForTxid(f.coin.txid)).toBinaryAtomic(f.coin.txid);
+      }
       await wallet.internalizeAction({
-        tx: f.beef,
+        tx,
         outputs: [await payment(f.pay, f.coin.vout)],
         description: 'Memepool buy not made: BSV back in your wallet',
         labels: ['memepool'],

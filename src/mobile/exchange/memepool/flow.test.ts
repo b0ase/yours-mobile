@@ -27,6 +27,7 @@ import {
   type TradeWallet,
 } from './trade';
 import { legacyPendingStore, localPendingStore, type PendingRecord, type PendingStore } from './pending';
+import { memepoolWallet } from './wallet';
 import { PARAMS, STATE, TOKEN, POOL_ORD, POOL_PAY, INDEXER, honestBuy, honestSell, pay, tok } from './testkit';
 import { addressPkh, bsv21TransferScript, parseBsv21Transfer } from './script';
 import type { Template } from './validate';
@@ -169,6 +170,8 @@ function fakeMemepool(opts: {
   submit?: Reply[];
   proof?: unknown;
   config?: Record<string, unknown>;
+  /** How long Memepool says its quote lives (default 30 s). */
+  expiresIn?: number;
 }) {
   const calls: string[] = [];
   const prepares = [...(opts.prepare ?? [])];
@@ -229,7 +232,11 @@ function fakeMemepool(opts: {
       const r = prepares.shift();
       if (r && r.status !== 200) return json(r.status, r.body);
       const body = JSON.parse(String(init?.body));
-      return json(200, { quoteId: `q${calls.length}`, template: opts.build(body), expiresAt: Date.now() + 30_000 });
+      return json(200, {
+        quoteId: `q${calls.length}`,
+        template: opts.build(body),
+        expiresAt: Date.now() + (opts.expiresIn ?? 30_000),
+      });
     }
     if (path === '/trade/submit') {
       const r = submits.shift() ?? { status: 202, body: { txid: 'ab'.repeat(32) } };
@@ -242,7 +249,13 @@ function fakeMemepool(opts: {
 
 /** `account` stands for the wallet's root key: a nonce re-derives the same pay key only in the same account. */
 function fakeWallet(side: 'buy' | 'sell', account = 'A') {
-  const log = { signed: 0, funded: 0, returned: 0, signedIndexes: [] as number[][] };
+  const log = {
+    signed: 0,
+    funded: 0,
+    returned: 0,
+    signedIndexes: [] as number[][],
+    back: [] as Parameters<TradeWallet['returnFunding']>[0][],
+  };
   let ordAddr = '';
   let payAddr = '';
   const w: TradeWallet = {
@@ -266,8 +279,9 @@ function fakeWallet(side: 'buy' | 'sell', account = 'A') {
         pay: p,
       };
     },
-    returnFunding: async () => {
+    returnFunding: async (f) => {
       log.returned++;
+      log.back.push(f);
     },
     tokenCoins: async () =>
       side === 'sell'
@@ -304,6 +318,43 @@ const buildBuy = (tweak?: (t: Template) => void) => (body: Record<string, unknow
   Object.assign(userIn, { txid: coin.txid, vout: coin.vout });
   tweak?.(f.t);
   return f.t;
+};
+
+// ── the network as WhatsOnChain answers it (/spent, /tx/hash, /address/../unspent/all) ─────────────────────────────
+type Net = {
+  /** `${txid}_${vout}` → the txid that spent it. */
+  spent: Map<string, string>;
+  txs: Map<string, { confirmed: boolean; inputs: { txid: string; vout: number }[] }>;
+  utxos: Map<string, { tx_hash: string; tx_pos: number; value: number; isSpentInMempoolTx?: boolean }[]>;
+};
+const newNet = (): Net => ({ spent: new Map(), txs: new Map(), utxos: new Map() });
+const onNet = (inner: Deps['fetch'], net: Net): Deps['fetch'] =>
+  (async (url: string, init?: RequestInit) => {
+    const ok = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
+    let m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(url);
+    if (m) {
+      const by = net.spent.get(`${m[1]}_${m[2]}`);
+      return by ? ok({ txid: by, vin: 0, status: 'confirmed' }) : new Response('', { status: 404 });
+    }
+    m = /\/tx\/hash\/([0-9a-f]{64})$/.exec(url);
+    if (m) {
+      const t = net.txs.get(m[1]);
+      if (!t) return new Response('', { status: 404 });
+      return ok({
+        txid: m[1],
+        vin: t.inputs,
+        ...(t.confirmed ? { blockhash: '00'.repeat(32), confirmations: 1 } : {}),
+      });
+    }
+    m = /\/address\/(\w+)\/unspent\/all$/.exec(url);
+    if (m) return ok({ address: m[1], result: net.utxos.get(m[1]) ?? [], error: '' });
+    return inner(url, init);
+  }) as Deps['fetch'];
+/** Another trader's transaction takes the first pool coin of `p`'s template (confirmed unless said otherwise). */
+const killPool = (net: Net, p: { template: Template }, confirmed = true, spender = 'ee'.repeat(32)) => {
+  const pool = p.template.inputs.find((i) => i.owner !== 'user')!;
+  net.spent.set(`${pool.txid}_${pool.vout}`, spender);
+  net.txs.set(spender, { confirmed, inputs: [{ txid: pool.txid, vout: pool.vout }] });
 };
 
 describe('flow', () => {
@@ -374,8 +425,9 @@ describe('flow', () => {
     if (r.kind === 'new-sheet') {
       expect(r.brokeMinimum).toBe(false);
       expect(r.prepared.quoteId).not.toBe(p.quoteId);
-      await cancelPrepared(d, r.prepared); // the user says no on the fresh sheet
-      expect(fw.log.returned).toBe(1);
+      // The user says no on the fresh sheet. The first signature may still be live, so nothing goes back yet.
+      await cancelPrepared(d, r.prepared);
+      expect(fw.log.returned).toBe(0);
     }
   });
 
@@ -496,12 +548,14 @@ describe('buy funding recovery (b-Aware 511)', () => {
 
   test('unsure submit, then the sheet closes: the funding goes back and the record clears', async () => {
     const { fw, store, d } = setup(new Set(), [{ status: 502, body: {} }]);
+    const net = newNet();
     let t = Date.now();
-    const timed: Deps = { ...d, now: () => t };
+    const timed: Deps = { ...d, fetch: onNet(d.fetch, net), now: () => t };
     const p = await prepareBuy(timed, await loadMarket(timed, TOKEN), BigInt(1_000_000), 300);
     expect((await executeTrade(timed, p)).kind).toBe('unsure');
     expect(store.list()[0].state).toBe('unsure');
-    t = p.expiresAt + UNSURE_MARGIN_MS + 1; // closed after the quote is well past use
+    killPool(net, p); // someone else's confirmed trade took the pool coin our signature needs
+    t = p.quoteExpiresAt + UNSURE_MARGIN_MS + 1; // and the quote is well past use
     expect(await closeUnsure(timed, p)).toBe(true);
     expect(fw.log.returned).toBe(1);
     expect(store.list()).toEqual([]);
@@ -654,26 +708,26 @@ describe('funding recovery: review fixes', () => {
     const mp = fakeMemepool({ build: buildBuy() });
     const fw = fakeWallet('buy');
     let fail = false;
-    const store = memStore(() => fail);
+    const store = memStore((n) => fail && n >= 4); // nonce, funding, signed are written; 'sent' throws
     const d: Deps = { fetch: mp.fetch, wallet: fw.w, sleep: async () => undefined, pending: store };
     const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
     fail = true;
     expect(await executeTrade(d, p)).toEqual({ kind: 'sent', txid: 'ab'.repeat(32) });
     expect(fw.log.signed).toBe(1);
     expect(fw.log.returned).toBe(0);
-    expect(store.list()).toEqual([]); // 'sent' couldn't be written, so the record is dropped, never swept back
+    expect(store.list().map((r) => r.state)).toEqual(['signed']); // never swept while the signature may be live
   });
 
   test('fix 1: storage throws after an unsure submit: still unsure, record left for the sweep', async () => {
     const mp = fakeMemepool({ build: buildBuy(), submit: [{ status: 502, body: {} }] });
     const fw = fakeWallet('buy');
     let fail = false;
-    const store = memStore(() => fail);
+    const store = memStore((n) => fail && n >= 4);
     const d: Deps = { fetch: mp.fetch, wallet: fw.w, sleep: async () => undefined, pending: store };
     const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
     fail = true;
     expect((await executeTrade(d, p)).kind).toBe('unsure');
-    expect(store.list().map((r) => r.state)).toEqual(['pending']);
+    expect(store.list().map((r) => r.state)).toEqual(['signed']);
   });
 
   test('fix 2: quote expired at Allow: refused before signing and the funding goes back at once', async () => {
@@ -712,8 +766,9 @@ describe('funding recovery: review fixes', () => {
     const fw = fakeWallet('buy');
     const store = memStore();
     let t = Date.now();
+    const net = newNet();
     const d: Deps = {
-      fetch: chain404(mp.fetch),
+      fetch: onNet(mp.fetch, net),
       wallet: fw.w,
       sleep: async () => undefined,
       pending: store,
@@ -728,6 +783,8 @@ describe('funding recovery: review fixes', () => {
     expect(fw.log.returned).toBe(0);
     expect(store.list().map((r) => r.state)).toEqual(['unsure']); // left for the sweep
     t = p.expiresAt + UNSURE_MARGIN_MS + 1;
+    expect(await closeUnsure(d, p)).toBe(false); // past the time, but the pool coin is unspent: still maybe live
+    killPool(net, p);
     expect(await closeUnsure(d, p)).toBe(true);
     expect(fw.log.returned).toBe(1);
   });
@@ -759,5 +816,264 @@ describe('funding recovery: review fixes', () => {
     expect(await sweepFundings(dA)).toEqual({ returned: 1, spent: 0, kept: 0 });
     expect(a.log.returned).toBe(1);
     expect(legacy.list()).toEqual([]);
+  });
+});
+
+// Re-review fixes (task 58 re-review of d4061a24, 19 Nov 2026). Each test fails against d4061a24's source.
+describe('funding recovery: re-review fixes', () => {
+  const memStore = (failOn?: (n: number) => boolean): PendingStore & { rows: Map<string, PendingRecord> } => {
+    const rows = new Map<string, PendingRecord>();
+    let n = 0;
+    return {
+      rows,
+      list: () => [...rows.values()],
+      put: (r) => {
+        if (failOn?.(++n)) throw new Error('QuotaExceededError');
+        rows.set(r.id, structuredClone(r));
+      },
+      remove: (id) => void rows.delete(id),
+    };
+  };
+  const OLD = 20 * 60 * 1000;
+  const age = (store: PendingStore, by = OLD) =>
+    store.list().forEach((r) => store.put({ ...r, createdAt: r.createdAt - by }));
+  const rig = (opts: { expiresIn?: number; submit?: { status: number; body: unknown }[] } = {}) => {
+    const mp = fakeMemepool({ build: buildBuy(), ...opts });
+    const fw = fakeWallet('buy');
+    const store = memStore();
+    const net = newNet();
+    let t = Date.now();
+    const clock = { set: (v: number) => (t = v), get: () => t };
+    const d: Deps = {
+      fetch: onNet(mp.fetch, net),
+      wallet: fw.w,
+      sleep: async () => undefined,
+      pending: store,
+      now: () => t,
+    };
+    return { mp, fw, store, net, clock, d };
+  };
+
+  test('1: the funding record is slim (no BEEF), so a big funding transaction still fits the storage quota', async () => {
+    const mp = fakeMemepool({ build: buildBuy() });
+    const fw = fakeWallet('buy');
+    const m = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        if (v.length > 4_000) throw new Error('QuotaExceededError');
+        m.set(k, v);
+      },
+    };
+    const w: TradeWallet = {
+      ...fw.w,
+      fund: async (p, sats) => ({ ...(await fw.w.fund(p, sats)), beef: new Array(20_000).fill(7) }),
+    };
+    const d: Deps = {
+      fetch: mp.fetch,
+      wallet: w,
+      sleep: async () => undefined,
+      pending: localPendingStore('A', storage),
+    };
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    expect(p.funding?.beef.length).toBe(20_000); // kept in memory for this session
+    const rec = d.pending!.list()[0];
+    expect(rec.funding?.txid).toBe('02'.padStart(64, '0'));
+    expect('beef' in (rec.funding ?? {})).toBe(false);
+    expect(fw.log.returned).toBe(0);
+  });
+
+  test('1: funding note AND give-back both fail: never told "put back"; the sweep recovers it by address', async () => {
+    const { fw, net, clock, d } = rig();
+    const store = memStore((n) => n === 2); // the nonce is written; the funding record throws
+    const failing: TradeWallet = {
+      ...fw.w,
+      returnFunding: async () => {
+        throw new Error('offline');
+      },
+    };
+    const dd: Deps = { ...d, wallet: failing, pending: store };
+    const err = await prepareBuy(dd, await loadMarket(dd, TOKEN), BigInt(1_000_000), 300).catch((e: Error) => e);
+    expect(String((err as Error).message)).not.toMatch(/put back/);
+    expect(String((err as Error).message)).toMatch(/by itself/);
+    expect(fw.log.funded).toBe(1);
+    const rec = store.list()[0];
+    expect(rec.funding).toBeUndefined(); // only the nonce is known
+    const key = await fw.w.newPayKey({ prefix: rec.prefix, suffix: rec.suffix });
+    net.utxos.set(key.address, [{ tx_hash: '02'.padStart(64, '0'), tx_pos: 0, value: rec.sats + 50_000 }]);
+    age(store);
+    clock.set(Date.now());
+    expect(await sweepFundings({ ...d, pending: store })).toEqual({ returned: 1, spent: 0, kept: 0 });
+    expect(fw.log.back[0].coin).toMatchObject({ txid: '02'.padStart(64, '0'), vout: 0, script: pay(key.address) });
+    expect(fw.log.back[0].beef).toEqual([]); // fetched again by the wallet (memepoolWallet.returnFunding)
+    expect(store.list()).toEqual([]);
+  });
+
+  test('1: memepoolWallet fetches the BEEF again when a swept funding has none', async () => {
+    const internalized: unknown[] = [];
+    const wallet = {
+      getPublicKey: async () => ({ publicKey: PrivateKey.fromRandom().toPublicKey().toString() }),
+      internalizeAction: async (a: { tx: number[] }) => {
+        internalized.push(a.tx);
+        return { accepted: true };
+      },
+    } as unknown as WalletInterface;
+    const fetched: string[] = [];
+    const services = {
+      getBeefForTxid: async (txid: string) => {
+        fetched.push(txid);
+        return { toBinaryAtomic: () => [1, 2, 3] };
+      },
+    };
+    const w = memepoolWallet(wallet, services);
+    const pay = {
+      address: '',
+      key: { protocolID: [2, 'x'] as [2, string], keyID: 'a b' },
+      derivationPrefix: 'a',
+      derivationSuffix: 'b',
+    };
+    await w.returnFunding({
+      coin: { txid: '02'.padStart(64, '0'), vout: 0, satoshis: 5, script: '', key: pay.key },
+      beef: [],
+      pay,
+    });
+    expect(fetched).toEqual(['02'.padStart(64, '0')]);
+    expect(internalized).toEqual([[1, 2, 3]]);
+  });
+
+  test("2: Memepool's quote outlives ours: no give-back before ITS expiry, nor while the pool coin is unspent", async () => {
+    const { fw, store, net, clock, d } = rig({ expiresIn: 10 * 60_000, submit: [{ status: 502, body: {} }] });
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    expect((await executeTrade(d, p)).kind).toBe('unsure');
+    clock.set(p.expiresAt + UNSURE_MARGIN_MS + 1); // past OUR (60 s) quote, but Memepool's still runs
+    expect(await closeUnsure(d, p)).toBe(false);
+    killPool(net, p);
+    expect(await closeUnsure(d, p)).toBe(false); // pool dead, but Memepool's own expiry + margin not yet passed
+    expect(fw.log.returned).toBe(0);
+    expect(store.list().length).toBe(1);
+    clock.set(Date.now() + 10 * 60_000 + UNSURE_MARGIN_MS + 5_000);
+    expect(await closeUnsure(d, p)).toBe(true);
+    expect(fw.log.returned).toBe(1);
+  });
+
+  test('2: a pool coin spent only by an unconfirmed transaction does not count; nor does ours', async () => {
+    const { fw, net, clock, d } = rig({ submit: [{ status: 502, body: {} }] });
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    await executeTrade(d, p);
+    clock.set(Date.now() + 60 * 60_000);
+    killPool(net, p, false); // in the mempool only
+    expect(await closeUnsure(d, p)).toBe(false);
+    // Our own trade spent it (it also spends our coin): the buy happened, nothing goes back.
+    const ours = 'ab'.repeat(32);
+    killPool(net, p, true, ours);
+    net.txs.get(ours)!.inputs.push({ txid: p.funding!.coin.txid, vout: p.funding!.coin.vout });
+    net.spent.set(`${p.funding!.coin.txid}_${p.funding!.coin.vout}`, ours);
+    expect(await closeUnsure(d, p)).toBe(false);
+    expect(fw.log.returned).toBe(0);
+  });
+
+  test("3: a 'sent' record whose coin is unspent while the pool coin went to another confirmed trade is swept back", async () => {
+    const { fw, store, net, clock, d } = rig();
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    expect((await executeTrade(d, p)).kind).toBe('sent');
+    expect(store.list()[0].state).toBe('sent');
+    clock.set(Date.now() + 60 * 60_000);
+    expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 0, kept: 1 }); // pool coin still unspent
+    killPool(net, p);
+    expect(await sweepFundings(d)).toEqual({ returned: 1, spent: 0, kept: 0 });
+    expect(fw.log.returned).toBe(1);
+  });
+
+  test('4: two sweeps at once share one run (one give-back)', async () => {
+    const { fw, store, clock, d } = rig();
+    await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    clock.set(Date.now() + 60 * 60_000);
+    const [a, b] = await Promise.all([sweepFundings(d), sweepFundings(d)]);
+    expect(a).toEqual({ returned: 1, spent: 0, kept: 0 });
+    expect(b).toEqual(a);
+    expect(fw.log.returned).toBe(1);
+    expect(store.list()).toEqual([]);
+  });
+
+  test('5: 409 then the reload fails: the signature is recorded (unsure) and the sweep waits for it', async () => {
+    const { mp, fw, store, clock, d } = rig({ submit: [{ status: 409, body: { code: 'stale' } }] });
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    let down = false;
+    const dd: Deps = {
+      ...d,
+      fetch: (async (u: string, i?: RequestInit) => {
+        if (down && /txblaster/.test(u)) throw new Error('offline');
+        const r = await d.fetch(u, i);
+        if (/trade\/submit/.test(u)) down = true;
+        return r;
+      }) as Deps['fetch'],
+    };
+    await expect(executeTrade(dd, p)).rejects.toThrow();
+    expect(mp.calls.filter((c) => c === '/trade/submit').length).toBe(1);
+    const rec = store.list()[0];
+    expect(rec.state).toBe('unsure');
+    expect(rec.signed?.length).toBe(1);
+    clock.set(Date.now() + 60 * 60_000);
+    expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 0, kept: 1 }); // pool coin unspent: maybe live
+    expect(fw.log.returned).toBe(0);
+  });
+
+  test('5: Cancel on the fresh sheet after a 409 follows the close rule', async () => {
+    const { fw, store, net, clock, d } = rig({ submit: [{ status: 409, body: { code: 'stale' } }] });
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    const r = await executeTrade(d, p);
+    expect(r.kind).toBe('new-sheet');
+    if (r.kind !== 'new-sheet') return;
+    await cancelPrepared(d, r.prepared);
+    expect(fw.log.returned).toBe(0);
+    expect(store.list()[0].signed?.length).toBe(1);
+    killPool(net, p); // the signed (first) template's pool coin went to someone else's confirmed trade
+    clock.set(Date.now() + 60 * 60_000);
+    await cancelPrepared(d, r.prepared);
+    expect(fw.log.returned).toBe(1);
+  });
+
+  test('6a: fund() broadcast then threw: the nonce-only record is recovered from its address', async () => {
+    const { fw, store, net, clock, d } = rig();
+    const w: TradeWallet = {
+      ...fw.w,
+      fund: async (p, sats) => {
+        await fw.w.fund(p, sats);
+        throw new Error('timed out after broadcasting');
+      },
+    };
+    const dd: Deps = { ...d, wallet: w };
+    await expect(prepareBuy(dd, await loadMarket(dd, TOKEN), BigInt(1_000_000), 300)).rejects.toThrow(/timed out/);
+    const rec = store.list()[0];
+    expect(rec.funding).toBeUndefined();
+    const pay = await fw.w.newPayKey({ prefix: rec.prefix, suffix: rec.suffix });
+    net.utxos.set(pay.address, [
+      { tx_hash: '02'.padStart(64, '0'), tx_pos: 0, value: rec.sats },
+      { tx_hash: '05'.padStart(64, '0'), tx_pos: 1, value: 9, isSpentInMempoolTx: true }, // already going: left out
+    ]);
+    expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 0, kept: 1 }); // young: left alone
+    clock.set(Date.now() + 60 * 60_000);
+    expect(await sweepFundings(d)).toEqual({ returned: 1, spent: 0, kept: 0 });
+    expect(fw.log.back.map((f) => [f.coin.txid, f.coin.vout, f.coin.satoshis])).toEqual([
+      ['02'.padStart(64, '0'), 0, rec.sats],
+    ]);
+    expect(store.list()).toEqual([]);
+  });
+
+  test('6a: a nonce whose address stays empty is kept a day, then dropped', async () => {
+    const { fw, store, clock, d } = rig();
+    const w: TradeWallet = {
+      ...fw.w,
+      fund: async () => {
+        throw new Error('wallet refused');
+      },
+    };
+    const dd: Deps = { ...d, wallet: w };
+    await expect(prepareBuy(dd, await loadMarket(dd, TOKEN), BigInt(1_000_000), 300)).rejects.toThrow();
+    clock.set(Date.now() + 60 * 60_000);
+    expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 0, kept: 1 });
+    clock.set(Date.now() + 25 * 60 * 60_000);
+    expect(await sweepFundings(d)).toEqual({ returned: 0, spent: 1, kept: 0 });
+    expect(store.list()).toEqual([]);
   });
 });

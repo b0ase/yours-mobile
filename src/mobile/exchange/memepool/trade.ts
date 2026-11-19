@@ -36,12 +36,15 @@ import { CurveError, buyTokens, minTokensFor, parseCurve, sellSats, type CurvePa
 import { proofVerdict, type ProofVerdict } from './proof';
 import {
   giveBack,
+  giveBackIfSafe,
   idOf,
   safePut,
-  safeRemove,
   sweepPending,
   toRecord,
+  type Chain,
+  type Outpoint,
   type PendingStore,
+  type SignedSpend,
   type SweepResult,
 } from './pending';
 import { isAddress } from './script';
@@ -150,7 +153,10 @@ export type Prepared = {
   slippageBps: number;
   quoteId: string;
   template: Template;
+  /** Our deadline for signing: Memepool's expiry, capped at QUOTE_TTL_MS. */
   expiresAt: number;
+  /** Memepool's own expiry, uncapped: how long it may still use a trade we signed. */
+  quoteExpiresAt: number;
   checked: CheckedTrade;
   limits: VerifyContext['limits'];
   /** Buy: the most that can leave the wallet (what the sheet shows). */
@@ -159,6 +165,8 @@ export type Prepared = {
   pay: PayKey;
   coins: OfferedCoin[];
   funding: Funding | null;
+  /** Signatures already made over `funding` on an earlier sheet (409, then a new sheet). */
+  signed?: SignedSpend[];
 };
 
 type Limits = { limits: VerifyContext['limits']; maxSpend: bigint; indexFee: number };
@@ -205,7 +213,7 @@ async function prepareAndVerify(
   ord: OrdKey,
   pay: PayKey,
   coins: OfferedCoin[],
-): Promise<{ template: Template; quoteId: string; expiresAt: number; checked: CheckedTrade }> {
+): Promise<{ template: Template; quoteId: string; expiresAt: number; quoteExpiresAt: number; checked: CheckedTrade }> {
   const body = {
     tokenId: m.tokenId,
     side,
@@ -234,11 +242,11 @@ async function prepareAndVerify(
   if (typeof quoteId !== 'string' || !quoteId || !template) plain("Memepool sent an answer this wallet can't read.");
   const exp = Number(prep!.expiresAt);
   const now = nowOf(d);
-  // Memepool may send seconds or ms; never trust more than our own TTL.
-  const expiresAt = Math.min(
-    Number.isFinite(exp) && exp > 0 ? (exp < 1e12 ? exp * 1000 : exp) : Infinity,
-    now + QUOTE_TTL_MS,
-  );
+  // Memepool may send seconds or ms; never trust more than our own TTL for signing.
+  const theirs = Number.isFinite(exp) && exp > 0 ? (exp < 1e12 ? exp * 1000 : exp) : NaN;
+  const expiresAt = Math.min(Number.isFinite(theirs) ? theirs : Infinity, now + QUOTE_TTL_MS);
+  // But Memepool may keep a signed trade until ITS expiry, so recovery waits for the later of the two.
+  const quoteExpiresAt = Number.isFinite(theirs) ? Math.max(theirs, expiresAt) : expiresAt;
   const ctx: VerifyContext = {
     side,
     tokenId: m.tokenId,
@@ -255,7 +263,7 @@ async function prepareAndVerify(
     expiresAt,
     now,
   };
-  return { template, quoteId: quoteId as string, expiresAt, checked: verifyTemplate(template, ctx) };
+  return { template, quoteId: quoteId as string, expiresAt, quoteExpiresAt, checked: verifyTemplate(template, ctx) };
 }
 
 /** Quote, prepare and check a buy of `budget` sats. Sets the BSV aside first (see the header). */
@@ -277,12 +285,19 @@ export async function prepareBuy(d: Deps, m: Market, budget: bigint, slippageBps
       createdAt: nowOf(d),
     });
   if (!noted) plain("This wallet couldn't save the note it needs before setting BSV aside. Nothing was spent.");
-  // If fund() throws we can't know the BSV didn't go out, so the nonce record stays (it holds no coin to sweep).
+  // If fund() throws we can't know the BSV didn't go out, so the nonce record stays; the sweep finds its coin by address.
   const funding = await d.wallet.fund(pay, Number(l.maxSpend));
+  // The funding coin is written down (slim, no BEEF) before going on and before any give-back. If it can't be, the
+  // BSV goes back now; if that fails too, the nonce record above lets the next sweep find the coin by its address.
+  if (d.pending && !safePut(d.pending, toRecord(funding, Number(l.maxSpend), 'pending', nowOf(d)))) {
+    const back = await giveBack(d.wallet, d.pending, funding).catch(() => false);
+    plain(
+      back
+        ? "This wallet couldn't save its note of the BSV set aside, so it was put back. Nothing was bought."
+        : "This wallet couldn't save its note of the BSV set aside. Nothing was bought. The BSV comes back to your balance by itself: open Memepool again in about 10 minutes.",
+    );
+  }
   try {
-    // The funding's txid must be written down before going on; if it can't be, the BSV goes straight back (catch).
-    if (d.pending && !safePut(d.pending, toRecord(funding, Number(l.maxSpend), 'pending', nowOf(d))))
-      plain("This wallet couldn't save its note of the BSV set aside, so it was put back. Nothing was bought.");
     const r = await prepareAndVerify(d, m, 'buy', budget, l, ord, pay, [funding.coin]);
     return {
       side: 'buy',
@@ -297,7 +312,8 @@ export async function prepareBuy(d: Deps, m: Market, budget: bigint, slippageBps
       funding,
     };
   } catch (e) {
-    await giveBack(d.wallet, d.pending, funding);
+    // Nothing was signed. A failed give-back keeps the record for the sweep.
+    await giveBack(d.wallet, d.pending, funding).catch(() => false);
     throw e;
   }
 }
@@ -330,8 +346,15 @@ export type ExecuteResult =
   /** We don't know whether Memepool broadcast it. Watch our coin; never sign again. */
   | { kind: 'unsure'; message: string };
 
+/** How long past the later quote expiry (ours, Memepool's) before a signed funding may come back. */
+export const UNSURE_MARGIN_MS = 2 * 60 * 1000;
+
 /** The same checks as before the sheet, right before signing (the quote may have expired while it was open); then sign. */
-async function checkAndSign(d: Deps, p: Prepared, keys: Map<string, CoinKey>): Promise<Record<string, string>> {
+async function checkAndSign(
+  d: Deps,
+  p: Prepared,
+  keys: Map<string, CoinKey>,
+): Promise<{ unlocks: Record<string, string>; others: Outpoint[] }> {
   const checked = verifyTemplate(p.template, {
     side: p.side,
     tokenId: p.market.tokenId,
@@ -348,23 +371,43 @@ async function checkAndSign(d: Deps, p: Prepared, keys: Map<string, CoinKey>): P
     expiresAt: p.expiresAt,
     now: nowOf(d),
   });
-  return d.wallet.sign(p.template, checked.ourInputs, (i) => {
+  const unlocks = await d.wallet.sign(p.template, checked.ourInputs, (i) => {
     const inp = p.template.inputs[i];
     return keys.get(`${inp.txid}_${inp.vout}`);
   });
+  // The pool's coins in this transaction: if another transaction spends one, this signature can never be used.
+  const others = p.template.inputs
+    .filter((_, i) => !checked.ourInputs.includes(i))
+    .map((i) => ({ txid: i.txid, vout: i.vout }));
+  return { unlocks, others };
 }
 
 /** The user said Allow: check again, sign only our inputs, submit. */
 export async function executeTrade(d: Deps, p: Prepared): Promise<ExecuteResult> {
   const keys = new Map(p.coins.map((c) => [`${c.txid}_${c.vout}`, c.key]));
-  let unlocks: Record<string, string>;
+  let signedNow: { unlocks: Record<string, string>; others: Outpoint[] };
   try {
-    unlocks = await checkAndSign(d, p, keys);
+    signedNow = await checkAndSign(d, p, keys);
   } catch (e) {
-    // Nothing has left this device (no unlock was handed to Memepool), so a buy's set-aside BSV can go back now. A
-    // failed give-back keeps the record for the next sweep.
-    if (p.funding) await giveBack(d.wallet, d.pending, p.funding).catch(() => false);
+    // Nothing from this sheet left the device. An earlier sheet's signature (p.signed) may still be live, so the BSV
+    // goes back now only under the same rule as a close; otherwise the sweep returns it later.
+    await releaseIfSafe(d, p, p.signed);
     throw e;
+  }
+  const { unlocks, others } = signedNow;
+  const signed: SignedSpend[] = [
+    ...(p.signed ?? []),
+    { others, notBefore: Math.max(p.expiresAt, p.quoteExpiresAt) + UNSURE_MARGIN_MS },
+  ];
+  // Write the signature down BEFORE it goes to Memepool, so a funding with a live signature is never swept back. If
+  // it can't be written, it is never sent.
+  if (
+    p.funding &&
+    d.pending &&
+    !safePut(d.pending, toRecord(p.funding, p.coins[0].satoshis, 'signed', nowOf(d), signed))
+  ) {
+    await releaseIfSafe(d, p, p.signed);
+    plain("This wallet couldn't save a note it needs before sending the trade, so nothing was sent.");
   }
   let out: Record<string, unknown>;
   try {
@@ -372,89 +415,166 @@ export async function executeTrade(d: Deps, p: Prepared): Promise<ExecuteResult>
   } catch (e) {
     if (e instanceof MemepoolHttpError && e.status === 409) {
       // Stale. Our coins weren't spent. Re-prepare once from a fresh look at the coin; the user decides again.
-      const m = await loadMarket(d, p.market.tokenId);
-      const l = await limitsFor(d, m, p.side, p.amount, p.slippageBps);
-      const r = await prepareAndVerify(d, m, p.side, p.amount, l, p.ord, p.pay, p.coins);
-      const brokeMinimum =
-        p.side === 'buy'
-          ? r.checked.tokens < (p.limits as { minTokens: bigint }).minTokens
-          : r.checked.sats < (p.limits as { minSats: bigint }).minSats;
-      return { kind: 'new-sheet', brokeMinimum, prepared: { ...p, market: m, ...r, ...l } };
+      try {
+        const m = await loadMarket(d, p.market.tokenId);
+        const l = await limitsFor(d, m, p.side, p.amount, p.slippageBps);
+        const r = await prepareAndVerify(d, m, p.side, p.amount, l, p.ord, p.pay, p.coins);
+        const brokeMinimum =
+          p.side === 'buy'
+            ? r.checked.tokens < (p.limits as { minTokens: bigint }).minTokens
+            : r.checked.sats < (p.limits as { minSats: bigint }).minSats;
+        return { kind: 'new-sheet', brokeMinimum, prepared: { ...p, market: m, ...r, ...l, signed } };
+      } catch (reload) {
+        // The signature was handed over: the funding waits under the signed rule, timed from now.
+        markFunding(d, p, 'unsure', signed);
+        throw reload;
+      }
     }
     if (e instanceof MemepoolHttpError && e.status >= 400 && e.status < 500) {
-      // A definite refusal: nothing was broadcast. Put a buy's BSV back.
-      if (p.funding) await giveBack(d.wallet, d.pending, p.funding);
+      // A definite refusal of THIS signature: nothing was broadcast. An earlier sheet's signature still follows the
+      // close rule, so the BSV goes back now only if there is none (or it is dead).
+      await releaseIfSafe(d, p, p.signed);
       plain(plainError(e));
     }
-    markFunding(d, p, 'unsure');
+    markFunding(d, p, 'unsure', signed);
     return {
       kind: 'unsure',
       message: "We sent the trade but Memepool didn't confirm it. We're watching the network for it.",
     };
   }
   const txid = typeof out.txid === 'string' && /^[0-9a-f]{64}$/.test(out.txid) ? out.txid : null;
-  markFunding(d, p, txid ? 'sent' : 'unsure');
+  markFunding(d, p, txid ? 'sent' : 'unsure', signed);
   if (!txid)
     return { kind: 'unsure', message: "Memepool took the trade but didn't say its id. We're watching for it." };
   return { kind: 'sent', txid };
 }
 
-/** The user said Cancel (or the sheet closed): a buy's set-aside BSV goes back into the wallet. */
+/** Give a buy's funding back now if no signature over it can still be used (pending.ts giveBackIfSafe). */
+async function releaseIfSafe(d: Deps, p: Prepared, signed: SignedSpend[] | undefined): Promise<boolean> {
+  if (!p.funding) return false;
+  return giveBackIfSafe(d.wallet, d.pending, wocChain(d), p.funding, signed, nowOf(d)).catch(() => false);
+}
+
+/** Every signature written down for this funding, plus any the sheet carries. */
+function signedFor(d: Deps, p: Prepared): SignedSpend[] {
+  if (!p.funding) return [];
+  const id = idOf(p.funding.pay.derivationPrefix, p.funding.pay.derivationSuffix);
+  let rec: SignedSpend[] = [];
+  try {
+    rec = d.pending?.list().find((r) => r.id === id)?.signed ?? [];
+  } catch {
+    /* unreadable store: only what the sheet carries */
+  }
+  return [...(p.signed ?? []), ...rec];
+}
+
+/**
+ * The user said Cancel (or the sheet closed): a buy's set-aside BSV goes back into the wallet. After a 409 the sheet
+ * is a fresh one but an earlier signature exists, so the close rule applies: no give-back while it may still be used.
+ */
 export async function cancelPrepared(d: Deps, p: Prepared): Promise<void> {
   if (!p.funding) return;
+  const signed = signedFor(d, p);
+  if (signed.length) {
+    await releaseIfSafe(d, p, signed); // if still live, the record waits for the sweep
+    return;
+  }
   if (!(await giveBack(d.wallet, d.pending, p.funding))) throw new Error('The BSV could not be put back yet.');
 }
 
 /**
- * Record what became of a buy's funding after we signed (a 'sent' coin is never swept back). Never throws: the trade
- * already went to Memepool, so a storage failure here must not read as a failed trade (that invites a second buy).
- * If 'sent' can't be written, the record is dropped instead (its coin is spent by the trade); if 'unsure' can't, the
- * 'pending' record stays, which the sweep treats the same way.
+ * Record what became of a buy's funding after we signed. Never throws: the trade already went to Memepool, so a
+ * storage failure here must not read as a failed trade (that invites a second buy). If it can't be written, the
+ * 'signed' record written before the submit stays, which the sweep treats the same way.
  */
-function markFunding(d: Deps, p: Prepared, state: 'unsure' | 'sent') {
+function markFunding(d: Deps, p: Prepared, state: 'unsure' | 'sent', signed: SignedSpend[]) {
   if (!p.funding || !d.pending) return;
-  const rec = toRecord(p.funding, p.coins[0].satoshis, state, nowOf(d));
-  if (!safePut(d.pending, rec) && state === 'sent') safeRemove(d.pending, rec.id);
+  safePut(d.pending, toRecord(p.funding, p.coins[0].satoshis, state, nowOf(d), signed));
 }
 
-/** How long past the quote's expiry before an unspent coin is trusted to mean "the trade didn't happen". */
-export const UNSURE_MARGIN_MS = 2 * 60 * 1000;
-
 /**
- * The sheet closed after an unsure submit. Memepool may still hold our signed spend and the chain index can lag, so a
- * "not spent" answer only counts once the quote is well past expiry (Memepool can't use it after that). Then, if the
- * coin is still unspent, the BSV goes back now; otherwise it stays recorded and the sweep sorts it out later.
+ * The sheet closed after an unsure submit. Memepool may still hold our signed spend, so the BSV goes back only once
+ * every signature over it is dead for good (another, confirmed transaction spent a pool coin it needs) and the later
+ * quote expiry (ours, Memepool's) is UNSURE_MARGIN_MS behind us. Otherwise the record stays for the sweep.
  * Returns true if it went back.
  */
 export async function closeUnsure(d: Deps, p: Prepared): Promise<boolean> {
   if (!p.funding) return false;
-  if (nowOf(d) <= p.expiresAt + UNSURE_MARGIN_MS) return false;
-  return giveBack(d.wallet, d.pending, p.funding, (c) => coinSpent(d, c));
+  const signed = signedFor(d, p);
+  if (!signed.length) return false; // a submit happened, so a signature exists; without its record, never guess
+  return releaseIfSafe(d, p, signed);
 }
 
-/** One look at whether `coin` has been spent. Only a clear "not found" counts as unspent. */
-export async function coinSpent(
-  d: Deps,
-  coin: { txid: string; vout: number },
-): Promise<'spent' | 'unspent' | 'unknown'> {
-  const r = await d.fetch(`${WOC}/tx/${coin.txid}/${coin.vout}/spent`, { credentials: 'omit' }).catch(() => null);
-  if (!r) return 'unknown';
-  if (r.ok) {
-    const j = (await r.json().catch(() => null)) as { txid?: unknown } | null;
-    return typeof j?.txid === 'string' && /^[0-9a-f]{64}$/.test(j.txid) ? 'spent' : 'unknown';
-  }
-  return r.status === 404 ? 'unspent' : 'unknown';
+const HEX64 = /^[0-9a-f]{64}$/;
+
+/**
+ * The network, as WhatsOnChain answers it. Its plain `/spent` checks confirmed and unconfirmed (mempool) spends in
+ * one call; 404 = a known coin nothing spent, 400 = a coin it doesn't know (read as unknown). `/tx/hash` has a
+ * blockhash and confirmations only once the transaction is in a block. `/address/../unspent/all` lists confirmed and
+ * mempool coins, flagging ones a mempool transaction already spends (left out here).
+ */
+export function wocChain(d: Deps): Chain {
+  const get = (path: string) => d.fetch(`${WOC}${path}`, { credentials: 'omit' }).catch(() => null);
+  const json = async (r: Response) => (await r.json().catch(() => null)) as Record<string, unknown> | null;
+  return {
+    async spentBy(o) {
+      const r = await get(`/tx/${o.txid}/${o.vout}/spent`);
+      if (!r) return 'unknown';
+      if (r.ok) {
+        const j = await json(r);
+        return typeof j?.txid === 'string' && HEX64.test(j.txid) ? j.txid : 'unknown';
+      }
+      return r.status === 404 ? 'unspent' : 'unknown';
+    },
+    async tx(txid) {
+      const r = await get(`/tx/hash/${txid}`);
+      if (!r?.ok) return null;
+      const j = await json(r);
+      if (!j || !Array.isArray(j.vin)) return null;
+      const confirmed = typeof j.blockhash === 'string' && j.blockhash.length > 0 && Number(j.confirmations) > 0;
+      const inputs = (j.vin as { txid?: unknown; vout?: unknown }[])
+        .filter((i) => typeof i?.txid === 'string' && Number.isInteger(i.vout))
+        .map((i) => ({ txid: i.txid as string, vout: i.vout as number }));
+      return { confirmed, inputs };
+    },
+    async unspentAt(address) {
+      const r = await get(`/address/${address}/unspent/all`);
+      if (!r?.ok) return null;
+      const j = await json(r);
+      if (!j || !Array.isArray(j.result) || j.error) return null;
+      return (j.result as { tx_hash?: unknown; tx_pos?: unknown; value?: unknown; isSpentInMempoolTx?: unknown }[])
+        .filter(
+          (u) =>
+            typeof u.tx_hash === 'string' &&
+            HEX64.test(u.tx_hash) &&
+            Number.isInteger(u.tx_pos) &&
+            Number.isSafeInteger(u.value) &&
+            (u.value as number) > 0 &&
+            u.isSpentInMempoolTx !== true,
+        )
+        .map((u) => ({ txid: u.tx_hash as string, vout: u.tx_pos as number, satoshis: u.value as number }));
+    },
+  };
 }
 
-// A younger record may be a sheet open in another tab. It must also outlast a quote (QUOTE_TTL_MS) plus the unsure
-// margin, so the sweep never returns a coin Memepool might still spend (closeUnsure's rule).
+// A younger record may be a sheet open in another tab (signed records also wait for their own notBefore).
 const SWEEP_MIN_AGE_MS = 10 * 60 * 1000;
+
+/** One sweep per store at a time: a second call while one runs (two tabs' worth, StrictMode) shares that run. */
+const sweeping = new Map<unknown, Promise<SweepResult>>();
 
 /** On start: put back any funding left over from a buy that never finished. */
 export function sweepFundings(d: Deps): Promise<SweepResult> {
-  return d.pending
-    ? sweepPending(d.wallet, d.pending, (c) => coinSpent(d, c), { minAgeMs: SWEEP_MIN_AGE_MS, now: nowOf(d) })
-    : Promise.resolve({ returned: 0, spent: 0, kept: 0 });
+  const store = d.pending;
+  if (!store) return Promise.resolve({ returned: 0, spent: 0, kept: 0 });
+  const key = store.id ?? store;
+  const running = sweeping.get(key);
+  if (running) return running;
+  const run = sweepPending(d.wallet, store, wocChain(d), { minAgeMs: SWEEP_MIN_AGE_MS, now: nowOf(d) }).finally(() =>
+    sweeping.delete(key),
+  );
+  sweeping.set(key, run);
+  return run;
 }
 
 const WOC = 'https://api.whatsonchain.com/v1/bsv/main';
