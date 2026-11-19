@@ -50,7 +50,7 @@ const base = {
     version: '1',
     network: 'mainnet',
     summary: 's',
-    codeHash: 'h1',
+    codeHash: 'c1'.repeat(32),
   },
   description: 'A plain NDA',
   author: { name: 'Ann Lawyer', address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },

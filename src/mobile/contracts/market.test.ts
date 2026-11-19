@@ -81,7 +81,7 @@ const ann = new ProtoWallet(PrivateKey.fromRandom());
 const attacker = new ProtoWallet(PrivateKey.fromRandom());
 const annBase = {
   format: CONTRACT_ENVELOPE_FORMAT,
-  contract: { format: 'bwalletx.contract/1', name: 'NDA', network: 'mainnet', codeHash: 'h1' },
+  contract: { format: 'bwalletx.contract/1', name: 'NDA', network: 'mainnet', codeHash: 'c1'.repeat(32) },
   description: 'A plain NDA',
   author: { name: 'Ann', address: '1AuthorAddressxxxxxxxxxxxxxxxxxxxx' },
   sale: { priceUsd: 1, copies: 10, payTo: '1AuthorAddressxxxxxxxxxxxxxxxxxxxx' },

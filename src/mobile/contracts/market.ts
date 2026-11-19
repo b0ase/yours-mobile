@@ -14,8 +14,8 @@ import {
   canonical,
   CONTRACT_CONTENT_TYPE,
   contractAuthorKey,
-  contractIdentity,
-  hasContractCode,
+  contractCodeProblem,
+  sameContract,
   signContractEnvelope,
   type ContractEnvelope,
 } from './contractNft';
@@ -59,8 +59,8 @@ export const ownedContractOutpoints = async (ctx: OneSatContext) => {
  * and list it.
  */
 export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope, handle?: string) => {
-  if (env.sale.priceUsd > 0 && !hasContractCode(env.contract))
-    throw new Error('A paid contract must include its source or code hash. Nothing was published.');
+  const noCode = env.sale.priceUsd > 0 ? contractCodeProblem(env.contract) : null;
+  if (noCode) throw new Error(`${noCode}. Nothing was published.`);
   const signed = await signContractEnvelope(ctx.wallet, env, handle);
   const outpoint = await mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed));
   const proof = await prove(ctx, 'publish', outpoint);
@@ -104,21 +104,24 @@ export const checkAgainstOriginal = async (listing: Pick<ContractListing, 'origi
 };
 
 /**
- * An earlier listing of the same contract (the same behaviour: contractIdentity, so a changed name, version, summary
- * or description doesn't make a different one) by another author, or undefined. Anyone can
- * inscribe a copy of someone's contract with their own name and payee and list it (review of row 115, 14 Nov 2026):
- * the copy is a valid inscription, so checkAgainstOriginal passes it. The earliest listing is the one paid. Same rule
- * as the catalogue (site/lib/contracts.js mayFollow): a signed listing may be listed again only under the same
- * verified key; after an unsigned one only the same author address may follow. Best effort: it
- * sees what the catalogue lists (which already leaves later copies out, ranked by chain order).
+ * An earlier listing of the same contract (sameContract: the same code, or for a free listing with no code the same
+ * normalised fields and name; a changed name, version, summary or description, or reworded params, don't make a
+ * different one) by another author, or undefined. Anyone can inscribe a copy of someone's contract with their own name
+ * and payee and list it (review of row 115, 14 Nov 2026): the copy is a valid inscription, so checkAgainstOriginal
+ * passes it. The earliest listing is the one paid. Same rule as the catalogue (site/lib/contracts.js mayFollow): a
+ * signed listing may be listed again only under the same verified key; after an unsigned one only the same author
+ * address may follow.
+ * Known limit (review of row 352, F3): `all` is what the catalogue returns from listContracts(), its newest 200
+ * listings, so this only sees an original the catalogue chooses to show. A dishonest catalogue that leaves the
+ * original out defeats it. The backstop is the author's signed handle on the buy sheet (contractAuthorLabel): the
+ * buyer sees who is paid.
  */
 export const copiedFrom = async (
   listing: ContractListing,
   all: readonly ContractListing[],
 ): Promise<ContractListing | undefined> => {
   const at = Date.parse(listing.createdAt);
-  const id = contractIdentity(listing.envelope.contract);
-  const same = (o: ContractListing) => contractIdentity(o.envelope.contract) === id;
+  const same = (o: ContractListing) => sameContract(o.envelope.contract, listing.envelope.contract);
   const mine = await contractAuthorKey(listing.envelope);
   for (const o of all) {
     if (o.origin === listing.origin || !same(o) || Date.parse(o.createdAt) > at) continue;

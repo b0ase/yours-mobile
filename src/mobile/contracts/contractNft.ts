@@ -5,7 +5,7 @@
  * source) plus sale terms. A buyer's copy is the same envelope inscribed again in the transaction that pays the
  * author; the catalogue (site/api/contracts.js) counts paid copies against the edition size.
  */
-import { ProtoWallet, Utils, type WalletInterface } from '@bsv/sdk';
+import { Hash, ProtoWallet, Utils, type WalletInterface } from '@bsv/sdk';
 import { APP_NAME } from '../storeBuild';
 
 export const CONTRACT_CONTENT_TYPE = 'application/vnd.bwalletx.contract+json';
@@ -65,21 +65,93 @@ export const canonical = (v: unknown): unknown =>
       : v;
 
 /**
- * What a contract DOES: the behaviour fields only. name, version, summary and the envelope's description are free
- * text, so one changed character there must not make a copy a different contract (b-Aware row 352). Byte-identical
- * to the catalogue's contractId (site/lib/contracts.js); a test runs both on the same fixtures.
+ * What makes two listings the same contract (b-Aware row 352, UID 630, and its review). Free text (name, version,
+ * summary, the envelope's description) never does: one changed character there must not make a copy a different
+ * contract. Mirrored line for line by the catalogue (site/lib/contracts.js contractKeys); a test runs both on the same
+ * fixtures.
+ * - A listing with code (every paid one must have it; contractCodeProblem) IS its code: `hash:` + its code hash in
+ *   lower case, and `src:` + sha256 of its normalised source. Params, spend paths, oracle and network are text the
+ *   author types around the code, so a junk param, `5` for "5" or an empty oracle don't make a new contract. Two
+ *   listings are the same contract when they share either key (sameContract), so dropping the code hash or the source
+ *   of an original that carries both doesn't make a copy new either.
+ * - A free listing with no code: `free:` + the canonical JSON of its normalised format, network, params, spend paths,
+ *   oracle and NAME (the name, or every unrelated free contract on one network would be "the same").
+ * Known limit: a real edit to the code itself (one changed character of a code hash, a new token in the source) is a
+ * different contract; the backstop is the signed author handle on the sheet.
  */
-export const BEHAVIOUR_FIELDS = ['format', 'network', 'params', 'spendPaths', 'oracle', 'source', 'codeHash'] as const;
-export const contractIdentity = (c: Partial<ContractDescriptor> | null | undefined): string => {
-  const src: Record<string, unknown> = c && typeof c === 'object' ? c : {};
-  const picked: Record<string, unknown> = {};
-  for (const k of BEHAVIOUR_FIELDS) if (src[k] !== undefined) picked[k] = src[k];
-  return JSON.stringify(canonical(picked));
+export const CODE_HASH_RE = /^[0-9a-f]{64}$/i;
+const FREE_IDENTITY_FIELDS = ['format', 'network', 'params', 'spendPaths', 'oracle', 'name'] as const;
+
+/** Source as identity sees it: NFKC, CRLF/CR → LF, trailing whitespace per line and blank lines at the ends dropped. */
+export const normaliseSource = (s: unknown): string =>
+  typeof s === 'string'
+    ? s
+        .normalize('NFKC')
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .map((l) => l.replace(/\s+$/u, ''))
+        .join('\n')
+        .trim()
+    : '';
+
+/** Every string and number as NFKC-trimmed text; null, '', [] and {} dropped (undefined); object keys sorted. */
+const tidy = (v: unknown): unknown => {
+  if (v === null || v === undefined) return undefined;
+  if (Array.isArray(v)) {
+    const a = v.map(tidy).filter((x) => x !== undefined);
+    return a.length ? a : undefined;
+  }
+  if (typeof v === 'object') {
+    const entries = Object.entries(v as Record<string, unknown>)
+      .map(([k, x]) => [k.normalize('NFKC').trim(), tidy(x)] as const)
+      .filter(([k, x]) => k !== '' && x !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return entries.length ? Object.fromEntries(entries) : undefined;
+  }
+  const s = String(v).normalize('NFKC').trim();
+  return s === '' ? undefined : s;
 };
 
-/** A non-empty source or code hash: a paid listing must carry one (it is what makes two listings the same contract). */
-export const hasContractCode = (c: Partial<ContractDescriptor> | null | undefined) =>
-  !!c && ((typeof c.source === 'string' && c.source !== '') || (typeof c.codeHash === 'string' && c.codeHash !== ''));
+/** The identity keys of a contract descriptor (see above). Never empty. */
+export const contractKeys = (c: Partial<ContractDescriptor> | null | undefined): string[] => {
+  const src: Record<string, unknown> = c && typeof c === 'object' ? c : {};
+  const keys: string[] = [];
+  if (typeof src.codeHash === 'string' && CODE_HASH_RE.test(src.codeHash))
+    keys.push(`hash:${src.codeHash.toLowerCase()}`);
+  const source = normaliseSource(src.source);
+  if (source !== '') keys.push(`src:${Utils.toHex(Hash.sha256(Utils.toArray(source, 'utf8')))}`);
+  if (keys.length) return keys;
+  const picked: Record<string, unknown> = {};
+  for (const k of FREE_IDENTITY_FIELDS) picked[k] = src[k];
+  return [`free:${JSON.stringify(tidy(picked) ?? {})}`];
+};
+
+/** One string for a contract's identity: its code hash, else its source, else its free fields (contractKeys[0]). */
+export const contractIdentity = (c: Partial<ContractDescriptor> | null | undefined): string => contractKeys(c)[0];
+
+/** The same contract: the two share an identity key. */
+export const sameContract = (
+  a: Partial<ContractDescriptor> | null | undefined,
+  b: Partial<ContractDescriptor> | null | undefined,
+) => {
+  const theirs = contractKeys(b);
+  return contractKeys(a).some((k) => theirs.includes(k));
+};
+
+/**
+ * Why a PAID listing can't be listed, or null: it must carry code, a valid code hash (64 hex characters) or a
+ * source that isn't blank once normalised, and a code hash it carries must be valid (buyers are shown it, and it is
+ * the identity).
+ */
+export const contractCodeProblem = (c: Partial<ContractDescriptor> | null | undefined): string | null => {
+  const hash = c?.codeHash as unknown;
+  const hasHash = hash !== undefined && hash !== null && hash !== '';
+  if (hasHash && (typeof hash !== 'string' || !CODE_HASH_RE.test(hash)))
+    return 'A paid contract’s code hash must be 64 hex characters';
+  if (!hasHash && normaliseSource(c?.source) === '')
+    return 'A paid contract must include its source or code hash, so buyers can read what they are paying for';
+  return null;
+};
 
 /** The bytes the author signs: the canonical envelope with authorSig left out. */
 export const contractSigningBytes = (env: ContractEnvelope): number[] => {

@@ -10,7 +10,13 @@
 // later copy of an earlier author's contract, is never shown or counted (fail closed).
 // Env (Vercel only): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 const K = require('../lib/strategyKeys');
-const { CONTRACT_TYPE, envelopeRefusal, judgeListings, parseContractEnvelope } = require('../lib/contracts');
+const {
+  CONTRACT_TYPE,
+  envelopeRefusal,
+  judgeListings,
+  normaliseSource,
+  parseContractEnvelope,
+} = require('../lib/contracts');
 
 const WINDOW_MS = 10 * 60 * 1000;
 const hits = new Map();
@@ -84,18 +90,30 @@ const enc = (s) => {
 };
 const quote = (v) => `"${String(v).replace(/["\\]/g, '\\$&')}"`;
 /**
- * Every listing that may be the same contract as these: by name, and by code hash or source, since the identity
- * (contractId) leaves the name out and a copier can rename. A listing with neither code hash nor source (free only)
- * is found by name alone. Earliest first, so if there are ever more rows than the limit, the ones cut are the latest,
- * never an original. (A later migration could store contractId in a column and look up by that instead.)
+ * Every listing that may be the same contract as these (lib/contracts.js contractKeys): by name, code hash and
+ * source, since the identity leaves the name out and a copier can rename. Each is asked as written and as identity
+ * normalises it (a code hash in lower and upper case, a source or name NFKC-normalised and trimmed), so a copy that
+ * only re-cases or re-spaces the code still meets an original stored in its plain form, as the wallet writes it. A
+ * listing with neither code hash nor source (free only) is found by name. Earliest first, so if there are ever more
+ * rows than the limit, the ones cut are the latest, never an original. (A later migration could store the keys in a
+ * column and look up by those instead.)
  */
 async function sameBehaviour(contracts) {
-  const by = (f) => [...new Set(contracts.map((c) => c?.[f]).filter((v) => typeof v === 'string' && v !== ''))];
+  const by = (f, forms) => [
+    ...new Set(
+      contracts
+        .map((c) => c?.[f])
+        .filter((v) => typeof v === 'string' && v !== '')
+        .flatMap(forms)
+        .filter((v) => v !== ''),
+    ),
+  ];
+  const nfkc = (v) => [v, v.normalize('NFKC').trim()];
   const out = new Map();
   for (const [col, values] of [
-    ['name', by('name')],
-    ['codeHash', by('codeHash')],
-    ['source', by('source')],
+    ['name', by('name', nfkc)],
+    ['codeHash', by('codeHash', (v) => [v, v.toLowerCase(), v.toUpperCase()])],
+    ['source', by('source', (v) => [v, normaliseSource(v)])],
   ])
     for (let i = 0; i < values.length; i += 25) {
       const list = `(${values
