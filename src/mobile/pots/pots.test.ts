@@ -357,6 +357,49 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     expect((await agent).ok).toBe(false);
   });
 
+  test('a waiting payment is cap-checked and broadcast inside the spend queue (b-Aware row 338)', async () => {
+    // Cap $20, $10 already logged today, a $10 payment signed earlier and waiting to broadcast (slow), and a
+    // concurrent $10 spend that is check → broadcast → log. Together they must not pass $20.
+    const s = setup({ start: NOW - 1000 }); // one $10 period due
+    setAgentDailyCap('1Pot', 20);
+    const { appendAgentLog, checkAgentSpend } = await import('../agents/agentAccounts');
+    const { serialSpend } = await import('../agents/spendQueue');
+    appendAgentLog('1Pot', { at: NOW, action: 'sub-pay', detail: 'earlier', usd: 10 });
+    // Run 1 signs and records the pending payment, then the broadcast fails: the record stays.
+    const failing = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => ({ rawTx: 'RAWP', txid: 'TXP' }),
+      broadcast: async () => {
+        throw new Error('network down');
+      },
+    };
+    expect((await payDue(failing, NOW))[0].ok).toBe(false);
+    expect(getPending(s.id)?.usd).toBe(10);
+    // Run 2 broadcasts it slowly while another spend arrives.
+    const slowDeps = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => ({ rawTx: 'RAWX', txid: 'TXX' }),
+      broadcast: () => new Promise<void>((r) => setTimeout(r, 300)),
+    };
+    const paying = payDue(slowDeps, NOW + 1);
+    await new Promise((r) => setTimeout(r, 50)); // payDue is now at its slow broadcast
+    const other = serialSpend(async () => {
+      const gate = checkAgentSpend('1Pot', 10, NOW + 1);
+      if (!gate.ok) return gate;
+      await new Promise((r) => setTimeout(r, 10)); // stub broadcast
+      appendAgentLog('1Pot', { at: NOW + 1, action: 'agent-pay', detail: 'other', usd: 10 });
+      return gate;
+    });
+    expect((await paying)[0].ok).toBe(true);
+    const second = await other;
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.reason).toMatch(/Over today.s cap/);
+    const total = getAgentLog('1Pot').reduce((t, l) => t + (l.usd ?? 0), 0);
+    expect(total).toBeLessThanOrEqual(20);
+  });
+
   test('stopped pot and the daily cap refuse; nothing is signed', async () => {
     const s = setup();
     setAgentStopped('1Pot', true, NOW);
