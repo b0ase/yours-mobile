@@ -128,7 +128,9 @@ const StrategyBody = ({ id }: { id: string }) => {
           <button
             type="button"
             onClick={() =>
-              confirmLive ? (setStrategyMode(id, 'live'), setLiveArmedFor('')) : setLiveArmedFor(liveConfirmKey(loaded))
+              confirmLive
+                ? (setStrategyMode(id, 'live', Date.now(), liveArmedFor), setLiveArmedFor(''))
+                : setLiveArmedFor(liveConfirmKey(loaded))
             }
             className={btn}
             style={{ background: confirmLive ? '#12B76A' : GOLD, color: confirmLive ? '#fff' : '#000' }}

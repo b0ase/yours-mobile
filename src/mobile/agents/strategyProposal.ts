@@ -44,10 +44,24 @@ const store = (id: string, p: StrategyProposal | null) => {
  * keep re-arming the sheet's Approve delay so the owner could never approve the last one shown.
  */
 export const PROPOSAL_MIN_GAP_MS = 5_000;
+/**
+ * When this account last accepted a proposal, from any pairing. Per account, not per pairing (two pairings taking
+ * turns would otherwise keep Approve disarmed), and kept through Decline and Approve.
+ */
+const LAST_AT = (id: string) => `bwallet.strategy.proposalAt.${id}`;
+const lastProposalAt = (id: string): number | null => {
+  try {
+    const v = Number(localStorage.getItem(LAST_AT(id)));
+    return Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * A computer proposes a strategy. Stored for the owner; the active strategy is untouched. Returns false (and logs it,
- * one merged line per pairing) when the same pairing proposed less than PROPOSAL_MIN_GAP_MS ago: the extra one is dropped.
+ * one merged line for the account) when this account accepted a proposal, from any pairing, less than
+ * PROPOSAL_MIN_GAP_MS ago: the extra one is dropped.
  */
 export const proposeStrategy = (
   id: string,
@@ -55,16 +69,22 @@ export const proposeStrategy = (
   from: { computer: string; session: string; expiresAt: number },
   now = Date.now(),
 ): boolean => {
-  const prev = getProposal(id);
-  if (prev && prev.session === from.session && now - prev.at < PROPOSAL_MIN_GAP_MS) {
+  const last = lastProposalAt(id);
+  // abs: a clock set back doesn't block proposals until it catches up with a stamp in its future.
+  if (last !== null && Math.abs(now - last) < PROPOSAL_MIN_GAP_MS) {
     appendAgentLog(id, {
       at: now,
       action: 'strategy',
       detail: `Ignored extra proposals from ${pairedComputerLabel(from.computer, from.session)}: at most one every ${PROPOSAL_MIN_GAP_MS / 1000} s`,
       usd: 0,
-      merge: `strategy-proposal-dropped:${from.session}`,
+      merge: 'strategy-proposal-dropped',
     });
     return false;
+  }
+  try {
+    localStorage.setItem(LAST_AT(id), String(now));
+  } catch {
+    /* storage unavailable: the proposal below can't be stored either */
   }
   store(id, { strategy, ...from, at: now });
   // One log line per pairing session: a newer proposal replaces that session's earlier line, so a flood of proposals

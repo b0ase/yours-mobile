@@ -7,29 +7,38 @@
  */
 
 /**
- * Characters that render as nothing (or can hide text): every format character (Cf: bidi controls U+200E/F,
- * U+202A-202E, U+2066-2069, zero-width U+200B-200D, U+2060-2064, U+FEFF, soft hyphen, tag characters U+E0001,
- * U+E0020-E007F…), the rest of the tag block, variation selectors, the combining grapheme joiner and blank fillers.
+ * Characters that render as nothing (or can hide text): every format character (Cf: bidi controls, zero-width, BOM,
+ * soft hyphen, tag characters…), every default-ignorable code point (U+2065, U+FFF0-FFF8, U+E0000-E0FFF, variation
+ * selectors, the combining grapheme joiner, Hangul and Khmer fillers…), private-use, unassigned and lone surrogate code
+ * points, and U+FFFC. Braille blank U+2800 is a blank, not text: BLANK turns it into a space.
  */
 export const INVISIBLE =
-  /[\p{Cf}\u{E0000}-\u{E007F}\u115F\u1160\u3164\uFFA0]|\p{Variation_Selector}|\u034F|\u17B4|\u17B5/gu;
+  /[\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Default_Ignorable_Code_Point}\uFFFC\u115F\u1160\u3164\uFFA0]|\p{Variation_Selector}|\u034F|\u17B4|\u17B5/gu;
 const CONTROL = /\p{Cc}/gu;
+/** Blank-looking characters that count as spaces: everything \s matches (NBSP, U+2007, U+202F…) plus braille blank. */
+const BLANK = /[\s\u2800]+/gu;
+/** More than two combining marks on one base (stacked "Zalgo" text that can cover other lines) keep only the first two. */
+const MARK_STACK = /(\p{M}{2})\p{M}+/gu;
+
+/** The first `n` code points (never half a surrogate pair), trimmed: cleaning a cut string again changes nothing. */
+export const cut = (s: string, n: number) => [...s].slice(0, n).join('').trim();
 
 /** One-line text (names, versions, list items, listing spec, changelog): no hidden characters, no line breaks. */
-export const cleanLine = (s: string) => s.replace(INVISIBLE, '').replace(CONTROL, ' ').replace(/\s+/g, ' ').trim();
+export const cleanLine = (s: string) =>
+  s.replace(INVISIBLE, '').replace(CONTROL, ' ').replace(MARK_STACK, '$1').replace(BLANK, ' ').trim();
 
 /**
- * Free text (goals): no hidden characters; tabs become spaces; trailing whitespace trimmed on every line; at most two
- * blank lines in a row.
+ * Free text (goals): no hidden characters; inside a line every run of blanks is one space and trailing blanks go, so a
+ * line of only blanks is empty; then at most two empty lines in a row (padding can't push text below the box).
  */
 export const cleanText = (s: string) =>
   s
     .replace(/\r\n?|[\u2028\u2029\u0085]/g, '\n')
     .replace(INVISIBLE, '')
-    .replace(/\t/g, ' ')
-    .replace(CONTROL, (c) => (c === '\n' ? c : ''))
+    .replace(CONTROL, (c) => (c === '\n' ? c : ' '))
+    .replace(MARK_STACK, '$1')
     .split('\n')
-    .map((l) => l.replace(/\s+$/, ''))
+    .map((l) => l.replace(BLANK, ' ').trimEnd())
     .join('\n')
     .replace(/\n{4,}/g, '\n\n\n')
     .trim();
@@ -37,7 +46,8 @@ export const cleanText = (s: string) =>
 /** Every string in a value cleaned: `goals` (top level) as free text, everything else as one line. */
 export const cleanDeep = <T>(v: T, key = ''): T => {
   if (typeof v === 'string') return (key === 'goals' ? cleanText(v) : cleanLine(v)) as T;
-  if (Array.isArray(v)) return v.map((x) => cleanDeep(x, '[]')) as T;
+  // A list item that cleans to nothing is dropped: an empty token or address must never match anything.
+  if (Array.isArray(v)) return v.map((x) => cleanDeep(x, '[]')).filter((x) => x !== '') as T;
   if (v && typeof v === 'object')
     return Object.fromEntries(
       Object.entries(v).map(([k, x]) => [k, cleanDeep(x, key === '' ? k : `${key}.${k}`)]),

@@ -8,7 +8,7 @@
  * One strategy per account. It runs "paper" (live prices, pretend money, nothing signed) or "live".
  * Pure helpers + localStorage, like agentAccounts.ts; nothing here signs.
  */
-import { canonicalJson, cleanDeep, cleanLine, cleanText } from './strategyText';
+import { canonicalJson, cleanDeep, cleanLine, cleanText, cut } from './strategyText';
 import {
   appendAgentLog,
   getAgentLog,
@@ -97,11 +97,11 @@ export const parseStrategy = (input: string | unknown): Parsed => {
   if (!o || typeof o !== 'object') return { ok: false, errors: ['Not a strategy file'] };
   const errors: string[] = [];
   if (o.format !== STRATEGY_FORMAT) errors.push(`format must be "${STRATEGY_FORMAT}"`);
-  const name = typeof o.name === 'string' ? cleanLine(o.name).slice(0, 60).trim() : '';
+  const name = typeof o.name === 'string' ? cut(cleanLine(o.name), 60) : '';
   if (!name) errors.push('name is required');
-  const version = typeof o.version === 'string' ? cleanLine(o.version).slice(0, 20).trim() : '';
+  const version = typeof o.version === 'string' ? cut(cleanLine(o.version), 20) : '';
   if (!version) errors.push('version is required (e.g. "1.0")');
-  const goals = typeof o.goals === 'string' ? cleanText(o.goals).slice(0, 4000).trim() : '';
+  const goals = typeof o.goals === 'string' ? cut(cleanText(o.goals), 4000) : '';
   if (!goals) errors.push('goals are required');
   const r = (o.rules ?? {}) as Record<string, unknown>;
   const tokens = strs(r.tokens);
@@ -139,7 +139,7 @@ export const parseStrategy = (input: string | unknown): Parsed => {
   const sp = (o.spec ?? {}) as Record<string, unknown>;
   const spec: StrategySpec = {};
   for (const k of ['trades', 'spends', 'often', 'stops', 'needs'] as const)
-    if (typeof sp[k] === 'string') spec[k] = cleanLine(sp[k] as string).slice(0, 200);
+    if (typeof sp[k] === 'string') spec[k] = cut(cleanLine(sp[k] as string), 200);
   if (['Low', 'Medium', 'High', 'Experimental'].includes(sp.risk as string))
     spec.risk = sp.risk as StrategySpec['risk'];
   const changelog = Array.isArray(o.changelog)
@@ -147,8 +147,8 @@ export const parseStrategy = (input: string | unknown): Parsed => {
         .filter((c) => typeof c?.version === 'string' && typeof c?.note === 'string')
         .slice(0, 50)
         .map((c) => ({
-          version: cleanLine(c.version as string).slice(0, 20),
-          note: cleanLine(c.note as string).slice(0, 200),
+          version: cut(cleanLine(c.version as string), 20),
+          note: cut(cleanLine(c.note as string), 200),
         }))
     : undefined;
   return {
@@ -329,14 +329,20 @@ export const loadStrategy = (
   });
 };
 
-/** Paper ↔ Live. Never touches the spend ledger. */
-export const setStrategyMode = (id: string, mode: Loaded['mode'], now = Date.now()) => {
+/**
+ * Paper ↔ Live. Never touches the spend ledger. Going live needs `armedFor`, the liveConfirmKey the owner's first
+ * "Run live" tap was armed for: refused (false) unless that is still exactly the loaded strategy, so a tap armed in one
+ * window can't make a strategy loaded meanwhile (another window, an approval) live. Back to paper needs nothing.
+ */
+export const setStrategyMode = (id: string, mode: Loaded['mode'], now = Date.now(), armedFor = ''): boolean => {
   const l = getLoadedStrategy(id);
-  if (!l || l.mode === mode) return;
+  if (!l || l.mode === mode) return false;
+  if (mode === 'live' && !liveTapConfirmed(armedFor, l)) return false;
   write(KEY(id), { ...l, mode });
   if (!getStrategyLedger(id)) resetStrategyLedger(id, l.loadedAt);
   if (mode === 'paper') write(PAPER(id), null);
   appendAgentLog(id, { at: now, action: 'strategy', detail: `${l.strategy.name}: switched to ${mode}`, usd: 0 });
+  return true;
 };
 
 export const unloadStrategy = (id: string, now = Date.now()) => {
