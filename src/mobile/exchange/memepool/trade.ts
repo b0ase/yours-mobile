@@ -789,6 +789,9 @@ async function recoverOnce(d: Deps, id: string): Promise<RecoverResult> {
       // The broadcaster flagged our recovery, yet the spender the network proves IS our recovery (its txid): the BSV
       // came back. Its coin is real, so its record keeps the funding and is taken in now (or by the sweep).
       if (rec?.funding && typeof by === 'object' && by.txid === rec.funding.txid) {
+        // Ours, but not in a block yet: Memepool's spend could still win, so claim nothing. Both records stay as
+        // they are (the note keeps its funding); the sweep settles them once the network confirms one or the other.
+        if (!by.confirmed) plain('Your recovery is on its way. Check back once the network confirms it.');
         tombstone(store, id, 'returned', { returnedBy: by.txid }, now);
         const key = await d.wallet.newPayKey({ prefix: rec.prefix, suffix: rec.suffix }).catch(() => null);
         if (key)

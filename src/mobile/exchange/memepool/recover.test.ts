@@ -38,8 +38,9 @@ const HEIGHT = 900_000;
 
 /** What the stub wallet does with the transaction it builds. */
 type Build = 'ok' | 'foreign-output' | 'no-output';
-/** 'double-ours': the broadcaster flags our recovery as a double spend, yet it is our recovery that gets mined. */
-type Mode = 'ok' | 'double' | 'double-ours' | 'fail';
+/** 'double-ours': the broadcaster flags our recovery as a double spend, yet it is our recovery that gets mined.
+ * 'double-ours-unconfirmed': the same, but our recovery is only in the mempool (no merkle proof yet). */
+type Mode = 'ok' | 'double' | 'double-ours' | 'double-ours-unconfirmed' | 'fail';
 
 async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}) {
   let now = Date.now();
@@ -124,11 +125,12 @@ async function rig(opts: { services?: boolean; mode?: Mode; build?: Build } = {}
     signAction: async (a: { reference: string; spends: Record<number, { unlockingScript: string }> }) => {
       log.signed.push(a);
       const key = `${fundTx!.id('hex')}_0`;
-      if (mode === 'double-ours') {
+      if (mode === 'double-ours' || mode === 'double-ours-unconfirmed') {
         spendTx!.inputs[0].unlockingScript = UnlockingScript.fromHex(a.spends[0].unlockingScript);
         const ours = spendTx!.id('hex');
-        txs.set(ours, { raw: spendTx!.toHex(), confirmed: true });
-        prove(spendTx!);
+        const mined = mode === 'double-ours';
+        txs.set(ours, { raw: spendTx!.toHex(), confirmed: mined });
+        if (mined) prove(spendTx!);
         spent.set(key, ours);
         throw Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
           reviewActionResults: [{ txid: ours, status: 'doubleSpend' }],
@@ -696,5 +698,16 @@ describe('recheck fairness, eviction order, own recovery', () => {
     expect(note.funding?.txid).toBe((res as { txid: string }).txid);
     expect(note.state).toBe('returned');
     expect(t.log.internalized.length).toBe(1);
+  });
+
+  test('3: our own recovery flagged as a double spend but not yet in a block: nothing claimed, both records kept', async () => {
+    const t = await rig({ mode: 'double-ours-unconfirmed' });
+    const r = t.record();
+    await expect(recoverNow(t.d, r.id)).rejects.toThrow(/on its way/);
+    expect(byId(t.store, r.id)?.state).not.toBe('returned');
+    expect(byId(t.store, r.id)?.state).not.toBe('spent');
+    const note = t.store.list().find((x) => x.id !== r.id)!;
+    expect(note.funding).toBeDefined(); // the note keeps its funding, so the coin is never forgotten
+    expect(t.log.internalized.length).toBe(0);
   });
 });
