@@ -234,11 +234,19 @@ export type Loaded = {
   source?: Provenance;
 };
 
-/** Where a strategy came from: the owner on the phone, or a paired computer (its name and the pairing session id). */
+/**
+ * Where a strategy came from: the owner on the phone, or a paired computer. `computer` is the pairing's name (the agent
+ * account the owner paired it to), never a host the computer reports: a CLI pairing's origin is always
+ * cli.bwalletx.com, which would read as official.
+ */
 export type Provenance = { by: 'owner' } | { by: 'computer'; computer: string; session: string };
 
+/** "a paired computer ("Trader", session abcdef12)": generic, with the pairing name and session id visible. */
+export const pairedComputerLabel = (computer: string, session: string) =>
+  `a paired computer ("${computer}", session ${session.slice(0, 8)})`;
+
 export const describeProvenance = (p?: Provenance) =>
-  !p || p.by === 'owner' ? 'You, on this phone' : `${p.computer} (session ${p.session.slice(0, 8)})`;
+  !p || p.by === 'owner' ? 'You, on this phone' : pairedComputerLabel(p.computer, p.session);
 
 /** Pretend money for paper mode: USD cash plus token holdings, filled at live prices. */
 export type PaperBook = { cashUsd: number; tokens: Record<string, number>; spentUsd: number };
@@ -288,7 +296,9 @@ export const loadStrategy = (
   source: Provenance = { by: 'owner' },
 ) => {
   const prev = getLoadedStrategy(id);
-  const since = prev?.loadedAt ?? now;
+  // A lost strategy record must not start a new window while the ledger survives: the caps would read a ledger whose
+  // `since` doesn't match (strategyLedgerSpent → 0) and fall back to the truncatable log.
+  const since = prev?.loadedAt ?? getStrategyLedger(id)?.since ?? now;
   write(KEY(id), { strategy, mode, loadedAt: since, startValueUsd, source } satisfies Loaded);
   if (!getStrategyLedger(id)) resetStrategyLedger(id, since);
   if (mode === 'paper') write(PAPER(id), null);

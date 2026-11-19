@@ -1,6 +1,6 @@
 import { LOAD_STRATEGY_BLURB } from './describeRules';
 import { StrategyRuleNotes } from './StrategyRuleNotes';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FileUp } from 'lucide-react';
 import {
   exampleStrategy,
@@ -13,7 +13,15 @@ import {
   unloadStrategy,
   type Loaded,
 } from './strategy';
-import { approveProposal, declineProposal, getProposal, proposalChanges } from './strategyProposal';
+import {
+  approveProposal,
+  declineProposal,
+  getProposal,
+  proposalChanges,
+  proposalKey,
+  type ApproveResult,
+} from './strategyProposal';
+import { isAgentSessionLive } from '../pair/sessions';
 import { saveTextFile } from './saveText';
 import { PublishStrategy } from '../strategies/PublishStrategy';
 import { myStrategies } from '../strategies/myStrategies';
@@ -255,10 +263,33 @@ const StrategyBody = ({ id }: { id: string }) => {
   );
 };
 
-/** A strategy a paired computer sent: what would change, which computer, and the owner's Approve / Decline. */
+/** How long Approve stays off after the proposal on screen appears or changes, so a swap can't catch a tap. */
+export const APPROVE_ARM_MS = 1500;
+
+const REFUSED: Record<Exclude<ApproveResult, { ok: true }>['reason'], string> = {
+  gone: 'That proposal is no longer waiting.',
+  changed: 'The computer changed its proposal. Check the new one before you approve.',
+  'session-ended': 'That pairing has ended, so its proposal was dropped.',
+};
+
+/** A strategy a paired computer sent: what would change, which pairing, and the owner's Approve / Decline. */
 const ProposalSheet = ({ id }: { id: string }) => {
   const p = getProposal(id);
-  if (!p) return null;
+  const key = p ? proposalKey(p) : '';
+  const [armedFor, setArmedFor] = useState('');
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    if (!key) return;
+    const t = setTimeout(() => setArmedFor(key), APPROVE_ARM_MS);
+    return () => clearTimeout(t);
+  }, [key]);
+  if (!p)
+    return note ? (
+      <div className="text-xs mb-2" style={{ color: MUTED }}>
+        {note}
+      </div>
+    ) : null;
+  const armed = armedFor === key;
   const changes = proposalChanges(id, p);
   return (
     <div
@@ -266,10 +297,10 @@ const ProposalSheet = ({ id }: { id: string }) => {
       style={{ background: CARD }}
       data-testid="strategy-proposal"
     >
-      <div className="text-sm font-bold text-white">{p.computer} wants to change this strategy</div>
+      <div className="text-sm font-bold text-white">A paired computer wants to change this strategy</div>
       <div className="text-xs" style={{ color: MUTED }}>
-        Session {p.session.slice(0, 8)}. Nothing changes until you approve. It loads on paper; going live is a separate
-        tap.
+        Pairing &quot;{p.computer}&quot;, session {p.session.slice(0, 8)}. Nothing changes until you approve. It loads
+        on paper; going live is a separate tap.
       </div>
       {changes.length === 0 && (
         <div className="text-xs" style={{ color: '#D0D5DD' }}>
@@ -281,12 +312,22 @@ const ProposalSheet = ({ id }: { id: string }) => {
           <b className="text-white">{c.what}:</b> {c.from} → {c.to}
         </div>
       ))}
+      {note && (
+        <div className="text-xs" style={{ color: MUTED }}>
+          {note}
+        </div>
+      )}
       <div className="flex gap-2">
         <button
           type="button"
           className="rounded-lg px-3 py-2 text-sm font-bold border-0 flex-1"
-          style={{ background: GOLD, color: '#000' }}
-          onClick={() => approveProposal(id)}
+          style={{ background: GOLD, color: '#000', opacity: armed ? 1 : 0.5 }}
+          disabled={!armed}
+          onClick={() => {
+            // Approve exactly what this sheet shows: refused if the stored proposal changed since it rendered.
+            const r = approveProposal(id, p, isAgentSessionLive);
+            setNote(r.ok ? '' : REFUSED[r.reason]);
+          }}
         >
           Approve
         </button>
@@ -294,7 +335,10 @@ const ProposalSheet = ({ id }: { id: string }) => {
           type="button"
           className="rounded-lg px-3 py-2 text-sm font-bold border-0 flex-1"
           style={{ background: LINE, color: '#fff' }}
-          onClick={() => declineProposal(id)}
+          onClick={() => {
+            setNote('');
+            declineProposal(id);
+          }}
         >
           Decline
         </button>

@@ -5,8 +5,9 @@
  * Pure helpers + localStorage, like strategy.ts; nothing here signs.
  */
 import { appendAgentLog } from './agentAccounts';
-import { getLoadedStrategy, loadStrategy, type Strategy } from './strategy';
+import { getLoadedStrategy, loadStrategy, pairedComputerLabel, type Strategy } from './strategy';
 
+/** `computer` is the pairing's name (the agent account it was paired to); `session` is the pairing channel id. */
 export type StrategyProposal = { strategy: Strategy; computer: string; session: string; at: number };
 
 const KEY = (id: string) => `bwallet.strategy.proposal.${id}`;
@@ -42,21 +43,68 @@ export const proposeStrategy = (
   now = Date.now(),
 ) => {
   store(id, { strategy, ...from, at: now });
+  // One log line per pairing session: a newer proposal replaces that session's earlier line, so a flood of proposals
+  // cannot push older provenance lines out of the log.
   appendAgentLog(id, {
     at: now,
     action: 'strategy',
-    detail: `${from.computer} (session ${from.session.slice(0, 8)}) proposed ${strategy.name} v${strategy.version}; waiting for you to approve`,
+    detail: `${pairedComputerLabel(from.computer, from.session)} proposed ${strategy.name} v${strategy.version}; waiting for you to approve`,
     usd: 0,
+    merge: `strategy-proposal:${from.session}`,
   });
 };
 
-/** Owner approves: it loads on paper (going live is still its own tap), tagged with the computer it came from. */
-export const approveProposal = (id: string, now = Date.now()) => {
+/** JSON with object keys sorted at every level, so two strategies compare equal exactly when their content is equal. */
+export const canonicalJson = (v: unknown): string => {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
+  if (v && typeof v === 'object')
+    return `{${Object.keys(v)
+      .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson((v as Record<string, unknown>)[k])}`)
+      .join(',')}}`;
+  return JSON.stringify(v) ?? 'null';
+};
+
+/** A stable key for one proposal: changes whenever anything the owner is shown (or would load) changes. */
+export const proposalKey = (p: StrategyProposal) =>
+  canonicalJson({ at: p.at, session: p.session, computer: p.computer, strategy: p.strategy });
+
+export type ApproveResult = { ok: true } | { ok: false; reason: 'gone' | 'changed' | 'session-ended' };
+
+/**
+ * Owner approves the proposal the sheet SHOWED (`shown`): it loads on paper (going live is still its own tap), tagged
+ * with the computer it came from. Refused when the stored proposal is no longer exactly that one (the computer sent
+ * another between render and tap), or when the pairing that sent it has ended (`sessionLive`, sessions.ts).
+ */
+export const approveProposal = (
+  id: string,
+  shown: StrategyProposal,
+  sessionLive: (session: string, agentId: string) => boolean,
+  now = Date.now(),
+): ApproveResult => {
   const p = getProposal(id);
-  if (!p) return false;
+  if (!p) return { ok: false, reason: 'gone' };
+  if (proposalKey(p) !== proposalKey(shown)) return { ok: false, reason: 'changed' };
+  if (!sessionLive(p.session, id)) {
+    store(id, null);
+    appendAgentLog(id, {
+      at: now,
+      action: 'strategy',
+      detail: `Dropped ${p.strategy.name} v${p.strategy.version} from ${pairedComputerLabel(p.computer, p.session)}: that pairing has ended`,
+      usd: 0,
+    });
+    return { ok: false, reason: 'session-ended' };
+  }
   loadStrategy(id, p.strategy, 'paper', undefined, now, { by: 'computer', computer: p.computer, session: p.session });
   store(id, null);
-  return true;
+  return { ok: true };
+};
+
+/** A pairing ended (Disconnect, lapse, expiry): drop the proposal it sent, if that is the one waiting. */
+export const dropProposalFromSession = (id: string, session: string) => {
+  const p = getProposal(id);
+  if (p && p.session === session) store(id, null);
 };
 
 export const declineProposal = (id: string, now = Date.now()) => {
@@ -66,7 +114,7 @@ export const declineProposal = (id: string, now = Date.now()) => {
   appendAgentLog(id, {
     at: now,
     action: 'strategy',
-    detail: `Declined ${p.strategy.name} v${p.strategy.version} from ${p.computer}`,
+    detail: `Declined ${p.strategy.name} v${p.strategy.version} from ${pairedComputerLabel(p.computer, p.session)}`,
     usd: 0,
   });
 };

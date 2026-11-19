@@ -121,8 +121,8 @@ export type AgentDeps = {
    * before signing (b-Aware report, 13 Nov 2026). Missing = live (direct callers and tests with no session).
    */
   isLive?: () => boolean;
-  /** The pairing session this call came from (its id and the computer's host), recorded on strategy proposals. */
-  session?: { id: string; computer: string };
+  /** The pairing session this call came from (its channel id), recorded on strategy proposals. */
+  session?: { id: string };
   /** Swappable for tests: the trade run's own outside calls (agentTrade.ts AgentTradeIo). */
   tradeIo?: AgentActionHooks['io'];
 };
@@ -232,7 +232,9 @@ export async function handleAgentCall(
       // loads on paper. Nothing active, and no spend ledger, changes here (b-Aware 315).
       const r = parseStrategy(p.strategy);
       if (!r.ok) throw new AgentCallError('INVALID', r.errors.join('; '));
-      const from = { computer: deps.session?.computer ?? grant.name, session: deps.session?.id ?? 'unknown' };
+      // Named by the pairing (grant.name, chosen by the owner when pairing), never by the host the computer reports.
+      // No session (direct callers): 'unknown', which approval refuses as not a live pairing.
+      const from = { computer: grant.name, session: deps.session?.id ?? 'unknown' };
       proposeStrategy(id, r.strategy, from);
       return {
         proposed: r.strategy.name,

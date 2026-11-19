@@ -40,6 +40,12 @@ export type AgentLogEntry = {
   rule?: string;
   /** How many identical refusals in a row this entry stands for (refusals are coalesced, not appended). */
   repeat?: number;
+  /**
+   * Entries with the same merge key replace each other: the newest is kept (counting the ones it replaced in
+   * `repeat`), so a flood of them, like strategy proposals from one pairing, can't push older lines out of the log.
+   * Zero-dollar entries only; a spend never merges.
+   */
+  merge?: string;
 };
 
 const KEY = 'bwallet.agentAccounts';
@@ -227,7 +233,11 @@ export const strategyLedgerSpent = (id: string, since: number, now = Date.now())
   return { todayUsd: today > 0 ? today : 0, totalUsd: l.totalUsd > 0 ? l.totalUsd : 0 };
 };
 
-export const appendAgentLog = (id: string, e: AgentLogEntry) => {
+export const appendAgentLog = (id: string, entry: AgentLogEntry) => {
+  const all = getAgentLog(id);
+  // Only zero-dollar entries merge: a spend line is never removed from the log the caps read.
+  const prev = entry.merge && !(entry.usd > 0) ? all.find((x) => x.merge === entry.merge && !(x.usd > 0)) : undefined;
+  const e = prev ? { ...entry, repeat: (prev.repeat ?? 1) + 1 } : entry;
   if (e.usd > 0) {
     const day = dayStart(e.at);
     const l = read<SpendDay | null>(SPEND(id), null);
@@ -240,7 +250,7 @@ export const appendAgentLog = (id: string, e: AgentLogEntry) => {
       write(STRAT_SPEND(id), { since: sl.since, totalUsd: sl.totalUsd + e.usd, days } satisfies StrategySpendLedger);
     }
   }
-  const log = getAgentLog(id);
+  const log = prev ? all.filter((x) => x !== prev) : all;
   // Coalesce a run of identical refusals into one entry, so refusal floods don't fill the log.
   const top = log[0];
   if (e.action === 'refused' && top && top.action === 'refused' && top.detail === e.detail && top.rule === e.rule) {
