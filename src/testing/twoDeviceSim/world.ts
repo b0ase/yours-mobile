@@ -78,7 +78,7 @@ import {
   type QueueStore,
   type UnsentDeps,
 } from '../../services/stuckSends';
-import { createReleaseMarks, markReleases, type ReleaseMarks } from '../../services/releaseMarks';
+import { createReleaseMarks, markReleases, watchSigned, type ReleaseMarks } from '../../services/releaseMarks';
 import { guardPostBeef, heldLocally, knownByServices } from '../../services/beefAncestors';
 import { guardReclaimActivation, reclaimLockFor, reclaimVerdict } from '../../services/reclaimGuard';
 import {
@@ -350,11 +350,16 @@ export class World {
     // own; the toolbox activates a reclaim only when that same check passes.
     const marks = createReleaseMarks();
     markReleases(wallet, marks, { admin: SIM_ADMIN });
+    if (!watchSigned(sm, marks)) throw new Error('storage processAction not watched');
     const lockFor = reclaimLockFor(wallet as never);
     if (
       !guardPostBeef(svc, {
         released: (txid) => marks.released(txid),
-        known: (txid) => knownByServices(svc as never, txid),
+        known: async (txid) => {
+          const k = await knownByServices(svc as never, txid);
+          if (k) await marks.markSeen(txid);
+          return k;
+        },
         held: heldLocally(marks, () => s as never),
         reclaim: (txid) => reclaimVerdict(s as never, txid, lockFor),
         log: (m) => this.log(`[${name}] ${m}`),
@@ -827,6 +832,7 @@ export class World {
             sp as unknown as QueueStore,
             (t) => d.marks.released(t),
             IS.walletOwnership(this.root) as never,
+            { heldHere: (t) => d.marks.heldHere(t), seen: (t) => d.marks.seen(t) },
           ),
         ),
       knownOnChain: (txid) => knownOnChain(txid, chainLookups(f)),

@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { readFileSync } from 'node:fs';
 import { HeldPaymentsView } from './HeldPayments';
-import { ELSEWHERE_LABEL, heldLineItems, RESTORED_LABEL } from './heldPaymentLines';
+import { ELSEWHERE_LABEL, heldLineItems, NEVER_SEEN_NOTE, RESTORED_LABEL } from './heldPaymentLines';
 import { unsentOutcomeText as outcomeText } from '../services/stuckSends';
 
 const sats = (n: number) => `${n} sats`;
@@ -43,8 +43,18 @@ describe('held payments under the balance (task 54 review, rounds 2 and 3)', () 
       expect(view([p])).toMatch(/<button[^>]*disabled=""[^>]*>Send now<\/button>/);
     expect(view([queued])).not.toMatch(/<button[^>]*disabled=""[^>]*>Send now<\/button>/);
   });
-  test("round 5 (4): another device's dropped payment is labelled so, with Send now and Cancel", () => {
-    const html = view([{ ...queued, elsewhere: true, queuedHere: false, description: 'From the backup' }]);
+  test("round 6 (d): another device's payment never seen on the network: no Send now, Cancel only, and a note", () => {
+    const html = view([{ ...queued, elsewhere: true, queuedHere: false, seenOnNetwork: false }]);
+    expect(html).toContain(`${ELSEWHERE_LABEL} · 20000 sats`);
+    expect(html).not.toContain('Send now');
+    expect(html).toContain('Cancel');
+    expect(html).toContain(NEVER_SEEN_NOTE);
+    expect(ELSEWHERE_LABEL).toBe('From another device, not on the network'); // claims nothing was sent
+  });
+  test("round 5 (4): another device's dropped payment this device saw on the network: labelled so, with Send now and Cancel", () => {
+    const html = view([
+      { ...queued, elsewhere: true, seenOnNetwork: true, queuedHere: false, description: 'From the backup' },
+    ]);
     expect(html).toContain(`${ELSEWHERE_LABEL} · 20000 sats`);
     expect(html).not.toContain('From the backup');
     expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Send now<\/button>/);

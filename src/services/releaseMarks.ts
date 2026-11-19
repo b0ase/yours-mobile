@@ -15,11 +15,13 @@
  * services/beefAncestors.ts guardPostBeef refuses a broadcast carrying a held payment without a release.
  * A wiped or restored device starts with none: a payment it gets back from a backup is held until the user releases it.
  */
+import { Transaction } from '@bsv/sdk';
 
 export type ReleaseRecord = {
   released: string[];
   held?: string[];
   owners?: [string, string][];
+  seen?: string[];
   /** Written by round 3 builds; read and dropped. */
   armed?: string[];
 };
@@ -42,6 +44,16 @@ export type ReleaseMarks = {
   setOwner: (txid: string, owner: string) => Promise<void>;
   /** The originator that made it on this device, if any. */
   owner: (txid: string) => string | undefined;
+  /** Any record of it here (owner, held or released). */
+  known: (txid: string) => boolean;
+  /** This device's signer handed it to storage (watchSigned): in memory, for matching a call's own result. */
+  noteSigned: (txid: string) => void;
+  /** A counter for noteSigned; signedSince(n) lists the txids signed after it was n. */
+  signedSeq: () => number;
+  signedSince: (seq: number) => string[];
+  /** The network was seen to have it (in a block or the mempool): kept, for Held payments' Send now. */
+  markSeen: (txid: string) => Promise<void>;
+  seen: (txid: string) => boolean;
 };
 
 /** The most kept of each kind (oldest dropped first): far more than a wallet's pending payments ever are. */
@@ -53,14 +65,22 @@ export function createReleaseMarks(kv?: ReleaseKV): ReleaseMarks {
   const released = new Set<string>();
   const held = new Set<string>();
   const owners = new Map<string, string>();
+  const seenOnNetwork = new Set<string>();
   const flying = new Map<string, number>();
+  const signed: { seq: number; txid: string }[] = [];
+  let seq = 0;
   let saving = Promise.resolve();
   const trim = <K>(s: { size: number; delete: (k: K) => boolean; keys: () => IterableIterator<K> }) => {
     while (s.size > MAX_MARKS) s.delete(s.keys().next().value as K);
   };
   const save = () => {
     if (!kv) return Promise.resolve();
-    const r: ReleaseRecord = { released: [...released], held: [...held], owners: [...owners] };
+    const r: ReleaseRecord = {
+      released: [...released],
+      held: [...held],
+      owners: [...owners],
+      seen: [...seenOnNetwork],
+    };
     saving = saving.then(() => kv.save(r)).catch(() => undefined);
     return saving;
   };
@@ -70,6 +90,7 @@ export function createReleaseMarks(kv?: ReleaseKV): ReleaseMarks {
       for (const t of r?.released ?? []) if (TXID.test(norm(t))) released.add(norm(t));
       for (const t of r?.held ?? []) if (TXID.test(norm(t))) held.add(norm(t));
       for (const [t, o] of r?.owners ?? []) if (TXID.test(norm(t)) && typeof o === 'string') owners.set(norm(t), o);
+      for (const t of r?.seen ?? []) if (TXID.test(norm(t))) seenOnNetwork.add(norm(t));
     },
     release: async (txids) => {
       let n = 0;
@@ -105,18 +126,35 @@ export function createReleaseMarks(kv?: ReleaseKV): ReleaseMarks {
       if (!TXID.test(norm(txid))) return;
       held.add(norm(txid));
       trim(held);
-      if (owner !== undefined) owners.set(norm(txid), owner);
+      // Never another maker over the one recorded (review round 6, c).
+      if (owner !== undefined && !owners.has(norm(txid))) owners.set(norm(txid), owner);
       trim(owners);
       await save();
     },
     heldHere: (txid) => held.has(norm(txid)) && !marks.released(txid),
     setOwner: async (txid, owner) => {
-      if (!TXID.test(norm(txid)) || owners.get(norm(txid)) === owner) return;
+      // Never another maker over the one recorded (review round 6, c).
+      if (!TXID.test(norm(txid)) || owners.has(norm(txid))) return;
       owners.set(norm(txid), owner);
       trim(owners);
       await save();
     },
     owner: (txid) => owners.get(norm(txid)),
+    known: (txid) => owners.has(norm(txid)) || held.has(norm(txid)) || released.has(norm(txid)),
+    noteSigned: (txid) => {
+      if (!TXID.test(norm(txid))) return;
+      signed.push({ seq: ++seq, txid: norm(txid) });
+      if (signed.length > 200) signed.shift();
+    },
+    signedSeq: () => seq,
+    signedSince: (n) => signed.filter((x) => x.seq > n).map((x) => x.txid),
+    markSeen: async (txid) => {
+      if (!TXID.test(norm(txid)) || seenOnNetwork.has(norm(txid))) return;
+      seenOnNetwork.add(norm(txid));
+      trim(seenOnNetwork);
+      await save();
+    },
+    seen: (txid) => seenOnNetwork.has(norm(txid)),
   };
   return marks;
 }
@@ -172,17 +210,32 @@ export function markReleases<T extends object>(wallet: T, marks: ReleaseMarks, o
       const owner = ownerOf(originator);
       if (isSite(owner)) for (const t of namedBy(args)) if (marks.owner(t) !== owner) throw new Error(NOT_YOURS);
       let r: ActionResult;
+      const since = marks.signedSeq();
+      /**
+       * The txid of this very call, when it threw after reaching storage: a WERR_REVIEW_ACTIONS ("Undelayed createAction
+       * or signAction results require review") naming the one transaction this device's signer handed to storage
+       * during the call (watchSigned), and of which this device has no record yet. A remote store can send that error
+       * with any txid (review round 6, c): one it names that this call didn't sign here is never recorded.
+       */
+      const ownReview = (e: unknown): string | undefined => {
+        const err = e as { name?: unknown; code?: unknown; txid?: unknown } | null;
+        if (err?.name !== 'WERR_REVIEW_ACTIONS' && err?.code !== 'WERR_REVIEW_ACTIONS') return undefined;
+        const txid = norm(String(err?.txid ?? ''));
+        const mine = marks.signedSince(since);
+        return TXID.test(txid) && mine.length === 1 && mine[0] === txid && !marks.known(txid) ? txid : undefined;
+      };
       try {
         r = await marks.inFlight(
           releasedBy(args),
           async () =>
             (original as (...a: unknown[]) => Promise<ActionResult>).apply(wallet, [args, originator, ...rest]),
-          reachedStorage,
+          (e) => !!ownReview(e),
         );
       } catch (e) {
-        // Thrown after the action reached storage ("Undelayed createAction or signAction results require review",
-        // WERR_REVIEW_ACTIONS, carries its txid): its records are kept as for a success (review round 5, item 3).
-        if (reachedStorage(e)) await record(method, args, owner, { txid: (e as { txid: string }).txid });
+        // Thrown after this call's own transaction reached storage: its records are kept as for a success (round 5,
+        // item 3), only for that transaction and only when it has none yet (round 6, c).
+        const txid = ownReview(e);
+        if (txid) await record(method, args, owner, { txid });
         throw e;
       }
       await record(method, args, owner, r);
@@ -213,5 +266,33 @@ export function markReleases<T extends object>(wallet: T, marks: ReleaseMarks, o
   return wallet;
 }
 
-/** An error the toolbox throws after the action is in storage: it names the action's txid. */
-const reachedStorage = (e: unknown) => TXID.test(norm(String((e as { txid?: unknown } | null)?.txid ?? '')));
+type ProcessArgs = { isNewTx?: boolean; txid?: string; rawTx?: ArrayLike<number> };
+const SIGNED = Symbol.for('bwx.releaseMarks.signed');
+
+/**
+ * Wrap the storage manager's processAction (in place): every new transaction this device's signer hands to storage
+ * is noted (its bytes checked against its txid) before storage answers, so a call that then throws can tell its own
+ * transaction from one a remote store names (markReleases). Idempotent; false without processAction.
+ */
+export function watchSigned(storage: unknown, marks: ReleaseMarks): boolean {
+  const s = storage as
+    | ({ processAction?: (a: ProcessArgs, ...r: unknown[]) => Promise<unknown> } & {
+        [SIGNED]?: true;
+      })
+    | null;
+  if (!s || typeof s.processAction !== 'function') return false;
+  if (s[SIGNED]) return true;
+  const original = s.processAction.bind(s);
+  s.processAction = async (a: ProcessArgs, ...r: unknown[]) => {
+    if (a?.isNewTx && a.txid && a.rawTx?.length) {
+      try {
+        if (Transaction.fromBinary(Array.from(a.rawTx)).id('hex') === norm(a.txid)) marks.noteSigned(a.txid);
+      } catch {
+        // bytes that aren't a transaction: not noted
+      }
+    }
+    return original(a, ...r);
+  };
+  s[SIGNED] = true;
+  return true;
+}

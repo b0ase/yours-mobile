@@ -4,7 +4,7 @@ import { sendMessageAsync } from '../utils/chromeHelpers';
 import { ThemeContext } from '../contexts/ColorThemeContext';
 import { TruthLinesOn } from './truthLinesContext';
 import { SendConfirmation } from './SendConfirmation';
-import { ELSEWHERE_LABEL, heldLineItems, RESTORED_LABEL } from './heldPaymentLines';
+import { ELSEWHERE_LABEL, heldLineItems, NEVER_SEEN_NOTE, RESTORED_LABEL } from './heldPaymentLines';
 
 const MUTED = 'var(--bw-muted, #98A2B3)';
 const GOLD = 'var(--bw-accent, #D4AF37)';
@@ -31,7 +31,7 @@ export const HeldPaymentsView = ({
 }: {
   items: Pick<
     QueuedSend,
-    'txid' | 'description' | 'createdAt' | 'recipients' | 'amountSats' | 'queuedHere' | 'elsewhere'
+    'txid' | 'description' | 'createdAt' | 'recipients' | 'amountSats' | 'queuedHere' | 'elsewhere' | 'seenOnNetwork'
   >[];
   fmt: (sats: number) => string;
   hidden?: boolean;
@@ -56,34 +56,40 @@ export const HeldPaymentsView = ({
         </div>
       )}
       {items.map((p) => (
-        <div key={p.txid} className="flex gap-2 items-center justify-between" style={{ marginTop: 4 }}>
-          <span className="overflow-hidden text-ellipsis whitespace-nowrap select-text">
-            {p.elsewhere ? ELSEWHERE_LABEL : p.queuedHere ? p.description || 'Payment' : RESTORED_LABEL}
-            {hidden ? '' : typeof p.amountSats === 'number' ? ` · ${fmt(p.amountSats)}` : ' · amount unreadable'}
-            {p.recipients?.length
-              ? ` to ${p.recipients.length === 1 ? p.recipients[0].to.slice(0, 10) + '…' : `${p.recipients.length} recipients`}`
-              : ''}
-          </span>
-          <span className="flex gap-1" style={{ flexShrink: 0 }}>
-            <button
-              type="button"
-              disabled={!!busy || !p.recipients?.length || !p.amountSats}
-              onClick={() => onSend(p.txid)}
-              className="rounded-md px-2 py-0.5 border-0 cursor-pointer font-semibold"
-              style={{ background: GOLD, color: '#000', fontSize: 11 }}
-            >
-              {busy === p.txid ? 'Sending…' : 'Send now'}
-            </button>
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={() => onCancel(p.txid)}
-              className="rounded-md px-2 py-0.5 cursor-pointer bg-transparent"
-              style={{ border: `1px solid ${MUTED}`, color: MUTED, fontSize: 11 }}
-            >
-              Cancel
-            </button>
-          </span>
+        <div key={p.txid} style={{ marginTop: 4 }}>
+          <div className="flex gap-2 items-center justify-between">
+            <span className="overflow-hidden text-ellipsis whitespace-nowrap select-text">
+              {p.elsewhere ? ELSEWHERE_LABEL : p.queuedHere ? p.description || 'Payment' : RESTORED_LABEL}
+              {hidden ? '' : typeof p.amountSats === 'number' ? ` · ${fmt(p.amountSats)}` : ' · amount unreadable'}
+              {p.recipients?.length
+                ? ` to ${p.recipients.length === 1 ? p.recipients[0].to.slice(0, 10) + '…' : `${p.recipients.length} recipients`}`
+                : ''}
+            </span>
+            <span className="flex gap-1" style={{ flexShrink: 0 }}>
+              {/* Another device's payment this device never saw on the network: Cancel only (round 6, d). */}
+              {p.elsewhere && !p.seenOnNetwork ? null : (
+                <button
+                  type="button"
+                  disabled={!!busy || !p.recipients?.length || !p.amountSats}
+                  onClick={() => onSend(p.txid)}
+                  className="rounded-md px-2 py-0.5 border-0 cursor-pointer font-semibold"
+                  style={{ background: GOLD, color: '#000', fontSize: 11 }}
+                >
+                  {busy === p.txid ? 'Sending…' : 'Send now'}
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => onCancel(p.txid)}
+                className="rounded-md px-2 py-0.5 cursor-pointer bg-transparent"
+                style={{ border: `1px solid ${MUTED}`, color: MUTED, fontSize: 11 }}
+              >
+                Cancel
+              </button>
+            </span>
+          </div>
+          {p.elsewhere && !p.seenOnNetwork && <div>{NEVER_SEEN_NOTE}</div>}
         </div>
       ))}
       {n > 0 && (

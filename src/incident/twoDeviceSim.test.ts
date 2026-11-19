@@ -42,7 +42,7 @@ import { rng } from '../testing/twoDeviceSim/chain';
 import { Beef, Script, Transaction } from '@bsv/sdk';
 import { Wallet, WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import { NOT_YOURS } from '../services/releaseMarks';
-import { isHeld, NEEDS_CONFIRMATION, resolveUnsent, visibleUnsent } from '../services/stuckSends';
+import { isHeld, NEEDS_CONFIRMATION, NEVER_SEEN, resolveUnsent, visibleUnsent } from '../services/stuckSends';
 
 // The Store client (mobile/themeOrder/api.ts, imported by the Store open) reads its API base once, when it is first
 // loaded. bun runs every file in one process: whichever file loads it first fixes it for the rest, so this file sets
@@ -602,10 +602,15 @@ describe('two devices, one seed: named cases', () => {
     await w.sync('A');
     await w.sync('B');
     expect(await w.statusOf('B', P.txid)).toEqual({ tx: 'unproven', req: 'nosend' });
+    // B's list read (initWallet's listUnsent): one the network has is marked seen on B.
     const listed = async () =>
-      (await visibleUnsent(await w.unsentDeps('B').listQueued(), (t) => Promise.resolve(w.chain.has(t)))).find(
-        (q) => q.txid === P.txid,
-      );
+      (
+        await visibleUnsent(
+          await w.unsentDeps('B').listQueued(),
+          (t) => Promise.resolve(w.chain.has(t)),
+          (t) => w.B.marks.markSeen(t),
+        )
+      ).find((q) => q.txid === P.txid);
     expect(await listed()).toBeUndefined(); // in the mempool: nothing to do
     w.chain.drop(P.txid); // A's device is gone; the network forgot P
     return { w, P, listed };
@@ -645,6 +650,7 @@ describe('two devices, one seed: named cases', () => {
       ok: true,
       txid: P.txid,
       result: 'cancelled',
+      elsewhere: true, // "Released here. If the other device sends it, it will still go through."
     });
     expect(w.B.posted.slice(before)).toEqual([]);
     expect(w.chain.has(P.txid)).toBe(false);
@@ -664,6 +670,88 @@ describe('two devices, one seed: named cases', () => {
       expect(r.released.map((x) => x.txid)).toContain(P.txid);
       expect(w.B.posted.slice(before)).toEqual([]);
       expect(await w.statusOf('B', P.txid)).toEqual({ tx: 'failed', req: 'invalid' });
+    },
+  );
+
+  sim(
+    "task 54 round 6 (d): A's withheld payment a backup brings to B as sent is listed with Cancel only, never sendable",
+    async () => {
+      const w = await threeCoins();
+      const W = await w.storePay('A', 20_000, { outbox: false }); // withheld on A
+      await w.sync('A');
+      const [bt] = await w.backup.findTransactions({ partial: { txid: W.txid }, noRawTx: true });
+      w.advance(60_000);
+      await w.backup.updateTransaction(bt.transactionId, {
+        status: 'unproven',
+        updated_at: new Date(Date.now()),
+      } as never);
+      await w.wipe('B');
+      await w.sync('B');
+      expect(await w.statusOf('B', W.txid)).toEqual({ tx: 'unproven', req: 'nosend' });
+      const q = (
+        await visibleUnsent(
+          await w.unsentDeps('B').listQueued(),
+          (t) => Promise.resolve(w.chain.has(t)),
+          (t) => w.B.marks.markSeen(t),
+        )
+      ).find((x) => x.txid === W.txid);
+      expect([q?.elsewhere, q?.seenOnNetwork]).toEqual([true, false]);
+      expect(await resolveUnsent(w.unsentDeps('B'), W.txid, 'send', { confirmed: true })).toEqual({
+        ok: false,
+        txid: W.txid,
+        error: NEVER_SEEN,
+      });
+      expect(w.chain.has(W.txid)).toBe(false);
+      expect(await resolveUnsent(w.unsentDeps('B'), W.txid, 'cancel')).toEqual({
+        ok: true,
+        txid: W.txid,
+        result: 'cancelled',
+        elsewhere: true,
+      });
+      expect(w.chain.has(W.txid)).toBe(false);
+    },
+  );
+
+  sim(
+    "task 54 round 6 (c): a store's review error naming W can't re-own W to a site, which still can't send it",
+    async () => {
+      const w = await threeCoins();
+      const W = (await w.A.wallet.createAction({
+        description: 'Held payment',
+        outputs: [{ lockingScript: w.externalScript(), satoshis: 10_000, outputDescription: 'payment' }],
+        options: { noSend: true },
+      } as never)) as { txid: string };
+      expect([w.A.marks.owner(W.txid), w.A.marks.heldHere(W.txid)]).toEqual(['', true]);
+      // The active store answers evil.site's next payment with a WERR_REVIEW_ACTIONS that names W.
+      const sm = w.A.sm as unknown as { processAction: (...a: unknown[]) => Promise<unknown> };
+      const real = sm.processAction;
+      sm.processAction = async (...a: unknown[]) => {
+        await real(...a);
+        throw Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
+          name: 'WERR_REVIEW_ACTIONS',
+          txid: W.txid,
+        });
+      };
+      const pm = pmOf(w, 'A');
+      await expect(
+        pm.createAction(
+          {
+            description: 'Evil payment',
+            outputs: [{ lockingScript: w.externalScript(), satoshis: 1_000, outputDescription: 'payment' }],
+          } as never,
+          'evil.site',
+        ),
+      ).rejects.toThrow();
+      sm.processAction = real;
+      expect([w.A.marks.owner(W.txid), w.A.marks.heldHere(W.txid), w.A.marks.released(W.txid)]).toEqual([
+        '',
+        true,
+        false,
+      ]);
+      await expect(
+        pm.createAction({ description: 'Send it now', options: { sendWith: [W.txid] } } as never, 'evil.site'),
+      ).rejects.toThrow(NOT_YOURS);
+      expect(w.chain.has(W.txid)).toBe(false);
     },
   );
 

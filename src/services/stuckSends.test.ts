@@ -270,9 +270,12 @@ describe("task 54 round 2: a held payment (restored as 'nosend') goes out only o
 
 import { P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk';
 import {
+  createUnsentVisibility,
   decodePayment,
   listQueuedSends,
   NEEDS_CONFIRMATION,
+  NEVER_SEEN,
+  unsentOutcomeText,
   NOSEND_COPY_GIVE_UP_MS,
   stuckVerdict,
   visibleUnsent,
@@ -368,5 +371,82 @@ describe('task 54 round 3 (d): a held payment shows what its own bytes pay, and 
     ).toEqual([]);
     // Given up on after the held-copy window like any other, by the same review.
     expect(stuckVerdict({ ...q, createdAt: 0 }, NOSEND_COPY_GIVE_UP_MS + 1)).toBe('give-up');
+  });
+
+  const elsewhereStore = (t: Transaction) => ({
+    findTransactions: async (a: { partial: Record<string, unknown> }) =>
+      a.partial.status === 'unproven'
+        ? [{ transactionId: 1, txid: t.id('hex'), created_at: new Date(0), description: 'x', satoshis: -5 }]
+        : [],
+    findProvenTxReqs: async () => [{ status: 'nosend', attempts: 0, rawTx: t.toBinary() }],
+    findOutputs: async () => [{ vout: 1, change: true, basketId: 1 }],
+  });
+  test("round 6 (d): this device's own withheld payment a backup marks as sent is not listed as another device's", async () => {
+    const t = pay();
+    expect(await listQueuedSends(elsewhereStore(t), () => false, owns, { heldHere: (x) => x === t.id('hex') })).toEqual(
+      [],
+    );
+    const [q] = await listQueuedSends(elsewhereStore(t), () => false, owns, { heldHere: () => false });
+    expect(q.elsewhere).toBe(true);
+  });
+  test('round 6 (d): Send now only for one this device saw on the network; Cancel always (released here only)', async () => {
+    const t = pay();
+    const deps = (seen: boolean) => {
+      const sent: string[] = [];
+      return {
+        sent,
+        d: {
+          listQueued: () => listQueuedSends(elsewhereStore(t), () => false, owns, { seen: () => seen }),
+          knownOnChain: async () => false,
+          cancel: async () => undefined,
+          sendWaiting: async () => undefined,
+          sendWith: async (x: string) => void sent.push(x),
+        },
+      };
+    };
+    const never = deps(false);
+    expect(await resolveUnsent(never.d, t.id('hex'), 'send', { confirmed: true })).toEqual({
+      ok: false,
+      txid: t.id('hex'),
+      error: NEVER_SEEN,
+    });
+    expect(never.sent).toEqual([]);
+    const cancelled = await resolveUnsent(never.d, t.id('hex'), 'cancel');
+    expect(cancelled).toEqual({ ok: true, txid: t.id('hex'), result: 'cancelled', elsewhere: true });
+    expect(unsentOutcomeText(cancelled)).toBe('Released here. If the other device sends it, it will still go through.');
+    const seen = deps(true);
+    expect((await resolveUnsent(seen.d, t.id('hex'), 'send', { confirmed: true })).ok).toBe(true);
+    expect(seen.sent).toEqual([t.id('hex')]);
+  });
+  test('round 6 (e): the network answer is reused for a few minutes, and only a few are asked per read', async () => {
+    const rows = ['1', '2', '3'].map((d) => ({
+      transactionId: Number(d),
+      txid: d.repeat(64),
+      createdAt: 0,
+      attempts: 0,
+      reqStatus: 'nosend',
+      elsewhere: true,
+    }));
+    let clock = 0;
+    const asked: string[] = [];
+    const seen: string[] = [];
+    const read = createUnsentVisibility({
+      knownOnChain: async (x) => {
+        asked.push(x);
+        return x === rows[0].txid; // the first is on the network
+      },
+      onSeen: (x) => void seen.push(x),
+      ttlMs: 60_000,
+      maxLookups: 2,
+      now: () => clock,
+    });
+    expect((await read(rows)).map((q) => q.txid)).toEqual([rows[1].txid]); // the third waits for a later read
+    expect(asked).toEqual([rows[0].txid, rows[1].txid]);
+    expect(seen).toEqual([rows[0].txid]);
+    expect((await read(rows)).map((q) => q.txid)).toEqual([rows[1].txid, rows[2].txid]); // cached two, asked one
+    expect(asked).toHaveLength(3);
+    clock = 60_000; // reuse over: asked again
+    await read(rows);
+    expect(asked).toHaveLength(5);
   });
 });

@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { createReleaseMarks, markReleases, NOT_YOURS, releasedBy, type ReleaseRecord } from './releaseMarks';
+import { P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
+import {
+  createReleaseMarks,
+  markReleases,
+  NOT_YOURS,
+  releasedBy,
+  watchSigned,
+  type ReleaseRecord,
+} from './releaseMarks';
 
 const A = 'a'.repeat(64);
 const B = 'b'.repeat(64);
@@ -99,16 +107,20 @@ describe('release marks (this device only, never synced): task 54 review, rounds
     expect(m.released(A)).toBe(true);
   });
 
+  /** The toolbox's error after the action reached storage, as its class builds it (name WERR_REVIEW_ACTIONS). */
+  const reviewError = (txid: string, extra: object = {}) =>
+    Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
+      name: 'WERR_REVIEW_ACTIONS',
+      txid,
+      ...extra,
+    });
+
   test('round 5 (3): a send that reached storage and then threw (results require review) keeps its marks', async () => {
     const m = createReleaseMarks();
-    const review = () =>
-      Object.assign(new Error('Undelayed createAction or signAction results require review'), {
-        txid: C,
-        sendWithResults: [{ txid: A, status: 'failed' }],
-      });
     const w = {
       createAction: async () => {
-        throw review();
+        m.noteSigned(C); // this device's signer handed C to storage (watchSigned)
+        throw reviewError(C, { sendWithResults: [{ txid: A, status: 'failed' }] });
       },
     };
     markReleases(w, m, { admin: ADMIN });
@@ -118,11 +130,83 @@ describe('release marks (this device only, never synced): task 54 review, rounds
     // A noSend one that reached storage is held here.
     const w2 = {
       createAction: async () => {
-        throw Object.assign(new Error('Undelayed createAction or signAction results require review'), { txid: D });
+        m.noteSigned(D);
+        throw reviewError(D);
       },
     };
     markReleases(w2, m, { admin: ADMIN });
     await expect(w2.createAction({ options: { noSend: true } } as never)).rejects.toThrow('require review');
     expect([m.heldHere(D), m.released(D)]).toEqual([true, false]);
+  });
+
+  test("round 6 (c): a remote store's review error naming W changes nothing about W, and the site still can't send it", async () => {
+    const m = createReleaseMarks();
+    await m.hold(B, ''); // W: the wallet's own withheld payment
+    const sends: unknown[] = [];
+    const w = {
+      createAction: async (args: { options?: { sendWith?: string[] } }) => {
+        if (args.options?.sendWith) {
+          sends.push(args);
+          return { txid: C };
+        }
+        m.noteSigned(C); // what this call really signed
+        throw reviewError(B); // the remote store's envelope names W instead
+      },
+    };
+    markReleases(w, m, { admin: ADMIN });
+    await expect(w.createAction({ description: 'x' } as never, 'evil.site' as never)).rejects.toThrow('require review');
+    expect([m.owner(B), m.heldHere(B), m.released(B), m.known(C)]).toEqual(['', true, false, false]);
+    await expect(
+      w.createAction({ description: 'x', options: { sendWith: [B] } } as never, 'evil.site' as never),
+    ).rejects.toThrow(NOT_YOURS);
+    expect(sends).toEqual([]);
+  });
+
+  test('round 6 (c): only a WERR_REVIEW_ACTIONS naming the one transaction this call signed, with no record yet', async () => {
+    const cases: [string, () => void, Error][] = [
+      ['another name', () => undefined, Object.assign(new Error('boom'), { txid: C })],
+      ['nothing signed in the call', () => undefined, reviewError(C)],
+      ['two signed in the call', () => undefined, reviewError(C)],
+    ];
+    for (const [why, , err] of cases) {
+      const m = createReleaseMarks();
+      const w = {
+        createAction: async () => {
+          if (why === 'another name') m.noteSigned(C);
+          if (why === 'two signed in the call') {
+            m.noteSigned(C);
+            m.noteSigned(D);
+          }
+          throw err;
+        },
+      };
+      markReleases(w, m, { admin: ADMIN });
+      await expect(w.createAction({} as never, 'a.site' as never)).rejects.toThrow();
+      expect([why, m.known(C)]).toEqual([why, false]);
+    }
+  });
+
+  test('round 6 (c): a recorded maker is never replaced, on any path', async () => {
+    const m = createReleaseMarks();
+    await m.hold(A, 'site.a');
+    await m.setOwner(A, 'evil.site');
+    await m.hold(A, 'evil.site');
+    await m.setOwner(B, 'site.b');
+    await m.setOwner(B, 'evil.site');
+    expect([m.owner(A), m.owner(B)]).toEqual(['site.a', 'site.b']);
+  });
+
+  test("round 6 (c): watchSigned notes each new transaction this device's signer hands to storage (bytes checked)", async () => {
+    const m = createReleaseMarks();
+    const t = new Transaction();
+    t.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 1 });
+    const seen: unknown[] = [];
+    const storage = { processAction: async (a: unknown) => void seen.push(a) };
+    expect(watchSigned(storage, m)).toBe(true);
+    const n = m.signedSeq();
+    await storage.processAction({ isNewTx: true, txid: t.id('hex'), rawTx: t.toBinary() });
+    await storage.processAction({ isNewTx: true, txid: A, rawTx: t.toBinary() }); // bytes of another tx: not noted
+    await storage.processAction({ isNewTx: false, txid: t.id('hex'), rawTx: t.toBinary() });
+    expect([m.signedSince(n), seen.length]).toEqual([[t.id('hex')], 3]);
   });
 });

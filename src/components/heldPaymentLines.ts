@@ -3,8 +3,10 @@ import type { SendLineItem } from './SendConfirmation';
 
 /** Restored from a backup, as the list says it: not queued on this device (services/releaseMarks.ts). */
 export const RESTORED_LABEL = 'Restored from backup';
-/** Another device's payment, sent but never confirmed (dropped by the network): Send now re-sends it. */
-export const ELSEWHERE_LABEL = 'Sent from another device, not confirmed yet';
+/** Another device's payment the network has no copy of (it may have dropped, or never been sent): round 6, d. */
+export const ELSEWHERE_LABEL = 'From another device, not on the network';
+/** Shown for one this device never saw on the network: it can be cancelled here, not sent. */
+export const NEVER_SEEN_NOTE = 'Never seen on the network: Cancel releases it here.';
 
 /**
  * The confirmation sheet's lines for a held payment: each recipient its own bytes pay (never a backup's description

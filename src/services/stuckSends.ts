@@ -61,6 +61,11 @@ export type QueuedSend = {
    * network has no copy (review round 5, item 4).
    */
   elsewhere?: boolean;
+  /**
+   * For an `elsewhere` row: this device once saw the network have it (services/releaseMarks.ts `seen`). Only such a
+   * payment may be sent from here; one never seen on the network may be one a backup forged (review round 6, d).
+   */
+  seenOnNetwork?: boolean;
 };
 
 export type Recipient = { to: string; sats: number };
@@ -132,6 +137,7 @@ export async function listQueuedSends(
   sp: QueueStore,
   released?: (txid: string) => boolean,
   owns?: OwnsOutput,
+  o: { heldHere?: (txid: string) => boolean; seen?: (txid: string) => boolean } = {},
 ): Promise<QueuedSend[]> {
   const out: QueuedSend[] = [];
   const rows = [
@@ -149,6 +155,8 @@ export async function listQueuedSends(
     const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
     // A sent payment is listed only as another device's copy held here (its own sends are the Monitor's to settle).
     if (elsewhere && req?.status !== 'nosend') continue;
+    // This device's own withheld payment that a backup marks as sent is not another device's (review round 6, d).
+    if (elsewhere && o.heldHere?.(t.txid)) continue;
     const outputs = await sp.findOutputs({ partial: { transactionId: t.transactionId } });
     const paid = await decodePayment(req?.rawTx, async (vout, script) => {
       const row = outputs.find((o) => o.vout === vout);
@@ -164,24 +172,64 @@ export async function listQueuedSends(
       satoshis: t.satoshis,
       ...(paid ?? {}),
       queuedHere: released ? released(t.txid) : undefined,
-      ...(elsewhere ? { elsewhere: true } : {}),
+      ...(elsewhere ? { elsewhere: true, seenOnNetwork: !!o.seen?.(t.txid) } : {}),
     });
   }
   return out;
 }
 
+/** How long a network answer about another device's payment is reused, and how many are asked per list read. */
+export const VISIBILITY_TTL_MS = 3 * 60_000;
+export const VISIBILITY_MAX_LOOKUPS = 5;
+
 /**
  * What the user's list shows: every queued send, and another device's unconfirmed payment only once the network has
- * no copy of it (`knownOnChain` fails closed: any doubt keeps it off the list). The stuck-send review (releaseStuckSends)
- * reads the whole list: such a copy is given up on, inputs released, after NOSEND_COPY_GIVE_UP_MS like any held copy.
+ * no copy of it (`knownOnChain` fails closed: any doubt keeps it off the list). Each answer is reused for `ttlMs`, and
+ * at most `maxLookups` are asked per read (the rest wait for a later read, off the list meanwhile: round 6, e). A
+ * payment the network is seen to have is reported to `onSeen` (releaseMarks.markSeen: Send now needs it later). The
+ * stuck-send review (releaseStuckSends) reads the whole list: such a copy is given up on, inputs released, after
+ * NOSEND_COPY_GIVE_UP_MS like any held copy.
  */
+export function createUnsentVisibility(o: {
+  knownOnChain: (txid: string) => Promise<boolean>;
+  onSeen?: (txid: string) => unknown;
+  ttlMs?: number;
+  maxLookups?: number;
+  now?: () => number;
+}): (queued: QueuedSend[]) => Promise<QueuedSend[]> {
+  const cache = new Map<string, { known: boolean; at: number }>();
+  const ttl = o.ttlMs ?? VISIBILITY_TTL_MS;
+  const max = o.maxLookups ?? VISIBILITY_MAX_LOOKUPS;
+  const now = o.now ?? Date.now;
+  return async (queued) => {
+    const out: QueuedSend[] = [];
+    let asked = 0;
+    for (const q of queued) {
+      if (!q.elsewhere) {
+        out.push(q);
+        continue;
+      }
+      let hit = cache.get(q.txid);
+      if (!hit || now() - hit.at >= ttl) {
+        if (asked >= max) continue;
+        asked++;
+        hit = { known: await o.knownOnChain(q.txid).catch(() => true), at: now() };
+        cache.set(q.txid, hit);
+        if (hit.known) await Promise.resolve(o.onSeen?.(q.txid)).catch(() => undefined);
+      }
+      if (!hit.known) out.push(q);
+    }
+    return out;
+  };
+}
+
+/** One read with no reuse (tests and one-off reads): see createUnsentVisibility. */
 export async function visibleUnsent(
   queued: QueuedSend[],
   knownOnChain: (txid: string) => Promise<boolean>,
+  onSeen?: (txid: string) => unknown,
 ): Promise<QueuedSend[]> {
-  const out: QueuedSend[] = [];
-  for (const q of queued) if (!q.elsewhere || !(await knownOnChain(q.txid).catch(() => true))) out.push(q);
-  return out;
+  return createUnsentVisibility({ knownOnChain, onSeen, ttlMs: 0, maxLookups: Infinity })(queued);
 }
 
 export type StuckVerdict = 'wait' | 'give-up';
@@ -300,13 +348,19 @@ export const sendHeld =
       options: { sendWith: [txid], acceptDelayedBroadcast: false },
     } as never);
 
+/** Another device's payment this device never saw on the network: it can be cancelled here, not sent (round 6, d). */
+export const NEVER_SEEN =
+  'This payment was never seen on the network, so it can’t be sent from here. You can cancel it.';
+/** Cancel of another device's payment: released here only; the other device may still send it (round 6, e). */
+export const ELSEWHERE_CANCELLED = 'Released here. If the other device sends it, it will still go through.';
+
 /** A held payment's Send now without the confirmation sheet's yes. */
 export const NEEDS_CONFIRMATION = 'Confirm the payment first';
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export type UnsentOutcome =
-  | { ok: true; txid: string; result: 'network-may-have-it' | 'still-queued' | 'cancelled' }
+  | { ok: true; txid: string; result: 'network-may-have-it' | 'still-queued' | 'cancelled'; elsewhere?: true }
   | { ok: false; txid: string; error: string };
 
 /**
@@ -338,6 +392,7 @@ export async function resolveUnsent(
   };
   const queued = (await deps.listQueued()).find((s) => s.txid.toLowerCase() === txid.toLowerCase());
   if (!queued) return { ok: false, txid, error: 'That payment is not waiting to send' };
+  if (how === 'send' && queued.elsewhere && !queued.seenOnNetwork) return { ok: false, txid, error: NEVER_SEEN };
   if (how === 'send' && isHeld(queued)) {
     if (!deps.sendWith) return { ok: false, txid, error: 'This payment can’t be sent from here' };
     // Only after the user saw what it pays, read from its own bytes, and confirmed it (review round 3, d).
@@ -360,14 +415,17 @@ export async function resolveUnsent(
   }
   if (await known()) return { ok: false, txid, error: 'The network may already have it, so it is kept' };
   await deps.cancel(queued);
-  return { ok: true, txid, result: 'cancelled' };
+  return queued.elsewhere
+    ? { ok: true, txid, result: 'cancelled', elsewhere: true }
+    : { ok: true, txid, result: 'cancelled' };
 }
 
 /** What the user is told after a Send now / Cancel choice (components/HeldPayments.tsx), in plain words. */
 export function unsentOutcomeText(o: UnsentOutcome | undefined, error?: string): string {
   if (!o) return error || 'That didn’t work. Try again.';
   if (!o.ok) return o.error;
-  if (o.result === 'cancelled') return 'Cancelled. Nothing was paid, and the money is spendable again.';
+  if (o.result === 'cancelled')
+    return o.elsewhere ? ELSEWHERE_CANCELLED : 'Cancelled. Nothing was paid, and the money is spendable again.';
   if (o.result === 'network-may-have-it') return 'Sent.';
   return 'Not on the network yet. Try again in a few minutes.';
 }

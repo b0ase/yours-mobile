@@ -31,7 +31,7 @@ import {
   releaseStuckSends,
   listQueuedSends,
   resolveUnsent,
-  visibleUnsent,
+  createUnsentVisibility,
   sendHeld,
   type QueueStore,
   type QueuedSend,
@@ -60,7 +60,7 @@ import {
   type WriteAheadStorage,
 } from './services/changeWriteAhead';
 import { guardPostBeef, heldLocally, knownByServices, type HeldTxStore } from './services/beefAncestors';
-import { createReleaseMarks, markReleases, type ReleaseRecord } from './services/releaseMarks';
+import { createReleaseMarks, markReleases, watchSigned, type ReleaseRecord } from './services/releaseMarks';
 import { guardReclaimActivation, reclaimLockFor, reclaimVerdict, type ReclaimStore } from './services/reclaimGuard';
 import { forceLegacyActionBatch, requireLegacyForNoSend } from './services/actionBatchMode';
 import { requireLocalStoreForChange } from './services/localFirst';
@@ -1114,6 +1114,8 @@ export const initWallet = async (
   });
   await releaseMarks.hydrate();
   markReleases(baseWallet, releaseMarks, { admin: ADMIN_ORIGINATOR });
+  // What this device's signer hands to storage, so a call that then throws knows its own txid (round 6, c).
+  if (!watchSigned(storage, releaseMarks)) console.warn('[initWallet] storage has no processAction to watch');
   /** An output is the wallet's when this account's own keys derive its script (held payments' recipients, stuckSends). */
   const ownsOutput = walletOwnership(parsePrivateKey(keys.identityWif), [
     legacyOrdKey(keys.ordWif, account?.addresses?.ordAddress),
@@ -1164,7 +1166,12 @@ export const initWallet = async (
   if (
     !guardPostBeef(toolboxServices, {
       released: (txid) => releaseMarks.released(txid),
-      known: (txid) => knownByServices(toolboxServices as never, txid),
+      // A payment the network has in a block is marked seen here (Held payments' Send now: round 6, d).
+      known: async (txid) => {
+        const k = await knownByServices(toolboxServices as never, txid);
+        if (k) await releaseMarks.markSeen(txid);
+        return k;
+      },
       held: heldLocally(releaseMarks, () => ownStore() as unknown as HeldTxStore | undefined),
       reclaim: async (txid) => {
         const own = ownStore();
@@ -2190,11 +2197,23 @@ export const initWallet = async (
     });
 
   // Create close function
+  /**
+   * Which of another device's unconfirmed payments the user's list shows (the network has no copy), each answer reused
+   * for a few minutes and a few asked per read; one the network has is marked seen here, so Send now may re-send it
+   * later if it drops (round 6, d and e).
+   */
+  const unsentVisibility = createUnsentVisibility({
+    knownOnChain: (txid) => knownOnChain(txid),
+    onSeen: (txid) => releaseMarks.markSeen(txid),
+  });
   /** The queued-send review and the by-hand send/cancel share these (services/stuckSends.ts). */
   const stuckDeps: Parameters<typeof releaseStuckSends>[0] & { listQueued: () => Promise<QueuedSend[]> } = {
     listQueued: () =>
       storage.runAsStorageProvider((sp) =>
-        listQueuedSends(sp as unknown as QueueStore, releaseMarks.released, ownsOutput as never),
+        listQueuedSends(sp as unknown as QueueStore, releaseMarks.released, ownsOutput as never, {
+          heldHere: releaseMarks.heldHere,
+          seen: releaseMarks.seen,
+        }),
       ),
     knownOnChain: (txid) => knownOnChain(txid),
     cancel: (q) =>
@@ -2545,7 +2564,7 @@ export const initWallet = async (
         return (t?.rawTx?.length ?? 0) + (t?.inputBEEF?.length ?? 0);
       }),
     releaseStuckSends: () => releaseStuckSends(stuckDeps),
-    listUnsent: async () => visibleUnsent(await stuckDeps.listQueued(), (txid) => knownOnChain(txid)),
+    listUnsent: async () => unsentVisibility(await stuckDeps.listQueued()),
     resolveUnsent: (txid: string, how: 'send' | 'cancel', opts?: { confirmed?: boolean }) =>
       resolveUnsent(
         {
