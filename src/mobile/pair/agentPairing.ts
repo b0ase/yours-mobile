@@ -235,7 +235,11 @@ export async function handleAgentCall(
       // Named by the pairing (grant.name, chosen by the owner when pairing), never by the host the computer reports.
       // No session (direct callers): 'unknown', which approval refuses as not a live pairing.
       const from = { computer: grant.name, session: deps.session?.id ?? 'unknown', expiresAt: grant.expiresAt };
-      proposeStrategy(id, r.strategy, from);
+      if (!proposeStrategy(id, r.strategy, from))
+        throw new AgentCallError(
+          'RATE_LIMITED',
+          'One strategy proposal every 5 seconds: the owner is looking at your last one. Wait and send it again.',
+        );
       return {
         proposed: r.strategy.name,
         version: r.strategy.version,

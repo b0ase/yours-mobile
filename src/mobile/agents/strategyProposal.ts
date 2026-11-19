@@ -6,6 +6,7 @@
  */
 import { appendAgentLog } from './agentAccounts';
 import { getLoadedStrategy, loadStrategy, pairedComputerLabel, type Strategy } from './strategy';
+import { canonicalJson, cleanDeep, escapeLine, escapeText, quote } from './strategyText';
 
 /**
  * `computer` is the pairing's name (the agent account it was paired to); `session` is the pairing channel id;
@@ -38,13 +39,33 @@ const store = (id: string, p: StrategyProposal | null) => {
   }
 };
 
-/** A computer proposes a strategy. Stored for the owner; the active strategy is untouched. */
+/**
+ * One pairing may replace its own waiting proposal at most this often. A computer flooding proposals would otherwise
+ * keep re-arming the sheet's Approve delay so the owner could never approve the last one shown.
+ */
+export const PROPOSAL_MIN_GAP_MS = 5_000;
+
+/**
+ * A computer proposes a strategy. Stored for the owner; the active strategy is untouched. Returns false (and logs it,
+ * one merged line per pairing) when the same pairing proposed less than PROPOSAL_MIN_GAP_MS ago: the extra one is dropped.
+ */
 export const proposeStrategy = (
   id: string,
   strategy: Strategy,
   from: { computer: string; session: string; expiresAt: number },
   now = Date.now(),
-) => {
+): boolean => {
+  const prev = getProposal(id);
+  if (prev && prev.session === from.session && now - prev.at < PROPOSAL_MIN_GAP_MS) {
+    appendAgentLog(id, {
+      at: now,
+      action: 'strategy',
+      detail: `Ignored extra proposals from ${pairedComputerLabel(from.computer, from.session)}: at most one every ${PROPOSAL_MIN_GAP_MS / 1000} s`,
+      usd: 0,
+      merge: `strategy-proposal-dropped:${from.session}`,
+    });
+    return false;
+  }
   store(id, { strategy, ...from, at: now });
   // One log line per pairing session: a newer proposal replaces that session's earlier line, so a flood of proposals
   // cannot push older provenance lines out of the log.
@@ -55,19 +76,10 @@ export const proposeStrategy = (
     usd: 0,
     merge: `strategy-proposal:${from.session}`,
   });
+  return true;
 };
 
-/** JSON with object keys sorted at every level, so two strategies compare equal exactly when their content is equal. */
-export const canonicalJson = (v: unknown): string => {
-  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(',')}]`;
-  if (v && typeof v === 'object')
-    return `{${Object.keys(v)
-      .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonicalJson((v as Record<string, unknown>)[k])}`)
-      .join(',')}}`;
-  return JSON.stringify(v) ?? 'null';
-};
+export { canonicalJson };
 
 /** What the approval sheet showed: the proposal and the strategy loaded at the time (its "from" column). */
 export type ShownProposal = { proposal: StrategyProposal; current: Strategy | null };
@@ -94,13 +106,14 @@ export const proposalKey = (v: ShownProposal) => {
   });
 };
 
-export type ApproveResult = { ok: true } | { ok: false; reason: 'gone' | 'changed' | 'session-ended' };
+export type ApproveResult = { ok: true } | { ok: false; reason: 'gone' | 'changed' | 'session-ended' | 'invisible' };
 
 /**
  * Owner approves the proposal the sheet SHOWED (`shown`): it loads on paper (going live is still its own tap), tagged
  * with the computer it came from. Refused when the stored proposal or the loaded strategy is no longer exactly what
  * the sheet showed (changed between render and tap), or when the pairing that sent it has ended or is no longer the
- * same grant with the `strategy` scope (`sessionLive`, sessions.ts isAgentSessionLive).
+ * same grant with the `strategy` scope (`sessionLive`, sessions.ts isAgentSessionLive), or when any change is in
+ * characters the owner can't see (diffStrategy marks it `invisible`).
  */
 export const approveProposal = (
   id: string,
@@ -112,6 +125,8 @@ export const approveProposal = (
   if (!v) return { ok: false, reason: 'gone' };
   if (proposalKey(v) !== proposalKey(shown)) return { ok: false, reason: 'changed' };
   const p = v.proposal;
+  if (diffStrategy(v.current ?? undefined, p.strategy).some((c) => c.invisible))
+    return { ok: false, reason: 'invisible' };
   if (typeof p.expiresAt !== 'number' || !sessionLive(p.session, id, p.expiresAt)) {
     store(id, null);
     appendAgentLog(id, {
@@ -145,8 +160,12 @@ export const declineProposal = (id: string, now = Date.now()) => {
   });
 };
 
-/** One row of the approval sheet. `long`: free text (goals, changelog), shown in full in a scrolling box. */
-export type StrategyChange = { what: string; from: string; to: string; long?: boolean };
+/**
+ * One row of the approval sheet. `long`: free text (goals, changelog), shown in full in a scrolling box. `invisible`:
+ * the values differ only in characters nobody can see (hidden or control characters, layout whitespace); such a
+ * proposal can't be approved.
+ */
+export type StrategyChange = { what: string; from: string; to: string; long?: boolean; invisible?: boolean };
 
 /**
  * Every field of a strategy, with how the sheet names it. Anything not listed here still shows, under its path:
@@ -184,16 +203,22 @@ const flatten = (v: unknown, path = '', out = new Map<string, unknown>()) => {
   return out;
 };
 
+/**
+ * A value as the sheet shows it. Nothing can pass for something else: list items are quoted (["ABC, DEF"] never looks
+ * like ["ABC", "DEF"]), and line breaks, control and hidden characters show as escapes, except the line breaks of
+ * goals, which are free text.
+ */
 const show = (kind: (typeof FIELDS)[string]['kind'], v: unknown): string => {
-  if (kind === 'usd') return v === undefined ? 'no limit' : `$${String(v)}`;
-  if (kind === 'stop') return v === undefined ? 'never' : String(v);
+  if (kind === 'usd') return v === undefined ? 'no limit' : `$${escapeLine(String(v))}`;
+  if (kind === 'stop') return v === undefined ? 'never' : escapeLine(String(v));
   if (v === undefined) return 'none';
-  if (kind === 'list' && Array.isArray(v)) return v.length ? v.join(', ') : 'none';
+  if (Array.isArray(v) && v.every((x) => typeof x === 'string')) return v.length ? v.map(quote).join(', ') : 'none';
   if (Array.isArray(v) && v.every((x) => x && typeof x === 'object' && 'version' in x && 'note' in x))
     return (v as { version: unknown; note: unknown }[])
-      .map((c) => `${String(c.version)}: ${String(c.note)}`)
+      .map((c) => `${quote(String(c.version))}: ${quote(String(c.note))}`)
       .join('\n');
-  return typeof v === 'string' ? v : canonicalJson(v);
+  if (typeof v === 'string') return kind === 'long' ? escapeText(v) : escapeLine(v);
+  return escapeLine(canonicalJson(v));
 };
 
 /**
@@ -214,7 +239,15 @@ export const diffStrategy = (current: Strategy | undefined, next: Strategy): Str
     const from = show(f.kind, x);
     const to = show(f.kind, y);
     const long = f.kind === 'long' || from.length > 120 || to.length > 120;
-    out.push({ what: f.what, from, to, ...(long && { long: true }) });
+    // Cleaned the way a parsed strategy is (strategyText.ts), the two read the same: the difference is invisible.
+    const invisible = canonicalJson(cleanDeep(x, path)) === canonicalJson(cleanDeep(y, path));
+    out.push({
+      what: invisible ? `${f.what} changed (invisible characters)` : f.what,
+      from,
+      to,
+      ...(long && { long: true }),
+      ...(invisible && { invisible: true }),
+    });
   }
   if (!out.length && canonicalJson(current ?? null) !== canonicalJson(next))
     out.push({ what: 'Other details', from: canonicalJson(current ?? null), to: canonicalJson(next), long: true });

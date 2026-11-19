@@ -7,6 +7,8 @@ import {
   describeProvenance,
   getLoadedStrategy,
   getPaperBook,
+  liveConfirmKey,
+  liveTapConfirmed,
   loadStrategy,
   parseStrategy,
   setStrategyMode,
@@ -48,7 +50,9 @@ const StrategyBody = ({ id }: { id: string }) => {
   const [text, setText] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
-  const [confirmLive, setConfirmLive] = useState(false);
+  // The first "Run live" tap is armed for the exact strategy on screen; an approval (or any load) disarms it.
+  const [liveArmedFor, setLiveArmedFor] = useState('');
+  const confirmLive = liveTapConfirmed(liveArmedFor, loaded);
   const [publishing, setPublishing] = useState(false);
   const { chromeStorageService } = useServiceContext();
   const isCurrent = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress === id;
@@ -123,7 +127,9 @@ const StrategyBody = ({ id }: { id: string }) => {
         ) : (
           <button
             type="button"
-            onClick={() => (confirmLive ? (setStrategyMode(id, 'live'), setConfirmLive(false)) : setConfirmLive(true))}
+            onClick={() =>
+              confirmLive ? (setStrategyMode(id, 'live'), setLiveArmedFor('')) : setLiveArmedFor(liveConfirmKey(loaded))
+            }
             className={btn}
             style={{ background: confirmLive ? '#12B76A' : GOLD, color: confirmLive ? '#fff' : '#000' }}
           >
@@ -273,6 +279,7 @@ const REFUSED: Record<Exclude<ApproveResult, { ok: true }>['reason'], string> = 
   gone: 'That proposal is no longer waiting.',
   changed: 'The proposal or the loaded strategy changed. Check it again before you approve.',
   'session-ended': 'That pairing has ended, so its proposal was dropped.',
+  invisible: 'This proposal changes characters you can’t see. Decline it.',
 };
 
 /** A strategy a paired computer sent: what would change, which pairing, and the owner's Approve / Decline. */
@@ -294,8 +301,9 @@ const ProposalSheet = ({ id }: { id: string }) => {
         {note}
       </div>
     ) : null;
-  const armed = armedFor === key;
   const changes = diffStrategy(view.current ?? undefined, p.strategy);
+  const hidden = changes.some((c) => c.invisible);
+  const armed = armedFor === key && !hidden;
   return (
     <div
       className="rounded-2xl p-3 flex flex-col gap-2 mb-2"
@@ -315,7 +323,7 @@ const ProposalSheet = ({ id }: { id: string }) => {
       {changes.map((c) =>
         c.long ? (
           <div key={c.what} className="text-xs flex flex-col gap-1" style={{ color: '#D0D5DD' }}>
-            <b className="text-white">{c.what} changed</b>
+            <b className="text-white">{c.invisible ? c.what : `${c.what} changed`}</b>
             <span style={{ color: MUTED }}>Now:</span>
             <div className={LONG_BOX} style={{ background: 'var(--bw-bg)' }}>
               {c.from}
