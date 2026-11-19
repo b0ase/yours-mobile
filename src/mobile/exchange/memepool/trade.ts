@@ -34,7 +34,16 @@ import {
 } from './api';
 import { CurveError, buyTokens, minTokensFor, parseCurve, sellSats, type CurveParams, type CurveState } from './curve';
 import { proofVerdict, type ProofVerdict } from './proof';
-import { giveBack, idOf, sweepPending, toRecord, type PendingStore, type SweepResult } from './pending';
+import {
+  giveBack,
+  idOf,
+  safePut,
+  safeRemove,
+  sweepPending,
+  toRecord,
+  type PendingStore,
+  type SweepResult,
+} from './pending';
 import { isAddress } from './script';
 import type { CoinKey } from './sign';
 import {
@@ -256,18 +265,24 @@ export async function prepareBuy(d: Deps, m: Market, budget: bigint, slippageBps
   const ord = await d.wallet.newOrdKey(m.tokenId);
   const nonce = { prefix: Utils.toBase64(Random(10)), suffix: Utils.toBase64(Random(10)) };
   const pay = await d.wallet.newPayKey(nonce);
-  // Write the key's nonce down BEFORE any BSV moves, so a crash can never strand the funding.
-  d.pending?.put({
-    id: idOf(nonce.prefix, nonce.suffix),
-    ...nonce,
-    sats: Number(l.maxSpend),
-    state: 'pending',
-    createdAt: nowOf(d),
-  });
+  // Write the key's nonce down BEFORE any BSV moves, so a crash can never strand the funding. If it can't be written,
+  // nothing has moved yet: refuse the buy rather than fund a coin nobody could find again.
+  const noted =
+    !d.pending ||
+    safePut(d.pending, {
+      id: idOf(nonce.prefix, nonce.suffix),
+      ...nonce,
+      sats: Number(l.maxSpend),
+      state: 'pending',
+      createdAt: nowOf(d),
+    });
+  if (!noted) plain("This wallet couldn't save the note it needs before setting BSV aside. Nothing was spent.");
   // If fund() throws we can't know the BSV didn't go out, so the nonce record stays (it holds no coin to sweep).
   const funding = await d.wallet.fund(pay, Number(l.maxSpend));
-  d.pending?.put(toRecord(funding, Number(l.maxSpend), 'pending', nowOf(d)));
   try {
+    // The funding's txid must be written down before going on; if it can't be, the BSV goes straight back (catch).
+    if (d.pending && !safePut(d.pending, toRecord(funding, Number(l.maxSpend), 'pending', nowOf(d))))
+      plain("This wallet couldn't save its note of the BSV set aside, so it was put back. Nothing was bought.");
     const r = await prepareAndVerify(d, m, 'buy', budget, l, ord, pay, [funding.coin]);
     return {
       side: 'buy',
@@ -315,10 +330,8 @@ export type ExecuteResult =
   /** We don't know whether Memepool broadcast it. Watch our coin; never sign again. */
   | { kind: 'unsure'; message: string };
 
-/** The user said Allow: check again, sign only our inputs, submit. */
-export async function executeTrade(d: Deps, p: Prepared): Promise<ExecuteResult> {
-  const keys = new Map(p.coins.map((c) => [`${c.txid}_${c.vout}`, c.key]));
-  // The same checks again, right before signing (the quote may have expired while the sheet was open).
+/** The same checks as before the sheet, right before signing (the quote may have expired while it was open); then sign. */
+async function checkAndSign(d: Deps, p: Prepared, keys: Map<string, CoinKey>): Promise<Record<string, string>> {
   const checked = verifyTemplate(p.template, {
     side: p.side,
     tokenId: p.market.tokenId,
@@ -335,10 +348,24 @@ export async function executeTrade(d: Deps, p: Prepared): Promise<ExecuteResult>
     expiresAt: p.expiresAt,
     now: nowOf(d),
   });
-  const unlocks = await d.wallet.sign(p.template, checked.ourInputs, (i) => {
+  return d.wallet.sign(p.template, checked.ourInputs, (i) => {
     const inp = p.template.inputs[i];
     return keys.get(`${inp.txid}_${inp.vout}`);
   });
+}
+
+/** The user said Allow: check again, sign only our inputs, submit. */
+export async function executeTrade(d: Deps, p: Prepared): Promise<ExecuteResult> {
+  const keys = new Map(p.coins.map((c) => [`${c.txid}_${c.vout}`, c.key]));
+  let unlocks: Record<string, string>;
+  try {
+    unlocks = await checkAndSign(d, p, keys);
+  } catch (e) {
+    // Nothing has left this device (no unlock was handed to Memepool), so a buy's set-aside BSV can go back now. A
+    // failed give-back keeps the record for the next sweep.
+    if (p.funding) await giveBack(d.wallet, d.pending, p.funding).catch(() => false);
+    throw e;
+  }
   let out: Record<string, unknown>;
   try {
     out = await submitTrade(d.fetch, { quoteId: p.quoteId, unlocks });
@@ -378,17 +405,30 @@ export async function cancelPrepared(d: Deps, p: Prepared): Promise<void> {
   if (!(await giveBack(d.wallet, d.pending, p.funding))) throw new Error('The BSV could not be put back yet.');
 }
 
-/** Record what became of a buy's funding after we signed (a 'sent' coin is never swept back). */
+/**
+ * Record what became of a buy's funding after we signed (a 'sent' coin is never swept back). Never throws: the trade
+ * already went to Memepool, so a storage failure here must not read as a failed trade (that invites a second buy).
+ * If 'sent' can't be written, the record is dropped instead (its coin is spent by the trade); if 'unsure' can't, the
+ * 'pending' record stays, which the sweep treats the same way.
+ */
 function markFunding(d: Deps, p: Prepared, state: 'unsure' | 'sent') {
-  if (p.funding) d.pending?.put(toRecord(p.funding, p.coins[0].satoshis, state, nowOf(d)));
+  if (!p.funding || !d.pending) return;
+  const rec = toRecord(p.funding, p.coins[0].satoshis, state, nowOf(d));
+  if (!safePut(d.pending, rec) && state === 'sent') safeRemove(d.pending, rec.id);
 }
 
+/** How long past the quote's expiry before an unspent coin is trusted to mean "the trade didn't happen". */
+export const UNSURE_MARGIN_MS = 2 * 60 * 1000;
+
 /**
- * The sheet closed after an unsure submit: if the network shows our coin still unspent, the buy didn't happen and the
- * BSV goes back now; otherwise it stays recorded and the next start sorts it out. Returns true if it went back.
+ * The sheet closed after an unsure submit. Memepool may still hold our signed spend and the chain index can lag, so a
+ * "not spent" answer only counts once the quote is well past expiry (Memepool can't use it after that). Then, if the
+ * coin is still unspent, the BSV goes back now; otherwise it stays recorded and the sweep sorts it out later.
+ * Returns true if it went back.
  */
 export async function closeUnsure(d: Deps, p: Prepared): Promise<boolean> {
   if (!p.funding) return false;
+  if (nowOf(d) <= p.expiresAt + UNSURE_MARGIN_MS) return false;
   return giveBack(d.wallet, d.pending, p.funding, (c) => coinSpent(d, c));
 }
 
@@ -406,7 +446,9 @@ export async function coinSpent(
   return r.status === 404 ? 'unspent' : 'unknown';
 }
 
-const SWEEP_MIN_AGE_MS = 10 * 60 * 1000; // a younger record may be a sheet open in another tab
+// A younger record may be a sheet open in another tab. It must also outlast a quote (QUOTE_TTL_MS) plus the unsure
+// margin, so the sweep never returns a coin Memepool might still spend (closeUnsure's rule).
+const SWEEP_MIN_AGE_MS = 10 * 60 * 1000;
 
 /** On start: put back any funding left over from a buy that never finished. */
 export function sweepFundings(d: Deps): Promise<SweepResult> {

@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { LockingScript, PrivateKey, ProtoWallet, Spend, UnlockingScript, type WalletInterface } from '@bsv/sdk';
+import {
+  Hash,
+  LockingScript,
+  PrivateKey,
+  ProtoWallet,
+  Spend,
+  UnlockingScript,
+  Utils,
+  type WalletInterface,
+} from '@bsv/sdk';
 import { CurveError, buyTokens, feeSplit, parseCurve, sellSats } from './curve';
 import { proofVerdict } from './proof';
 import { configProblem } from './api';
@@ -13,10 +22,11 @@ import {
   prepareSell,
   closeUnsure,
   sweepFundings,
+  UNSURE_MARGIN_MS,
   type Deps,
   type TradeWallet,
 } from './trade';
-import { type PendingRecord, type PendingStore } from './pending';
+import { legacyPendingStore, localPendingStore, type PendingRecord, type PendingStore } from './pending';
 import { PARAMS, STATE, TOKEN, POOL_ORD, POOL_PAY, INDEXER, honestBuy, honestSell, pay, tok } from './testkit';
 import { addressPkh, bsv21TransferScript, parseBsv21Transfer } from './script';
 import type { Template } from './validate';
@@ -230,7 +240,8 @@ function fakeMemepool(opts: {
   return { fetch: fetch as Deps['fetch'], calls };
 }
 
-function fakeWallet(side: 'buy' | 'sell') {
+/** `account` stands for the wallet's root key: a nonce re-derives the same pay key only in the same account. */
+function fakeWallet(side: 'buy' | 'sell', account = 'A') {
   const log = { signed: 0, funded: 0, returned: 0, signedIndexes: [] as number[][] };
   let ordAddr = '';
   let payAddr = '';
@@ -240,7 +251,9 @@ function fakeWallet(side: 'buy' | 'sell') {
       key: { protocolID: [0, 'onesat'], keyID: 'o' },
     }),
     newPayKey: async (n) => ({
-      address: (payAddr = PrivateKey.fromRandom().toAddress()),
+      address: (payAddr = n
+        ? new PrivateKey(Utils.toHex(Hash.sha256(`${account} ${n.prefix} ${n.suffix}`, 'utf8')), 16).toAddress()
+        : PrivateKey.fromRandom().toAddress()),
       key: { protocolID: [2, '3241645161d8'], keyID: `${n?.prefix ?? 'p'} ${n?.suffix ?? 's'}` },
       derivationPrefix: n?.prefix ?? 'p',
       derivationSuffix: n?.suffix ?? 's',
@@ -483,19 +496,25 @@ describe('buy funding recovery (b-Aware 511)', () => {
 
   test('unsure submit, then the sheet closes: the funding goes back and the record clears', async () => {
     const { fw, store, d } = setup(new Set(), [{ status: 502, body: {} }]);
-    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
-    expect((await executeTrade(d, p)).kind).toBe('unsure');
+    let t = Date.now();
+    const timed: Deps = { ...d, now: () => t };
+    const p = await prepareBuy(timed, await loadMarket(timed, TOKEN), BigInt(1_000_000), 300);
+    expect((await executeTrade(timed, p)).kind).toBe('unsure');
     expect(store.list()[0].state).toBe('unsure');
-    expect(await closeUnsure(d, p)).toBe(true);
+    t = p.expiresAt + UNSURE_MARGIN_MS + 1; // closed after the quote is well past use
+    expect(await closeUnsure(timed, p)).toBe(true);
     expect(fw.log.returned).toBe(1);
     expect(store.list()).toEqual([]);
   });
 
   test('unsure submit, closed, but the coin was spent: nothing is returned (the buy happened)', async () => {
     const { fw, store, d } = setup(new Set([FUND]), [{ status: 502, body: {} }]);
-    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
-    await executeTrade(d, p);
-    expect(await closeUnsure(d, p)).toBe(false);
+    let t = Date.now();
+    const timed: Deps = { ...d, now: () => t };
+    const p = await prepareBuy(timed, await loadMarket(timed, TOKEN), BigInt(1_000_000), 300);
+    await executeTrade(timed, p);
+    t = p.expiresAt + UNSURE_MARGIN_MS + 1;
+    expect(await closeUnsure(timed, p)).toBe(false);
     expect(fw.log.returned).toBe(0);
     expect(store.list().length).toBe(1);
   });
@@ -556,5 +575,189 @@ describe('buy funding recovery (b-Aware 511)', () => {
     };
     await expect(cancelPrepared(flaky, p)).rejects.toThrow();
     expect(store.list().length).toBe(1);
+  });
+});
+
+// Review fixes (task 58 review, 19 Nov 2026). Each test here fails on the branch before the fix it names.
+describe('funding recovery: review fixes', () => {
+  const memStore = (failOn?: (n: number) => boolean): PendingStore & { rows: Map<string, PendingRecord> } => {
+    const rows = new Map<string, PendingRecord>();
+    let n = 0;
+    return {
+      rows,
+      list: () => [...rows.values()],
+      put: (r) => {
+        if (failOn?.(++n)) throw new Error('QuotaExceededError');
+        rows.set(r.id, r);
+      },
+      remove: (id) => void rows.delete(id),
+    };
+  };
+  /** localStorage stand-in; `full` makes every write throw like a full quota / Safari private mode. */
+  const memStorage = () => {
+    const m = new Map<string, string>();
+    const s = {
+      full: false,
+      m,
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        if (s.full) throw new Error('QuotaExceededError');
+        m.set(k, v);
+      },
+    };
+    return s;
+  };
+  /** WhatsOnChain that has not seen any spend yet (404 for every coin). */
+  const chain404 = (inner: Deps['fetch']): Deps['fetch'] =>
+    (async (url: string, init?: RequestInit) =>
+      /\/spent$/.test(url) ? new Response('', { status: 404 }) : inner(url, init)) as Deps['fetch'];
+
+  test('fix 1: localPendingStore never throws on a failed write; it says false', () => {
+    const st = memStorage();
+    const store = localPendingStore('acct', st);
+    st.full = true;
+    const r = { id: 'a.b', prefix: 'a', suffix: 'b', sats: 1, state: 'pending' as const, createdAt: 0 };
+    expect(store.put(r)).toBe(false);
+    expect(store.remove('a.b')).toBe(false);
+  });
+
+  test('fix 1: storage full before funding: the buy is refused and no BSV moves', async () => {
+    const mp = fakeMemepool({ build: buildBuy() });
+    const fw = fakeWallet('buy');
+    const st = memStorage();
+    st.full = true;
+    const d: Deps = {
+      fetch: mp.fetch,
+      wallet: fw.w,
+      sleep: async () => undefined,
+      pending: localPendingStore('A', st),
+    };
+    await expect(prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300)).rejects.toThrow(
+      /Nothing was spent/,
+    );
+    expect(fw.log.funded).toBe(0);
+  });
+
+  test('fix 1: the write after fund() throws: the funding goes straight back', async () => {
+    const mp = fakeMemepool({ build: buildBuy() });
+    const fw = fakeWallet('buy');
+    const store = memStore((n) => n === 2); // the nonce write works, the funding write throws
+    const d: Deps = { fetch: mp.fetch, wallet: fw.w, sleep: async () => undefined, pending: store };
+    await expect(prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300)).rejects.toThrow(/put back/);
+    expect(fw.log.funded).toBe(1);
+    expect(fw.log.returned).toBe(1);
+    expect(fw.log.signed).toBe(0);
+    expect(store.list()).toEqual([]);
+  });
+
+  test('fix 1: storage throws after a successful submit: still reported as sent, not as a failure', async () => {
+    const mp = fakeMemepool({ build: buildBuy() });
+    const fw = fakeWallet('buy');
+    let fail = false;
+    const store = memStore(() => fail);
+    const d: Deps = { fetch: mp.fetch, wallet: fw.w, sleep: async () => undefined, pending: store };
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    fail = true;
+    expect(await executeTrade(d, p)).toEqual({ kind: 'sent', txid: 'ab'.repeat(32) });
+    expect(fw.log.signed).toBe(1);
+    expect(fw.log.returned).toBe(0);
+    expect(store.list()).toEqual([]); // 'sent' couldn't be written, so the record is dropped, never swept back
+  });
+
+  test('fix 1: storage throws after an unsure submit: still unsure, record left for the sweep', async () => {
+    const mp = fakeMemepool({ build: buildBuy(), submit: [{ status: 502, body: {} }] });
+    const fw = fakeWallet('buy');
+    let fail = false;
+    const store = memStore(() => fail);
+    const d: Deps = { fetch: mp.fetch, wallet: fw.w, sleep: async () => undefined, pending: store };
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    fail = true;
+    expect((await executeTrade(d, p)).kind).toBe('unsure');
+    expect(store.list().map((r) => r.state)).toEqual(['pending']);
+  });
+
+  test('fix 2: quote expired at Allow: refused before signing and the funding goes back at once', async () => {
+    const mp = fakeMemepool({ build: buildBuy() });
+    const fw = fakeWallet('buy');
+    const store = memStore();
+    let t = Date.now();
+    const d: Deps = { fetch: mp.fetch, wallet: fw.w, sleep: async () => undefined, pending: store, now: () => t };
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    t += 10 * 60_000;
+    await expect(executeTrade(d, p)).rejects.toThrow(/expired/);
+    expect(fw.log.signed).toBe(0);
+    expect(fw.log.returned).toBe(1);
+    expect(store.list()).toEqual([]);
+  });
+
+  test('fix 2: the wallet fails to sign: nothing submitted, the funding goes back', async () => {
+    const mp = fakeMemepool({ build: buildBuy() });
+    const fw = fakeWallet('buy');
+    const store = memStore();
+    const w: TradeWallet = {
+      ...fw.w,
+      sign: async () => {
+        throw new Error('locked');
+      },
+    };
+    const d: Deps = { fetch: mp.fetch, wallet: w, sleep: async () => undefined, pending: store };
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    await expect(executeTrade(d, p)).rejects.toThrow(/locked/);
+    expect(mp.calls).not.toContain('/trade/submit');
+    expect(fw.log.returned).toBe(1);
+  });
+
+  test('fix 3: closed right after an unsure submit while the chain lags (404): nothing goes back yet', async () => {
+    const mp = fakeMemepool({ build: buildBuy(), submit: [{ status: 502, body: {} }] });
+    const fw = fakeWallet('buy');
+    const store = memStore();
+    let t = Date.now();
+    const d: Deps = {
+      fetch: chain404(mp.fetch),
+      wallet: fw.w,
+      sleep: async () => undefined,
+      pending: store,
+      now: () => t,
+    };
+    const p = await prepareBuy(d, await loadMarket(d, TOKEN), BigInt(1_000_000), 300);
+    expect((await executeTrade(d, p)).kind).toBe('unsure');
+    t += 5_000;
+    expect(await closeUnsure(d, p)).toBe(false); // Memepool may still hold a valid signed spend
+    t = p.expiresAt + UNSURE_MARGIN_MS; // still inside the margin
+    expect(await closeUnsure(d, p)).toBe(false);
+    expect(fw.log.returned).toBe(0);
+    expect(store.list().map((r) => r.state)).toEqual(['unsure']); // left for the sweep
+    t = p.expiresAt + UNSURE_MARGIN_MS + 1;
+    expect(await closeUnsure(d, p)).toBe(true);
+    expect(fw.log.returned).toBe(1);
+  });
+
+  test('fix 4: records are kept per account', async () => {
+    const st = memStorage();
+    const r = { id: 'a.b', prefix: 'a', suffix: 'b', sats: 1, state: 'pending' as const, createdAt: 0 };
+    expect(localPendingStore('A', st).put(r)).toBe(true);
+    expect(localPendingStore('A', st).list()).toEqual([r]);
+    expect(localPendingStore('B', st).list()).toEqual([]);
+    expect(legacyPendingStore(st).list()).toEqual([]);
+  });
+
+  test('fix 4: a legacy shared record is only swept by the account whose key the coin is locked to', async () => {
+    const mp = fakeMemepool({ build: buildBuy() });
+    const st = memStorage();
+    const a = fakeWallet('buy', 'A');
+    const legacy = legacyPendingStore(st);
+    const dA: Deps = { fetch: chain404(mp.fetch), wallet: a.w, sleep: async () => undefined, pending: legacy };
+    await prepareBuy(dA, await loadMarket(dA, TOKEN), BigInt(1_000_000), 300); // account A's page dies on the sheet
+    const r = legacy.list()[0];
+    legacy.put({ ...r, createdAt: 0 });
+    // Account B opens Memepool: the record is not B's, so B never internalizes A's coin.
+    const b = fakeWallet('buy', 'B');
+    expect(await sweepFundings({ ...dA, wallet: b.w })).toEqual({ returned: 0, spent: 0, kept: 1 });
+    expect(b.log.returned).toBe(0);
+    expect(legacy.list().length).toBe(1);
+    // Account A can prove it (its nonce re-derives the key the coin is locked to): it goes back to A.
+    expect(await sweepFundings(dA)).toEqual({ returned: 1, spent: 0, kept: 0 });
+    expect(a.log.returned).toBe(1);
+    expect(legacy.list()).toEqual([]);
   });
 });

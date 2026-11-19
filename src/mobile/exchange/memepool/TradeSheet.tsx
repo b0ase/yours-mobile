@@ -22,7 +22,7 @@ import {
   type Deps,
   type Prepared,
 } from './trade';
-import { localPendingStore } from './pending';
+import { localPendingStore, pendingAccountOf } from './pending';
 import { memepoolWallet } from './wallet';
 
 /**
@@ -53,7 +53,7 @@ export const MemepoolTradeSheet = ({
   rate: number;
   onClose: () => void;
 }) => {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [amount, setAmount] = useState('');
   const [slip, setSlip] = useState<number>(DEFAULT_SLIPPAGE_BPS);
@@ -75,9 +75,9 @@ export const MemepoolTradeSheet = ({
         apiContext.services as unknown as Parameters<typeof memepoolWallet>[1],
         coin.iconUrl,
       ),
-      pending: localPendingStore(),
+      pending: localPendingStore(pendingAccountOf(chromeStorageService)),
     }),
-    [apiContext, coin.iconUrl],
+    [apiContext, chromeStorageService, coin.iconUrl],
   );
   const busy = phase.k === 'working';
   const money = (sats: bigint) => fiatLabel(Number(sats), rate) || bsvLabel(Number(sats));

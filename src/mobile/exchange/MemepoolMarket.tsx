@@ -6,7 +6,7 @@ import { TokenRoomStore } from './TokenRoomStore';
 import { MEMEPOOL_SORTS, fetchMemepoolCoins, memepoolTradeUrl, type MemepoolCoin, type MemepoolSort } from './memepool';
 import { MemepoolTradeSheet } from './memepool/TradeSheet';
 import { sweepFundings } from './memepool/trade';
-import { localPendingStore } from './memepool/pending';
+import { legacyPendingStore, localPendingStore, pendingAccountOf } from './memepool/pending';
 import { memepoolWallet } from './memepool/wallet';
 import { useServiceContext } from '../../hooks/useServiceContext';
 
@@ -50,7 +50,7 @@ export const MemepoolMarket = ({ rate }: { rate: number }) => {
   const [q, setQ] = useState('');
   const [tick, setTick] = useState(0);
   const [trading, setTrading] = useState<MemepoolCoin | null>(null);
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
 
   // Put back any BSV set aside for a buy that never finished (page closed, unsure submit). Runs once on opening.
   useEffect(() => {
@@ -59,7 +59,13 @@ export const MemepoolMarket = ({ rate }: { rate: number }) => {
       apiContext.wallet,
       apiContext.services as unknown as Parameters<typeof memepoolWallet>[1],
     );
-    void sweepFundings({ fetch: (u, i) => fetch(u, i), wallet, pending: localPendingStore() }).catch(() => undefined);
+    const d = { fetch: ((u, i) => fetch(u, i)) as Parameters<typeof sweepFundings>[0]['fetch'], wallet };
+    // This account's records, then any written before records were kept per account: those are only returned when
+    // this wallet re-derives the key the coin is locked to (sweepPending's ownership check), else left alone.
+    void (async () => {
+      await sweepFundings({ ...d, pending: localPendingStore(pendingAccountOf(chromeStorageService)) });
+      await sweepFundings({ ...d, pending: legacyPendingStore() });
+    })().catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
