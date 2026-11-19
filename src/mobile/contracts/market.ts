@@ -14,6 +14,8 @@ import {
   canonical,
   CONTRACT_CONTENT_TYPE,
   contractAuthorKey,
+  contractIdentity,
+  hasContractCode,
   signContractEnvelope,
   type ContractEnvelope,
 } from './contractNft';
@@ -57,6 +59,8 @@ export const ownedContractOutpoints = async (ctx: OneSatContext) => {
  * and list it.
  */
 export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope, handle?: string) => {
+  if (env.sale.priceUsd > 0 && !hasContractCode(env.contract))
+    throw new Error('A paid contract must include its source or code hash. Nothing was published.');
   const signed = await signContractEnvelope(ctx.wallet, env, handle);
   const outpoint = await mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed));
   const proof = await prove(ctx, 'publish', outpoint);
@@ -100,11 +104,12 @@ export const checkAgainstOriginal = async (listing: Pick<ContractListing, 'origi
 };
 
 /**
- * An earlier listing of the same contract (descriptor and description) by another author, or undefined. Anyone can
+ * An earlier listing of the same contract (the same behaviour: contractIdentity, so a changed name, version, summary
+ * or description doesn't make a different one) by another author, or undefined. Anyone can
  * inscribe a copy of someone's contract with their own name and payee and list it (review of row 115, 14 Nov 2026):
  * the copy is a valid inscription, so checkAgainstOriginal passes it. The earliest listing is the one paid. Same rule
- * as the catalogue (site/lib/contracts.js mayFollow, review of 2e409da3): a signed listing may be listed again only
- * under the same verified key; an unsigned one blocks only a later unsigned one from another address. Best effort: it
+ * as the catalogue (site/lib/contracts.js mayFollow): a signed listing may be listed again only under the same
+ * verified key; after an unsigned one only the same author address may follow. Best effort: it
  * sees what the catalogue lists (which already leaves later copies out, ranked by chain order).
  */
 export const copiedFrom = async (
@@ -112,16 +117,13 @@ export const copiedFrom = async (
   all: readonly ContractListing[],
 ): Promise<ContractListing | undefined> => {
   const at = Date.parse(listing.createdAt);
-  const same = (o: ContractListing) =>
-    JSON.stringify(canon(o.envelope.contract)) === JSON.stringify(canon(listing.envelope.contract)) &&
-    o.envelope.description === listing.envelope.description;
+  const id = contractIdentity(listing.envelope.contract);
+  const same = (o: ContractListing) => contractIdentity(o.envelope.contract) === id;
   const mine = await contractAuthorKey(listing.envelope);
   for (const o of all) {
     if (o.origin === listing.origin || !same(o) || Date.parse(o.createdAt) > at) continue;
     const theirs = await contractAuthorKey(o.envelope);
-    const mayFollow = theirs
-      ? mine === theirs
-      : !!mine || o.envelope.author.address === listing.envelope.author.address;
+    const mayFollow = theirs ? mine === theirs : o.envelope.author.address === listing.envelope.author.address;
     if (!mayFollow) return o;
   }
   return undefined;

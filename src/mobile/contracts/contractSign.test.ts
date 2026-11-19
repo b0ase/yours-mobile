@@ -44,7 +44,14 @@ const mallory = new ProtoWallet(PrivateKey.fromRandom());
 const keyOf = async (w: ProtoWallet) => (await w.getPublicKey({ identityKey: true })).publicKey;
 const base = {
   format: CONTRACT_ENVELOPE_FORMAT,
-  contract: { format: 'bwalletx.contract/1', name: 'NDA', version: '1', network: 'mainnet', summary: 's' },
+  contract: {
+    format: 'bwalletx.contract/1',
+    name: 'NDA',
+    version: '1',
+    network: 'mainnet',
+    summary: 's',
+    codeHash: 'h1',
+  },
   description: 'A plain NDA',
   author: { name: 'Ann Lawyer', address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },
   sale: { priceUsd: 5, copies: 10, payTo: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },

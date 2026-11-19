@@ -82,28 +82,37 @@ const enc = (s) => {
     return encodeURIComponent(s.replace(/[\ud800-\udfff]/g, '\ufffd'));
   }
 };
-/** Every listing of a contract with this name (servedListings picks the same contract), earliest first. */
-const sameName = (name) => rows(`${LISTING}&envelope->contract->>name=eq.${enc(name)}&order=created_at.asc&limit=500`);
+const quote = (v) => `"${String(v).replace(/["\\]/g, '\\$&')}"`;
 /**
- * Every listing of contracts with these names, so a page of the catalogue is judged against older listings too.
- * Earliest first, so if a name ever has more rows than the limit, the ones cut are the latest, never an original.
- * (A later migration could store a hash of descriptor + description and look up by that instead of by name.)
+ * Every listing that may be the same contract as these: by name, and by code hash or source, since the identity
+ * (contractId) leaves the name out and a copier can rename. A listing with neither code hash nor source (free only)
+ * is found by name alone. Earliest first, so if there are ever more rows than the limit, the ones cut are the latest,
+ * never an original. (A later migration could store contractId in a column and look up by that instead.)
  */
-async function sameNames(names) {
-  const quoted = [...new Set(names)].map((n) => `"${n.replace(/["\\]/g, '\\$&')}"`);
-  const out = [];
-  for (let i = 0; i < quoted.length; i += 25)
-    out.push(
-      ...(await rows(
-        `${LISTING}&envelope->contract->>name=in.${enc(`(${quoted.slice(i, i + 25).join(',')})`)}&order=created_at.asc&limit=2000`,
-      )),
-    );
-  return out;
+async function sameBehaviour(contracts) {
+  const by = (f) => [...new Set(contracts.map((c) => c?.[f]).filter((v) => typeof v === 'string' && v !== ''))];
+  const out = new Map();
+  for (const [col, values] of [
+    ['name', by('name')],
+    ['codeHash', by('codeHash')],
+    ['source', by('source')],
+  ])
+    for (let i = 0; i < values.length; i += 25) {
+      const list = `(${values
+        .slice(i, i + 25)
+        .map(quote)
+        .join(',')})`;
+      for (const r of await rows(
+        `${LISTING}&envelope->contract->>${col}=in.${enc(list)}&order=created_at.asc&limit=2000`,
+      ))
+        out.set(r.origin, r);
+    }
+  return [...out.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 }
 /** Is the listing at `origin` (with envelope `env`) one the catalogue serves? true, false, or 'unchecked'. */
 async function served(origin, env) {
   if (typeof env?.contract?.name !== 'string') return false;
-  const j = await judgeListings(await sameName(env.contract.name), position);
+  const j = await judgeListings(await sameBehaviour([env.contract]), position);
   return j.unchecked.has(origin) ? 'unchecked' : j.served.has(origin);
 }
 
@@ -123,8 +132,8 @@ async function list(req, res) {
     if (is === 'unchecked') return send(res, 503, { error: NO_CHAIN });
     ok = new Set(is ? [all[0].origin] : []);
   } else {
-    const names = all.map((c) => c.envelope?.contract?.name).filter((n) => typeof n === 'string');
-    ok = (await judgeListings(await sameNames(names), position)).served;
+    const contracts = all.map((c) => c.envelope?.contract).filter((c) => typeof c?.name === 'string');
+    ok = (await judgeListings(await sameBehaviour(contracts), position)).served;
   }
   // `body` = the exact inscribed text: buyers inscribe it byte for byte, so their copy's hash matches.
   const out = all
@@ -160,7 +169,7 @@ async function publish(b, res) {
   const refused = await envelopeRefusal(a.env);
   if (refused) return send(res, refused[0], { error: refused[1] });
   // The earliest listing on chain stays: refused if an earlier one of this contract is by another author.
-  const others = (await sameName(a.env.contract.name)).filter((e) => e.origin !== p.outpoint);
+  const others = (await sameBehaviour([a.env.contract])).filter((e) => e.origin !== p.outpoint);
   // Not in the catalogue yet: among unconfirmed (or same-block) listings it ranks last.
   const mine = { origin: p.outpoint, envelope: a.env, created_at: null };
   const j = await judgeListings([...others, mine], position);

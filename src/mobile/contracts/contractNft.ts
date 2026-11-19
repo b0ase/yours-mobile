@@ -64,6 +64,23 @@ export const canonical = (v: unknown): unknown =>
         )
       : v;
 
+/**
+ * What a contract DOES: the behaviour fields only. name, version, summary and the envelope's description are free
+ * text, so one changed character there must not make a copy a different contract (b-Aware row 352). Byte-identical
+ * to the catalogue's contractId (site/lib/contracts.js); a test runs both on the same fixtures.
+ */
+export const BEHAVIOUR_FIELDS = ['format', 'network', 'params', 'spendPaths', 'oracle', 'source', 'codeHash'] as const;
+export const contractIdentity = (c: Partial<ContractDescriptor> | null | undefined): string => {
+  const src: Record<string, unknown> = c && typeof c === 'object' ? c : {};
+  const picked: Record<string, unknown> = {};
+  for (const k of BEHAVIOUR_FIELDS) if (src[k] !== undefined) picked[k] = src[k];
+  return JSON.stringify(canonical(picked));
+};
+
+/** A non-empty source or code hash: a paid listing must carry one (it is what makes two listings the same contract). */
+export const hasContractCode = (c: Partial<ContractDescriptor> | null | undefined) =>
+  !!c && ((typeof c.source === 'string' && c.source !== '') || (typeof c.codeHash === 'string' && c.codeHash !== ''));
+
 /** The bytes the author signs: the canonical envelope with authorSig left out. */
 export const contractSigningBytes = (env: ContractEnvelope): number[] => {
   const { authorSig: _sig, ...rest } = env;

@@ -71,8 +71,25 @@ async function contractAuthorKey(env) {
   }
 }
 
-/** Same contract: the same canonical descriptor and the same description (as the wallet's copiedFrom). */
-const contractId = (e) => JSON.stringify([canonical(e.contract), e.description]);
+/**
+ * What a contract DOES: the behaviour fields only. name, version, summary and the envelope's description are free
+ * text, so changing one character of them must not make a copy a different contract (b-Aware row 352, UID 630).
+ * Byte-identical to the wallet's contractIdentity (src/mobile/contracts/contractNft.ts); a test runs both.
+ */
+const BEHAVIOUR_FIELDS = ['format', 'network', 'params', 'spendPaths', 'oracle', 'source', 'codeHash'];
+
+/**
+ * Same contract: the same canonical behaviour (the wallet's copiedFrom uses the same function). A clone that changes
+ * a real parameter is a different contract; the backstop for that is the signed author handle on the sheet.
+ */
+const contractId = (e) => {
+  const c = e.contract && typeof e.contract === 'object' ? e.contract : {};
+  const picked = {};
+  for (const k of BEHAVIOUR_FIELDS) if (c[k] !== undefined) picked[k] = c[k];
+  return JSON.stringify(canonical(picked));
+};
+
+const NO_SOURCE = 'A paid contract must include its source or code hash, so buyers can read what they are paying for';
 
 /**
  * Older wallets list paid contracts unsigned. The released wallet shows this text as it is, after it has minted,
@@ -80,6 +97,10 @@ const contractId = (e) => JSON.stringify([canonical(e.contract), e.description])
  */
 const UPDATE_TO_SIGN =
   "This contract wasn't listed: paid contracts now carry your signature, which needs bWalletX 5.2.57 or later. Update when it's available, then publish it again.";
+
+/** A non-empty source or code hash (a paid listing must carry one: it is what makes two listings the same contract). */
+const hasCode = (c) =>
+  !!c && ((typeof c.source === 'string' && c.source !== '') || (typeof c.codeHash === 'string' && c.codeHash !== ''));
 
 /**
  * Why the catalogue won't list (or serve) `env`, as [status, error], or null. A paid listing must be signed by its
@@ -91,6 +112,7 @@ async function envelopeRefusal(env) {
   const paid = Number(env.sale.priceUsd) > 0;
   const author = env.author;
   if (paid && author.identityKey === undefined && env.authorSig === undefined) return [400, UPDATE_TO_SIGN];
+  if (paid && !hasCode(env.contract)) return [400, NO_SOURCE];
   if (paid || author.identityKey !== undefined || env.authorSig !== undefined) {
     if (typeof author.identityKey !== 'string' || !PUBKEY_RE.test(author.identityKey))
       return [400, paid ? 'A paid contract must carry its author’s identity key' : 'Bad author identity key'];
@@ -102,11 +124,12 @@ async function envelopeRefusal(env) {
 
 /**
  * May `later` be listed after `earlier` (the same contract)? A signed listing can be listed again only under the
- * same key; an unsigned one blocks only a later unsigned one from another address (review of 2e409da3). `key` is the
+ * same key. After an unsigned one only a listing from the same author address may follow, signed or not: a signed
+ * clone of a legacy unsigned listing must not win and shut the real author out (b-Aware row 352). `key` is the
  * verified identity key (contractAuthorKey) or null.
  */
 const mayFollow = (earlier, later) =>
-  earlier.key ? later.key === earlier.key : !!later.key || earlier.env.author.address === later.env.author.address;
+  earlier.key ? later.key === earlier.key : earlier.env.author.address === later.env.author.address;
 
 /**
  * Chain order of two origins: the earlier block first; unconfirmed ranks after confirmed. In one block (or both
@@ -189,6 +212,8 @@ module.exports = {
   chainOrder,
   contractAuthorKey,
   contractId,
+  BEHAVIOUR_FIELDS,
+  hasCode,
   contractSigningBytes,
   envelopeRefusal,
   judgeListings,

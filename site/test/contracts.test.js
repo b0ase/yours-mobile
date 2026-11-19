@@ -40,9 +40,18 @@ const signAs = async (who, env, over = {}) => {
   });
   return { ...unsigned, authorSig: Utils.toHex(signature) };
 };
+/** A different contract (own name and code hash) from the default NDA. */
+const variant = (name) => ({ ...listing(ann).contract, name, codeHash: `h-${name}` });
 const listing = (who, priceUsd = 5, over = {}) => ({
   format: 'bwalletx.contract-nft/1',
-  contract: { format: 'bwalletx.contract/1', name: 'NDA', version: '1', network: 'mainnet', summary: 's' },
+  contract: {
+    format: 'bwalletx.contract/1',
+    name: 'NDA',
+    version: '1',
+    network: 'mainnet',
+    summary: 's',
+    codeHash: 'h-NDA',
+  },
   description: 'A plain NDA',
   author: { name: 'Ann Lawyer', address: who.address },
   sale: { priceUsd, copies: 10, payTo: who.address },
@@ -75,12 +84,13 @@ const fakeDb = async (url, init = {}) => {
     table.push({ ...row, created_at: new Date(BASE + clock++).toISOString() });
     return new Response('', { status: 201 });
   }
-  const name = q.get('envelope->contract->>name');
-  if (name) queries.push(name);
+  const by = ['name', 'codeHash', 'source'].find((f) => q.get(`envelope->contract->>${f}`));
+  const name = by && q.get(`envelope->contract->>${by}`);
+  if (name) queries.push(`${by}:${name}`);
   if (name) urls.push(u.search);
   const names = name?.startsWith('in.') ? inList(name) : name ? [name.slice(3)] : null;
   const out = table
-    .filter((r) => !names || names.includes(r.envelope.contract.name))
+    .filter((r) => !names || names.includes(r.envelope.contract[by]))
     .filter((r) => !q.get('origin') || q.get('origin') === `eq.${r.origin}`)
     .filter((r) => !q.get('body_hash') || q.get('body_hash') === `eq.${r.body_hash}`)
     .sort((a, b) => a.created_at.localeCompare(b.created_at) * (q.get('order')?.endsWith('desc') ? -1 : 1));
@@ -277,18 +287,34 @@ describe('contract catalogue: paid listings are signed by their author', () => {
     expect(table).toHaveLength(1);
     expect(table[0].envelope.author.identityKey).toBe(ann.key);
     // The lookup asked only for listings of this contract's name (as PostgREST reads the encoded query).
-    expect(queries).toContain('eq.NDA');
+    expect(queries).toContain('name:in.("NDA")');
     // Key order in the descriptor doesn't hide a clone.
     const reordered = await signAs(
       mallory,
       listing(mallory, 5, {
-        contract: { summary: 's', network: 'mainnet', version: '1', name: 'NDA', format: 'bwalletx.contract/1' },
+        contract: {
+          codeHash: 'h-NDA',
+          summary: 's',
+          network: 'mainnet',
+          version: '1',
+          name: 'NDA',
+          format: 'bwalletx.contract/1',
+        },
       }),
     );
     expect((await publish(reordered))[0]).toBe(409);
     // Ann listing it again, and Mallory listing a different contract, are fine.
     expect((await publish(await signAs(ann, listing(ann, 7))))[0]).toBe(200);
-    expect((await publish(await signAs(mallory, listing(mallory, 5, { description: 'Mallory’s NDA' }))))[0]).toBe(200);
+    expect(
+      (
+        await publish(
+          await signAs(
+            mallory,
+            listing(mallory, 5, { contract: { ...listing(mallory).contract, params: { own: 1 } } }),
+          ),
+        )
+      )[0],
+    ).toBe(200);
   });
 
   test('an unsigned free clone under another address is refused', async () => {
@@ -310,11 +336,14 @@ describe('contract catalogue: paid listings are signed by their author', () => {
 });
 
 describe('contract catalogue: who keeps a contract (review of 2e409da3)', () => {
-  test("an unsigned free listing doesn't block the real author's signed listing", async () => {
-    const [, , squat] = await publish(listing(mallory, 0));
+  test('after an unsigned listing only the same address may follow, signed or not (b-Aware row 352)', async () => {
+    const [, , first] = await publish(listing(ann, 0));
+    // A signed clone from another key and address is refused ...
+    expect((await publish(await signAs(mallory, listing(mallory))))[0]).toBe(409);
+    // ... and the original's own address publishing it signed is allowed.
     const [status, , anns] = await publish(await signAs(ann, listing(ann)));
     expect(status).toBe(200);
-    expect((await served()).sort()).toEqual([squat.outpoint, anns.outpoint].sort());
+    expect((await served()).sort()).toEqual([first.outpoint, anns.outpoint].sort());
   });
 
   test("an unsigned free copy under the author's own name and address is refused after a signed listing", async () => {
@@ -360,10 +389,10 @@ describe('contract catalogue: who keeps a contract (review of 2e409da3)', () => 
   });
 
   test('older rows: an unsigned or badly signed paid listing is never served or counted; free ones still are', async () => {
-    const unsigned = oldRow(listing(ann, 5, { contract: { ...listing(ann).contract, name: 'Old' } }));
-    const signed = await signAs(ann, listing(ann, 5, { contract: { ...listing(ann).contract, name: 'Forged' } }));
+    const unsigned = oldRow(listing(ann, 5, { contract: variant('Old') }));
+    const signed = await signAs(ann, listing(ann, 5, { contract: variant('Forged') }));
     const forged = oldRow({ ...signed, sale: { ...signed.sale, priceUsd: 500 } });
-    const free = oldRow(listing(ann, 0, { contract: { ...listing(ann).contract, name: 'Free' } }));
+    const free = oldRow(listing(ann, 0, { contract: variant('Free') }));
     expect(await served()).toEqual([free.outpoint]);
     expect(await getOne(unsigned.outpoint)).toBe(404);
     expect(await getOne(forged.outpoint)).toBe(404);
@@ -379,7 +408,7 @@ describe('contract catalogue: who keeps a contract (review of 2e409da3)', () => 
 
   test('names with PostgREST punctuation are quoted in the catalogue lookup', async () => {
     const odd = 'a,b) "c" \\d';
-    const [, , m] = await publish(listing(ann, 0, { contract: { ...listing(ann).contract, name: odd } }));
+    const [, , m] = await publish(listing(ann, 0, { contract: variant(odd) }));
     expect(await served()).toEqual([m.outpoint]);
   });
 });
@@ -400,7 +429,7 @@ describe('contract catalogue: when the chain can’t be checked (re-review of f3
       created_at: new Date().toISOString(),
     });
     // An unrelated contract is still served.
-    const [, , other] = await publish(listing(ann, 0, { contract: { ...listing(ann).contract, name: 'Other' } }));
+    const [, , other] = await publish(listing(ann, 0, { contract: variant('Other') }));
     down.add(txidOf(anns));
     expect(await served()).toEqual([other.outpoint]);
     expect(await getOne(mal.outpoint)).toBe(503);
@@ -462,7 +491,7 @@ describe('contract catalogue: when the chain can’t be checked (re-review of f3
 });
 
 describe('contract names the catalogue lookup must survive', () => {
-  const named = (name) => listing(ann, 0, { contract: { ...listing(ann).contract, name } });
+  const named = (name) => listing(ann, 0, { contract: variant(name) });
   test('a name with a lone surrogate is not a contract inscription (400, not a crash)', async () => {
     expect((await publish(named('x\ud800')))[0]).toBe(400);
     expect((await publish(named('ok \ud83d\ude00')))[0]).toBe(200);
@@ -536,5 +565,56 @@ describe('where an origin sits on chain (strategyKeys chain.position)', () => {
       height: 7,
       index: null,
     });
+  });
+});
+
+describe('contract identity is the behaviour, not the words (b-Aware row 352, UID 630)', () => {
+  const edit = (over) => ({ contract: { ...listing(ann).contract, ...over } });
+
+  test('a description-only change is the same contract: the later copy is refused (409)', async () => {
+    expect((await publish(await signAs(ann, listing(ann))))[0]).toBe(200);
+    const [status] = await publish(await signAs(mallory, listing(mallory, 5, { description: 'A plain NDA.' })));
+    expect(status).toBe(409);
+    expect(table).toHaveLength(1);
+  });
+
+  test('a name, version or summary change is the same contract too', async () => {
+    expect((await publish(await signAs(ann, listing(ann))))[0]).toBe(200);
+    for (const over of [{ name: 'NDA 2' }, { version: '2' }, { summary: 'Same thing, other words' }])
+      expect((await publish(await signAs(mallory, listing(mallory, 5, edit(over)))))[0]).toBe(409);
+    expect(table).toHaveLength(1);
+  });
+
+  test('a real parameter, code hash or network change is a different contract', async () => {
+    expect((await publish(await signAs(ann, listing(ann, 5, edit({ params: { rate: 1 } })))))[0]).toBe(200);
+    expect((await publish(await signAs(mallory, listing(mallory, 5, edit({ params: { rate: 2 } })))))[0]).toBe(200);
+    expect((await publish(await signAs(mallory, listing(mallory, 5, edit({ codeHash: 'other' })))))[0]).toBe(200);
+    expect((await publish(await signAs(mallory, listing(mallory, 5, edit({ network: 'testnet' })))))[0]).toBe(200);
+  });
+
+  test('a paid listing without source or code hash is refused (400, plain message)', async () => {
+    const bare = listing(ann);
+    delete bare.contract.codeHash;
+    const [status, out] = await publish(await signAs(ann, bare));
+    expect(status).toBe(400);
+    expect(out.error).toContain('source or code hash');
+    // With a source instead, or free, it is fine.
+    expect((await publish(await signAs(ann, listing(ann, 5, edit({ codeHash: undefined, source: 'x' })))))[0]).toBe(
+      200,
+    );
+    expect((await publish(listing(ann, 0, edit({ name: 'Free', codeHash: undefined }))))[0]).toBe(200);
+  });
+
+  test('a signed clone of an unsigned original is refused; the original address may re-publish signed', async () => {
+    const [, , first] = await publish(listing(ann, 0));
+    expect((await publish(await signAs(mallory, listing(mallory, 0, { description: 'x' }))))[0]).toBe(409);
+    expect((await publish(await signAs(ann, listing(ann, 0))))[0]).toBe(200);
+    expect(await served()).toContain(first.outpoint);
+  });
+
+  test('the identity is key-order independent and leaves out the free text', () => {
+    const a = listing(ann).contract;
+    const b = { codeHash: a.codeHash, network: a.network, format: a.format, name: 'z', version: '9', summary: 'z' };
+    expect(C.contractId({ contract: a, description: 'x' })).toBe(C.contractId({ contract: b, description: 'y' }));
   });
 });
