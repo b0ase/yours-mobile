@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  chromeConsentStore,
-  LEGACY_LIST_CONSENT_KEY,
-  LIST_CONSENT_DAYS,
-  LIST_CONSENT_KEY,
-  memoryConsentStore,
-} from './siteTokens';
+import { chromeConsentStore, LEGACY_LIST_CONSENT_KEY, LIST_CONSENT_DAYS, memoryConsentStore } from './siteTokens';
 import { keepGlobals } from '../testing/stubGlobals';
 
 keepGlobals('chrome');
