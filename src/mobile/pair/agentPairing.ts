@@ -234,7 +234,7 @@ export async function handleAgentCall(
       if (!r.ok) throw new AgentCallError('INVALID', r.errors.join('; '));
       // Named by the pairing (grant.name, chosen by the owner when pairing), never by the host the computer reports.
       // No session (direct callers): 'unknown', which approval refuses as not a live pairing.
-      const from = { computer: grant.name, session: deps.session?.id ?? 'unknown' };
+      const from = { computer: grant.name, session: deps.session?.id ?? 'unknown', expiresAt: grant.expiresAt };
       proposeStrategy(id, r.strategy, from);
       return {
         proposed: r.strategy.name,

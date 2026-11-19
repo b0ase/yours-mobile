@@ -16,9 +16,9 @@ import {
 import {
   approveProposal,
   declineProposal,
-  getProposal,
-  proposalChanges,
+  diffStrategy,
   proposalKey,
+  proposalView,
   type ApproveResult,
 } from './strategyProposal';
 import { isAgentSessionLive } from '../pair/sessions';
@@ -266,16 +266,21 @@ const StrategyBody = ({ id }: { id: string }) => {
 /** How long Approve stays off after the proposal on screen appears or changes, so a swap can't catch a tap. */
 export const APPROVE_ARM_MS = 1500;
 
+/** Full free text (goals can be 4,000 characters), scrolling, never cut. */
+const LONG_BOX = 'rounded-lg px-2 py-1 whitespace-pre-wrap break-words overflow-y-auto max-h-48';
+
 const REFUSED: Record<Exclude<ApproveResult, { ok: true }>['reason'], string> = {
   gone: 'That proposal is no longer waiting.',
-  changed: 'The computer changed its proposal. Check the new one before you approve.',
+  changed: 'The proposal or the loaded strategy changed. Check it again before you approve.',
   'session-ended': 'That pairing has ended, so its proposal was dropped.',
 };
 
 /** A strategy a paired computer sent: what would change, which pairing, and the owner's Approve / Decline. */
 const ProposalSheet = ({ id }: { id: string }) => {
-  const p = getProposal(id);
-  const key = p ? proposalKey(p) : '';
+  // The proposal and the strategy it is compared with, read once: the diff, the arm delay and Approve all use this view.
+  const view = proposalView(id);
+  const p = view?.proposal;
+  const key = view ? proposalKey(view) : '';
   const [armedFor, setArmedFor] = useState('');
   const [note, setNote] = useState('');
   useEffect(() => {
@@ -283,14 +288,14 @@ const ProposalSheet = ({ id }: { id: string }) => {
     const t = setTimeout(() => setArmedFor(key), APPROVE_ARM_MS);
     return () => clearTimeout(t);
   }, [key]);
-  if (!p)
+  if (!view || !p)
     return note ? (
       <div className="text-xs mb-2" style={{ color: MUTED }}>
         {note}
       </div>
     ) : null;
   const armed = armedFor === key;
-  const changes = proposalChanges(id, p);
+  const changes = diffStrategy(view.current ?? undefined, p.strategy);
   return (
     <div
       className="rounded-2xl p-3 flex flex-col gap-2 mb-2"
@@ -307,11 +312,25 @@ const ProposalSheet = ({ id }: { id: string }) => {
           Same limits as now.
         </div>
       )}
-      {changes.map((c) => (
-        <div key={c.what} className="text-xs" style={{ color: '#D0D5DD' }}>
-          <b className="text-white">{c.what}:</b> {c.from} → {c.to}
-        </div>
-      ))}
+      {changes.map((c) =>
+        c.long ? (
+          <div key={c.what} className="text-xs flex flex-col gap-1" style={{ color: '#D0D5DD' }}>
+            <b className="text-white">{c.what} changed</b>
+            <span style={{ color: MUTED }}>Now:</span>
+            <div className={LONG_BOX} style={{ background: 'var(--bw-bg)' }}>
+              {c.from}
+            </div>
+            <span style={{ color: MUTED }}>Proposed:</span>
+            <div className={LONG_BOX} style={{ background: 'var(--bw-bg)' }} data-testid="proposal-long-to">
+              {c.to}
+            </div>
+          </div>
+        ) : (
+          <div key={c.what} className="text-xs" style={{ color: '#D0D5DD' }}>
+            <b className="text-white">{c.what}:</b> {c.from} → {c.to}
+          </div>
+        ),
+      )}
       {note && (
         <div className="text-xs" style={{ color: MUTED }}>
           {note}
@@ -324,8 +343,8 @@ const ProposalSheet = ({ id }: { id: string }) => {
           style={{ background: GOLD, color: '#000', opacity: armed ? 1 : 0.5 }}
           disabled={!armed}
           onClick={() => {
-            // Approve exactly what this sheet shows: refused if the stored proposal changed since it rendered.
-            const r = approveProposal(id, p, isAgentSessionLive);
+            // Approve exactly what this sheet shows: refused if the proposal or the loaded strategy changed since.
+            const r = approveProposal(id, view, isAgentSessionLive);
             setNote(r.ok ? '' : REFUSED[r.reason]);
           }}
         >

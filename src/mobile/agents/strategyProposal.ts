@@ -7,8 +7,11 @@
 import { appendAgentLog } from './agentAccounts';
 import { getLoadedStrategy, loadStrategy, pairedComputerLabel, type Strategy } from './strategy';
 
-/** `computer` is the pairing's name (the agent account it was paired to); `session` is the pairing channel id. */
-export type StrategyProposal = { strategy: Strategy; computer: string; session: string; at: number };
+/**
+ * `computer` is the pairing's name (the agent account it was paired to); `session` is the pairing channel id;
+ * `expiresAt` is that pairing's grant expiry, so a re-pair on the same channel (a new grant) can't inherit it.
+ */
+export type StrategyProposal = { strategy: Strategy; computer: string; session: string; expiresAt: number; at: number };
 
 const KEY = (id: string) => `bwallet.strategy.proposal.${id}`;
 
@@ -39,7 +42,7 @@ const store = (id: string, p: StrategyProposal | null) => {
 export const proposeStrategy = (
   id: string,
   strategy: Strategy,
-  from: { computer: string; session: string },
+  from: { computer: string; session: string; expiresAt: number },
   now = Date.now(),
 ) => {
   store(id, { strategy, ...from, at: now });
@@ -66,27 +69,50 @@ export const canonicalJson = (v: unknown): string => {
   return JSON.stringify(v) ?? 'null';
 };
 
-/** A stable key for one proposal: changes whenever anything the owner is shown (or would load) changes. */
-export const proposalKey = (p: StrategyProposal) =>
-  canonicalJson({ at: p.at, session: p.session, computer: p.computer, strategy: p.strategy });
+/** What the approval sheet showed: the proposal and the strategy loaded at the time (its "from" column). */
+export type ShownProposal = { proposal: StrategyProposal; current: Strategy | null };
+
+/** The sheet's view right now. */
+export const proposalView = (id: string): ShownProposal | null => {
+  const proposal = getProposal(id);
+  return proposal ? { proposal, current: getLoadedStrategy(id)?.strategy ?? null } : null;
+};
+
+/**
+ * A stable key for what the owner is shown: changes whenever the proposal (or what it would load) changes, or the
+ * strategy it is compared with changes.
+ */
+export const proposalKey = (v: ShownProposal) => {
+  const p = v.proposal;
+  return canonicalJson({
+    at: p.at,
+    session: p.session,
+    computer: p.computer,
+    expiresAt: p.expiresAt,
+    strategy: p.strategy,
+    current: v.current,
+  });
+};
 
 export type ApproveResult = { ok: true } | { ok: false; reason: 'gone' | 'changed' | 'session-ended' };
 
 /**
  * Owner approves the proposal the sheet SHOWED (`shown`): it loads on paper (going live is still its own tap), tagged
- * with the computer it came from. Refused when the stored proposal is no longer exactly that one (the computer sent
- * another between render and tap), or when the pairing that sent it has ended (`sessionLive`, sessions.ts).
+ * with the computer it came from. Refused when the stored proposal or the loaded strategy is no longer exactly what
+ * the sheet showed (changed between render and tap), or when the pairing that sent it has ended or is no longer the
+ * same grant with the `strategy` scope (`sessionLive`, sessions.ts isAgentSessionLive).
  */
 export const approveProposal = (
   id: string,
-  shown: StrategyProposal,
-  sessionLive: (session: string, agentId: string) => boolean,
+  shown: ShownProposal,
+  sessionLive: (session: string, agentId: string, expiresAt: number) => boolean,
   now = Date.now(),
 ): ApproveResult => {
-  const p = getProposal(id);
-  if (!p) return { ok: false, reason: 'gone' };
-  if (proposalKey(p) !== proposalKey(shown)) return { ok: false, reason: 'changed' };
-  if (!sessionLive(p.session, id)) {
+  const v = proposalView(id);
+  if (!v) return { ok: false, reason: 'gone' };
+  if (proposalKey(v) !== proposalKey(shown)) return { ok: false, reason: 'changed' };
+  const p = v.proposal;
+  if (typeof p.expiresAt !== 'number' || !sessionLive(p.session, id, p.expiresAt)) {
     store(id, null);
     appendAgentLog(id, {
       at: now,
@@ -119,30 +145,78 @@ export const declineProposal = (id: string, now = Date.now()) => {
   });
 };
 
-export type StrategyChange = { what: string; from: string; to: string };
+/** One row of the approval sheet. `long`: free text (goals, changelog), shown in full in a scrolling box. */
+export type StrategyChange = { what: string; from: string; to: string; long?: boolean };
 
-const list = (a?: string[]) => (a && a.length ? a.join(', ') : 'none');
-const usd = (n?: number) => (n === undefined ? 'no limit' : `$${n}`);
+/**
+ * Every field of a strategy, with how the sheet names it. Anything not listed here still shows, under its path:
+ * a field nobody labelled can never read as "Same limits as now".
+ */
+const FIELDS: Record<string, { what: string; kind?: 'usd' | 'list' | 'stop' | 'long' }> = {
+  name: { what: 'Name' },
+  version: { what: 'Version' },
+  format: { what: 'Format' },
+  goals: { what: 'Goals (b follows these; they steer what it does)', kind: 'long' },
+  'rules.tokens': { what: 'Tokens', kind: 'list' },
+  'rules.actions': { what: 'Actions', kind: 'list' },
+  'rules.sendTo': { what: 'Sends only to', kind: 'list' },
+  'rules.maxPerTradeUsd': { what: 'Most per trade', kind: 'usd' },
+  'rules.maxPerDayUsd': { what: 'Most per day', kind: 'usd' },
+  'rules.maxTotalUsd': { what: 'Most in total', kind: 'usd' },
+  'rules.buyBelowUsd': { what: 'Buy below', kind: 'usd' },
+  'rules.sellAboveUsd': { what: 'Sell above', kind: 'usd' },
+  'rules.stop.holdTokens': { what: 'Stop when holding', kind: 'stop' },
+  'rules.stop.downPct': { what: 'Stop when down (%)', kind: 'stop' },
+  'spec.trades': { what: 'Listing: trades' },
+  'spec.risk': { what: 'Listing: risk' },
+  'spec.spends': { what: 'Listing: spends' },
+  'spec.often': { what: 'Listing: how often' },
+  'spec.stops': { what: 'Listing: stops' },
+  'spec.needs': { what: 'Listing: needs' },
+  changelog: { what: 'Changelog', kind: 'long' },
+};
 
-/** What a proposal would change against the current strategy (everything is "new" when nothing is loaded). */
-export const diffStrategy = (current: Strategy | undefined, next: Strategy): StrategyChange[] => {
-  const a = current?.rules;
-  const b = next.rules;
-  const out: StrategyChange[] = [];
-  const add = (what: string, from: string, to: string) => from !== to && out.push({ what, from, to });
-  add('Name', current ? `${current.name} v${current.version}` : 'none loaded', `${next.name} v${next.version}`);
-  add('Tokens', list(a?.tokens), list(b.tokens));
-  add('Actions', list(a?.actions), list(b.actions));
-  add('Sends only to', list(a?.sendTo), list(b.sendTo));
-  add('Most per trade', a ? usd(a.maxPerTradeUsd) : 'none', usd(b.maxPerTradeUsd));
-  add('Most per day', usd(a?.maxPerDayUsd), usd(b.maxPerDayUsd));
-  add('Most in total', usd(a?.maxTotalUsd), usd(b.maxTotalUsd));
-  add('Buy below', usd(a?.buyBelowUsd), usd(b.buyBelowUsd));
-  add('Sell above', usd(a?.sellAboveUsd), usd(b.sellAboveUsd));
-  add('Stop when holding', String(a?.stop?.holdTokens ?? 'never'), String(b.stop?.holdTokens ?? 'never'));
+/** Leaf values by path (`rules.stop.downPct`); arrays are leaves. */
+const flatten = (v: unknown, path = '', out = new Map<string, unknown>()) => {
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    for (const [k, x] of Object.entries(v)) if (x !== undefined) flatten(x, path ? `${path}.${k}` : k, out);
+  } else if (path) out.set(path, v);
   return out;
 };
 
-/** The current strategy's diff against a stored proposal, for the approval sheet. */
-export const proposalChanges = (id: string, p: StrategyProposal) =>
-  diffStrategy(getLoadedStrategy(id)?.strategy, p.strategy);
+const show = (kind: (typeof FIELDS)[string]['kind'], v: unknown): string => {
+  if (kind === 'usd') return v === undefined ? 'no limit' : `$${String(v)}`;
+  if (kind === 'stop') return v === undefined ? 'never' : String(v);
+  if (v === undefined) return 'none';
+  if (kind === 'list' && Array.isArray(v)) return v.length ? v.join(', ') : 'none';
+  if (Array.isArray(v) && v.every((x) => x && typeof x === 'object' && 'version' in x && 'note' in x))
+    return (v as { version: unknown; note: unknown }[])
+      .map((c) => `${String(c.version)}: ${String(c.note)}`)
+      .join('\n');
+  return typeof v === 'string' ? v : canonicalJson(v);
+};
+
+/**
+ * What a proposal would change against the current strategy (everything is "new" when nothing is loaded). Covers
+ * every field: labelled ones in FIELDS order, then any other path by name. Empty exactly when the two are the same.
+ */
+export const diffStrategy = (current: Strategy | undefined, next: Strategy): StrategyChange[] => {
+  const a = flatten(current);
+  const b = flatten(next);
+  const order = Object.keys(FIELDS);
+  const paths = [...new Set([...order, ...[...a.keys(), ...b.keys()].sort()])];
+  const out: StrategyChange[] = [];
+  for (const path of paths) {
+    const x = a.get(path);
+    const y = b.get(path);
+    if (canonicalJson(x) === canonicalJson(y)) continue;
+    const f = FIELDS[path] ?? { what: path };
+    const from = show(f.kind, x);
+    const to = show(f.kind, y);
+    const long = f.kind === 'long' || from.length > 120 || to.length > 120;
+    out.push({ what: f.what, from, to, ...(long && { long: true }) });
+  }
+  if (!out.length && canonicalJson(current ?? null) !== canonicalJson(next))
+    out.push({ what: 'Other details', from: canonicalJson(current ?? null), to: canonicalJson(next), long: true });
+  return out;
+};

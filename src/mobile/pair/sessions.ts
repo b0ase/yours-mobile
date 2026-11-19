@@ -535,12 +535,14 @@ export const pairingLiveCheck = (c: string, grant: AgentGrant, ctx: OneSatContex
 };
 
 /**
- * Is `c` still a pairing that may act for agent account `agentId`? For approving a strategy proposal it sent: the stored
- * session exists, holds that account's agent grant, and has not lapsed or moved to an unpinned relay. Read only (peek).
+ * Is `c` still the pairing that sent a strategy proposal for agent account `agentId`? For Approve: the stored session
+ * exists, holds the same agent grant (that account, the same expiry, so a re-pair on the channel doesn't count) with the
+ * `strategy` scope, and has not lapsed or moved to an unpinned relay. Read only (peek).
  */
-export const isAgentSessionLive = (c: string, agentId: string, now = Date.now()) => {
+export const isAgentSessionLive = (c: string, agentId: string, expiresAt: number, now = Date.now()) => {
   const s = peek(c);
-  if (!s?.agent || s.agent.agentId !== agentId || !isCurrent(s, now)) return false;
+  if (!s?.agent || s.agent.agentId !== agentId || s.agent.expiresAt !== expiresAt) return false;
+  if (!s.agent.scopes.includes('strategy') || !isCurrent(s, now)) return false;
   return dropUntrustedRelays([s]).length === 1;
 };
 
@@ -943,6 +945,9 @@ function connectPairing(
             ...(v2 ? { claim: sessionClaim, wcv: 2 as const } : { claim }),
             ...(proven && { proven: true }),
           };
+          // A re-pair on a channel the CLI chose again starts clean: the old pairing's strategy proposal goes with it.
+          dropProposalsOf(peek(link.c));
+          if (agent) dropProposalFromSession(agent.agentId, link.c);
           save([...loadAll().filter((s) => s.c !== link.c), stored]);
           const l: Live = { ws, sealer: sealer!, stored, relayed: true, session: sessionClaim };
           attach(l);
