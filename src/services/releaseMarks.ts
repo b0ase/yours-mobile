@@ -25,6 +25,9 @@ export type ReleaseRecord = {
   /** Written by round 3 builds; read and dropped. */
   armed?: string[];
 };
+/** One transaction this device's signer handed to storage (watchSigned). */
+export type Signed = { txid: string; rawTx?: number[]; reference?: string };
+
 export type ReleaseKV = { load: () => Promise<ReleaseRecord | null>; save: (r: ReleaseRecord) => Promise<void> };
 
 export type ReleaseMarks = {
@@ -47,10 +50,10 @@ export type ReleaseMarks = {
   /** Any record of it here (owner, held or released). */
   known: (txid: string) => boolean;
   /** This device's signer handed it to storage (watchSigned): in memory, for matching a call's own result. */
-  noteSigned: (txid: string) => void;
-  /** A counter for noteSigned; signedSince(n) lists the txids signed after it was n. */
+  noteSigned: (txid: string, o?: { rawTx?: ArrayLike<number>; reference?: string }) => void;
+  /** A counter for noteSigned; signedSince(n) lists what was signed after it was n (with its bytes and reference). */
   signedSeq: () => number;
-  signedSince: (seq: number) => string[];
+  signedSince: (seq: number) => Signed[];
   /** The network was seen to have it (in a block or the mempool): kept, for Held payments' Send now. */
   markSeen: (txid: string) => Promise<void>;
   seen: (txid: string) => boolean;
@@ -67,7 +70,7 @@ export function createReleaseMarks(kv?: ReleaseKV): ReleaseMarks {
   const owners = new Map<string, string>();
   const seenOnNetwork = new Set<string>();
   const flying = new Map<string, number>();
-  const signed: { seq: number; txid: string }[] = [];
+  const signed: (Signed & { seq: number })[] = [];
   let seq = 0;
   let saving = Promise.resolve();
   const trim = <K>(s: { size: number; delete: (k: K) => boolean; keys: () => IterableIterator<K> }) => {
@@ -141,13 +144,19 @@ export function createReleaseMarks(kv?: ReleaseKV): ReleaseMarks {
     },
     owner: (txid) => owners.get(norm(txid)),
     known: (txid) => owners.has(norm(txid)) || held.has(norm(txid)) || released.has(norm(txid)),
-    noteSigned: (txid) => {
+    noteSigned: (txid, o = {}) => {
       if (!TXID.test(norm(txid))) return;
-      signed.push({ seq: ++seq, txid: norm(txid) });
+      signed.push({
+        seq: ++seq,
+        txid: norm(txid),
+        rawTx: o.rawTx ? Array.from(o.rawTx) : undefined,
+        reference: o.reference,
+      });
       if (signed.length > 200) signed.shift();
     },
     signedSeq: () => seq,
-    signedSince: (n) => signed.filter((x) => x.seq > n).map((x) => x.txid),
+    signedSince: (n) =>
+      signed.filter((x) => x.seq > n).map(({ txid, rawTx, reference }) => ({ txid, rawTx, reference })),
     markSeen: async (txid) => {
       if (!TXID.test(norm(txid)) || seenOnNetwork.has(norm(txid))) return;
       seenOnNetwork.add(norm(txid));
@@ -161,6 +170,8 @@ export function createReleaseMarks(kv?: ReleaseKV): ReleaseMarks {
 
 type ActionArgs = {
   reference?: string;
+  inputs?: { outpoint?: string }[];
+  outputs?: { lockingScript?: string; satoshis?: number }[];
   options?: {
     noSend?: boolean;
     signAndProcess?: boolean;
@@ -221,8 +232,12 @@ export function markReleases<T extends object>(wallet: T, marks: ReleaseMarks, o
         const err = e as { name?: unknown; code?: unknown; txid?: unknown } | null;
         if (err?.name !== 'WERR_REVIEW_ACTIONS' && err?.code !== 'WERR_REVIEW_ACTIONS') return undefined;
         const txid = norm(String(err?.txid ?? ''));
-        const mine = marks.signedSince(since);
-        return TXID.test(txid) && mine.length === 1 && mine[0] === txid && !marks.known(txid) ? txid : undefined;
+        if (!TXID.test(txid) || marks.known(txid)) return undefined;
+        // Signed here during this call, and signed FOR this call (round 6 follow-up: another call running at the same
+        // time, the wallet's own, may have signed it): its bytes carry this createAction's outputs and inputs, or, for
+        // a signAction, it went to storage under this call's reference.
+        const s = marks.signedSince(since).find((x) => x.txid === txid);
+        return s && signedForCall(method, args, s) ? txid : undefined;
       };
       try {
         r = await marks.inFlight(
@@ -266,7 +281,44 @@ export function markReleases<T extends object>(wallet: T, marks: ReleaseMarks, o
   return wallet;
 }
 
-type ProcessArgs = { isNewTx?: boolean; txid?: string; rawTx?: ArrayLike<number> };
+/**
+ * Is this signed transaction the one `args` asked for? A createAction's: every output it names (script and amount)
+ * and every input it names are in the bytes, and it names at least one of them. A signAction's: storage got it under
+ * this call's reference.
+ */
+export function signedForCall(method: 'createAction' | 'signAction', args: ActionArgs | undefined, s: Signed): boolean {
+  if (method === 'signAction') return !!args?.reference && s.reference === args.reference;
+  const outs = args?.outputs ?? [];
+  const ins = args?.inputs ?? [];
+  if (!outs.length && !ins.length) return false;
+  let tx: Transaction;
+  try {
+    if (!s.rawTx?.length) return false;
+    tx = Transaction.fromBinary(s.rawTx);
+  } catch {
+    return false;
+  }
+  const left = tx.outputs.map((x) => `${x.lockingScript.toHex().toLowerCase()}:${x.satoshis}`);
+  for (const o of outs) {
+    const i = left.indexOf(`${String(o?.lockingScript ?? '').toLowerCase()}:${o?.satoshis}`);
+    if (i < 0) return false;
+    left.splice(i, 1);
+  }
+  const spent = new Set(
+    tx.inputs.map(
+      (x) => `${(x.sourceTXID ?? x.sourceTransaction?.id('hex') ?? '').toLowerCase()}.${x.sourceOutputIndex}`,
+    ),
+  );
+  return ins.every((i) =>
+    spent.has(
+      String(i?.outpoint ?? '')
+        .toLowerCase()
+        .replace('_', '.'),
+    ),
+  );
+}
+
+type ProcessArgs = { isNewTx?: boolean; txid?: string; rawTx?: ArrayLike<number>; reference?: string };
 const SIGNED = Symbol.for('bwx.releaseMarks.signed');
 
 /**
@@ -286,7 +338,8 @@ export function watchSigned(storage: unknown, marks: ReleaseMarks): boolean {
   s.processAction = async (a: ProcessArgs, ...r: unknown[]) => {
     if (a?.isNewTx && a.txid && a.rawTx?.length) {
       try {
-        if (Transaction.fromBinary(Array.from(a.rawTx)).id('hex') === norm(a.txid)) marks.noteSigned(a.txid);
+        if (Transaction.fromBinary(Array.from(a.rawTx)).id('hex') === norm(a.txid))
+          marks.noteSigned(a.txid, { rawTx: a.rawTx, reference: a.reference });
       } catch {
         // bytes that aren't a transaction: not noted
       }

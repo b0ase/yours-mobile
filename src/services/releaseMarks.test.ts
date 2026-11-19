@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { P2PKH, PrivateKey, Transaction } from '@bsv/sdk';
+import { P2PKH, PrivateKey, Script, Transaction } from '@bsv/sdk';
 import {
   createReleaseMarks,
   markReleases,
   NOT_YOURS,
   releasedBy,
+  signedForCall,
   watchSigned,
   type ReleaseRecord,
 } from './releaseMarks';
@@ -115,33 +116,55 @@ describe('release marks (this device only, never synced): task 54 review, rounds
       ...extra,
     });
 
+  /** A payment as a createAction asks for it, and the transaction this device's signer built for it. */
+  const payment = (sats: number) => {
+    const lockingScript = new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex();
+    const tx = new Transaction();
+    tx.addInput({
+      sourceTXID: 'e'.repeat(64),
+      sourceOutputIndex: sats % 7,
+      unlockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()),
+      sequence: 0xffffffff,
+    });
+    tx.addOutput({ lockingScript: Script.fromHex(lockingScript), satoshis: sats });
+    tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 777 }); // change
+    return {
+      txid: tx.id('hex'),
+      raw: tx.toBinary(),
+      args: { description: 'a payment', outputs: [{ lockingScript, satoshis: sats, outputDescription: 'payment' }] },
+    };
+  };
+
   test('round 5 (3): a send that reached storage and then threw (results require review) keeps its marks', async () => {
     const m = createReleaseMarks();
+    const P = payment(1_000);
     const w = {
       createAction: async () => {
-        m.noteSigned(C); // this device's signer handed C to storage (watchSigned)
-        throw reviewError(C, { sendWithResults: [{ txid: A, status: 'failed' }] });
+        m.noteSigned(P.txid, { rawTx: P.raw }); // this device's signer handed P to storage (watchSigned)
+        throw reviewError(P.txid, { sendWithResults: [{ txid: A, status: 'failed' }] });
       },
     };
     markReleases(w, m, { admin: ADMIN });
-    await expect(w.createAction({ options: { sendWith: [A] } } as never)).rejects.toThrow('require review');
+    await expect(w.createAction({ ...P.args, options: { sendWith: [A] } } as never)).rejects.toThrow('require review');
     // The payment it built is this device's own (queued here), and the release it made stands.
-    expect([m.released(C), m.owner(C), m.released(A)]).toEqual([true, '', true]);
+    expect([m.released(P.txid), m.owner(P.txid), m.released(A)]).toEqual([true, '', true]);
     // A noSend one that reached storage is held here.
+    const Q = payment(2_000);
     const w2 = {
       createAction: async () => {
-        m.noteSigned(D);
-        throw reviewError(D);
+        m.noteSigned(Q.txid, { rawTx: Q.raw });
+        throw reviewError(Q.txid);
       },
     };
     markReleases(w2, m, { admin: ADMIN });
-    await expect(w2.createAction({ options: { noSend: true } } as never)).rejects.toThrow('require review');
-    expect([m.heldHere(D), m.released(D)]).toEqual([true, false]);
+    await expect(w2.createAction({ ...Q.args, options: { noSend: true } } as never)).rejects.toThrow('require review');
+    expect([m.heldHere(Q.txid), m.released(Q.txid)]).toEqual([true, false]);
   });
 
   test("round 6 (c): a remote store's review error naming W changes nothing about W, and the site still can't send it", async () => {
     const m = createReleaseMarks();
     await m.hold(B, ''); // W: the wallet's own withheld payment
+    const P = payment(1_000);
     const sends: unknown[] = [];
     const w = {
       createAction: async (args: { options?: { sendWith?: string[] } }) => {
@@ -149,41 +172,89 @@ describe('release marks (this device only, never synced): task 54 review, rounds
           sends.push(args);
           return { txid: C };
         }
-        m.noteSigned(C); // what this call really signed
+        m.noteSigned(P.txid, { rawTx: P.raw }); // what this call really signed
         throw reviewError(B); // the remote store's envelope names W instead
       },
     };
     markReleases(w, m, { admin: ADMIN });
-    await expect(w.createAction({ description: 'x' } as never, 'evil.site' as never)).rejects.toThrow('require review');
-    expect([m.owner(B), m.heldHere(B), m.released(B), m.known(C)]).toEqual(['', true, false, false]);
+    await expect(w.createAction(P.args as never, 'evil.site' as never)).rejects.toThrow('require review');
+    expect([m.owner(B), m.heldHere(B), m.released(B), m.known(P.txid)]).toEqual(['', true, false, false]);
     await expect(
       w.createAction({ description: 'x', options: { sendWith: [B] } } as never, 'evil.site' as never),
     ).rejects.toThrow(NOT_YOURS);
     expect(sends).toEqual([]);
   });
 
-  test('round 6 (c): only a WERR_REVIEW_ACTIONS naming the one transaction this call signed, with no record yet', async () => {
-    const cases: [string, () => void, Error][] = [
-      ['another name', () => undefined, Object.assign(new Error('boom'), { txid: C })],
-      ['nothing signed in the call', () => undefined, reviewError(C)],
-      ['two signed in the call', () => undefined, reviewError(C)],
-    ];
-    for (const [why, , err] of cases) {
+  test('round 6 (c): only a WERR_REVIEW_ACTIONS naming a transaction this call signed for itself, with no record yet', async () => {
+    for (const why of ['another name', 'nothing signed in the call', 'signed, but not with this call’s outputs']) {
       const m = createReleaseMarks();
+      const P = payment(1_000);
+      const other = payment(3_000);
       const w = {
         createAction: async () => {
-          if (why === 'another name') m.noteSigned(C);
-          if (why === 'two signed in the call') {
-            m.noteSigned(C);
-            m.noteSigned(D);
-          }
-          throw err;
+          if (why !== 'nothing signed in the call') m.noteSigned(P.txid, { rawTx: P.raw });
+          throw why === 'another name' ? Object.assign(new Error('boom'), { txid: P.txid }) : reviewError(P.txid);
         },
       };
       markReleases(w, m, { admin: ADMIN });
-      await expect(w.createAction({} as never, 'a.site' as never)).rejects.toThrow();
-      expect([why, m.known(C)]).toEqual([why, false]);
+      const args = why === 'signed, but not with this call’s outputs' ? other.args : P.args;
+      await expect(w.createAction(args as never, 'a.site' as never)).rejects.toThrow();
+      expect([why, m.known(P.txid)]).toEqual([why, false]);
     }
+  });
+
+  test("round 6 follow-up: a site's call that errors naming the wallet's concurrently signed T changes nothing about T", async () => {
+    const m = createReleaseMarks();
+    const T = payment(5_000); // the wallet's own withheld payment, signed while the site's call is running
+    const S = payment(1_000); // what the site asked for (its call signs nothing itself)
+    let signT!: () => void;
+    const tSigned = new Promise<void>((r) => (signT = r));
+    const w = {
+      createAction: async (args: { description?: string }) => {
+        if (args.description === 'wallet') {
+          m.noteSigned(T.txid, { rawTx: T.raw });
+          signT();
+          return { txid: T.txid };
+        }
+        await tSigned; // the hostile store answers the site's call once T is signed
+        throw reviewError(T.txid);
+      },
+    };
+    markReleases(w, m, { admin: ADMIN });
+    const site = w.createAction({ ...S.args, description: 'site' } as never, 'evil.site' as never);
+    const wallet = w.createAction(
+      { ...T.args, description: 'wallet', options: { noSend: true } } as never,
+      ADMIN as never,
+    );
+    await expect(site).rejects.toThrow('require review');
+    await wallet;
+    // T is the wallet's own, held: the site's error recorded nothing for it.
+    expect([m.owner(T.txid), m.heldHere(T.txid), m.released(T.txid)]).toEqual([ADMIN, true, false]);
+    await expect(
+      w.createAction({ description: 'x', options: { sendWith: [T.txid] } } as never, 'evil.site' as never),
+    ).rejects.toThrow(NOT_YOURS);
+  });
+
+  test("round 6 follow-up: a signAction's review error counts only for the transaction storage got under this call's reference", async () => {
+    for (const ref of ['ref-1', 'ref-other']) {
+      const m = createReleaseMarks();
+      const P = payment(1_000);
+      const w = {
+        // Two-step, as every site's action through the permissions manager: noSend, signed later by signAction.
+        createAction: async () => ({ signableTransaction: { reference: 'ref-1' } }),
+        signAction: async () => {
+          m.noteSigned(P.txid, { rawTx: P.raw, reference: ref }); // storage got P under `ref`
+          throw reviewError(P.txid);
+        },
+      };
+      markReleases(w, m, { admin: ADMIN });
+      await w.createAction({ ...P.args, options: { noSend: true, signAndProcess: false } } as never, 'a.site' as never);
+      await expect(w.signAction({ reference: 'ref-1' } as never, 'a.site' as never)).rejects.toThrow('require review');
+      expect([ref, m.heldHere(P.txid), m.owner(P.txid)]).toEqual(
+        ref === 'ref-1' ? [ref, true, 'a.site'] : [ref, false, undefined],
+      );
+    }
+    expect(signedForCall('signAction', { reference: 'r' }, { txid: A })).toBe(false);
   });
 
   test('round 6 (c): a recorded maker is never replaced, on any path', async () => {
@@ -207,6 +278,6 @@ describe('release marks (this device only, never synced): task 54 review, rounds
     await storage.processAction({ isNewTx: true, txid: t.id('hex'), rawTx: t.toBinary() });
     await storage.processAction({ isNewTx: true, txid: A, rawTx: t.toBinary() }); // bytes of another tx: not noted
     await storage.processAction({ isNewTx: false, txid: t.id('hex'), rawTx: t.toBinary() });
-    expect([m.signedSince(n), seen.length]).toEqual([[t.id('hex')], 3]);
+    expect([m.signedSince(n).map((x) => x.txid), seen.length]).toEqual([[t.id('hex')], 3]);
   });
 });
