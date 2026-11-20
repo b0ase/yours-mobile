@@ -8,9 +8,11 @@
  * One strategy per account. It runs "paper" (live prices, pretend money, nothing signed) or "live".
  * Pure helpers + localStorage, like agentAccounts.ts; nothing here signs.
  */
+import { canonicalJson, cleanDeep, cleanLine, cleanText, cut } from './strategyText';
 import {
   appendAgentLog,
   getAgentLog,
+  getStrategyLedger,
   spendAllowed,
   getAgentAccount,
   allAgentsStopped,
@@ -75,13 +77,16 @@ const strs = (v: unknown, max = 50) =>
         ...new Set(
           v
             .filter((x) => typeof x === 'string')
-            .map((x) => x.trim())
+            .map((x) => cleanLine(x))
             .filter(Boolean),
         ),
       ].slice(0, max)
     : [];
 
-/** Validate a strategy file (text or object). Unknown fields are dropped, so a loaded strategy only holds what the wallet understands. */
+/**
+ * Validate a strategy file (text or object). Unknown fields are dropped, so a loaded strategy only holds what the wallet
+ * understands. Every string is cleaned (strategyText.ts): no hidden characters reach the sheet or b's prompt.
+ */
 export const parseStrategy = (input: string | unknown): Parsed => {
   let o: Record<string, unknown>;
   try {
@@ -92,11 +97,11 @@ export const parseStrategy = (input: string | unknown): Parsed => {
   if (!o || typeof o !== 'object') return { ok: false, errors: ['Not a strategy file'] };
   const errors: string[] = [];
   if (o.format !== STRATEGY_FORMAT) errors.push(`format must be "${STRATEGY_FORMAT}"`);
-  const name = typeof o.name === 'string' ? o.name.trim().slice(0, 60) : '';
+  const name = typeof o.name === 'string' ? cut(cleanLine(o.name), 60) : '';
   if (!name) errors.push('name is required');
-  const version = typeof o.version === 'string' ? o.version.trim().slice(0, 20) : '';
+  const version = typeof o.version === 'string' ? cut(cleanLine(o.version), 20) : '';
   if (!version) errors.push('version is required (e.g. "1.0")');
-  const goals = typeof o.goals === 'string' ? o.goals.trim().slice(0, 4000) : '';
+  const goals = typeof o.goals === 'string' ? cut(cleanText(o.goals), 4000) : '';
   if (!goals) errors.push('goals are required');
   const r = (o.rules ?? {}) as Record<string, unknown>;
   const tokens = strs(r.tokens);
@@ -134,14 +139,17 @@ export const parseStrategy = (input: string | unknown): Parsed => {
   const sp = (o.spec ?? {}) as Record<string, unknown>;
   const spec: StrategySpec = {};
   for (const k of ['trades', 'spends', 'often', 'stops', 'needs'] as const)
-    if (typeof sp[k] === 'string') spec[k] = (sp[k] as string).slice(0, 200);
+    if (typeof sp[k] === 'string') spec[k] = cut(cleanLine(sp[k] as string), 200);
   if (['Low', 'Medium', 'High', 'Experimental'].includes(sp.risk as string))
     spec.risk = sp.risk as StrategySpec['risk'];
   const changelog = Array.isArray(o.changelog)
     ? (o.changelog as { version?: unknown; note?: unknown }[])
         .filter((c) => typeof c?.version === 'string' && typeof c?.note === 'string')
         .slice(0, 50)
-        .map((c) => ({ version: (c.version as string).slice(0, 20), note: (c.note as string).slice(0, 200) }))
+        .map((c) => ({
+          version: cut(cleanLine(c.version as string), 20),
+          note: cut(cleanLine(c.note as string), 200),
+        }))
     : undefined;
   return {
     ok: true,
@@ -229,7 +237,23 @@ export type Loaded = {
   loadedAt: number;
   /** Account value when loaded, for stop.downPct. */
   startValueUsd?: number;
+  /** Who put this strategy here. Missing = the owner, on this phone (strategies loaded before provenance existed). */
+  source?: Provenance;
 };
+
+/**
+ * Where a strategy came from: the owner on the phone, or a paired computer. `computer` is the pairing's name (the agent
+ * account the owner paired it to), never a host the computer reports: a CLI pairing's origin is always
+ * cli.bwalletx.com, which would read as official.
+ */
+export type Provenance = { by: 'owner' } | { by: 'computer'; computer: string; session: string };
+
+/** "a paired computer ("Trader", session abcdef12)": generic, with the pairing name and session id visible. */
+export const pairedComputerLabel = (computer: string, session: string) =>
+  `a paired computer ("${computer}", session ${session.slice(0, 8)})`;
+
+export const describeProvenance = (p?: Provenance) =>
+  !p || p.by === 'owner' ? 'You, on this phone' : pairedComputerLabel(p.computer, p.session);
 
 /** Pretend money for paper mode: USD cash plus token holdings, filled at live prices. */
 export type PaperBook = { cashUsd: number; tokens: Record<string, number>; spentUsd: number };
@@ -260,36 +284,65 @@ const write = (k: string, v: unknown) => {
   }
 };
 
-export const getLoadedStrategy = (id: string) => read<Loaded>(KEY(id));
+/** The loaded strategy, its text cleaned like parseStrategy's (a record saved before cleaning existed reads clean too). */
+export const getLoadedStrategy = (id: string): Loaded | null => {
+  const l = read<Loaded>(KEY(id));
+  return l?.strategy ? { ...l, strategy: cleanDeep(l.strategy) } : l;
+};
+
+/** What a "Run live" confirmation was armed for: the exact strategy loaded (and when), never carried to another. */
+export const liveConfirmKey = (l: Loaded | null | undefined) =>
+  l ? canonicalJson({ strategy: l.strategy, loadedAt: l.loadedAt, source: l.source ?? null }) : '';
+
+/** Is the second "Run live" tap confirmed? Only for the very strategy the first tap was for. */
+export const liveTapConfirmed = (armedFor: string, l: Loaded | null | undefined) =>
+  !!armedFor && armedFor === liveConfirmKey(l);
 export const getPaperBook = (id: string): PaperBook =>
   read<PaperBook>(PAPER(id)) ?? { cashUsd: PAPER_START_USD, tokens: {}, spentUsd: 0 };
 
-/** Account › Load strategy. Replaces any strategy already loaded; paper mode starts a fresh $100 book. */
+/**
+ * Account › Load strategy. Replaces any strategy already loaded; paper mode starts a fresh $100 book.
+ * The spend ledger is never reset by a load: the new strategy keeps the earlier one's start time, so what was already
+ * spent still counts against its maxPerDayUsd / maxTotalUsd (b-Aware 315). A fresh ledger starts only when nothing
+ * was loaded before and there is no ledger yet.
+ */
 export const loadStrategy = (
   id: string,
   strategy: Strategy,
   mode: Loaded['mode'],
   startValueUsd?: number,
   now = Date.now(),
+  source: Provenance = { by: 'owner' },
 ) => {
-  write(KEY(id), { strategy, mode, loadedAt: now, startValueUsd } satisfies Loaded);
-  resetStrategyLedger(id, now);
+  const prev = getLoadedStrategy(id);
+  // A lost strategy record must not start a new window while the ledger survives: the caps would read a ledger whose
+  // `since` doesn't match (strategyLedgerSpent → 0) and fall back to the truncatable log.
+  const since = prev?.loadedAt ?? getStrategyLedger(id)?.since ?? now;
+  write(KEY(id), { strategy: cleanDeep(strategy), mode, loadedAt: since, startValueUsd, source } satisfies Loaded);
+  if (!getStrategyLedger(id)) resetStrategyLedger(id, since);
   if (mode === 'paper') write(PAPER(id), null);
   appendAgentLog(id, {
     at: now,
     action: 'strategy',
-    detail: `Loaded ${strategy.name} v${strategy.version} (${mode})`,
+    detail: `Loaded ${strategy.name} v${strategy.version} (${mode}) from ${describeProvenance(source)}`,
     usd: 0,
   });
 };
 
-export const setStrategyMode = (id: string, mode: Loaded['mode'], now = Date.now()) => {
+/**
+ * Paper ↔ Live. Never touches the spend ledger. Going live needs `armedFor`, the liveConfirmKey the owner's first
+ * "Run live" tap was armed for: refused (false) unless that is still exactly the loaded strategy, so a tap armed in one
+ * window can't make a strategy loaded meanwhile (another window, an approval) live. Back to paper needs nothing.
+ */
+export const setStrategyMode = (id: string, mode: Loaded['mode'], now = Date.now(), armedFor = ''): boolean => {
   const l = getLoadedStrategy(id);
-  if (!l || l.mode === mode) return;
-  write(KEY(id), { ...l, mode, loadedAt: now });
-  resetStrategyLedger(id, now);
+  if (!l || l.mode === mode) return false;
+  if (mode === 'live' && !liveTapConfirmed(armedFor, l)) return false;
+  write(KEY(id), { ...l, mode });
+  if (!getStrategyLedger(id)) resetStrategyLedger(id, l.loadedAt);
   if (mode === 'paper') write(PAPER(id), null);
   appendAgentLog(id, { at: now, action: 'strategy', detail: `${l.strategy.name}: switched to ${mode}`, usd: 0 });
+  return true;
 };
 
 export const unloadStrategy = (id: string, now = Date.now()) => {

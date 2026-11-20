@@ -1,17 +1,29 @@
 import { LOAD_STRATEGY_BLURB } from './describeRules';
 import { StrategyRuleNotes } from './StrategyRuleNotes';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FileUp } from 'lucide-react';
 import {
   exampleStrategy,
+  describeProvenance,
   getLoadedStrategy,
   getPaperBook,
+  liveConfirmKey,
+  liveTapConfirmed,
   loadStrategy,
   parseStrategy,
   setStrategyMode,
   unloadStrategy,
   type Loaded,
 } from './strategy';
+import {
+  approveProposal,
+  declineProposal,
+  diffStrategy,
+  proposalKey,
+  proposalView,
+  type ApproveResult,
+} from './strategyProposal';
+import { isAgentSessionLive } from '../pair/sessions';
 import { saveTextFile } from './saveText';
 import { PublishStrategy } from '../strategies/PublishStrategy';
 import { myStrategies } from '../strategies/myStrategies';
@@ -33,12 +45,14 @@ const download = (l: Loaded) =>
  * Agent account › Strategy (SMART-WALLET-SPEC.md §3): load a strategy file (pick or paste), see its goals
  * and rules, switch Paper ↔ Live, unload. Loading always starts in paper mode; Live needs a second tap.
  */
-export const StrategySection = ({ id }: { id: string }) => {
+const StrategyBody = ({ id }: { id: string }) => {
   const loaded = getLoadedStrategy(id);
   const [text, setText] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
-  const [confirmLive, setConfirmLive] = useState(false);
+  // The first "Run live" tap is armed for the exact strategy on screen; an approval (or any load) disarms it.
+  const [liveArmedFor, setLiveArmedFor] = useState('');
+  const confirmLive = liveTapConfirmed(liveArmedFor, loaded);
   const [publishing, setPublishing] = useState(false);
   const { chromeStorageService } = useServiceContext();
   const isCurrent = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress === id;
@@ -87,6 +101,9 @@ export const StrategySection = ({ id }: { id: string }) => {
         <div className="text-xs whitespace-pre-wrap" style={{ color: '#D0D5DD' }}>
           {s.goals}
         </div>
+        <div className="text-xs" style={{ color: MUTED }} data-testid="strategy-source">
+          Loaded by: {describeProvenance(loaded.source)}
+        </div>
         <StrategyRuleNotes rules={s.rules} paper={!live} />
         {book && (
           <div className="rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--bw-bg)', color: '#D0D5DD' }}>
@@ -110,7 +127,11 @@ export const StrategySection = ({ id }: { id: string }) => {
         ) : (
           <button
             type="button"
-            onClick={() => (confirmLive ? (setStrategyMode(id, 'live'), setConfirmLive(false)) : setConfirmLive(true))}
+            onClick={() =>
+              confirmLive
+                ? (setStrategyMode(id, 'live', Date.now(), liveArmedFor), setLiveArmedFor(''))
+                : setLiveArmedFor(liveConfirmKey(loaded))
+            }
             className={btn}
             style={{ background: confirmLive ? '#12B76A' : GOLD, color: confirmLive ? '#fff' : '#000' }}
           >
@@ -249,3 +270,115 @@ export const StrategySection = ({ id }: { id: string }) => {
     </div>
   );
 };
+
+/** How long Approve stays off after the proposal on screen appears or changes, so a swap can't catch a tap. */
+export const APPROVE_ARM_MS = 1500;
+
+/** Full free text (goals can be 4,000 characters), scrolling, never cut. */
+const LONG_BOX = 'rounded-lg px-2 py-1 whitespace-pre-wrap break-words overflow-y-auto max-h-48';
+
+const REFUSED: Record<Exclude<ApproveResult, { ok: true }>['reason'], string> = {
+  gone: 'That proposal is no longer waiting.',
+  changed: 'The proposal or the loaded strategy changed. Check it again before you approve.',
+  'session-ended': 'That pairing has ended, so its proposal was dropped.',
+  invisible: 'This proposal changes characters you can’t see. Decline it.',
+};
+
+/** A strategy a paired computer sent: what would change, which pairing, and the owner's Approve / Decline. */
+const ProposalSheet = ({ id }: { id: string }) => {
+  // The proposal and the strategy it is compared with, read once: the diff, the arm delay and Approve all use this view.
+  const view = proposalView(id);
+  const p = view?.proposal;
+  const key = view ? proposalKey(view) : '';
+  const [armedFor, setArmedFor] = useState('');
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    if (!key) return;
+    const t = setTimeout(() => setArmedFor(key), APPROVE_ARM_MS);
+    return () => clearTimeout(t);
+  }, [key]);
+  if (!view || !p)
+    return note ? (
+      <div className="text-xs mb-2" style={{ color: MUTED }}>
+        {note}
+      </div>
+    ) : null;
+  const changes = diffStrategy(view.current ?? undefined, p.strategy);
+  const hidden = changes.some((c) => c.invisible);
+  const armed = armedFor === key && !hidden;
+  return (
+    <div
+      className="rounded-2xl p-3 flex flex-col gap-2 mb-2"
+      style={{ background: CARD }}
+      data-testid="strategy-proposal"
+    >
+      <div className="text-sm font-bold text-white">A paired computer wants to change this strategy</div>
+      <div className="text-xs" style={{ color: MUTED }}>
+        Pairing &quot;{p.computer}&quot;, session {p.session.slice(0, 8)}. Nothing changes until you approve. It loads
+        on paper; going live is a separate tap.
+      </div>
+      {changes.length === 0 && (
+        <div className="text-xs" style={{ color: '#D0D5DD' }}>
+          Same limits as now.
+        </div>
+      )}
+      {changes.map((c) =>
+        c.long ? (
+          <div key={c.what} className="text-xs flex flex-col gap-1" style={{ color: '#D0D5DD' }}>
+            <b className="text-white">{c.invisible ? c.what : `${c.what} changed`}</b>
+            <span style={{ color: MUTED }}>Now:</span>
+            <div className={LONG_BOX} style={{ background: 'var(--bw-bg)' }}>
+              {c.from}
+            </div>
+            <span style={{ color: MUTED }}>Proposed:</span>
+            <div className={LONG_BOX} style={{ background: 'var(--bw-bg)' }} data-testid="proposal-long-to">
+              {c.to}
+            </div>
+          </div>
+        ) : (
+          <div key={c.what} className="text-xs" style={{ color: '#D0D5DD' }}>
+            <b className="text-white">{c.what}:</b> {c.from} → {c.to}
+          </div>
+        ),
+      )}
+      {note && (
+        <div className="text-xs" style={{ color: MUTED }}>
+          {note}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className="rounded-lg px-3 py-2 text-sm font-bold border-0 flex-1"
+          style={{ background: GOLD, color: '#000', opacity: armed ? 1 : 0.5 }}
+          disabled={!armed}
+          onClick={() => {
+            // Approve exactly what this sheet shows: refused if the proposal or the loaded strategy changed since.
+            const r = approveProposal(id, view, isAgentSessionLive);
+            setNote(r.ok ? '' : REFUSED[r.reason]);
+          }}
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          className="rounded-lg px-3 py-2 text-sm font-bold border-0 flex-1"
+          style={{ background: LINE, color: '#fff' }}
+          onClick={() => {
+            setNote('');
+            declineProposal(id);
+          }}
+        >
+          Decline
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export const StrategySection = ({ id }: { id: string }) => (
+  <>
+    <ProposalSheet id={id} />
+    <StrategyBody id={id} />
+  </>
+);

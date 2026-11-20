@@ -42,6 +42,7 @@ import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../servi
 import { PAIR_MIRROR_KEY, toPairMirror } from '../../services/pairedPromptGuard';
 import { closeConnectCardsFor, forgetLogin, handlePairLoginCall, watchConnectCard } from './pairLogin';
 import { accountNamesFor } from '../names/accountNames';
+import { dropProposalFromSession } from '../agents/strategyProposal';
 
 /**
  * The pairing itself has ended (24 h idle, agent grant expired, disconnected, or bound to another account), so the
@@ -300,6 +301,11 @@ const isCurrent = (s: StoredSession, now = Date.now()) =>
 const revokedGen = new Map<string, number>();
 const revokeChannel = (c: string) => revokedGen.set(c, (revokedGen.get(c) ?? 0) + 1);
 
+/** A pairing that ended takes its waiting strategy proposal with it (b-Aware 315 review): nothing outlives the pairing. */
+const dropProposalsOf = (s: StoredSession | undefined) => {
+  if (s?.agent) dropProposalFromSession(s.agent.agentId, s.c);
+};
+
 /**
  * A session that lapses (24 h idle, agent grant expired, unpinned relay) is dropped like a Disconnect: its socket
  * closes and the paired key's grants are queued for revocation (b-Aware report, 23 Oct 2026), unless another
@@ -312,6 +318,7 @@ const dropLapsed = (dropped: StoredSession[], kept: StoredSession[]) => {
   if (origins.length) writeQueue([...readQueue(), ...origins]);
   for (const s of dropped) {
     revokeChannel(s.c);
+    dropProposalsOf(s);
     replies.forget(s.c);
     const l = live.get(s.c);
     if (!l) continue;
@@ -527,6 +534,18 @@ export const pairingLiveCheck = (c: string, grant: AgentGrant, ctx: OneSatContex
   };
 };
 
+/**
+ * Is `c` still the pairing that sent a strategy proposal for agent account `agentId`? For Approve: the stored session
+ * exists, holds the same agent grant (that account, the same expiry, so a re-pair on the channel doesn't count) with the
+ * `strategy` scope, and has not lapsed or moved to an unpinned relay. Read only (peek).
+ */
+export const isAgentSessionLive = (c: string, agentId: string, expiresAt: number, now = Date.now()) => {
+  const s = peek(c);
+  if (!s?.agent || s.agent.agentId !== agentId || s.agent.expiresAt !== expiresAt) return false;
+  if (!s.agent.scopes.includes('strategy') || !isCurrent(s, now)) return false;
+  return dropUntrustedRelays([s]).length === 1;
+};
+
 async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
   try {
     if (!agentDeps.ctx) throw new AgentCallError('LOCKED', `${APP_NAME} is locked. Unlock it on your phone.`);
@@ -534,6 +553,7 @@ async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: st
       ctx: agentDeps.ctx,
       currentId: agentDeps.currentId,
       isLive: pairingLiveCheck(l.stored.c, grant, agentDeps.ctx),
+      session: { id: l.stored.c },
       bsvUsd,
       feeRate: agentDeps.feeRate,
       saveGrant: (g) => {
@@ -744,6 +764,7 @@ function connect(c: string) {
 /** Disconnect a site: tell it, forget the key, and withdraw every grant and allowance the pairing was given. */
 export function forget(c: string, notify = true) {
   revokeChannel(c); // first: a spend queued for this channel must not sign from here on
+  dropProposalsOf(peek(c)); // peek, not load(): a parked pairing's proposal goes too
   forgetLogin(c);
   const stored = load().find((s) => s.c === c);
   const l = live.get(c);
@@ -924,6 +945,9 @@ function connectPairing(
             ...(v2 ? { claim: sessionClaim, wcv: 2 as const } : { claim }),
             ...(proven && { proven: true }),
           };
+          // A re-pair on a channel the CLI chose again starts clean: the old pairing's strategy proposal goes with it.
+          dropProposalsOf(peek(link.c));
+          if (agent) dropProposalFromSession(agent.agentId, link.c);
           save([...loadAll().filter((s) => s.c !== link.c), stored]);
           const l: Live = { ws, sealer: sealer!, stored, relayed: true, session: sessionClaim };
           attach(l);
@@ -997,7 +1021,11 @@ export function initPairing() {
 export function closeAllPairings() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
-    if (Array.isArray(raw)) for (const s of raw) revokeChannel(s.c);
+    if (Array.isArray(raw))
+      for (const s of raw) {
+        revokeChannel(s.c);
+        dropProposalsOf(s);
+      }
   } catch {
     /* storage unavailable: the live channels below are still revoked */
   }

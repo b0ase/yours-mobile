@@ -180,7 +180,7 @@ describe('round A8, S6: a store build refuses the agent buy and strategy_load ac
     feeRate: () => 100,
   });
   const outcome = async (action: string, params: unknown, store: boolean) => {
-    const g = makeGrant('1A', 'trader', ['trade'], 7, Date.now());
+    const g = makeGrant('1A', 'trader', ['trade', 'strategy'], 7, Date.now());
     try {
       await handleAgentCall(g, action, params, deps(), store);
       return 'OK';

@@ -32,10 +32,12 @@ import {
 import { isPaused, PAUSED_MESSAGE } from '../config/killSwitch';
 import { runAgentAction, type AgentActionHooks } from '../agents/agentTrade';
 import { serialSpend } from '../agents/spendQueue';
-import { getLoadedStrategy, getPaperBook, loadStrategy, parseStrategy } from '../agents/strategy';
+import { getLoadedStrategy, getPaperBook, parseStrategy } from '../agents/strategy';
+import { proposeStrategy } from '../agents/strategyProposal';
 
 export const CLI_ORIGIN = 'https://cli.bwalletx.com';
-export type AgentScope = 'read' | 'trade' | 'send' | 'mint';
+/** `strategy` lets a computer PROPOSE a strategy (the owner approves it in the app); it is not part of `trade`. */
+export type AgentScope = 'read' | 'trade' | 'strategy' | 'send' | 'mint';
 export const MAX_GRANT_DAYS = 30;
 
 /** `mint` is set exactly when the scopes include 'mint': the limits chosen at pairing and what's used. */
@@ -67,7 +69,7 @@ const NEEDS: Record<string, AgentScope> = {
   balance: 'read',
   log: 'read',
   strategy_show: 'read',
-  strategy_load: 'trade',
+  strategy_load: 'strategy',
   buy: 'trade',
   send: 'send',
   mint_quote: 'mint',
@@ -119,6 +121,8 @@ export type AgentDeps = {
    * before signing (b-Aware report, 13 Nov 2026). Missing = live (direct callers and tests with no session).
    */
   isLive?: () => boolean;
+  /** The pairing session this call came from (its channel id), recorded on strategy proposals. */
+  session?: { id: string };
   /** Swappable for tests: the trade run's own outside calls (agentTrade.ts AgentTradeIo). */
   tradeIo?: AgentActionHooks['io'];
 };
@@ -224,11 +228,23 @@ export async function handleAgentCall(
     case 'strategy_show':
       return getLoadedStrategy(id);
     case 'strategy_load': {
-      // From a computer, strategies load on paper only; going live is a tap in the app.
+      // From a computer a strategy is only a proposal: the owner approves it (with a diff) in the app, and it then
+      // loads on paper. Nothing active, and no spend ledger, changes here (b-Aware 315).
       const r = parseStrategy(p.strategy);
       if (!r.ok) throw new AgentCallError('INVALID', r.errors.join('; '));
-      loadStrategy(id, r.strategy, 'paper');
-      return { loaded: r.strategy.name, version: r.strategy.version, mode: 'paper' };
+      // Named by the pairing (grant.name, chosen by the owner when pairing), never by the host the computer reports.
+      // No session (direct callers): 'unknown', which approval refuses as not a live pairing.
+      const from = { computer: grant.name, session: deps.session?.id ?? 'unknown', expiresAt: grant.expiresAt };
+      if (!proposeStrategy(id, r.strategy, from))
+        throw new AgentCallError(
+          'RATE_LIMITED',
+          'One strategy proposal every 5 seconds: the owner is looking at your last one. Wait and send it again.',
+        );
+      return {
+        proposed: r.strategy.name,
+        version: r.strategy.version,
+        status: 'waiting for the owner to approve it in the app',
+      };
     }
     case 'buy':
     case 'send': {
