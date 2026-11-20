@@ -171,6 +171,15 @@ import { recordCall, recordPayment, requestedSats, updateConnectionLog } from '.
 import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
 import { userDeniedError, withDenialCode } from './services/userDenied';
+import {
+  internalRefusal,
+  pairingEndedError,
+  promptStaleError,
+  sealNotCoveredError,
+  sheetBuildRefusal,
+  siteBlockedError,
+  withRefusalCode,
+} from './services/refusalCodes';
 import { HANDOFF_ENABLED } from './mobile/passkey/extHandoff';
 import { HANDOFF_ALARM, handleExternalHandoff, sweepExpiredHandoff } from './mobile/passkey/extHandoffStore';
 import { isInvalidTxReview, resyncMessage, resyncSpent, type HealReport } from './services/invalidSendHeal';
@@ -263,7 +272,6 @@ import {
   PermissionBundler,
   TRUST_SITE_BASKET,
   BLOCK_SITE_BASKET,
-  BLOCKED_SITE_REFUSAL,
   blockActive,
   trustCovers,
   trustedBasketsFrom,
@@ -300,7 +308,6 @@ import { oneUseGrant } from './services/oneShotGrant';
 import { answerWithoutSheet, type SheetlessRequest } from './services/sheetlessAnswer';
 import { isOneUseRequestID } from './services/sharedKeySigning';
 import {
-  SEAL_BUSY_REFUSAL,
   SEAL_PROTOCOL,
   SEAL_REQUEST_PREFIX,
   SealPasses,
@@ -2301,11 +2308,25 @@ const bindPermissionCallbacks = (manager: LocalWalletPermissionsManager) => {
  * Show a permission prompt popup and wait for user response.
  * Returns a promise that resolves when user grants permission or rejects when denied.
  */
+/**
+ * The wallet refuses a site's permission request on its own (not the person's No): the manager's waiting call is
+ * settled with `err`, which carries its own code (services/refusalCodes.ts), never the toolbox's ERR_PERMISSION_DENIED
+ * that denyPermission would give it. One [bwx-req] line with the reason. Rejects with `err`.
+ */
+const refuseRequest = (request: { requestID: string; type?: string; originator?: string }, err: Error): Promise<never> => {
+  console.warn(
+    `[bwx-req] refused ${request.type ?? 'request'} host=${siteHost(request.originator ?? '')} ` +
+      `code=${String((err as { code?: unknown }).code)} reason=${err.message}`,
+  );
+  const wallet = accountContext?.wallet;
+  if (wallet) rejectManagerRequest(wallet, request.requestID, err).catch(() => undefined);
+  return Promise.reject(err);
+};
+
 const showPermissionPrompt = (request: PermissionRequest & { requestID: string }): Promise<void> => {
   console.log('[background] showPermissionPrompt called, requestID:', request.requestID, 'type:', request.type);
   if (request.type === 'protocol' && isReservedProtocol(request.protocolID) && request.originator !== ADMIN_ORIGINATOR) {
-    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-    return Promise.reject(new Error(RESERVED_REFUSAL));
+    return refuseRequest(request, internalRefusal(RESERVED_REFUSAL));
   }
   // The wallet's own action labels (bMail's stamp record) are never offered to a site (services/reservedLabels.ts).
   if (
@@ -2313,13 +2334,11 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
     isReservedLabelProtocol(request.protocolID) &&
     request.originator !== ADMIN_ORIGINATOR
   ) {
-    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-    return Promise.reject(new Error(RESERVED_LABEL_REFUSAL));
+    return refuseRequest(request, internalRefusal(RESERVED_LABEL_REFUSAL));
   }
   // The wallet's own baskets (coins, ordinals, tokens, locks, names) are never offered to a site.
   if (request.type === 'basket' && isReservedBasket(request.basket) && request.originator !== ADMIN_ORIGINATOR) {
-    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-    return Promise.reject(new Error(RESERVED_BASKET_REFUSAL));
+    return refuseRequest(request, internalRefusal(RESERVED_BASKET_REFUSAL));
   }
   // A pinned site's paid action (services/pinnedMint.ts): its self-encrypts, and its own label while its
   // createAction runs, go through for that one request only (oneUseGrant: nothing stored, so a decrypt, signature or
@@ -2382,8 +2401,7 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           return;
         }
         if (blocked) {
-          accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-          reject(new Error(BLOCKED_SITE_REFUSAL));
+          refuseRequest(request, siteBlockedError()).catch(reject);
           return;
         }
         if (sealCovered && accountContext?.wallet) {
@@ -2431,8 +2449,8 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
         } catch (error) {
-          accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-          reject(error instanceof Error ? error : new Error(String(error)));
+          // The wallet could not put this sheet together (payees unreadable, queue full…): its own code, never "denied".
+          refuseRequest(request, sheetBuildRefusal(error)).catch(reject);
           return;
         }
         pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
@@ -2574,8 +2592,7 @@ const revokeBasketGrantsFor = async (originator: string): Promise<void> => {
 
 const showGroupedPermissionPrompt = async (request: GroupedPermissionRequest): Promise<void> => {
   if (await siteBlocked(request.originator)) {
-    accountContext?.wallet.denyGroupedPermission(request.requestID).catch(() => undefined);
-    throw new Error(BLOCKED_SITE_REFUSAL);
+    return refuseRequest({ ...request, type: 'grouped' }, siteBlockedError());
   }
   return new Promise((resolve, reject) => {
     pendingGroupedPermissionRequests.set(request.requestID, { request, resolve, reject });
@@ -2590,8 +2607,7 @@ const showGroupedPermissionPrompt = async (request: GroupedPermissionRequest): P
 
 const showCounterpartyPermissionPrompt = async (request: CounterpartyPermissionRequest): Promise<void> => {
   if (await siteBlocked(request.originator)) {
-    accountContext?.wallet.denyCounterpartyPermission(request.requestID).catch(() => undefined);
-    throw new Error(BLOCKED_SITE_REFUSAL);
+    return refuseRequest({ ...request, type: 'counterparty' }, siteBlockedError());
   }
   return new Promise((resolve, reject) => {
     pendingCounterpartyPermissionRequests.set(request.requestID, { request, resolve, reject });
@@ -2991,7 +3007,7 @@ if (isInServiceWorker) {
   chrome.runtime.onMessage.addListener(function onRuntimeMessage(message: any, sender, answer: CallbackResponse) {
     // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
     // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
-    const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withDenialCode(response)));
+    const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withRefusalCode(withDenialCode(response))));
     console.log(
       '[background] Received message:',
       message.action,
@@ -5197,8 +5213,9 @@ if (!(
 
     // A paired originator is granted only while its pairing is current (checked at approve time).
     if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
-      accountContext?.wallet.denyPermission(response.requestID).catch(console.error);
-      pending.reject(new Error('This pairing has ended'));
+      const err = pairingEndedError();
+      refuseRequest(pending.request, err).catch(() => undefined);
+      pending.reject(err);
       closeDappPopupIfNoUi();
       return true;
     }
@@ -5206,8 +5223,9 @@ if (!(
     // A payment's answer pays only the outputs its sheet listed (services/spendRecipients.ts, review of 0xrard).
     if (response.granted && !spendApprovalMatches(pending.request as BundleRequest)) {
       console.warn(`[bwx-req] payment list no longer its own action host=${siteHost(pending.request.originator)}`);
-      accountContext?.wallet.denyPermission(response.requestID).catch(console.error);
-      pending.reject(new Error('This request changed while you were answering, so nothing was allowed. Ask the site to try again.'));
+      const err = promptStaleError();
+      refuseRequest(pending.request, err).catch(() => undefined);
+      pending.reject(err);
       closeDappPopupIfNoUi();
       return true;
     }
@@ -5888,8 +5906,10 @@ if (!(
       for (const r of [...result.granted, ...result.denied]) {
         const pending = pendingPermissionRequests.get(r.requestID);
         pendingPermissionRequests.delete(r.requestID);
-        accountContext?.wallet.denyPermission(r.requestID).catch(console.error);
-        pending?.reject(new Error('This pairing has ended'));
+        const err = pairingEndedError();
+        if (isReconnectRequestId(r.requestID) || isSealRequestId(r.requestID)) console.warn(`[bwx-req] refused ${r.requestID}: ${err.message}`);
+        else refuseRequest(r, err).catch(() => undefined);
+        pending?.reject(err);
       }
       sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'This pairing has ended' });
       closeDappPopupIfNoUi();
@@ -6010,7 +6030,13 @@ if (!(
           pendingPermissionRequests.delete(r.requestID);
           if (!pending) return;
           if (isReconnectRequestId(r.requestID)) return pending.reject(new Error('Permission denied by user'));
-          if (isSealRequestId(r.requestID)) return pending.reject(userDeniedError());
+          // Refused because the sheet changed under the tap (not the person's No): ERR_PROMPT_STALE.
+          if (isSealRequestId(r.requestID)) return pending.reject(result.stale ? promptStaleError() : userDeniedError());
+          if (result.stale) {
+            const err = promptStaleError();
+            await refuseRequest(r, err).catch(() => undefined);
+            return pending.reject(err);
+          }
           // A blocked sheet is handled by the block itself; a plain No to a basket read stands for the session, and
           // to a one-signature request for 10 minutes.
           if (!response.block) {
@@ -6096,8 +6122,9 @@ if (!(
     pendingGroupedPermissionRequests.delete(response.requestID);
 
     if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
-      accountContext?.wallet.denyGroupedPermission(response.requestID).catch(console.error);
-      pending.reject(new Error('This pairing has ended'));
+      const err = pairingEndedError();
+      refuseRequest(pending.request, err).catch(() => undefined);
+      pending.reject(err);
       closeDappPopupIfNoUi();
       return true;
     }
@@ -6154,8 +6181,9 @@ if (!(
     pendingCounterpartyPermissionRequests.delete(response.requestID);
 
     if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
-      accountContext?.wallet.denyCounterpartyPermission(response.requestID).catch(console.error);
-      pending.reject(new Error('This pairing has ended'));
+      const err = pairingEndedError();
+      refuseRequest(pending.request, err).catch(() => undefined);
+      pending.reject(err);
       closeDappPopupIfNoUi();
       return true;
     }
@@ -6985,7 +7013,7 @@ if (!(
         isSealProtocol(message.params?.protocolID) &&
         sealPasses?.signing(sealSite)
       )
-        throw new Error(SEAL_BUSY_REFUSAL);
+        throw sealNotCoveredError();
       // Store builds: no Seal sheet (storeBuild.ts NATIVE_SEAL_ENABLED written out, literal env, review 24 S1); the
       // sign asks as before.
       const seal =
