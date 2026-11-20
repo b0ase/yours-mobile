@@ -12,13 +12,10 @@ import {
   bizAgentPay,
   bizAgentSweep,
   bizSpentToday,
-  bizWriteOffPending,
   createBizAgent,
-  defaultBizTxStatus,
   defaultFindBizCoins,
   getBizAgent,
   getBizLog,
-  getBizPending,
   onBizAgentChange,
   setBizCap,
   setBizStopped,
@@ -34,7 +31,7 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 const useBiz = (ticker: string) => {
   const [, bump] = useState(0);
   useEffect(() => onBizAgentChange(() => bump((n) => n + 1)), []);
-  return { agent: getBizAgent(ticker), log: getBizLog(ticker), pending: getBizPending(ticker) };
+  return { agent: getBizAgent(ticker), log: getBizLog(ticker) };
 };
 
 const rate = async () => cachedExchangeRate() || (await fetchExchangeRate().catch(() => 0));
@@ -42,7 +39,7 @@ const rate = async () => cachedExchangeRate() || (await fetchExchangeRate().catc
 export default function BizAgentAccount({ ticker }: { ticker: string }) {
   const { apiContext } = useServiceContext();
   const { addSnackbar } = useSnackbar();
-  const { agent, log, pending } = useBiz(ticker);
+  const { agent, log } = useBiz(ticker);
   const [cap, setCap] = useState('');
   const [balance, setBalance] = useState<number | null>(null);
   const [busy, setBusy] = useState('');
@@ -153,41 +150,6 @@ export default function BizAgentAccount({ ticker }: { ticker: string }) {
         {busy === 'Returning…' ? busy : 'Return all to my wallet'}
       </button>
 
-      {pending.length > 0 && (
-        <>
-          <div className="mt-4 text-white font-semibold text-[13px]">Waiting for the network</div>
-          <p className="text-[11px]" style={{ color: MUTED }}>
-            No new payment from this account until these show up on the network. Write one off only if you are sure it
-            never went out; if it is made again, the new payment uses the same coins, so only one of them can go
-            through.
-          </p>
-          {pending.map((x) => (
-            <div
-              key={x.txid}
-              className="flex justify-between gap-2 py-1 text-[12px]"
-              style={{ borderBottom: `1px solid ${LINE}` }}
-            >
-              <span className="min-w-0">
-                <span>{x.detail}</span>
-                <span className="block text-[10px]" style={{ color: MUTED }}>
-                  {new Date(x.at).toLocaleString()} · {x.txid.slice(0, 12)}…
-                </span>
-              </span>
-              <button
-                onClick={() => {
-                  if (window.confirm('Write this payment off? Only if you are sure it never went out.'))
-                    bizWriteOffPending(ticker, x.txid);
-                }}
-                className="shrink-0 rounded-lg px-2 py-1 text-[11px]"
-                style={{ border: `1px solid ${LINE}`, color: MUTED }}
-              >
-                Write off
-              </button>
-            </div>
-          ))}
-        </>
-      )}
-
       <div className="mt-4 text-white font-semibold text-[13px]">Activity</div>
       {!log.length && (
         <div className="text-[12px]" style={{ color: MUTED }}>
@@ -247,15 +209,8 @@ export function AgentRefundButton({
       const { address, data } = await resolve();
       const r = await bizAgentPay(
         { ticker, address, sats, data, detail: label },
-        {
-          wallet,
-          findCoins: defaultFindBizCoins,
-          broadcast: broadcastRaw,
-          txStatus: defaultBizTxStatus,
-          usdPerBsv: await rate(),
-        },
+        { wallet, findCoins: defaultFindBizCoins, broadcast: broadcastRaw, usdPerBsv: await rate() },
       );
-      // Unsure (pending): said plainly, and nothing new is paid from this room until it is seen on chain or refused.
       if (!r.ok) throw new Error(r.reason);
       await onPaid(r.txid);
     } catch (e) {

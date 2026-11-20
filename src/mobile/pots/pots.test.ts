@@ -30,7 +30,7 @@ const {
   subProblem,
   subscriptionsUnlocked,
 } = await import('./pots');
-const { payDue, ALREADY_KNOWN } = await import('./payDue');
+const { payDue } = await import('./payDue');
 const { getPending } = await import('./pots');
 const { parseConfig, DEFAULT_CONFIG, getRemoteConfig, resetRemoteConfigFailure, CONFIG_FAIL_TTL } =
   await import('../config/remoteConfig');
@@ -476,7 +476,44 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     expect(src).not.toMatch(/from '\.\/payDue'/);
   });
 
-  test('a refused broadcast whose extra info says "already" is not taken as paid (only the ALREADY_KNOWN code is)', async () => {
+  test('a waiting tx already mined, answered REJECTED on a re-post: settled as paid by its status, not stuck', async () => {
+    const s = setup({ start: NOW - 1000 });
+    const posted: string[] = [];
+    const refusedRepost = async (raw: string) => {
+      posted.push(raw);
+      throw new Error('Payment refused by the network (REJECTED: txn-mempool-conflict)');
+    };
+    const base = { bsvUsd: 50, resolve: async () => '1L', sign: async () => ({ rawTx: 'RAWK', txid: 'TXK' }) };
+    // Run 1: posted, no answer we can trust (it was mined after all).
+    expect((await payDue({ ...base, broadcast: refusedRepost }, NOW))[0].ok).toBe(false);
+    expect(getPending(s.id)?.txid).toBe('TXK');
+    // Run 2: the status says mined: paid, without posting it again (a re-post would be refused).
+    const r = await payDue({ ...base, broadcast: refusedRepost, txKnown: async (t: string) => t === 'TXK' }, NOW + 1);
+    expect(r).toEqual([{ id: s.id, ok: true, count: 1, txid: 'TXK' }]);
+    expect(posted).toEqual(['RAWK']);
+    expect(getPending(s.id)).toBeNull();
+    expect(getSub(s.id)?.periodIndex).toBe(1);
+  });
+
+  test('a waiting tx whose status is unknown (or the lookup fails) is posted again, the same signed tx', async () => {
+    const s = setup({ start: NOW - 1000 });
+    const posted: string[] = [];
+    const base = { bsvUsd: 50, resolve: async () => '1L', sign: async () => ({ rawTx: 'RAWU', txid: 'TXU' }) };
+    await payDue({ ...base, broadcast: async () => Promise.reject(new Error('timeout')) }, NOW);
+    const r = await payDue(
+      {
+        ...base,
+        txKnown: async () => Promise.reject(new Error('status down')),
+        broadcast: async (raw: string) => void posted.push(raw),
+      },
+      NOW + 1,
+    );
+    expect(r[0].ok).toBe(true);
+    expect(posted).toEqual(['RAWU']);
+    expect(getPending(s.id)).toBeNull();
+  });
+
+  test('a refused broadcast whose extra info says "already" is not taken as paid (no text is read)', async () => {
     const s = setup({ start: NOW - 1000 });
     const r = await payDue(
       {
@@ -693,19 +730,19 @@ describe('crash safety: a payment is recorded before it is broadcast', () => {
     expect(getPending(s.id)?.dueTimes).toHaveLength(3);
     expect(getSub(s.id)?.periodIndex).toBe(0);
 
-    // Run 2: the network already has TX1 ("already known"). No new tx is signed; the periods are marked paid.
+    // Run 2: the network already has TX1 (its status says so). No new tx is signed; the periods are marked paid.
     const next = {
       bsvUsd: 50,
       resolve: async () => '1L',
       sign: async () => (signs++, { rawTx: 'RAW2', txid: 'TX2' }),
+      txKnown: async (txid: string) => txid === 'TX1',
       broadcast: async (raw: string) => {
         network.push(raw);
-        throw Object.assign(new Error('txn-already-known'), { code: ALREADY_KNOWN });
       },
     };
     expect(await payDue(next, NOW)).toEqual([{ id: s.id, ok: true, count: 3, txid: 'TX1' }]);
     expect(signs).toBe(1);
-    expect(network).toEqual(['RAW1', 'RAW1']);
+    expect(network).toEqual(['RAW1']);
     expect(getSub(s.id)?.periodIndex).toBe(3);
     expect(getSub(s.id)?.paidCount).toBe(3);
     expect(getPending(s.id)).toBeNull();

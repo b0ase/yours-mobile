@@ -34,14 +34,6 @@ import {
 } from './pots';
 import { PayeeReviewError, legacyPin, scheduledOutputsRefusal, type PayeeDestination } from './payeeBinding';
 
-/**
- * A broadcaster says the network already has this tx by throwing an error whose `code` is 'ALREADY_KNOWN' (or by
- * resolving: broadcastRaw's arcade answers a known tx with its status). Never read from the message text: a refused
- * broadcast's extra info can say "already" (e.g. an input already spent), and that is not a payment that went out.
- */
-export const ALREADY_KNOWN = 'ALREADY_KNOWN';
-const alreadyKnown = (e: unknown) => !!e && typeof e === 'object' && (e as { code?: unknown }).code === ALREADY_KNOWN;
-
 /** A hung broadcast would hold the spend queue, and with it every agent and CLI spend on the device. */
 export const BROADCAST_TIMEOUT_MS = 30_000;
 
@@ -77,11 +69,14 @@ export type PayDeps = {
     outputs: { address: string; sats: number }[],
     memo?: string,
   ) => Promise<{ rawTx: string; txid: string }>;
-  /**
-   * Broadcast a signed tx. Must be idempotent: the same raw tx again is fine (already known / mined): it resolves, or
-   * throws an error with code ALREADY_KNOWN. Any other error is an unsure result.
-   */
+  /** Broadcast a signed tx. Must be idempotent: the same raw tx again is fine. Any error is an unsure result. */
   broadcast: (rawTx: string) => Promise<void>;
+  /**
+   * Is this txid already on the network or mined (potSend potTxKnown)? Asked before a waiting payment is posted again:
+   * a tx already mined can be answered REJECTED on a re-post (its inputs are spent, by itself), which must not leave it
+   * stuck. Absent, or an error or timeout: not known (the same tx is posted again).
+   */
+  txKnown?: (txid: string) => Promise<boolean>;
   /**
    * Sign (don't broadcast) one PNEE transfer from a PNEE pot: `units` PNEEs (1 unit = 1¢) per output. Absent = PNEE
    * orders wait. rawTx is what broadcastPnee takes.
@@ -173,7 +168,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
             reason: gate && !gate.ok ? gate.reason : 'Stopped: the waiting payment was not sent',
           };
         }
-        return settlePending(cur, pending, deps, now, unsure);
+        return settlePending(cur, pending, deps, now, unsure, true);
       });
       out.push(r);
       if (!r.ok) continue; // still unsettled: never sign anything new for this order
@@ -321,7 +316,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
         ...(pnee ? { unit: 'PNEE' as const } : { sats: sats! * count }),
       };
       savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
-      return settlePending(s, p, deps, now, unsure);
+      return settlePending(s, p, deps, now, unsure, false);
     });
     if (r) out.push(r);
   }
@@ -338,28 +333,38 @@ async function settlePending(
   deps: PayDeps,
   now: number,
   unsure: Set<string>,
+  /** A waiting payment from an earlier run (not a tx just signed): its status is asked for first. */
+  repost: boolean,
 ): Promise<PayOutcome> {
   // Checked again at broadcast time: the pause may have been switched on while this order was resolving or signing.
   if (await paused(deps)) return { id: s.id, ok: false, reason: 'Spending is paused' };
-  // No chain check before re-posting a waiting payment, on purpose: it is the SAME signed tx (same txid, same
-  // signature), and posting it again is idempotent at the network: it is accepted once, and a repeat only gets "already
-  // known" or its mined status. It can never pay twice; a fresh signature for these periods is what could, and that is
-  // never made while the record exists.
-  try {
-    if (p.unit === 'PNEE') {
-      if (!deps.broadcastPnee) throw new Error(PNEE_NO_SEND);
-      await withTimeout(deps.broadcastPnee(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
-    } else await withTimeout(deps.broadcast(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    if (!alreadyKnown(e)) {
+  const ms = deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS;
+  // A waiting payment the network already has (seen or mined) is paid: settled without posting it again. A re-post of a
+  // mined tx can be answered REJECTED (its inputs are spent, by itself), which would leave it waiting for good.
+  const known =
+    repost && deps.txKnown
+      ? await withTimeout(deps.txKnown(p.txid), ms).then(
+          (k) => k === true,
+          () => false,
+        )
+      : false;
+  // Otherwise the SAME signed tx is posted again (same txid, same signature): idempotent at the network, accepted once,
+  // so it can never pay twice. A fresh signature for these periods is what could, and none is made while the record
+  // exists. Any error or a timeout is an unsure result: the record stays.
+  if (!known)
+    try {
+      if (p.unit === 'PNEE') {
+        if (!deps.broadcastPnee) throw new Error(PNEE_NO_SEND);
+        await withTimeout(deps.broadcastPnee(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
+      } else await withTimeout(deps.broadcast(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
       // Unknown outcome: keep the record and retry this exact tx next time; no more signing from this pot in this run.
       unsure.add(p.potId);
       patch(s.id, () => ({ lastError: m }));
       deps.notify?.(`Payment to ${s.payee.name} is waiting to go through`, m);
       return { id: s.id, ok: false, reason: m };
     }
-  }
   // Already advanced past these periods (crash after saveSub, before clearPending)? Then only clear.
   const cur = getSub(s.id) ?? s;
   if (cur.periodIndex === p.periodIndex) {

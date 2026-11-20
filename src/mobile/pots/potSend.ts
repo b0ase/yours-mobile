@@ -313,6 +313,13 @@ export const memoScript = (memo: string) => {
 };
 
 const REFUSED = new Set(['REJECTED', 'DOUBLE_SPEND_ATTEMPTED', 'INVALID', 'MALFORMED']);
+const KNOWN = new Set(['MINED', 'IMMUTABLE', 'SEEN_ON_NETWORK', 'SEEN_MULTIPLE_NODES', 'ACCEPTED_BY_NETWORK']);
+
+/** Is this txid on the network or mined, by 1sat-stack's status (the endpoint broadcastRaw posts to)? */
+export const potTxKnown = async (txid: string): Promise<boolean> => {
+  const r = await svc().getStackStatus(txid);
+  return !!r && KNOWN.has(r.txStatus);
+};
 
 /**
  * Broadcast a signed raw tx. Idempotent: sending the same tx again gets its current status (seen / mined),
