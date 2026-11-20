@@ -10,7 +10,7 @@ android {
         applicationId "com.bitcoincorp.bwallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 147
+        versionCode 148
         versionName "5.2.59"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
