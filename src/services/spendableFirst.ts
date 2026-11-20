@@ -22,6 +22,12 @@
  * Any failure, a missing or older server, no user there, an empty snapshot, or one behind the 1Sat backup: today's
  * path runs instead. With the flag off nothing here runs at all.
  *
+ * Which store is active (review, 20 Nov 2026, finding 6). Moving a remote-active account here (makeDeviceActive) is the
+ * toolbox's setActive, as today's move is: it writes this device's key into the 1Sat backup's user row. The owner's
+ * other devices then find 1Sat naming another store on their next open and heal as they do after any move
+ * (services/deviceActive.ts: merge, then make themselves active again). Our server's user row is pointed at this device
+ * before it is registered (spendableFirstWiring addOurBackup), so it never registers as a conflicting store here.
+ *
  * What the inbound guard (services/inboundSync.ts) checks with the chain before a backup coin becomes spendable is, for
  * snapshot coins, checked at signing instead (2 above). Not checked before signing: that the coin is still unspent. A
  * coin spent elsewhere fails at broadcast and is rolled back, as any double spend is today.
