@@ -126,7 +126,14 @@ import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, outpointsOnDevice, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
 import { asRestore } from './services/fullPass';
 import { isUncheckedPage } from './services/inboundSync';
-import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
+import {
+  SEND_WAIT_MS,
+  ensureLocalStore,
+  joinOrStartMove,
+  movingMessage,
+  type EnsureLocalResult,
+  type MoveProgress,
+} from './services/localFirst';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
@@ -877,6 +884,7 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     startSyncsAfter: heavyWorkMayStart,
     // No payment builds change on the remote store: this device's store first (services/localFirst.ts, P0 3 Nov 2026).
     ensureLocalStore: () => ensureLocalForPayment(),
+    refusal: () => movingMessage(moveProgress),
     // One line on the balance card's sync label (a full re-pull over mobile data: services/fullPass.ts).
     notice: (message) => {
       chrome.runtime
@@ -1100,22 +1108,32 @@ const moveStatus = () => {
  * A payment would build change while the remote store is active: make this device's store active first, joining a
  * switch already running (services/localFirst.ts). True once it is; the payment is refused otherwise.
  */
-const ensureLocalForPayment = async (): Promise<boolean> => {
+const ensureLocalForPayment = async (waitMs = SEND_WAIT_MS): Promise<boolean> => {
   const ctx = accountContext;
   if (!ctx) return false;
-  const local = () => ctx.storage.isActiveStorageProvider();
-  if (local()) return true;
-  const within = (p: Promise<unknown>) =>
-    Promise.race([p.then(() => undefined), new Promise<void>((r) => setTimeout(r, 90_000))]);
-  if (storageSwitch) await within(storageSwitch).catch(() => undefined);
-  if (local() || accountContext !== ctx) return local();
-  const run = preferLocalStorage(ctx);
-  storageSwitch = run;
-  void run.finally(() => {
-    if (storageSwitch === run) storageSwitch = null;
+  // Join the copy already running; never start a second one beside it.
+  return joinOrStartMove({
+    isLocal: () => ctx.storage.isActiveStorageProvider(),
+    running: () => storageSwitch,
+    start: () => {
+      const run = preferLocalStorage(ctx);
+      storageSwitch = run;
+      void run.finally(() => {
+        if (storageSwitch === run) storageSwitch = null;
+      });
+      return run;
+    },
+    waitMs,
   });
-  await within(run).catch(() => undefined);
-  return local();
+};
+
+/** How far the copy and coin checks have got, for the message a refused send shows. */
+let moveProgress: MoveProgress | null = null;
+const noteMoveProgress = (message: string) => {
+  const m = /Checked (\d+) of (\d+) coins/.exec(message);
+  if (!m) return;
+  const done = Number(m[1]);
+  moveProgress = { done, total: Number(m[2]), startedAt: moveProgress?.startedAt ?? Date.now() };
 };
 
 /**
@@ -1128,7 +1146,7 @@ const moveToDeviceNow = async (): Promise<boolean> => {
     const f = moveFailures.get(id);
     if (f) f.nextAt = 0;
   }
-  return ensureLocalForPayment();
+  return ensureLocalForPayment(90_000);
 };
 
 /** "Loading your wallet from backup…" on the balance card; undefined = done, null = done without the copy. */
@@ -4428,8 +4446,12 @@ if (!(
       const ctx = accountContext;
       const identityKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
       const report = await withCoinResyncLock(() =>
-        resyncAccountCoins(ctx, identityKey, (step) => sendRecoverProgress('txid', step)),
+        resyncAccountCoins(ctx, identityKey, (step) => {
+          noteMoveProgress(step);
+          sendRecoverProgress('txid', step);
+        }),
       );
+      moveProgress = null;
       if (!report) throw new Error('Wallet services are not ready yet. Try again in a moment.');
       console.log('[STORAGE_RESYNC_COINS]', report);
       sendResponse({ type: 'STORAGE_RESYNC_COINS', success: true, data: { report, summary: resyncMessage(report) } });

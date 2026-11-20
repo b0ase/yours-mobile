@@ -8,10 +8,14 @@ import {
   LocalStoreNeededError,
   ensureLocalStore,
   isOnDeviceStore,
+  SEND_WAIT_MS,
+  joinOrStartMove,
+  movingMessage,
   requireLocalStoreForChange,
   type EnsureLocalDeps,
   type StoreConfigLike,
 } from './localFirst';
+import { isMovingError } from '../mobile/themeStore/buySheetState';
 import type { SwitchResult } from './restoreFromRemote';
 
 const REMOTE = 'https://wallet.1sat.app';
@@ -252,5 +256,82 @@ describe('review 4 Nov 2026', () => {
     expect(bg).toContain("case 'STORAGE_MOVE_TO_DEVICE':");
     for (const page of ['src/pages/BsvWallet.tsx', 'src/pages/StorageStatus.tsx', 'src/mobile/themeStore/StoreBuy.tsx'])
       expect(readFileSync(page, 'utf8')).toContain('<MoveToDeviceNotice');
+  });
+});
+
+describe('a send during the copy (never a second copy, refuse within 2 s with progress)', () => {
+  const never = () => new Promise<void>(() => undefined);
+
+  test('joins the copy already running: start() is never called', async () => {
+    let starts = 0;
+    const t0 = Date.now();
+    const ok = await joinOrStartMove({
+      isLocal: () => false,
+      running: () => never(),
+      start: async () => void starts++,
+      waitMs: 50,
+    });
+    expect(ok).toBe(false);
+    expect(starts).toBe(0);
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+
+  test('starts exactly one copy when none runs, and a second send joins it', async () => {
+    let starts = 0;
+    let running: Promise<unknown> | null = null;
+    const deps = {
+      isLocal: () => false,
+      running: () => running,
+      start: () => {
+        starts++;
+        running = never();
+        return running;
+      },
+      waitMs: 20,
+    };
+    await joinOrStartMove(deps);
+    await joinOrStartMove(deps);
+    await joinOrStartMove(deps);
+    expect(starts).toBe(1);
+  });
+
+  test('once coins are admitted (local active), a send proceeds without waiting', async () => {
+    const ok = await joinOrStartMove({
+      isLocal: () => true,
+      running: () => never(),
+      start: never,
+      waitMs: 10_000,
+    });
+    expect(ok).toBe(true);
+  });
+
+  test('the wrapped createAction refuses within 2 s with the progress message and signs nothing', async () => {
+    let built = 0;
+    let local = false;
+    const wallet = { createAction: async () => void built++ };
+    requireLocalStoreForChange(wallet, {
+      isLocal: () => local,
+      ensureLocal: () =>
+        joinOrStartMove({ isLocal: () => local, running: () => never(), start: never, waitMs: SEND_WAIT_MS }),
+      refusal: () => movingMessage({ done: 250, total: 1000, startedAt: Date.now() - 5 * 60_000 }),
+      log: () => undefined,
+    });
+    const t0 = Date.now();
+    const err = await wallet.createAction({ outputs: [{}] } as never).catch((e) => e);
+    expect(Date.now() - t0).toBeLessThan(2500);
+    expect(err).toBeInstanceOf(LocalStoreNeededError);
+    expect(err.message).toBe(
+      'Moving your wallet to this device: 250 of 1000. You can send in about 15 minutes. Nothing was sent.',
+    );
+    expect(built).toBe(0);
+    // Coins admitted: the same wrapped send now goes through.
+    local = true;
+    await wallet.createAction({ outputs: [{}] } as never);
+    expect(built).toBe(1);
+  });
+
+  test('the progress message is recognised by the popup as the moving notice', () => {
+    expect(isMovingError(movingMessage({ done: 1, total: 4, startedAt: Date.now() - 60_000 }))).toBe(true);
+    expect(isMovingError(movingMessage(null))).toBe(true);
   });
 });

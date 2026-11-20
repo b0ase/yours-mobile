@@ -473,6 +473,8 @@ export interface InitWalletOptions {
    * (services/localFirst.ts). Without it such a payment is refused.
    */
   ensureLocalStore?: () => Promise<boolean>;
+  /** The progress message a refused send shows (services/localFirst.ts movingMessage). */
+  refusal?: () => string;
   /** A one-line notice for the owner (the extension shows it on the balance card's sync line). */
   notice?: (text: string) => void;
 }
@@ -1108,6 +1110,7 @@ export const initWallet = async (
     !requireLocalStoreForChange(baseWallet, {
       isLocal: () => storage.isActiveStorageProvider(),
       ensureLocal: options?.ensureLocalStore,
+      refusal: options?.refusal,
     })
   )
     console.error('[initWallet] payments are not held to the device store');

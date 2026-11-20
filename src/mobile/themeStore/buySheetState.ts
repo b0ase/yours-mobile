@@ -9,7 +9,7 @@
 export const MOVING_SHORT = 'Nothing was sent: this account is still moving to this device.';
 
 export const isMovingError = (message: string | undefined): boolean =>
-  !!message && /moving to this device/i.test(message);
+  !!message && /moving (your wallet )?to this device/i.test(message);
 
 export function errorLayout(message: string | undefined): { hero: boolean; notice: boolean; error?: string } {
   if (isMovingError(message)) return { hero: false, notice: true, error: MOVING_SHORT };
