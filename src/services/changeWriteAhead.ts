@@ -42,6 +42,10 @@
  *    After a failed push the write-ahead is skipped for COOL_OFF_MS (each payment flagged at once) until a push goes
  *    through again.
  *
+ *  - While the post-restore backlog is still running (deps.backlog: the pull's full pass from the backup has not
+ *    finished), no push at all before a broadcast: each payment is flagged at once and the urgent retry pushes (the
+ *    same path as an unreachable backup). The device's own record is committed before the post either way.
+ *
  * POLICY (flag for the owner): the backup being down never stops a payment. If the push fails or runs out of time, the
  * payment is still broadcast, its txids are recorded as "change not backed up yet" (count shown on the balance card and
  * in syncHealth.changeNotBackedUp; persisted per account so a restart still shows it), and the push is retried urgently
@@ -109,6 +113,12 @@ export type WriteAheadDeps = {
   inFlightFor: (backup: object) => InFlight;
   /** The device sync's pushNow (services/deviceSync.ts): the urgent retry after a payment went out unbacked. */
   pushNow: () => Promise<DeviceSyncResult>;
+  /**
+   * The post-restore copy or upload backlog is still running (initWallet: the pull's full pass from the backup has not
+   * finished). True: the push before a broadcast is skipped and the payment flagged for the next push, as when the
+   * backup is unreachable. Throws or rejects: read as false (the push runs). Optional (default: no backlog).
+   */
+  backlog?: () => boolean | Promise<boolean>;
   budgetMs?: number;
   retryMs?: number[];
   coolOffMs?: number;
@@ -270,6 +280,11 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
     }
     // Just failed: not waited for again (each payment flagged at once) until a push goes through or the cool-off ends.
     if (now() < coolUntil) return flag(mine, 'the backup failed moments ago: not waited for', { coolOff: false });
+    // The post-restore backlog is still draining: every cycle is many pages, so a payment would wait the whole budget
+    // (and hold the writer lock) for nothing. Flagged for the urgent retry instead. Not a backup failure: no cool-off.
+    // The payment's rows are already committed on this device by now (the toolbox does that before it posts).
+    if (await (async () => d.backlog?.())().catch(() => false))
+      return flag(mine, 'the backup is still catching up after a restore: not waited for', { coolOff: false });
     const t0 = now();
     const deadlineAt = t0 + budgetMs;
     // Every push that starts from here on carries these rows; a mark made after this is the next payment's.

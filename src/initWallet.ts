@@ -110,7 +110,9 @@ import {
 import { KNOWN_PROVIDERS } from './components/storageProviders';
 import {
   FULL_PASS_NEXT_SLICE_MS,
+  passFromStart,
   passLooksStuck,
+  passUnderWay,
   paymentYields,
   requestFullPass,
   requestTailPass,
@@ -1087,6 +1089,15 @@ export const initWallet = async (
     storage: storage as unknown as WriteAheadStorage,
     inFlightFor: pushInFlightFor,
     pushNow: () => deviceSync.pushNow(),
+    // After a restore the pull's full pass from the backup runs for a long while: no push is waited for until it ends.
+    backlog: async () => {
+      const own = ownStore();
+      const backupSik = backupSikNow();
+      if (!own || !backupSik) return false;
+      const { identityKey } = await storage.getAuth();
+      const row = await syncStateFor(own as never, identityKey, backupSik);
+      return !!row && (passFromStart(row) || passUnderWay(row));
+    },
     onChange: (n) => pullHealth.changeNotBackedUp(n),
     kv: {
       load: async () => ((await chrome.storage.local.get(unbackedKey))?.[unbackedKey] as UnbackedRecord) ?? null,

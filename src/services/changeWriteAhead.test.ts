@@ -22,6 +22,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 function harness(
   o: Partial<WriteAheadDeps> & {
     push?: (view: Record<string, (...a: unknown[]) => Promise<unknown>>) => Promise<void>;
+    /** Record 'local record durable' when processAction has committed the rows, just before it posts. */
+    commitEvent?: boolean;
   } = {},
 ) {
   const events: string[] = [];
@@ -101,6 +103,7 @@ function harness(
       try {
         if (args.isDelayed) return 'queued';
         const send = processActionSends(args);
+        if (o.commitEvent) events.push('local record durable');
         if (send.length) await services.postBeef({}, send);
         return 'done';
       } finally {
@@ -149,6 +152,49 @@ describe('which txids a storage call sends (the toolbox rule)', () => {
       TX,
     ]);
     expect(processActionSends(undefined)).toEqual([]);
+  });
+});
+
+describe('the post-restore backlog', () => {
+  test('during the backlog a send does not wait on the push: it goes out at once, flagged, local record first', async () => {
+    let pushed = false;
+    const h = harness({
+      commitEvent: true,
+      backlog: () => true,
+      push: async () => {
+        pushed = true;
+        await sleep(50);
+      },
+    });
+    expect(await h.pa({ txid: TX })).toBe('done');
+    expect(pushed).toBe(false);
+    expect(h.syncCalls.length).toBe(0);
+    expect(h.events).toEqual(['local record durable', `post ${TX.slice(0, 2)}`]);
+    expect(h.wa.count()).toBe(1); // flagged for the next push
+    expect(h.timers.length).toBe(1); // the urgent retry is scheduled
+  });
+
+  test('afterwards the push runs as before, after the local record and before the broadcast', async () => {
+    let backlog = true;
+    const h = harness({ commitEvent: true, backlog: () => backlog });
+    await h.pa({ txid: TX });
+    expect(h.wa.count()).toBe(1);
+    backlog = false; // not a backup failure: no cool-off, so the next payment pushes at once
+    h.events.length = 0;
+    await h.pa({ txid: TX2 });
+    expect(h.events).toEqual(['local record durable', 'push', `post ${TX2.slice(0, 2)}`]);
+    expect(h.wa.count()).toBe(0); // the push that started after the earlier payment carried it too
+  });
+
+  test('a backlog check that fails does not skip the push', async () => {
+    const h = harness({
+      commitEvent: true,
+      backlog: async () => {
+        throw new Error('cannot read');
+      },
+    });
+    await h.pa({ txid: TX });
+    expect(h.events).toEqual(['local record durable', 'push', `post ${TX.slice(0, 2)}`]);
   });
 });
 
