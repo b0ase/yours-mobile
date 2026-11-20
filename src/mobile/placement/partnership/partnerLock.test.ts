@@ -822,6 +822,25 @@ describe('holding rows: by the script, exact template, on chain (re-review)', ()
     expect(holdingsFromRecord([row(real)], pub(ann), TOKEN, null).holdings).toEqual([]); // no agreed keyset: none
   });
 
+  test("a lock row tagged to me for ANOTHER token is not mine: not skipped, so the Lock button isn't hidden", () => {
+    const src = new Transaction();
+    src.addInput({
+      sourceTXID: (n++).toString(16).padStart(64, '0'),
+      sourceOutputIndex: 0,
+      unlockingScript: new P2PKH().lock(ann.toAddress()),
+      sequence: 0xffffffff,
+    });
+    src.addOutput({
+      lockingScript: partnerLockScript({ tokenId: 'b'.repeat(64) + '_0', amt: 5n, holder: pub(ann) }, k2of3),
+      satoshis: 1,
+    });
+    const junk = { sourceTx: src, vout: 0 };
+    const r = holdingsFromRecord([row(junk, ann), row(junk)], pub(ann), TOKEN, k2of3);
+    expect(r).toEqual({ holdings: [], skipped: 0 });
+    // an off-keyset row for THIS token is still skipped (the double-lock guard)
+    expect(holdingsFromRecord([row(locked(k3of3, ann, 7n))], pub(ann), TOKEN, k2of3).skipped).toBe(1);
+  });
+
   test("rows are chosen by the holder tag in the script, not the row's holder column (no hijack)", () => {
     const bens = locked(k2of3, ben, 900n);
     const anns = locked(k2of3, ann, 3000n);

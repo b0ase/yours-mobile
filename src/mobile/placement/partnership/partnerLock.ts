@@ -309,7 +309,7 @@ export type RecordHolding = LockedUtxo & { amt: bigint; outpoint: string };
  * My holdings from the record's rows, chosen by the holder tag INSIDE each row's locking script (never the row's
  * holder or amt columns, which any partner can post) and kept only when that output is exactly the partner lock
  * template under the agreed keyset. Each outpoint counts once. `skipped` counts rows that claim to be mine (by
- * column or by tag) but were not kept: malformed, another token, off the agreed keyset, or a duplicate. Whether a
+ * column or by tag) but were not kept: malformed, off the agreed keyset, or a duplicate. Whether a
  * kept row is really on chain and unspent is checked before anything is funded (proposeMove).
  */
 export function holdingsFromRecord(
@@ -348,6 +348,8 @@ export function holdingsFromRecord(
     } catch {
       /* malformed row */
     }
+    // A well-formed partner lock for ANOTHER token is not mine, whatever the row's holder column says.
+    if (lock && !!tokenId && lock.tokenId !== tokenId) continue;
     if (h.holder?.toLowerCase() === me || lock?.holder === me) skipped++;
   }
   return { holdings, skipped };

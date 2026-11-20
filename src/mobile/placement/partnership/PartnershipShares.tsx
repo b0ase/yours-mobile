@@ -96,7 +96,7 @@ function Partnership({ api, ticker, name }: { api: BsharesApi; ticker: string; n
   const { holdings: mine, skipped } = holdingsFromRecord(s.holdings, s.myKey, s.tokenId, agreed);
   const myTotal = mine.reduce((t, h) => t + h.amt, 0n);
   // Never offer to lock again while anything is recorded as mine (a second lock would double the allocation).
-  const anyRecorded = mine.length > 0 || skipped > 0 || s.holdings.some((h) => h.holder === s.myKey);
+  const anyRecorded = mine.length > 0 || skipped > 0;
 
   const addKey = run(async () => {
     const [pk, idKey] = await Promise.all([partnerKey(ctx, s.partnershipId), identityKey(ctx)]);
