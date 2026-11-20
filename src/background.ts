@@ -1093,7 +1093,8 @@ const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) =
   const r = await settleLocalStore(ctx);
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   if (r.ok && id) moveFailures.delete(id);
-  if (r.ok && r.how !== 'snapshot') await addSnapshotRemote(ctx);
+  // In the background: our server's first fill can take a while, and nothing here waits for it.
+  if (r.ok) void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
   if (!r.ok) {
     console.warn('[background] storage: this device is not the active store yet:', r);
     const entry = id ? moveFailures.get(id) : undefined;
@@ -1103,20 +1104,25 @@ const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) =
 
 /**
  * With the instant-restore flag on, our storage server is a BACKUP beside 1Sat for an account on this device (README
- * Phase 1): saved in its remotes (every later open connects it), and added for this session with its user row pointed
- * here first, so the ordinary pushes fill it and the next restore is instant. Flag off: nothing.
+ * Phase 1). Its user row is pointed here, it is filled (services/backupFill.ts: the bulk outside the storage locks) and
+ * registered for this session; only then is it saved in the account's remotes, so a later open never connects a
+ * half-filled one whose first ordinary push would send everything inside the locks. Flag off: nothing.
  */
 const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
   if (!(await spendableFirstOn(chrome.storage?.local as never))) return;
-  const { account } = chromeStorageService.getCurrentAccountObject();
-  const config = account?.storageConfig as StorageConfig | undefined;
   if (!ctx.storage.isActiveStorageProvider()) return;
-  const next = withSnapshotRemote(config, true);
-  if (!account || !next || next === config) return;
+  const before = chromeStorageService.getCurrentAccountObject().account;
+  const config = before?.storageConfig as StorageConfig | undefined;
+  if (!before || !config || withSnapshotRemote(config, true) === config) return;
+  if (!(await ctx.addOurBackup())) return;
+  // Read again: the account may have changed while the fill ran.
+  const account = chromeStorageService.getCurrentAccountObject().account;
+  if (account?.addresses.identityAddress !== before.addresses.identityAddress) return;
+  const next = withSnapshotRemote(account.storageConfig as StorageConfig | undefined, true);
+  if (!next || next === account.storageConfig) return;
   await chromeStorageService.updateNested('accounts', {
     [account.addresses.identityAddress]: { storageConfig: next } as unknown as Account,
   });
-  void ctx.addOurBackup();
 };
 
 /** Where the move to this device stands, for the "Retry moving this account to this device" notice. */

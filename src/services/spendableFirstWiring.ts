@@ -15,6 +15,7 @@ import {
   type SnapshotMark,
 } from './spendableFirst';
 import { withTimeout } from './restoreProgress';
+import type { FillReport } from './backupFill';
 
 const CONNECT_MS = 8_000;
 const COUNT_MS = 8_000;
@@ -44,6 +45,11 @@ export type SpendableFirstWiringDeps = {
    * interleaves with it (review, 20 Nov 2026). The network fetch stays outside.
    */
   withLock: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * The first fill of our server from this device (services/backupFill.ts): the bulk outside the storage locks, and a
+   * device restored from our snapshot from its restore point. Runs before our server is registered as a backup.
+   */
+  fill: (writer: OurServerClient, restorePoint?: Date) => Promise<FillReport>;
   /** The factory's addRemote: register a backup for this session. */
   addRemote: (url: string) => Promise<void>;
   owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>;
@@ -138,18 +144,27 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
    * while it pushed the whole wallet): its user row is pointed at this device first, so it registers as a plain
    * backup and the ordinary pushes fill it.
    */
-  const addOurBackup = async () => {
-    if (!d.on || !d.deviceActive()) return;
+  const addOurBackup = async (): Promise<boolean> => {
+    if (!d.on || !d.deviceActive()) return false;
     try {
       const c = await connect();
       const identityKey = await d.identityKey();
       const { user } = await c.findOrInsertUser(identityKey);
       const deviceSik = d.device()?.getSettings().storageIdentityKey;
-      if (!deviceSik) return;
+      if (!deviceSik) return false;
       await c.setActive({ identityKey, userId: user.userId }, deviceSik);
+      // Filled before it is registered: the ordinary push then starts from our server's cursor, never from the
+      // beginning inside the storage locks (review, 20 Nov 2026, finding 4).
+      const restorePoint = mark?.restoredAt ? new Date(mark.restoredAt) : undefined;
+      const r = await d.fill(c, restorePoint);
+      log(
+        `[spendable-first] our server filled (${r.how}): ${r.pages} page(s), ${r.unlockedMs} ms unlocked, locked ${r.lockedMs.join('+') || 0} ms`,
+      );
       await d.addRemote(SNAPSHOT_SERVER_URL);
+      return true;
     } catch (e) {
       log('[spendable-first] our server not added as a backup this session:', e);
+      return false;
     }
   };
 
@@ -158,6 +173,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     spendableFirst: async (remoteUrl: string): Promise<{ used: true; remotes: string[] } | { used: false }> => {
       if (!d.on) return { used: false };
       const remoteActive = !d.deviceActive();
+      const restoredAt = Date.now();
       const r = await restoreSpendableFirst({
         enabled: async () => d.on,
         client: connect,
@@ -174,10 +190,10 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       if (!r.used) return { used: false };
       log(`[spendable-first] restored from our server's snapshot (backup ${remoteUrl} stays the history source)`);
       hook();
-      await saveMark({ stage: 'full', after: 0, at: Date.now() });
+      await saveMark({ stage: 'full', after: 0, at: Date.now(), restoredAt });
       void runFull();
-      void addOurBackup();
-      return { used: true, remotes: [SNAPSHOT_SERVER_URL] };
+      // Our server becomes a saved backup only once its first fill is done (background addSnapshotRemote).
+      return { used: true, remotes: [] };
     },
     /** At open: hook the BEEF builder and carry on an unfinished background snapshot. */
     resume: async () => {

@@ -250,6 +250,7 @@ import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/token
 import { settleWithin } from './utils/settleWithin';
 import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
 import { createSpendableFirst, type OurServerClient } from './services/spendableFirstWiring';
+import { fillBackup } from './services/backupFill';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
 const WATCH_STORES_CLOSE_CAP_MS = 2000;
@@ -376,8 +377,11 @@ export interface AccountContext {
   spendableFirst: (remoteUrl: string) => Promise<{ used: true; remotes: string[] } | { used: false }>;
   /** An instant restore is still bringing the rest in: "Loading older history…", no move notice. */
   snapshotLoading: () => boolean;
-  /** With the flag on, our storage server as a backup for this session (its user row pointed here first). */
-  addOurBackup: () => Promise<void>;
+  /**
+   * With the flag on, our storage server as a backup for this session: its user row pointed here, then its first fill
+   * (services/backupFill.ts), then registered. True once registered.
+   */
+  addOurBackup: () => Promise<boolean>;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
   backupBeforeSend: () => Promise<BackupBeforeSend>;
   /** The backup's state for the honest copy: configured, a push waiting, failures, the last good push. */
@@ -1098,6 +1102,14 @@ export const initWallet = async (
     makeDeviceActive: () =>
       withFullPassMode(ownSik(), 'defer', () => switchActiveAs(keepActive, setActiveStorage)('local')),
     withLock: (fn) => storage.runAsSync(() => fn()),
+    fill: (writer, restorePoint) =>
+      fillBackup({
+        manager: storage as never,
+        reader: ownStore() as never,
+        writer: writer as never,
+        restorePoint,
+        yieldWhile: () => ownPayments.waiting(),
+      }),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
     kv: {

@@ -965,7 +965,13 @@ export async function restoreSpendableFirst(d: SpendableFirstDeps): Promise<Spen
 
 // ── 3. the full snapshot, in the background ──
 
-export type SnapshotMark = { stage: 'full' | 'done' | 'refused'; after: number; at: number };
+export type SnapshotMark = {
+  stage: 'full' | 'done' | 'refused';
+  after: number;
+  at: number;
+  /** When the restore began: our server already holds everything older (backupFill's restore point). */
+  restoredAt?: number;
+};
 export const SNAPSHOT_MARK_KEY = (identityAddress: string) => `bwxSpendableSnapshot:${identityAddress}`;
 
 /**
@@ -997,8 +1003,11 @@ export async function runFullSnapshot(a: {
       withLock: a.withLock,
       after: mark.after,
       onPage: async (next) => {
+        const keep = mark.restoredAt ? { restoredAt: mark.restoredAt } : {};
         mark =
-          next === null ? { stage: 'done', after: 0, at: Date.now() } : { stage: 'full', after: next, at: Date.now() };
+          next === null
+            ? { stage: 'done', after: 0, at: Date.now(), ...keep }
+            : { stage: 'full', after: next, at: Date.now(), ...keep };
         await a.save(mark);
       },
     });
@@ -1011,7 +1020,7 @@ export async function runFullSnapshot(a: {
     a.log?.('[spendable-first] background snapshot refused; holding unverified coins:', e.message);
     const { user } = await a.device.findOrInsertUser(a.identityKey);
     await holdUnverified(a.device, user.userId).catch(() => 0);
-    mark = { stage: 'refused', after: 0, at: Date.now() };
+    mark = { stage: 'refused', after: 0, at: Date.now(), ...(mark.restoredAt ? { restoredAt: mark.restoredAt } : {}) };
     await a.save(mark);
     return mark;
   }

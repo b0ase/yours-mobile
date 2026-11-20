@@ -67,6 +67,10 @@ describe('initWallet wiring', () => {
       remoteDefaultCoins: async () => 0,
       makeDeviceActive: async () => void log.push('makeDeviceActive'),
       withLock: (fn) => fn(),
+      fill: async (_w, restorePoint) => {
+        log.push(`fill:${restorePoint ? 'restore-point' : 'full'}`);
+        return { how: 'full', pages: 1, unlockedPages: 0, unlockedMs: 0, lockedMs: [] };
+      },
       addRemote: async (url) => void log.push(`addRemote:${url}`),
       kv: { get: async (k) => ({ [k]: kvStore[k] }), set: async (i) => void Object.assign(kvStore, i) },
       markKey: 'mark',
@@ -86,8 +90,10 @@ describe('initWallet wiring', () => {
 
   test('flag on: our server is added as a backup only after its user row names this device', async () => {
     const { w, log } = harness(true);
-    await w.addOurBackup();
-    expect(log).toEqual(['connect', 'user', 'setActive:device-sik', `addRemote:${SNAPSHOT_SERVER_URL}`]);
+    expect(await w.addOurBackup()).toBe(true);
+    // Review 4: the first fill runs before our server is registered, so no ordinary push sends the whole wallet in
+    // the storage locks.
+    expect(log).toEqual(['connect', 'user', 'setActive:device-sik', 'fill:full', `addRemote:${SNAPSHOT_SERVER_URL}`]);
   });
 
   test('flag on, our server offers no snapshot: not used, today’s path runs', async () => {
