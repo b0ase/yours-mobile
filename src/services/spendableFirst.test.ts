@@ -280,7 +280,15 @@ describe('stage 1: the lean snapshot', () => {
 
   test('lean pages give the exact balance, under their own sync state; the real cursor is never written', async () => {
     const { kd, db } = await serverWith(PrivateKey.fromRandom());
-    const client = fakeSnapshotServer(db, { leanPageMax: 2 }); // 5 coins: three pages
+    const client = fakeSnapshotServer(db, {
+      leanPageMax: 2, // 5 coins: three pages
+      // A server that forgets to stamp its lean rows old: the device stamps them itself.
+      tamperPage: (p, lean) => {
+        if (lean)
+          for (const t of (p.chunk as { transactions: { updated_at: unknown }[] }).transactions)
+            t.updated_at = new Date();
+      },
+    });
     const { dev } = await device(kd);
     let activated = 0;
     const r = await restoreSpendableFirst(deps(client, dev, kd, { makeDeviceActive: async () => void activated++ }));
