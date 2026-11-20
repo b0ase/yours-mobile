@@ -1863,14 +1863,16 @@ export const BsvWallet = () => {
           )}
           {/* One small line each when it applies: held by an unsent payment, arriving from the other device, last sync
               with the other devices (services/balanceTruth.ts, plan fix 5). The phone shows them under WalletCard. */}
-          {/* Not gated on the balance being known: while a restored wallet moves to this device the balance can't load,
-              and the backup's total shows here (services/restoreProgress.ts). */}
-          <BalanceTruthLines
+          {/* Also while a restored wallet moves to this device, when the balance can't load yet: the backup's total shows
+              here (services/restoreProgress.ts). */}
+          {(balanceKnown || !!restoreMessage) && (
+            <BalanceTruthLines
             fmt={(n) =>
               exchangeRate > 0 ? formatBalanceUsd(n, exchangeRate, 0) : `${formatNumberWithCommasAndDecimals(n, 0)} sats`
             }
             refreshKey={bsvBalance}
-          />
+            />
+          )}
         </motion.div>
 
         {/* Still on the online backup: say so, and offer the move now (services/localFirst.ts, review F4). Outside the

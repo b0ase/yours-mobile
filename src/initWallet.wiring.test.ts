@@ -449,7 +449,9 @@ describe('the real initWallet wiring', () => {
     const bg = readFileSync(new URL('./background.ts', import.meta.url), 'utf8');
     expect(bg).toMatch(/notice: \(message\) =>[\s\S]*status: 'progress'[\s\S]*message/);
     // A restore's merges run whole (re-check N2).
-    expect(bg).toMatch(/setActiveStorage: \(target\) => asRestore\(\(\) => ctx\.setActiveStorage\(target\)\)/);
+    expect(bg).toMatch(
+      /setActiveStorage: \(target\) =>\s*asRestore\(async \(\) => \{[\s\S]*?await ctx\.setActiveStorage\(target\);/,
+    );
     expect(bg).toMatch(/asRestore\(\(\) => ctx\.storage\.syncFromReader\(identityKey, store as never\)\)/);
   });
 
