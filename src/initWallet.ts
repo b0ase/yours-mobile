@@ -248,7 +248,7 @@ import {
 } from './services/balanceTruth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 import { settleWithin } from './utils/settleWithin';
-import { SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
+import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
 import { createSpendableFirst, type OurServerClient } from './services/spendableFirstWiring';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
@@ -583,7 +583,10 @@ export const openAccountStorageForBackup = async (
   }
 
   const { account } = chromeStorageService.getCurrentAccountObject();
-  const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
+  const resolved = resolveStorageConfig(account?.storageConfig);
+  const { activeRemote } = resolved;
+  // Our storage server only with the instant-restore flag on (services/spendableFirst.ts): off, never connected.
+  const backups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
@@ -651,7 +654,10 @@ export const initWallet = async (
   // per-install and lazily materialized.
   const { account } = chromeStorageService.getCurrentAccountObject();
   ownStoresAccount = account?.addresses?.identityAddress;
-  const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
+  const resolved = resolveStorageConfig(account?.storageConfig);
+  const { activeRemote } = resolved;
+  // Our storage server only with the instant-restore flag on (services/spendableFirst.ts): off, never connected.
+  const backups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 

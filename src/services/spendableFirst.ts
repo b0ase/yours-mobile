@@ -78,6 +78,14 @@ export function withSnapshotRemote<T extends StoreConfig | undefined>(config: T,
   return { ...config, remotes: [...(config.remotes ?? []), SNAPSHOT_SERVER_URL] };
 }
 
+/**
+ * The backups to connect: our server only with the flag on (review, 20 Nov 2026). An earlier session with the flag on
+ * may have saved it in the account's remotes; with the flag off it is never connected or pushed to.
+ */
+export function backupsFor(urls: string[] | undefined, on: boolean): string[] | undefined {
+  return on || !urls ? urls : urls.filter((u) => u !== SNAPSHOT_SERVER_URL);
+}
+
 export type SnapshotLimits = { leanPageMax?: number; fullPageMax?: number; beefMaxOutpoints?: number };
 /** Our server's capability, or undefined (1Sat, an older server, ours with the methods off). */
 export function snapshotCapability(caps: unknown): SnapshotLimits | undefined {

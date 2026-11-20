@@ -97,3 +97,19 @@ describe('initWallet wiring', () => {
     expect(w.loading()).toBe(false);
   });
 });
+
+describe('review 7: flag off never connects or pushes to our server', () => {
+  test('our server is left out of the backups with the flag off, even if an earlier session saved it', async () => {
+    const { backupsFor } = await import('./spendableFirst');
+    const saved = ['https://wallet.1sat.app', SNAPSHOT_SERVER_URL];
+    expect(backupsFor(saved, false)).toEqual(['https://wallet.1sat.app']);
+    expect(backupsFor(saved, true)).toEqual(saved);
+    expect(backupsFor(undefined, false)).toBeUndefined();
+  });
+
+  test('wired: both of initWallet’s storage openings filter the backups by the flag', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
+    expect(src.match(/backupsFor\(resolved\.backups, await spendableFirstOn\(/g)?.length).toBe(2);
+  });
+});
