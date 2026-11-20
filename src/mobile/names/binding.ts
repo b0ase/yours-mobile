@@ -67,6 +67,73 @@ export async function checkBinding(alias: string, pubkey: string | undefined, b:
   }
 }
 
+/**
+ * A forward the typed name's owner signed (b-Aware 312, 18 Nov 2026): "from -> to, until expiresAt". The signer is the
+ * key bound to the TYPED name, shown by that name's own signed binding (`fromBinding`) riding with the forward, so a
+ * host can't make one up and an attacker's own key can't speak for someone else's name. Returns the target alias only
+ * when all of it checks out and it hasn't expired; anything else is no forward.
+ *
+ * `expiresAt` formats accepted (the server, bit-sign, must send one of these and sign the same string):
+ * - null, absent or "" = no expiry; signed as "".
+ * - a number = Unix time in MILLISECONDS (not seconds); signed as String(n), e.g. "1795000000000".
+ * - a string = an ISO 8601 date (Date.parse), e.g. "2026-12-01T00:00:00.000Z"; signed exactly as sent.
+ * Anything else, or a time not in the future, is no forward.
+ *
+ * After a followed forward, confirm() (or the key-change override) saves the TARGET's key under the typed name, and
+ * the forward's signer beside it (trustForwardSigner). So the signer passes when:
+ * - nothing is remembered for the typed name (first use, as with any first payment), or
+ * - the remembered key is the signer (or a valid handover from it), or
+ * - the signer is the one remembered for this name's last confirmed forward. A binding is self-signed, so any other
+ *   key is refused here (re-review, 19 Nov 2026). The owner re-forwarding to a new name and key is followed, and the
+ *   payment then stops as a key change with the payer's "I've checked with them" override (second re-review).
+ * resolvePaymail still runs keyChange on the served key itself. Returns the target alias and the verified signer.
+ */
+export async function checkForward(
+  alias: string,
+  fw: unknown,
+  shape: (alias: string, fw: unknown) => string | undefined,
+  now = Date.now(),
+): Promise<{ to: string; signer: string } | undefined> {
+  const to = shape(alias, fw);
+  if (!to) return undefined;
+  const f = fw as {
+    from?: unknown;
+    expiresAt?: unknown;
+    identityKey?: unknown;
+    timestamp?: unknown;
+    signature?: unknown;
+    fromBinding?: unknown;
+  };
+  const key = typeof f.identityKey === 'string' ? f.identityKey : '';
+  if (!key || typeof f.signature !== 'string' || !f.signature || !['string', 'number'].includes(typeof f.timestamp))
+    return undefined;
+  const noExpiry = f.expiresAt === null || f.expiresAt === undefined || f.expiresAt === '';
+  if (!noExpiry) {
+    const at = typeof f.expiresAt === 'number' ? f.expiresAt : Date.parse(String(f.expiresAt));
+    if (!Number.isFinite(at) || at <= now) return undefined;
+  }
+  try {
+    // The signer must be the key the typed name is bound to, and not a key change this wallet hasn't accepted.
+    const binding = f.fromBinding as { handover?: Handover } | undefined;
+    if ((await checkBinding(alias, key, binding)) !== 'signed') return undefined;
+    if (
+      keyChange(alias, key, 'signed', binding?.handover?.from) !== 'signed' &&
+      readSigners()[alias.toLowerCase()] !== key.toLowerCase()
+    )
+      return undefined;
+    const fields = {
+      from: String(f.from).split('@')[0].toLowerCase(),
+      to,
+      expiresAt: noExpiry ? '' : String(f.expiresAt),
+      identityKey: key,
+      timestamp: String(f.timestamp),
+    };
+    return (await verifyBy(key, 'forward', fields, f.signature)) ? { to, signer: key.toLowerCase() } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const SEEN_KEY = 'bwallet.names.seenKeys';
 const readSeen = (): Record<string, string> => {
   try {
@@ -79,6 +146,23 @@ const readSeen = (): Record<string, string> => {
 export const trustCurrentKey = (alias: string, key: string) => {
   try {
     localStorage.setItem(SEEN_KEY, JSON.stringify({ ...readSeen(), [alias.toLowerCase()]: key.toLowerCase() }));
+  } catch {
+    /* private mode: nothing remembered */
+  }
+};
+
+const SIGNER_KEY = 'bwallet.names.forwardSigners';
+const readSigners = (): Record<string, string> => {
+  try {
+    return JSON.parse(localStorage.getItem(SIGNER_KEY) ?? '{}') as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+/** Remember who signed the forward the payer confirmed for this typed name (checkForward accepts only them again). */
+export const trustForwardSigner = (alias: string, key: string) => {
+  try {
+    localStorage.setItem(SIGNER_KEY, JSON.stringify({ ...readSigners(), [alias.toLowerCase()]: key.toLowerCase() }));
   } catch {
     /* private mode: nothing remembered */
   }

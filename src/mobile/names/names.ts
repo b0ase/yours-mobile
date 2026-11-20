@@ -1,4 +1,11 @@
-import { checkBinding, keyChange, type BindingStatus } from './binding';
+import {
+  checkBinding,
+  checkForward,
+  keyChange,
+  trustCurrentKey,
+  trustForwardSigner,
+  type BindingStatus,
+} from './binding';
 import { checkNameProof, PROOF_PROVIDERS, type ProofCheck } from './proof';
 import { ProtoWallet, Utils } from '@bsv/sdk';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage } from './paymail';
@@ -104,6 +111,8 @@ export type Resolved = {
    * payments go to this name (bare alias), whose binding `nameBinding` describes. Shown, never swapped silently.
    */
   forwardsTo?: string;
+  /** The key that signed the followed forward (set only with `forwardsTo`); confirm() remembers it for the typed name. */
+  forwardSigner?: string;
   /** A provable name's provider-signed proof (names/proof.ts, docs PROVABLE-NAMES.md): set only for `name.gmail`. */
   nameProof?: ProofCheck;
   /** Where tokens (BSV-21 / ordinals) would go, if this name can receive them. */
@@ -279,7 +288,8 @@ export const scriptToAddress = (hex: string): string | undefined => {
 
 /**
  * The bare target alias of a forward our host declared for `alias` ({from, to} paymails), or undefined. Only a
- * forward FROM the typed name to a different name counts; anything else is ignored.
+ * forward FROM the typed name to a different name has the right shape. This is the SHAPE only and says nothing about
+ * trust: the host's word is not enough. resolvePaymail follows a forward only after checkForward (owner signature).
  */
 export const forwardTarget = (alias: string, fw: unknown): string | undefined => {
   if (!fw || typeof fw !== 'object') return undefined;
@@ -294,7 +304,21 @@ export const forwardTarget = (alias: string, fw: unknown): string | undefined =>
   return to;
 };
 
-/** "boase@ forwards to b0asex@ (same owner)": the confirm-card line for a forwarded bWalletX name. */
+/**
+ * Remember the paid key for the typed name and, for a followed forward, who signed it (only that key may forward the
+ * name next time). Used by NameInput's confirm() and by its "I've checked with them: trust the new wallet" override.
+ */
+export const trustResolvedKey = (r: Pick<Resolved, 'input' | 'pubkey' | 'forwardsTo' | 'forwardSigner'>) => {
+  if (!r.pubkey) return;
+  const typed = r.input.replace(/^\$/, '').split('@')[0];
+  trustCurrentKey(typed, r.pubkey);
+  if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
+};
+
+/**
+ * "boase@ forwards to b0asex@ (same owner)": the confirm-card line for a forwarded bWalletX name. `forwardsTo` is set
+ * only from a forward the typed name's owner signed, so "same owner" is said only when that signature verified.
+ */
 export const forwardLabel = (r: Pick<Resolved, 'input' | 'forwardsTo'>): string | undefined => {
   if (!r.forwardsTo) return undefined;
   const from = r.input.replace(/^\$/, '').split('@')[0].toLowerCase();
@@ -330,8 +354,14 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
     r.pubkey = str(id?.pubkey);
     // Our names carry the owner's signed binding: check it here rather than trust our server.
     if (!r.external && r.pubkey) {
-      const to = forwardTarget(alias, id?.forward);
-      if (to) r.forwardsTo = to;
+      // Only a forward the typed name's owner signed (and that hasn't expired) counts; an unsigned one is ignored and
+      // the typed name's own binding is checked against the served key below, so a mismatch refuses.
+      const fw = await checkForward(alias, id?.forward, forwardTarget);
+      const to = fw?.to;
+      if (fw) {
+        r.forwardsTo = fw.to;
+        r.forwardSigner = fw.signer;
+      }
       // A forward's binding is the target's: check it against the target name, never the typed one.
       const boundTo = to ?? alias;
       const servedFor = String((id?.binding as { alias?: unknown } | undefined)?.alias ?? '').toLowerCase();
