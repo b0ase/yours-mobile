@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { OneSatContext } from '@1sat/actions';
 import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import C from '../../../site/lib/contracts.js';
@@ -180,6 +182,7 @@ describe('wallet and catalogue agree on the identity (byte for byte, the shared 
     ...F.sameCodeUnnormalised.flatMap(([, a, b]) => [a, b]),
     ...F.differentCode.flatMap(([, a, b]) => [a, b]),
     ...F.paidNoCode.map(([, d]) => d),
+    ...F.lookalikeSources.map(([, source]) => F.descriptor({ source })),
     ...F.paidWithCode.map(([, d]) => d),
     ...F.freeSame.flatMap(([, a, b]) => [a, b]),
     F.freeTipJar,
@@ -206,5 +209,90 @@ describe('wallet and catalogue agree on the identity (byte for byte, the shared 
     for (const [, a, b] of F.differentCode) expect(N.sameContract(asDescriptor(a), asDescriptor(b))).toBe(false);
     expect(N.contractIdentity(base)).toBe(N.contractIdentity({ ...base, name: 'Other', version: '9', summary: 'z' }));
     expect(N.contractIdentity(asDescriptor(F.freeTipJar))).not.toBe(N.contractIdentity(asDescriptor(F.freeEscrow)));
+  });
+});
+
+describe('round 4 of the row 352 review, F3: the author’s code is never rewritten', () => {
+  for (const [what, source] of F.lookalikeSources)
+    test(`a source with ${what} is refused before minting, not rewritten`, async () => {
+      expect(N.normaliseSource(source)).toBe(source);
+      expect(N.contractFormProblem(asDescriptor(F.descriptor({ source })))).toBe(N.LOOKALIKE);
+      const { ctx, touched } = untouched();
+      for (const priced of [{}, free])
+        await expect(publishContract(ctx, env(ann, priced, asDescriptor(F.descriptor({ source }))))).rejects.toThrow(
+          /lookalike or compatibility characters .*Nothing was published/,
+        );
+      expect(touched).toEqual([]);
+    });
+
+  test('a code hash of the file with its trailing newline (as sha256sum gives it) is refused, saying what it covers', async () => {
+    const fileHash = createHash('sha256').update(`${F.SRC}\n`).digest('hex');
+    const d = asDescriptor(F.descriptor({ source: F.SRC, codeHash: fileHash }));
+    expect(N.contractCodeProblem(d)).toBe(N.CODE_HASH_RULE);
+    expect(N.CODE_HASH_RULE).toContain('no blank lines or newline at the end');
+    const { ctx, touched } = untouched();
+    await expect(publishContract(ctx, env(ann, {}, d))).rejects.toThrow(/newline at the end\. Nothing was published/);
+    expect(touched).toEqual([]);
+  });
+
+  test('the publish help says what the source and code hash are taken as', () => {
+    const ui = readFileSync(new URL('./ContractsMarket.tsx', import.meta.url), 'utf8');
+    expect(ui).toContain('must be the sha256 of the source in that form');
+    expect(ui).toContain('the newline at the end are dropped');
+    expect(ui).toContain('Lookalike characters');
+  });
+});
+
+describe('round 4 of the row 352 review, F2: a retried publish lists the same mint, never a second one', () => {
+  const setup = (answers: (string | null)[]) => {
+    const minted: string[] = [];
+    const posted: string[] = [];
+    const deps = {
+      mintJson: async () => {
+        const outpoint = `${'ab'.repeat(32)}_${minted.length}`;
+        minted.push(outpoint);
+        return outpoint;
+      },
+      prove: async () => ({ message: 'm', pubkey_hex: 'k', signature: 's' }),
+      post: async (body: unknown) => {
+        posted.push((body as { outpoint: string }).outpoint);
+        const answer = answers.shift();
+        if (answer) throw new Error(answer);
+        return { ok: true };
+      },
+    } as unknown as Parameters<typeof publishContract>[3];
+    return { minted, posted, deps, ctx: { wallet: ann.wallet } as unknown as OneSatContext };
+  };
+  const listing = (summary: string) =>
+    env(ann, {}, asDescriptor(F.descriptor({ source: F.SRC, codeHash: F.HASH, summary })));
+
+  test('the first POST fails (409, try again once confirmed): the retry posts the same outpoint', async () => {
+    const { minted, posted, deps, ctx } = setup([
+      'Someone listed this text moments before you. Try again in a few minutes, once your contract has confirmed.',
+      null,
+    ]);
+    const e = listing('retry after 409');
+    await expect(publishContract(ctx, e, 'ann@bwallet.space', deps)).rejects.toThrow(/moments before you/);
+    expect(await publishContract(ctx, e, 'ann@bwallet.space', deps)).toBe(minted[0]);
+    expect(minted).toHaveLength(1);
+    expect(posted).toEqual([minted[0], minted[0]]);
+  });
+
+  test('a lost answer ("Already published") counts as listed; a network failure keeps the mint for the retry', async () => {
+    const { minted, posted, deps, ctx } = setup(['Failed to fetch', 'Already published']);
+    const e = listing('retry after a lost answer');
+    await expect(publishContract(ctx, e, undefined, deps)).rejects.toThrow('Failed to fetch');
+    expect(await publishContract(ctx, e, undefined, deps)).toBe(minted[0]);
+    expect(minted).toHaveLength(1);
+    expect(posted).toEqual([minted[0], minted[0]]);
+  });
+
+  test('once listed, the record is gone: publishing again is a new listing (a new mint)', async () => {
+    const { minted, posted, deps, ctx } = setup([null, null]);
+    const e = listing('listed once');
+    await publishContract(ctx, e, undefined, deps);
+    await publishContract(ctx, e, undefined, deps);
+    expect(minted).toHaveLength(2);
+    expect(posted).toEqual(minted);
   });
 });

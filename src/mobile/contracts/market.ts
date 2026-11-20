@@ -3,6 +3,7 @@
  * buy (one transaction pays the author + the 1% market fee and mints your copy, then the catalogue counts it).
  */
 import type { OneSatContext } from '@1sat/actions';
+import { Hash, Utils } from '@bsv/sdk';
 import { ONESAT_BASKET } from '@1sat/types';
 import { withFeeOutput } from '../mint/mint';
 import { marketFeeAddress, marketFeeSats } from '../market/fee';
@@ -15,6 +16,7 @@ import {
   CONTRACT_CONTENT_TYPE,
   contractAuthorKey,
   contractCodeProblem,
+  contractFormProblem,
   normaliseContract,
   sameContract,
   signContractEnvelope,
@@ -55,20 +57,85 @@ export const ownedContractOutpoints = async (ctx: OneSatContext) => {
 };
 
 /**
+ * Publishes that minted but weren't listed yet (round 4 of the row 352 review, F2): fingerprint (the account's key
+ * and the exact unsigned envelope) → the minted outpoint. A 409 "try again once confirmed" or a 503 must be retried
+ * with the SAME outpoint: minting again would always be later on chain, so a copier who listed first would keep the
+ * win even after the author's first mint confirms in an earlier block. Kept in localStorage where there is one (it
+ * survives a restart), else in memory; a failure to store never stops a publish.
+ */
+const PENDING_KEY = 'bwx.contracts.pendingPublish.v1';
+const pendingMemory = new Map<string, string>();
+const readPending = (): Record<string, string> => {
+  try {
+    const raw = globalThis.localStorage?.getItem(PENDING_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    /* unreadable: memory only */
+  }
+  return Object.fromEntries(pendingMemory);
+};
+const writePending = (all: Record<string, string>) => {
+  pendingMemory.clear();
+  for (const [k, v] of Object.entries(all).slice(-50)) pendingMemory.set(k, v);
+  try {
+    globalThis.localStorage?.setItem(PENDING_KEY, JSON.stringify(Object.fromEntries(pendingMemory)));
+  } catch {
+    /* memory only */
+  }
+};
+const pendingPublishes = {
+  get: (fp: string): string | undefined => readPending()[fp],
+  set: (fp: string, outpoint: string) => writePending({ ...readPending(), [fp]: outpoint }),
+  delete: (fp: string) => {
+    const { [fp]: _gone, ...rest } = readPending();
+    writePending(rest);
+  },
+};
+const publishFingerprint = (identityKey: string, env: ContractEnvelope, handle?: string) =>
+  Utils.toHex(
+    Hash.sha256(Utils.toArray(JSON.stringify(canonical({ identityKey, env, handle: handle ?? null })), 'utf8')),
+  );
+
+/**
  * Publish: sign the envelope as this account (signContractEnvelope: its identity key, `handle` = its bWalletX
  * paymail, and the reserved contract-signing key; the wallet's own publish, no site involved), mint the original
- * and list it. The contract is put in its stored form first (normaliseContract: source normalised, code hash in lower
- * case), so the catalogue can find a later copy of it by that one form (final review of row 352, F1). A paid one
- * without a source, or whose code hash isn't its source's sha256, is refused before anything is signed or minted.
+ * and list it. The contract is put in its stored form first (normaliseContract: line endings and trailing whitespace,
+ * code hash in lower case), so the catalogue can find a later copy of it by that one form (final review of row 352,
+ * F1). A source with lookalike or compatibility characters, or a paid one without a source or whose code hash isn't
+ * its source's sha256, is refused before anything is signed or minted. If this exact envelope was already minted by
+ * this account and not yet listed (pendingPublishes), that same outpoint is listed again: never a second mint.
+ * `deps` is for tests.
  */
-export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope, handle?: string) => {
+export const publishContract = async (
+  ctx: OneSatContext,
+  env: ContractEnvelope,
+  handle?: string,
+  deps: { mintJson: typeof mintJson; prove: typeof prove; post: (body: unknown) => Promise<unknown> } = {
+    mintJson,
+    prove,
+    post: (body) => api({ method: 'POST', body: JSON.stringify(body) }),
+  },
+) => {
   const normal: ContractEnvelope = { ...env, contract: normaliseContract(env.contract) };
-  const noCode = normal.sale.priceUsd > 0 ? contractCodeProblem(normal.contract) : null;
-  if (noCode) throw new Error(`${noCode}. Nothing was published.`);
-  const signed = await signContractEnvelope(ctx.wallet, normal, handle);
-  const outpoint = await mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed));
-  const proof = await prove(ctx, 'publish', outpoint);
-  await api({ method: 'POST', body: JSON.stringify({ action: 'publish', outpoint, ...proof }) });
+  const refused =
+    contractFormProblem(normal.contract) ?? (normal.sale.priceUsd > 0 ? contractCodeProblem(normal.contract) : null);
+  if (refused) throw new Error(`${refused.replace(/\.$/, '')}. Nothing was published.`);
+  const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
+  const fp = publishFingerprint(publicKey, normal, handle);
+  let outpoint = pendingPublishes.get(fp);
+  if (!outpoint) {
+    const signed = await signContractEnvelope(ctx.wallet, normal, handle);
+    outpoint = await deps.mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed));
+    pendingPublishes.set(fp, outpoint);
+  }
+  const proof = await deps.prove(ctx, 'publish', outpoint);
+  try {
+    await deps.post({ action: 'publish', outpoint, ...proof });
+  } catch (e) {
+    // Listed by an earlier try whose answer was lost: done.
+    if (!(e instanceof Error && e.message === 'Already published')) throw e;
+  }
+  pendingPublishes.delete(fp);
   return outpoint;
 };
 

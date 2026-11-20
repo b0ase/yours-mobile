@@ -89,11 +89,14 @@ async function contractAuthorKey(env) {
  */
 const FREE_IDENTITY_FIELDS = ['format', 'network', 'params', 'spendPaths', 'oracle', 'name'];
 
-/** Source as identity sees it: NFKC, CRLF/CR → LF, trailing whitespace per line and blank lines at the ends dropped. */
+/**
+ * Source as it is stored and hashed: CRLF/CR → LF, trailing whitespace on each line and blank lines at the ends
+ * dropped (so no trailing newline). Nothing else is rewritten: NFKC would change the author's code (ﬁ → fi, x² → x2),
+ * so a source that NFKC changes is refused instead (formProblem).
+ */
 const normaliseSource = (s) =>
   typeof s === 'string'
     ? s
-        .normalize('NFKC')
         .replace(/\r\n?/g, '\n')
         .split('\n')
         .map((l) => l.replace(/\s+$/u, ''))
@@ -134,6 +137,10 @@ const contractKeys = (c) => {
 /** One string for an envelope's contract (contractKeys[0]). */
 const contractId = (e) => contractKeys(e?.contract)[0];
 
+/** What the code hash covers, said wherever a hash is refused (round 4 of the row 352 review, F3). */
+const CODE_HASH_RULE =
+  'A paid contract’s code hash must be the sha256 (lower-case hex) of its source as published: LF line endings, no spaces at the ends of lines, and no blank lines or newline at the end';
+
 /**
  * Why a PAID listing can't be listed, or null: it must carry a source that isn't blank once normalised, and a code
  * hash it carries must be sha256 of that normalised source in lower-case hex (buyers are shown it).
@@ -142,20 +149,24 @@ const codeProblem = (c) => {
   if (normaliseSource(c?.source) === '')
     return 'A paid contract must include its source, so buyers can read what they are paying for';
   const hash = c?.codeHash;
-  if (hash !== undefined && hash !== null && hash !== '' && hash !== sourceHash(c?.source))
-    return 'A paid contract’s code hash must be the sha256 of its source';
+  if (hash !== undefined && hash !== null && hash !== '' && hash !== sourceHash(c?.source)) return CODE_HASH_RULE;
   return null;
 };
 
+/** A source with compatibility or lookalike characters is refused, never rewritten (round 4 of the review, F3). */
+const LOOKALIKE =
+  'This contract’s source has lookalike or compatibility characters (such as ﬁ, Ｋ or ²). Write them as plain characters and publish it again.';
+
 /**
- * Why the catalogue refuses a NEW listing's form, or null (final review of row 352, F1): its source must already be
- * normalised and its code hash in lower case, the one form the catalogue stores and looks up (api/contracts.js
+ * Why the catalogue refuses a NEW listing's form, or null (final review of row 352, F1): its source must have no
+ * characters NFKC would change (LOOKALIKE), must already be normalised, and its code hash must be in lower case, the one form the catalogue stores and looks up (api/contracts.js
  * sameBehaviour). The wallet's publish writes that form, so only an older or altered wallet meets this. Asked on
  * publish only: rows listed before this check keep being served (scripts/contractsUnnormalised.js lists them).
  */
 const formProblem = (c) => {
   const source = c?.source;
   const hash = c?.codeHash;
+  if (typeof source === 'string' && source.normalize('NFKC') !== source) return LOOKALIKE;
   if (
     (source !== undefined && source !== normaliseSource(source)) ||
     (hash !== undefined && (typeof hash !== 'string' || hash !== hash.toLowerCase()))
@@ -226,7 +237,10 @@ async function checkRow(origin, env) {
 /**
  * The listings the catalogue serves, from rows `{ origin, envelope, created_at }`, as { served, unchecked } (Sets of
  * origins):
- * - a row that fails envelopeRefusal is left out (older unsigned or badly signed paid listings: fail closed);
+ * - a row that fails envelopeRefusal is never served (older unsigned or badly signed paid listings, or paid ones with
+ *   no source or a wrong code hash: fail closed), but it still holds its contract: it takes part in the order below
+ *   and blocks a later copy by another author, as it did when it was listed (round 4 of the row 352 review, F1).
+ *   Publish refuses such rows, so only rows listed before a check reach this;
  * - two listings are of one contract when they share an identity key (contractKeys). When two such listings disagree
  *   about the author (mayFollow), the earliest ON CHAIN stays (chainOrder, from `position(origin)`, asked only for
  *   listings in such a dispute) and a later one that may not follow an earlier kept one is left out. So listing first
@@ -235,6 +249,7 @@ async function checkRow(origin, env) {
  *   listings in that dispute (and in disputes joined to it) is served and all are `unchecked` (re-review of f3ff8a37:
  *   a failed lookup for the original must never serve the copy). A position the caller already holds doesn't fail, so
  *   a proven order stays served.
+ * `reasons` maps an origin that isn't served to why (refused, or the earlier listing that comes first).
  */
 async function judgeListings(rows, position) {
   const all = [];
@@ -242,12 +257,12 @@ async function judgeListings(rows, position) {
   for (const r of rows) {
     if (!r?.envelope || typeof r.envelope !== 'object' || !r.envelope.author || !r.envelope.sale) continue;
     const { refused, key } = await checkRow(r.origin, r.envelope);
-    if (refused) continue;
     const seen = Date.parse(r.created_at);
     const l = {
       origin: r.origin,
       env: r.envelope,
       key,
+      refused,
       seen: seen || Infinity,
       ids: contractKeys(r.envelope.contract),
     };
@@ -284,17 +299,23 @@ async function judgeListings(rows, position) {
     }
   }
   const served = new Set();
+  const reasons = new Map();
   const kept = new Map();
   for (const l of all.filter((x) => !stuck.has(x)).sort(chainOrder)) {
     const earlier = l.ids.flatMap((id) => kept.get(id) ?? []);
-    if (!earlier.every((k) => mayFollow(k, l))) continue;
-    served.add(l.origin);
+    const first = earlier.find((k) => !mayFollow(k, l));
+    if (first) {
+      reasons.set(l.origin, `An earlier listing of this contract by another author comes first (${first.origin})`);
+      continue;
+    }
     for (const id of l.ids) {
       if (!kept.has(id)) kept.set(id, []);
       kept.get(id).push(l);
     }
+    if (l.refused) reasons.set(l.origin, l.refused[1]);
+    else served.add(l.origin);
   }
-  return { served, unchecked };
+  return { served, unchecked, reasons };
 }
 const servedListings = async (rows, position) => (await judgeListings(rows, position)).served;
 
@@ -310,7 +331,9 @@ module.exports = {
   codeProblem,
   contractId,
   contractKeys,
+  CODE_HASH_RULE,
   formProblem,
+  LOOKALIKE,
   normaliseSource,
   sourceHash,
   contractSigningBytes,

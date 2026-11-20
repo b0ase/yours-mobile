@@ -84,11 +84,14 @@ export const canonical = (v: unknown): unknown =>
  */
 const FREE_IDENTITY_FIELDS = ['format', 'network', 'params', 'spendPaths', 'oracle', 'name'] as const;
 
-/** Source as identity sees it: NFKC, CRLF/CR → LF, trailing whitespace per line and blank lines at the ends dropped. */
+/**
+ * Source as it is stored and hashed: CRLF/CR → LF, trailing whitespace on each line and blank lines at the ends
+ * dropped (so no trailing newline). Nothing else is rewritten: NFKC would change the author's code (ﬁ → fi, x² → x2),
+ * so a source that NFKC changes is refused instead (contractFormProblem).
+ */
 export const normaliseSource = (s: unknown): string =>
   typeof s === 'string'
     ? s
-        .normalize('NFKC')
         .replace(/\r\n?/g, '\n')
         .split('\n')
         .map((l) => l.replace(/\s+$/u, ''))
@@ -136,6 +139,14 @@ export const sameContract = (
   b: Partial<ContractDescriptor> | null | undefined,
 ) => contractIdentity(a) === contractIdentity(b);
 
+/** What the code hash covers, said wherever a hash is refused and in the publish help (round 4 of the review, F3). */
+export const CODE_HASH_RULE =
+  'A paid contract’s code hash must be the sha256 (lower-case hex) of its source as published: LF line endings, no spaces at the ends of lines, and no blank lines or newline at the end';
+
+/** A source with compatibility or lookalike characters is refused, never rewritten (round 4 of the review, F3). */
+export const LOOKALIKE =
+  'This contract’s source has lookalike or compatibility characters (such as ﬁ, Ｋ or ²). Write them as plain characters and publish it again.';
+
 /**
  * Why a PAID listing can't be listed, or null: it must carry a source that isn't blank once normalised, and a code
  * hash it carries must be sha256 of that normalised source in lower-case hex (buyers are shown it).
@@ -144,19 +155,20 @@ export const contractCodeProblem = (c: Partial<ContractDescriptor> | null | unde
   if (normaliseSource(c?.source) === '')
     return 'A paid contract must include its source, so buyers can read what they are paying for';
   const hash = c?.codeHash as unknown;
-  if (hash !== undefined && hash !== null && hash !== '' && hash !== sourceHash(c?.source))
-    return 'A paid contract’s code hash must be the sha256 of its source';
+  if (hash !== undefined && hash !== null && hash !== '' && hash !== sourceHash(c?.source)) return CODE_HASH_RULE;
   return null;
 };
 
 /**
- * Why the catalogue refuses a NEW listing's form, or null (final review of row 352, F1): its source must already be
- * normalised and its code hash in lower case, the one form the catalogue stores and looks up. The wallet's publish
+ * Why the catalogue refuses a NEW listing's form, or null (final review of row 352, F1): its source must have no
+ * characters NFKC would change (LOOKALIKE), must already be normalised, and its code hash must be in lower case, the
+ * one form the catalogue stores and looks up. The wallet's publish
  * writes that form (normaliseContract), so only an older or altered wallet meets this.
  */
 export const contractFormProblem = (c: Partial<ContractDescriptor> | null | undefined): string | null => {
   const source = c?.source as unknown;
   const hash = c?.codeHash as unknown;
+  if (typeof source === 'string' && source.normalize('NFKC') !== source) return LOOKALIKE;
   if (
     (source !== undefined && source !== normaliseSource(source)) ||
     (hash !== undefined && (typeof hash !== 'string' || hash !== hash.toLowerCase()))
@@ -165,7 +177,11 @@ export const contractFormProblem = (c: Partial<ContractDescriptor> | null | unde
   return null;
 };
 
-/** The descriptor as the wallet publishes it: the source normalised (left out when blank), the code hash in lower case. */
+/**
+ * The descriptor as the wallet publishes it: line endings and trailing whitespace normalised (normaliseSource; the
+ * source left out when blank) and the code hash in lower case. Characters are never rewritten: publishContract
+ * refuses a source with lookalike or compatibility characters (contractFormProblem).
+ */
 export const normaliseContract = (c: ContractDescriptor): ContractDescriptor => {
   const { source, codeHash, ...rest } = c;
   const normal = normaliseSource(source);

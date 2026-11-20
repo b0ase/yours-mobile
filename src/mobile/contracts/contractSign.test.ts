@@ -200,7 +200,7 @@ describe('the wallet signs its own publish', () => {
   test('publishContract signs as the account and mints the signed envelope', () => {
     const src = read('./market.ts');
     expect(src).toContain('const signed = await signContractEnvelope(ctx.wallet, normal, handle);');
-    expect(src).toContain('await mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed))');
+    expect(src).toContain('await deps.mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed))');
   });
   test("the Contracts publish passes the account's bWalletX paymail as the handle", () => {
     const src = read('./ContractsMarket.tsx');

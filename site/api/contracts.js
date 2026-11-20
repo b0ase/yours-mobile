@@ -1,6 +1,7 @@
 // Exchange › Contracts catalogue (lib/contracts.js; chain checks shared with strategies in lib/strategyKeys.js).
 //   GET  /api/contracts                    → { contracts: [{ origin, envelope, sold, createdAt }] }
-//   GET  /api/contracts?origin=<origin>    → { contract: { origin, envelope, sold, createdAt } }
+//   GET  /api/contracts?origin=<origin>    → { contract: { origin, envelope, sold, createdAt } }, or 404 with `reason`
+//        when the listing exists but isn't served (refused, or an earlier listing of it by another author)
 //   POST { action:'publish', outpoint, message, pubkey_hex, signature }   the author's freshly minted copy
 //        A paid contract must be signed by its author (lib/contracts.js envelopeRefusal), and a contract listed
 //        earlier on chain by another author is refused (servedListings).
@@ -126,12 +127,16 @@ async function sameBehaviour(contracts) {
     }
   return [...out.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 }
-/** Is the listing at `origin` (with envelope `env`) one the catalogue serves? true, false, or 'unchecked'. */
-async function served(origin, env) {
-  if (typeof env?.contract?.name !== 'string') return false;
+/**
+ * Is the listing at `origin` (with envelope `env`) one the catalogue serves? `is`: true, false, or 'unchecked'; when
+ * false, `reason` says why (judgeListings reasons), so the author asking for it by origin can see it.
+ */
+async function judgeOne(origin, env) {
+  if (typeof env?.contract?.name !== 'string') return { is: false };
   const j = await judgeListings(await sameBehaviour([env.contract]), position);
-  return j.unchecked.has(origin) ? 'unchecked' : j.served.has(origin);
+  return j.unchecked.has(origin) ? { is: 'unchecked' } : { is: j.served.has(origin), reason: j.reasons.get(origin) };
 }
+const served = async (origin, env) => (await judgeOne(origin, env)).is;
 
 async function list(req, res) {
   const origin = K.normOutpoint(new URL(req.url, 'http://x').searchParams.get('origin'));
@@ -144,10 +149,12 @@ async function list(req, res) {
   const sold = new Map();
   for (const c of copies) sold.set(c.contract_origin, (sold.get(c.contract_origin) || 0) + 1);
   let ok;
+  let reason;
   if (origin) {
-    const is = all[0] ? await served(all[0].origin, all[0].envelope) : false;
-    if (is === 'unchecked') return send(res, 503, { error: NO_CHAIN });
-    ok = new Set(is ? [all[0].origin] : []);
+    const one = all[0] ? await judgeOne(all[0].origin, all[0].envelope) : { is: false };
+    if (one.is === 'unchecked') return send(res, 503, { error: NO_CHAIN });
+    ok = new Set(one.is ? [all[0].origin] : []);
+    reason = one.reason;
   } else {
     const contracts = all.map((c) => c.envelope?.contract).filter((c) => typeof c?.name === 'string');
     ok = (await judgeListings(await sameBehaviour(contracts), position)).served;
@@ -162,7 +169,11 @@ async function list(req, res) {
       sold: sold.get(c.origin) || 0,
       createdAt: c.created_at,
     }));
-  if (origin) return out[0] ? send(res, 200, { contract: out[0] }) : send(res, 404, { error: 'Not found' });
+  // A listing that isn't served says why, so its author can see it (round 4 of the row 352 review).
+  if (origin)
+    return out[0]
+      ? send(res, 200, { contract: out[0] })
+      : send(res, 404, reason ? { error: `This contract isn’t listed: ${reason}`, reason } : { error: 'Not found' });
   return send(res, 200, { contracts: out });
 }
 

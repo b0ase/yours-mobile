@@ -50,9 +50,17 @@ export const sameCodeUnnormalised = [
     sourced,
     { ...sourced, source: `\n\n${SRC.replace(/\n/g, ' \t\r\n')}\r\n\r\n` },
   ],
-  // NFKC folds compatibility lookalikes (here a fullwidth E); a Cyrillic look-alike is a different character.
-  ['source with a fullwidth lookalike letter', sourced, { ...sourced, source: SRC.replace('E', 'Ｅ') }],
   ['code hash in upper case', hashed, { ...hashed, codeHash: HASH.toUpperCase() }],
+];
+
+/**
+ * Sources with compatibility or lookalike characters (round 4 of the review, F3): never rewritten (NFKC would change
+ * the author's code), refused by the wallet's publish and by the catalogue.
+ */
+export const lookalikeSources = [
+  ['a fullwidth letter', SRC.replace('E', '\uff25')],
+  ['a ligature', SRC.replace('require', 'require /* \ufb01le */')],
+  ['a superscript', `${SRC}\n// x\u00b2`],
 ];
 
 /** [what changed, original, other]: a DIFFERENT contract (its source is different). */

@@ -1,25 +1,34 @@
-// READ-ONLY report on the contracts catalogue (final review of b-Aware row 352). It only GETs bwallet_contracts; it
-// never writes. It prints:
-//  - rows whose source isn't normalised or whose code hash isn't lower case (lib/contracts.js formProblem). New
-//    listings can't be stored that way any more, and the catalogue looks a copy's original up by the normalised source
-//    only, so such an original can be missed by a later renamed copy;
-//  - paid rows the catalogue no longer serves because they carry no source, or a code hash that isn't their source's
-//    sha256 (lib/contracts.js codeProblem).
+// READ-ONLY report on the contracts catalogue (reviews of b-Aware row 352). It only GETs bwallet_contracts; it never
+// writes. For each row it prints what to look at:
+//  - the source or code hash isn't in the stored form (lib/contracts.js formProblem: lookalike characters, a source
+//    that isn't normalised, a code hash not in lower case). New listings can't be stored that way any more, and the
+//    catalogue looks a copy's original up by the normalised source only, so such an original can be missed by a later
+//    renamed copy;
+//  - a paid row the catalogue no longer serves, with the reason (lib/contracts.js envelopeRefusal): unsigned, badly
+//    signed, paying someone other than its author, no source, or a code hash that isn't its source's sha256. Such a
+//    row still holds its contract (a later copy by another author isn't served), but it can't be bought.
 // With --backfill-sql it also prints (never runs) the UPDATE statements for the proposed identity_keys column
 // (migrations-proposed/20261120_contract_identity_keys.sql), one per row, from the same contractKeys the catalogue uses.
 // Run from site/: SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/contractsUnnormalised.js [--backfill-sql]
-const { codeProblem, contractKeys, formProblem } = require('../lib/contracts');
+const { contractKeys, envelopeRefusal, formProblem } = require('../lib/contracts');
 
 /** [{ origin, created_at, name, problems }] for the rows with something to report. */
-function findProblems(rows) {
+async function findProblems(rows) {
   const out = [];
   for (const r of rows) {
-    const c = r?.envelope?.contract;
+    const env = r?.envelope;
+    const c = env?.contract;
     const problems = [];
-    if (formProblem(c)) problems.push('source not normalised or code hash not lower case');
-    if (Number(r?.envelope?.sale?.priceUsd) > 0) {
-      const why = codeProblem(c);
-      if (why) problems.push(`paid, no longer served: ${why}`);
+    const form = formProblem(c);
+    if (form) problems.push(`not in the stored form: ${form}`);
+    if (Number(env?.sale?.priceUsd) > 0) {
+      let refused;
+      try {
+        refused = env.author ? await envelopeRefusal(env) : [400, 'no author'];
+      } catch {
+        refused = [400, 'unreadable envelope'];
+      }
+      if (refused) problems.push(`paid, not served: ${refused[1]}`);
     }
     if (problems.length) out.push({ origin: r.origin, created_at: r.created_at, name: c?.name, problems });
   }
@@ -52,7 +61,7 @@ async function main({ fetchImpl = fetch, env = process.env, argv = process.argv.
   const key = env.SUPABASE_SERVICE_ROLE_KEY;
   if (!base || !key) throw new Error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
   const rows = await readAll(fetchImpl, base, key);
-  const found = findProblems(rows);
+  const found = await findProblems(rows);
   log(`${rows.length} catalogue rows read; ${found.length} to look at.`);
   for (const f of found) log(`${f.origin}  ${f.created_at}  ${JSON.stringify(f.name)}  ${f.problems.join('; ')}`);
   if (argv.includes('--backfill-sql')) for (const line of backfillSql(rows)) log(line);

@@ -184,12 +184,14 @@ const publish = async (env, pos) => {
 /** Origins the catalogue serves (GET), and one listing by origin. */
 const served = async () => (await call({ method: 'GET' }))[1].contracts.map((c) => c.origin);
 const getOne = async (origin) => (await call({ method: 'GET', url: `/api/contracts?origin=${origin}` }))[0];
+/** [status, body] of the author-facing GET by origin. */
+const getOneFull = (origin) => call({ method: 'GET', url: `/api/contracts?origin=${origin}` });
 /** The author's own original, registered as a copy (claim): 200 when the catalogue serves it. */
 const claimOriginal = ({ outpoint, minter }) =>
   call({ method: 'POST', body: { action: 'claim', ...proof('unlock', outpoint, minter) } });
 /** A row from before this check, put straight into the table (as an older catalogue stored it). */
-const oldRow = (env) => {
-  const m = mint(env);
+const oldRow = (env, pos) => {
+  const m = mint(env, pos);
   const body = JSON.stringify(env);
   table.push({
     origin: m.outpoint,
@@ -402,9 +404,15 @@ describe('contract catalogue: who keeps a contract (review of 2e409da3)', () => 
     expect((await claimOriginal(free))[0]).toBe(200);
   });
 
-  test("an older unsigned paid copy doesn't block the author's signed listing", async () => {
-    oldRow(listing(mallory));
-    expect((await publish(await signAs(ann, listing(ann))))[0]).toBe(200);
+  // Round 4 of the row 352 review, F1: a row the catalogue no longer serves still holds its contract, as it did when
+  // it was listed. (Before, an older unsigned paid row was dropped and a later different-author copy won.)
+  test('an older unsigned paid row still blocks a later copy by another author, though it is never served', async () => {
+    const old = oldRow(listing(mallory));
+    expect((await publish(await signAs(ann, listing(ann))))[0]).toBe(409);
+    expect(await served()).toEqual([]);
+    const [status, out] = await getOneFull(old.outpoint);
+    expect(status).toBe(404);
+    expect(out.reason).toBe(C.UPDATE_TO_SIGN);
   });
 
   test('names with PostgREST punctuation are quoted in the catalogue lookup', async () => {
@@ -711,5 +719,76 @@ describe('final review of row 352, F1: one stored form, looked up in that form',
     await served();
     const asked = queries.filter((q) => q.startsWith('source:'));
     expect(asked).toEqual([`source:in.("${F.SRC}")`]);
+  });
+});
+
+describe('round 4 of the row 352 review, F1: a refused older row still holds its contract', () => {
+  test("Ann's older paid row with a file-style code hash is not beaten by a renamed clone; her correct re-list is served", async () => {
+    // Ann listed at height 100 before the code-hash check, with sha256sum's hash (it covers the trailing newline).
+    const fileHash = createHash('sha256').update(`${F.SRC}\n`).digest('hex');
+    const annsOld = oldRow(
+      await signAs(ann, listing(ann, 5, { contract: F.descriptor({ source: F.SRC, codeHash: fileHash }) })),
+      { height: 100, index: 0 },
+    );
+    // Mallory's renamed clone at 200 is refused ...
+    const clone = F.descriptor({ source: F.SRC, name: 'Escrow Pro' });
+    expect(
+      (await publish(await signAs(mallory, listing(mallory, 5, { contract: clone })), { height: 200, index: 0 }))[0],
+    ).toBe(409);
+    // ... and Ann's correct re-list at 300 is listed and served; her old row isn't (it can't be bought), and says why.
+    const fixed = F.descriptor({ source: F.SRC, codeHash: F.HASH });
+    const [status, , anns] = await publish(await signAs(ann, listing(ann, 5, { contract: fixed })), {
+      height: 300,
+      index: 0,
+    });
+    expect(status).toBe(200);
+    expect(await served()).toEqual([anns.outpoint]);
+    const [code, out] = await getOneFull(annsOld.outpoint);
+    expect(code).toBe(404);
+    expect(out.reason).toBe(C.CODE_HASH_RULE);
+    expect(out.error).toBe(`This contract isn’t listed: ${C.CODE_HASH_RULE}`);
+  });
+
+  test('a clone already in the table after the refused original is not served, and says which listing comes first', async () => {
+    const fileHash = createHash('sha256').update(`${F.SRC}\n`).digest('hex');
+    const annsOld = oldRow(
+      await signAs(ann, listing(ann, 5, { contract: F.descriptor({ source: F.SRC, codeHash: fileHash }) })),
+      { height: 100, index: 0 },
+    );
+    const mals = oldRow(
+      await signAs(mallory, listing(mallory, 5, { contract: F.descriptor({ source: F.SRC, name: 'X' }) })),
+      {
+        height: 200,
+        index: 0,
+      },
+    );
+    expect(await served()).toEqual([]);
+    const [code, out] = await getOneFull(mals.outpoint);
+    expect(code).toBe(404);
+    expect(out.reason).toBe(`An earlier listing of this contract by another author comes first (${annsOld.outpoint})`);
+  });
+});
+
+describe('round 4 of the row 352 review, F3: lookalike characters are refused, never rewritten', () => {
+  for (const [what, source] of F.lookalikeSources)
+    test(`a listing whose source has ${what} is refused (400), paid or free`, async () => {
+      for (const env of [
+        await signAs(ann, listing(ann, 5, { contract: F.descriptor({ source }) })),
+        listing(ann, 0, { contract: F.descriptor({ source }) }),
+      ]) {
+        const [status, out] = await publish(env);
+        expect([status, out.error]).toEqual([400, C.LOOKALIKE]);
+      }
+      expect(C.normaliseSource(source)).toBe(source);
+      expect(table).toHaveLength(0);
+    });
+
+  test('a code hash of the file with its trailing newline is refused, saying what the hash covers', async () => {
+    const fileHash = createHash('sha256').update(`${F.SRC}\n`).digest('hex');
+    const [status, out] = await publish(
+      await signAs(ann, listing(ann, 5, { contract: F.descriptor({ source: F.SRC, codeHash: fileHash }) })),
+    );
+    expect([status, out.error]).toEqual([400, C.CODE_HASH_RULE]);
+    expect(out.error).toContain('no blank lines or newline at the end');
   });
 });
