@@ -176,6 +176,36 @@ export function movingMessage(p: MoveProgress | null | undefined, now = Date.now
   return `Moving your wallet to this device: ${p.done} of ${p.total}. You can send in about ${mins} minute${mins === 1 ? '' : 's'}. Nothing was sent.`;
 }
 
+/** What one admission run settled and left (inboundSync.AdmitReport): the restore's own coin-check progress. */
+export type AdmissionCounts = { admitted: number; applied: number; refused: number; retired: number; left: number };
+
+/**
+ * The counts a refused send shows (task 70 review, B2), from the move's own progress: each admission run while a move
+ * runs adds what it settled (N) to what is still listed (M). Kept only while a move runs, and cleared when it ends,
+ * however it ends, so a failed move never leaves old counts behind.
+ */
+export function moveProgressTracker(clock: () => number = Date.now) {
+  let p: MoveProgress | null = null;
+  let running = 0;
+  return {
+    async track<T>(run: () => Promise<T>): Promise<T> {
+      if (running++ === 0) p = { done: 0, total: 0, startedAt: clock() };
+      try {
+        return await run();
+      } finally {
+        if (--running === 0) p = null;
+      }
+    },
+    admission(r: AdmissionCounts | undefined | void) {
+      if (!running || !p || !r) return;
+      const done = p.done + r.admitted + r.applied + r.refused + r.retired;
+      p = { done, total: done + r.left, startedAt: p.startedAt };
+    },
+    current: (): MoveProgress | null => (p ? { ...p } : null),
+    message: (now = clock()) => movingMessage(p, now),
+  };
+}
+
 /**
  * Get this device's store active for a payment without ever starting a second copy: join the one running, or start
  * one if none is. Waits at most `waitMs`; the copy carries on in the background either way. True once local is active.

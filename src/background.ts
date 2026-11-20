@@ -130,9 +130,8 @@ import {
   SEND_WAIT_MS,
   ensureLocalStore,
   joinOrStartMove,
-  movingMessage,
+  moveProgressTracker,
   type EnsureLocalResult,
-  type MoveProgress,
 } from './services/localFirst';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
@@ -884,7 +883,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     startSyncsAfter: heavyWorkMayStart,
     // No payment builds change on the remote store: this device's store first (services/localFirst.ts, P0 3 Nov 2026).
     ensureLocalStore: () => ensureLocalForPayment(),
-    refusal: () => movingMessage(moveProgress),
+    refusal: () => moveProgress.message(),
+    // The restore's own coin checks: "N of M" on a send refused while the move runs (task 70 review, B2).
+    onAdmitReport: (r) => moveProgress.admission(r),
     // One line on the balance card's sync label (a full re-pull over mobile data: services/fullPass.ts).
     notice: (message) => {
       chrome.runtime
@@ -1069,7 +1070,9 @@ const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<Ensu
   });
 };
 
-const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
+const preferLocalStorage = (ctx: NonNullable<typeof accountContext>) =>
+  moveProgress.track(() => preferLocalStorageOnce(ctx));
+const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) => {
   const r = await settleLocalStore(ctx);
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   if (r.ok && id) moveFailures.delete(id);
@@ -1127,14 +1130,11 @@ const ensureLocalForPayment = async (waitMs = SEND_WAIT_MS): Promise<boolean> =>
   });
 };
 
-/** How far the copy and coin checks have got, for the message a refused send shows. */
-let moveProgress: MoveProgress | null = null;
-const noteMoveProgress = (message: string) => {
-  const m = /Checked (\d+) of (\d+) coins/.exec(message);
-  if (!m) return;
-  const done = Number(m[1]);
-  moveProgress = { done, total: Number(m[2]), startedAt: moveProgress?.startedAt ?? Date.now() };
-};
+/**
+ * How far the move and its coin checks have got, for the message a refused send shows. Counts come from the admission
+ * runs while a move runs (onAdmitReport) and are cleared when it ends, however it ends.
+ */
+const moveProgress = moveProgressTracker();
 
 /**
  * Move this account to this device now, whatever the backoff says: "Retry moving this account to this device" and
@@ -1164,6 +1164,8 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
   const activeRemoteUrl = () => ctx.storage.getStores().find((s) => s.isActive && !s.isConflicting)?.endpointURL;
   return {
     remoteUrl,
+    // One switch at a time for this account's store, whoever asks (restoreFromRemote.ts, task 70 review B1).
+    key: ctx.storage,
     activeRemoteUrl,
     // A restore's merges run whole, whatever re-pull is under way (services/fullPass.ts, re-check N2).
     setActiveStorage: (target) => asRestore(() => ctx.setActiveStorage(target)),
@@ -4446,12 +4448,8 @@ if (!(
       const ctx = accountContext;
       const identityKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey || '';
       const report = await withCoinResyncLock(() =>
-        resyncAccountCoins(ctx, identityKey, (step) => {
-          noteMoveProgress(step);
-          sendRecoverProgress('txid', step);
-        }),
+        resyncAccountCoins(ctx, identityKey, (step) => sendRecoverProgress('txid', step)),
       );
-      moveProgress = null;
       if (!report) throw new Error('Wallet services are not ready yet. Try again in a moment.');
       console.log('[STORAGE_RESYNC_COINS]', report);
       sendResponse({ type: 'STORAGE_RESYNC_COINS', success: true, data: { report, summary: resyncMessage(report) } });
@@ -4594,7 +4592,7 @@ if (!(
             'switch to device',
             90_000,
             'Copying the backup to this device took too long',
-            () => switchToLocalVerified(restoreDeps(ctx, remoteUrl)),
+            () => moveProgress.track(() => switchToLocalVerified(restoreDeps(ctx, remoteUrl))),
           ).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
           console.log('[STORAGE_RECOVER_MINED] verified switch', r);
           if (r.ok) {
@@ -4657,7 +4655,7 @@ if (!(
       const parts: string[] = [];
       let ok = true;
       if (remoteUrl) {
-        const r = await switchToLocalVerified(restoreDeps(ctx, remoteUrl));
+        const r = await moveProgress.track(() => switchToLocalVerified(restoreDeps(ctx, remoteUrl)));
         sendRestoreStatus(r.ok ? undefined : null);
         console.log('[STORAGE_RESTORE_BACKUP] store', r);
         if (r.ok) {
