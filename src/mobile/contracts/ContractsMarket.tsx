@@ -423,6 +423,11 @@ const PublishContract = ({
         Paste the contract&apos;s descriptor (<span className="font-mono">contract.json</span>, format
         bwalletx.contract/1). It&apos;s published as a public NFT: anyone can read it. Sales pay this account.
       </div>
+      <div className="text-xs" style={{ color: MUTED }}>
+        A paid contract needs its <span className="font-mono">source</span>. Line endings become LF and spaces at the
+        ends of lines, blank lines and the newline at the end are dropped; a <span className="font-mono">codeHash</span>{' '}
+        must be the sha256 of the source in that form. Lookalike characters (such as ﬁ or Ｋ) aren&apos;t accepted.
+      </div>
       <textarea
         value={json}
         onChange={(e) => setJson(e.target.value)}
