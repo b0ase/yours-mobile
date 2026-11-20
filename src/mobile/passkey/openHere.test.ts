@@ -247,6 +247,12 @@ describe('open on computer: the computer binds the wallet to the code it was typ
     const keys = await deriveOpen(intruder, k, c);
     return { s, ws, got, keys, c };
   };
+  // The session handles frames on a queue (inOrder) and decrypts asynchronously, so deliver()'s short pause can end
+  // before the outcome is set on a busy machine. Wait for the outcome itself, not for a fixed time.
+  const outcome = async (got: { wallet?: string; error?: string }) => {
+    for (let i = 0; i < 2000 && got.wallet === undefined && got.error === undefined; i++)
+      await new Promise((r) => setTimeout(r, 10));
+  };
   const restore = () => {
     globalThis.WebSocket = realWs;
     (globalThis as { location?: unknown }).location = realLoc;
@@ -258,6 +264,7 @@ describe('open on computer: the computer binds the wallet to the code it was typ
       expect(await s.submitCode('111111')).toBe(true);
       const exp = Math.floor(Date.now() / 1000) + 60;
       await ws.deliver(await sealOpen(keys.key, c, { t: 'wallet', words: WORDS, exp, code: '999999' }));
+      await outcome(got);
       expect(got.wallet).toBeUndefined();
       expect(got.error).toContain("didn't come from your phone");
     } finally {
@@ -271,6 +278,7 @@ describe('open on computer: the computer binds the wallet to the code it was typ
       await s.submitCode('111111');
       const exp = Math.floor(Date.now() / 1000) + 60;
       await ws.deliver(await sealOpen(keys.key, c, { t: 'wallet', words: WORDS, exp } as never));
+      await outcome(got);
       expect(got.wallet).toBeUndefined();
     } finally {
       restore();
@@ -283,6 +291,7 @@ describe('open on computer: the computer binds the wallet to the code it was typ
       await s.submitCode('111 111');
       const exp = Math.floor(Date.now() / 1000) + 60;
       await ws.deliver(await sealOpen(keys.key, c, { t: 'wallet', words: WORDS, exp, code: '111111' }));
+      await outcome(got);
       expect(got.wallet).toBe(WORDS);
     } finally {
       restore();

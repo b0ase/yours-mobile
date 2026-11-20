@@ -168,12 +168,14 @@ const bsv21Client = (ctx: OneSatContext): Details | null =>
 const STATUS_TIMEOUT_MS = 8000;
 
 /** Current overlay status for a token, or null if the indexer doesn't know it (yet) or doesn't answer. */
-export async function overlayStatus(ctx: OneSatContext, tokenId: string): Promise<OverlayStatus | null> {
+export async function overlayStatus(
+  ctx: OneSatContext,
+  tokenId: string,
+  timeoutMs = STATUS_TIMEOUT_MS,
+): Promise<OverlayStatus | null> {
   const c = bsv21Client(ctx);
   if (!c) return null;
-  const details = await withTimeout(c.getTokenDetails(normId(tokenId)), STATUS_TIMEOUT_MS, 'Indexer status').catch(
-    () => null,
-  );
+  const details = await withTimeout(c.getTokenDetails(normId(tokenId)), timeoutMs, 'Indexer status').catch(() => null);
   return parseOverlayStatus(details);
 }
 
