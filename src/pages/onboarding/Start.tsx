@@ -13,7 +13,6 @@ import { getPlatform } from '../../platform';
 import { ObsidianBackdrop } from '../../mobile/ui/ObsidianBackdrop';
 import { SEEDLESS_ENABLED } from '../../mobile/passkey/prf';
 import { SeedlessWelcome } from '../../mobile/passkey/SeedlessWelcome';
-import { SignupLinkPanel } from '../../mobile/social/SignupLinkPanel';
 import { phoneLayoutOn } from '../../mobile/phone/flag';
 import { hasLanded } from '../../mobile/phone/pageEl';
 import { startRoute, WALLET_ROUTE } from '../../mobile/phone/screens';
@@ -105,13 +104,12 @@ export const Start = () => {
 
         {/* Bottom section — actions */}
         <div className="flex flex-col items-center gap-3 w-full max-w-[420px] mx-auto mb-2 px-1 overflow-visible">
-          {/* Optional link on the first screen, finished after the seed step (owner, 27 Oct 2026). */}
+          {/* No account linking here: the welcome screen is create or restore only; linking lives in the app's Link page (owner, 20 Nov 2026). */}
           {SETUP_FOR && (
             <p role="status" className="w-full text-sm text-center font-semibold px-2" style={{ color: contrast }}>
               {setupReason(SETUP_FOR)}
             </p>
           )}
-          <SignupLinkPanel color={contrast} gray={gray} />
           {SEEDLESS_ENABLED ? (
             <SeedlessWelcome />
           ) : (
