@@ -30,7 +30,7 @@ const {
   subProblem,
   subscriptionsUnlocked,
 } = await import('./pots');
-const { payDue } = await import('./payDue');
+const { payDue, ALREADY_KNOWN } = await import('./payDue');
 const { getPending } = await import('./pots');
 const { parseConfig, DEFAULT_CONFIG, getRemoteConfig, resetRemoteConfigFailure, CONFIG_FAIL_TTL } =
   await import('../config/remoteConfig');
@@ -476,6 +476,24 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     expect(src).not.toMatch(/from '\.\/payDue'/);
   });
 
+  test('a refused broadcast whose extra info says "already" is not taken as paid (only the ALREADY_KNOWN code is)', async () => {
+    const s = setup({ start: NOW - 1000 });
+    const r = await payDue(
+      {
+        bsvUsd: 50,
+        resolve: async () => '1L',
+        sign: async () => ({ rawTx: 'RAWR', txid: 'TXR' }),
+        broadcast: async () => {
+          throw new Error('Payment refused by the network (DOUBLE_SPEND_ATTEMPTED: input already spent)');
+        },
+      },
+      NOW,
+    );
+    expect(r[0].ok).toBe(false);
+    expect(getPending(s.id)?.rawTx).toBe('RAWR');
+    expect(getSub(s.id)?.periodIndex).toBe(0);
+  });
+
   test('after an unsure broadcast, nothing more is signed from that pot in the same run (its coins may be in flight)', async () => {
     const a = setup({ start: NOW - 1000 }); // one $10 period due
     setAgentDailyCap('1Pot', null);
@@ -682,7 +700,7 @@ describe('crash safety: a payment is recorded before it is broadcast', () => {
       sign: async () => (signs++, { rawTx: 'RAW2', txid: 'TX2' }),
       broadcast: async (raw: string) => {
         network.push(raw);
-        throw new Error('txn-already-known');
+        throw Object.assign(new Error('txn-already-known'), { code: ALREADY_KNOWN });
       },
     };
     expect(await payDue(next, NOW)).toEqual([{ id: s.id, ok: true, count: 3, txid: 'TX1' }]);

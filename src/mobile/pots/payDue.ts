@@ -34,6 +34,14 @@ import {
 } from './pots';
 import { PayeeReviewError, legacyPin, scheduledOutputsRefusal, type PayeeDestination } from './payeeBinding';
 
+/**
+ * A broadcaster says the network already has this tx by throwing an error whose `code` is 'ALREADY_KNOWN' (or by
+ * resolving: broadcastRaw's arcade answers a known tx with its status). Never read from the message text: a refused
+ * broadcast's extra info can say "already" (e.g. an input already spent), and that is not a payment that went out.
+ */
+export const ALREADY_KNOWN = 'ALREADY_KNOWN';
+const alreadyKnown = (e: unknown) => !!e && typeof e === 'object' && (e as { code?: unknown }).code === ALREADY_KNOWN;
+
 /** A hung broadcast would hold the spend queue, and with it every agent and CLI spend on the device. */
 export const BROADCAST_TIMEOUT_MS = 30_000;
 
@@ -69,7 +77,10 @@ export type PayDeps = {
     outputs: { address: string; sats: number }[],
     memo?: string,
   ) => Promise<{ rawTx: string; txid: string }>;
-  /** Broadcast a signed tx. Must be idempotent: the same raw tx again is fine (already known / mined). */
+  /**
+   * Broadcast a signed tx. Must be idempotent: the same raw tx again is fine (already known / mined): it resolves, or
+   * throws an error with code ALREADY_KNOWN. Any other error is an unsure result.
+   */
   broadcast: (rawTx: string) => Promise<void>;
   /**
    * Sign (don't broadcast) one PNEE transfer from a PNEE pot: `units` PNEEs (1 unit = 1¢) per output. Absent = PNEE
@@ -341,7 +352,7 @@ async function settlePending(
     } else await withTimeout(deps.broadcast(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    if (!/already|duplicate/i.test(m)) {
+    if (!alreadyKnown(e)) {
       // Unknown outcome: keep the record and retry this exact tx next time; no more signing from this pot in this run.
       unsure.add(p.potId);
       patch(s.id, () => ({ lastError: m }));
