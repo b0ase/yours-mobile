@@ -1576,7 +1576,8 @@ const sealPasses: SealPasses | null = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 )
-  ? new SealPasses()
+  ? // Every seal payment the pass does not cover is logged with its reason ([bwx-seal], services/sealPass.ts).
+    new SealPasses(Date.now, (line) => console.log(line))
   : null;
 let sealSheetCounter = 0;
 const askSealSheet = (originator: string, seal: SealSheet): Promise<void> =>
