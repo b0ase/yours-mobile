@@ -136,7 +136,13 @@ import {
   withTimeout,
 } from './services/restoreProgress';
 import { isUncheckedPage } from './services/inboundSync';
-import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
+import {
+  SEND_WAIT_MS,
+  ensureLocalStore,
+  joinOrStartMove,
+  moveProgressTracker,
+  type EnsureLocalResult,
+} from './services/localFirst';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
@@ -887,6 +893,9 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     startSyncsAfter: heavyWorkMayStart,
     // No payment builds change on the remote store: this device's store first (services/localFirst.ts, P0 3 Nov 2026).
     ensureLocalStore: () => ensureLocalForPayment(),
+    refusal: () => moveProgress.message(),
+    // The restore's own coin checks: "N of M" on a send refused while the move runs (task 70 review, B2).
+    onAdmitReport: (r) => moveProgress.admission(r),
     // One line on the balance card's sync label (a full re-pull over mobile data: services/fullPass.ts).
     notice: (message) => {
       chrome.runtime
@@ -1071,7 +1080,9 @@ const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<Ensu
   });
 };
 
-const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
+const preferLocalStorage = (ctx: NonNullable<typeof accountContext>) =>
+  moveProgress.track(() => preferLocalStorageOnce(ctx));
+const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) => {
   const r = await settleLocalStore(ctx);
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   if (r.ok && id) moveFailures.delete(id);
@@ -1110,23 +1121,30 @@ const moveStatus = () => {
  * A payment would build change while the remote store is active: make this device's store active first, joining a
  * switch already running (services/localFirst.ts). True once it is; the payment is refused otherwise.
  */
-const ensureLocalForPayment = async (): Promise<boolean> => {
+const ensureLocalForPayment = async (waitMs = SEND_WAIT_MS): Promise<boolean> => {
   const ctx = accountContext;
   if (!ctx) return false;
-  const local = () => ctx.storage.isActiveStorageProvider();
-  if (local()) return true;
-  const within = (p: Promise<unknown>) =>
-    Promise.race([p.then(() => undefined), new Promise<void>((r) => setTimeout(r, 90_000))]);
-  if (storageSwitch) await within(storageSwitch).catch(() => undefined);
-  if (local() || accountContext !== ctx) return local();
-  const run = preferLocalStorage(ctx);
-  storageSwitch = run;
-  void run.finally(() => {
-    if (storageSwitch === run) storageSwitch = null;
+  // Join the copy already running; never start a second one beside it.
+  return joinOrStartMove({
+    isLocal: () => ctx.storage.isActiveStorageProvider(),
+    running: () => storageSwitch,
+    start: () => {
+      const run = preferLocalStorage(ctx);
+      storageSwitch = run;
+      void run.finally(() => {
+        if (storageSwitch === run) storageSwitch = null;
+      });
+      return run;
+    },
+    waitMs,
   });
-  await within(run).catch(() => undefined);
-  return local();
 };
+
+/**
+ * How far the move and its coin checks have got, for the message a refused send shows. Counts come from the admission
+ * runs while a move runs (onAdmitReport) and are cleared when it ends, however it ends.
+ */
+const moveProgress = moveProgressTracker();
 
 /**
  * Move this account to this device now, whatever the backoff says: "Retry moving this account to this device" and
@@ -1138,7 +1156,7 @@ const moveToDeviceNow = async (): Promise<boolean> => {
     const f = moveFailures.get(id);
     if (f) f.nextAt = 0;
   }
-  return ensureLocalForPayment();
+  return ensureLocalForPayment(90_000);
 };
 
 /** "Loading your wallet from backup…" on the balance card; undefined = done, null = done without the copy. */
@@ -1156,6 +1174,8 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
   const activeRemoteUrl = () => ctx.storage.getStores().find((s) => s.isActive && !s.isConflicting)?.endpointURL;
   return {
     remoteUrl,
+    // One switch at a time for this account's store, whoever asks (restoreFromRemote.ts, task 70 review B1).
+    key: ctx.storage,
     activeRemoteUrl,
     // A restore's merges run whole, whatever re-pull is under way (services/fullPass.ts, re-check N2).
     setActiveStorage: (target) =>
@@ -4630,7 +4650,7 @@ if (!(
             'switch to device',
             90_000,
             'Copying the backup to this device took too long',
-            () => switchToLocalVerified(restoreDeps(ctx, remoteUrl)),
+            () => moveProgress.track(() => switchToLocalVerified(restoreDeps(ctx, remoteUrl))),
           ).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
           console.log('[STORAGE_RECOVER_MINED] verified switch', r);
           if (r.ok) {
@@ -4693,7 +4713,7 @@ if (!(
       const parts: string[] = [];
       let ok = true;
       if (remoteUrl) {
-        const r = await switchToLocalVerified(restoreDeps(ctx, remoteUrl));
+        const r = await moveProgress.track(() => switchToLocalVerified(restoreDeps(ctx, remoteUrl)));
         sendRestoreStatus(r.ok ? undefined : null);
         console.log('[STORAGE_RESTORE_BACKUP] store', r);
         if (r.ok) {

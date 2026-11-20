@@ -160,6 +160,78 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
   }
 }
 
+/** How long a send waits for the copy before it is refused with the progress message. */
+export const SEND_WAIT_MS = 2000;
+
+/** Progress of the copy and coin checks, as the background last heard it. */
+export type MoveProgress = { done: number; total: number; startedAt: number };
+
+/** "Moving your wallet to this device: N of M. You can send in about T." (no counts yet: a plain line). */
+export function movingMessage(p: MoveProgress | null | undefined, now = Date.now()): string {
+  if (!p || p.total <= 0 || p.done <= 0)
+    return 'Moving your wallet to this device. Nothing was sent. You can send when it finishes.';
+  const left = Math.max(0, p.total - p.done);
+  const perItem = (now - p.startedAt) / p.done;
+  const mins = Math.max(1, Math.ceil((left * perItem) / 60_000));
+  return `Moving your wallet to this device: ${p.done} of ${p.total}. You can send in about ${mins} minute${mins === 1 ? '' : 's'}. Nothing was sent.`;
+}
+
+/** What one admission run settled and left (inboundSync.AdmitReport): the restore's own coin-check progress. */
+export type AdmissionCounts = { admitted: number; applied: number; refused: number; retired: number; left: number };
+
+/**
+ * The counts a refused send shows (task 70 review, B2), from the move's own progress: each admission run while a move
+ * runs adds what it settled (N) to what is still listed (M). Kept only while a move runs, and cleared when it ends,
+ * however it ends, so a failed move never leaves old counts behind.
+ */
+export function moveProgressTracker(clock: () => number = Date.now) {
+  let p: MoveProgress | null = null;
+  let running = 0;
+  return {
+    async track<T>(run: () => Promise<T>): Promise<T> {
+      if (running++ === 0) p = { done: 0, total: 0, startedAt: clock() };
+      try {
+        return await run();
+      } finally {
+        if (--running === 0) p = null;
+      }
+    },
+    admission(r: AdmissionCounts | undefined | void) {
+      if (!running || !p || !r) return;
+      const done = p.done + r.admitted + r.applied + r.refused + r.retired;
+      p = { done, total: done + r.left, startedAt: p.startedAt };
+    },
+    current: (): MoveProgress | null => (p ? { ...p } : null),
+    message: (now = clock()) => movingMessage(p, now),
+  };
+}
+
+/**
+ * Get this device's store active for a payment without ever starting a second copy: join the one running, or start
+ * one if none is. Waits at most `waitMs`; the copy carries on in the background either way. True once local is active.
+ */
+export async function joinOrStartMove(d: {
+  isLocal: () => boolean;
+  running: () => Promise<unknown> | null;
+  start: () => Promise<unknown>;
+  waitMs: number;
+}): Promise<boolean> {
+  if (d.isLocal()) return true;
+  const p = d.running() ?? d.start();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    p.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((r) => {
+      timer = setTimeout(r, d.waitMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return d.isLocal();
+}
+
 type CreateArgs = { inputs?: unknown[]; outputs?: unknown[] } | undefined;
 
 /** Does this createAction build a transaction (and so change)? A sendWith-only call builds nothing. */
@@ -174,7 +246,13 @@ export const buildsTransaction = (args: CreateArgs): boolean =>
  */
 export function requireLocalStoreForChange(
   wallet: unknown,
-  d: { isLocal: () => boolean; ensureLocal?: () => Promise<boolean>; log?: (m: string) => void },
+  d: {
+    isLocal: () => boolean;
+    ensureLocal?: () => Promise<boolean>;
+    /** The progress message to refuse with (default: the general one). */
+    refusal?: () => string;
+    log?: (m: string) => void;
+  },
 ): boolean {
   const w = wallet as { createAction?: (args: CreateArgs, originator?: string) => Promise<unknown> } | null;
   if (!w || typeof w.createAction !== 'function') return false;
@@ -186,7 +264,7 @@ export function requireLocalStoreForChange(
       const ok = d.ensureLocal ? await d.ensureLocal().catch(() => false) : false;
       if (!ok || !d.isLocal()) {
         log('[localFirst] the device store is not active: payment refused, nothing built');
-        throw new LocalStoreNeededError();
+        throw new LocalStoreNeededError(d.refusal?.());
       }
     }
     return original(args, originator);

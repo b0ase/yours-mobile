@@ -9,9 +9,15 @@
 export const MOVING_SHORT = 'Nothing was sent: this account is still moving to this device.';
 
 export const isMovingError = (message: string | undefined): boolean =>
-  !!message && /moving to this device/i.test(message);
+  !!message && /moving (your wallet )?to this device/i.test(message);
+
+/** The move's progress line (services/localFirst.ts movingMessage): short, and says how far it has got. */
+export const isMoveProgress = (message: string | undefined): boolean =>
+  !!message && /^Moving your wallet to this device/.test(message);
 
 export function errorLayout(message: string | undefined): { hero: boolean; notice: boolean; error?: string } {
+  // The progress line is shown as it is (task 70 review, B2): the same "N of M" the popup shows, never replaced.
+  if (isMoveProgress(message)) return { hero: false, notice: true, error: message };
   if (isMovingError(message)) return { hero: false, notice: true, error: MOVING_SHORT };
   return { hero: true, notice: false, error: message };
 }

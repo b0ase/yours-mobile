@@ -481,6 +481,10 @@ export interface InitWalletOptions {
    * (services/localFirst.ts). Without it such a payment is refused.
    */
   ensureLocalStore?: () => Promise<boolean>;
+  /** The progress message a refused send shows (services/localFirst.ts movingMessage). */
+  refusal?: () => string;
+  /** Each admission run's report (inboundSync.admitPending): the move's coin-check counts (localFirst moveProgressTracker). */
+  onAdmitReport?: (report: AdmitReport) => void;
   /** A one-line notice for the owner (the extension shows it on the balance card's sync line). */
   notice?: (text: string) => void;
 }
@@ -864,6 +868,7 @@ export const initWallet = async (
         return undefined;
       },
     );
+    if (r) options?.onAdmitReport?.(r);
     // Anything left waits for its next try: run again then, never "only at the next unlock" (D2).
     if (r?.nextAt !== undefined) admitIn(r.nextAt - Date.now());
     return r;
@@ -1132,6 +1137,7 @@ export const initWallet = async (
     !requireLocalStoreForChange(baseWallet, {
       isLocal: () => storage.isActiveStorageProvider(),
       ensureLocal: options?.ensureLocalStore,
+      refusal: options?.refusal,
     })
   )
     console.error('[initWallet] payments are not held to the device store');

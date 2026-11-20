@@ -8,11 +8,16 @@ import {
   LocalStoreNeededError,
   ensureLocalStore,
   isOnDeviceStore,
+  SEND_WAIT_MS,
+  joinOrStartMove,
+  movingMessage,
+  moveProgressTracker,
   requireLocalStoreForChange,
   type EnsureLocalDeps,
   type StoreConfigLike,
 } from './localFirst';
-import type { SwitchResult } from './restoreFromRemote';
+import { errorLayout, isMovingError } from '../mobile/themeStore/buySheetState';
+import { switchToLocalVerified, type SwitchDeps, type SwitchResult } from './restoreFromRemote';
 
 const REMOTE = 'https://wallet.1sat.app';
 const S = { outputs: 1, spendableSats: 10, actions: 1 };
@@ -252,5 +257,190 @@ describe('review 4 Nov 2026', () => {
     expect(bg).toContain("case 'STORAGE_MOVE_TO_DEVICE':");
     for (const page of ['src/pages/BsvWallet.tsx', 'src/pages/StorageStatus.tsx', 'src/mobile/themeStore/StoreBuy.tsx'])
       expect(readFileSync(page, 'utf8')).toContain('<MoveToDeviceNotice');
+  });
+});
+
+describe('a send during the copy (never a second copy, refuse within 2 s with progress)', () => {
+  const never = () => new Promise<void>(() => undefined);
+
+  test('joins the copy already running: start() is never called', async () => {
+    let starts = 0;
+    const t0 = Date.now();
+    const ok = await joinOrStartMove({
+      isLocal: () => false,
+      running: () => never(),
+      start: async () => void starts++,
+      waitMs: 50,
+    });
+    expect(ok).toBe(false);
+    expect(starts).toBe(0);
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+
+  test('starts exactly one copy when none runs, and a second send joins it', async () => {
+    let starts = 0;
+    let running: Promise<unknown> | null = null;
+    const deps = {
+      isLocal: () => false,
+      running: () => running,
+      start: () => {
+        starts++;
+        running = never();
+        return running;
+      },
+      waitMs: 20,
+    };
+    await joinOrStartMove(deps);
+    await joinOrStartMove(deps);
+    await joinOrStartMove(deps);
+    expect(starts).toBe(1);
+  });
+
+  test('once coins are admitted (local active), a send proceeds without waiting', async () => {
+    const ok = await joinOrStartMove({
+      isLocal: () => true,
+      running: () => never(),
+      start: never,
+      waitMs: 10_000,
+    });
+    expect(ok).toBe(true);
+  });
+
+  test('the wrapped createAction refuses within 2 s with the progress message and signs nothing', async () => {
+    let built = 0;
+    let local = false;
+    const wallet = { createAction: async () => void built++ };
+    requireLocalStoreForChange(wallet, {
+      isLocal: () => local,
+      ensureLocal: () =>
+        joinOrStartMove({ isLocal: () => local, running: () => never(), start: never, waitMs: SEND_WAIT_MS }),
+      refusal: () => movingMessage({ done: 250, total: 1000, startedAt: Date.now() - 5 * 60_000 }),
+      log: () => undefined,
+    });
+    const t0 = Date.now();
+    const err = await wallet.createAction({ outputs: [{}] } as never).catch((e) => e);
+    expect(Date.now() - t0).toBeLessThan(2500);
+    expect(err).toBeInstanceOf(LocalStoreNeededError);
+    expect(err.message).toBe(
+      'Moving your wallet to this device: 250 of 1000. You can send in about 15 minutes. Nothing was sent.',
+    );
+    expect(built).toBe(0);
+    // Coins admitted: the same wrapped send now goes through.
+    local = true;
+    await wallet.createAction({ outputs: [{}] } as never);
+    expect(built).toBe(1);
+  });
+
+  test('the progress message is recognised by the popup as the moving notice', () => {
+    expect(isMovingError(movingMessage({ done: 1, total: 4, startedAt: Date.now() - 60_000 }))).toBe(true);
+    expect(isMovingError(movingMessage(null))).toBe(true);
+  });
+});
+
+describe("task 70 review: one switch for every caller (B1), the move's own counts (B2)", () => {
+  /** A switch whose copy (setActiveStorage('local')) waits until released; counts the copies started. */
+  const fakeSwitch = (key: object, remoteUrl = 'https://backup.example') => {
+    let active: string | undefined = remoteUrl;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const copies = { started: 0 };
+    const summary = { outputs: 1, spendableSats: 100, actions: 1 };
+    const deps: SwitchDeps = {
+      key,
+      remoteUrl,
+      activeRemoteUrl: () => active,
+      setActiveStorage: async (t) => {
+        if (t === 'local') {
+          copies.started++;
+          await gate;
+          active = undefined;
+        } else active = t;
+      },
+      summarize: async () => summary,
+      pullRemote: async () => undefined,
+    };
+    return { deps, release, copies };
+  };
+
+  test('B1: a second caller (Recover mined, Restore from backup) joins the running switch: one copy', async () => {
+    const store = {};
+    const a = fakeSwitch(store);
+    const first = switchToLocalVerified(a.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    // Another caller, its own deps for the same account's store.
+    const b = fakeSwitch(store);
+    const second = switchToLocalVerified(b.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(a.copies.started + b.copies.started).toBe(1);
+    a.release();
+    b.release();
+    const [r1, r2] = await Promise.all([first, second]);
+    expect(r1.ok).toBe(true);
+    expect(r2).toBe(r1);
+    expect(b.copies.started).toBe(0);
+    // Once it has finished, a later switch runs again.
+    const c = fakeSwitch(store);
+    c.release();
+    expect((await switchToLocalVerified(c.deps)).ok).toBe(true);
+    expect(c.copies.started).toBe(1);
+  });
+
+  test("B1: a switch to a different backup waits for the running one; another account's store is not held up", async () => {
+    const store = {};
+    const a = fakeSwitch(store, 'https://one.example');
+    const b = fakeSwitch(store, 'https://two.example');
+    const other = fakeSwitch({});
+    const first = switchToLocalVerified(a.deps);
+    const second = switchToLocalVerified(b.deps);
+    const third = switchToLocalVerified(other.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(a.copies.started).toBe(1);
+    expect(b.copies.started).toBe(0); // never two copies into one store at once
+    expect(other.copies.started).toBe(1);
+    a.release();
+    b.release();
+    other.release();
+    await Promise.all([first, second, third]);
+    expect(b.copies.started).toBe(1);
+  });
+
+  test("B2: the counts come from the move's own admission runs, and only while it runs", async () => {
+    let now = 1_000_000;
+    const t = moveProgressTracker(() => now);
+    t.admission({ admitted: 5, applied: 0, refused: 0, retired: 0, left: 10 }); // no move: ignored
+    expect(t.current()).toBeNull();
+    let finish!: () => void;
+    const move = t.track(() => new Promise<void>((r) => (finish = r)));
+    expect(t.message()).toBe(movingMessage(null)); // nothing checked yet: the plain line
+    now += 60_000;
+    t.admission({ admitted: 40, applied: 0, refused: 10, retired: 0, left: 150 });
+    expect(t.current()).toEqual({ done: 50, total: 200, startedAt: 1_000_000 });
+    now += 60_000;
+    t.admission({ admitted: 50, applied: 0, refused: 0, retired: 0, left: 100 });
+    expect(t.message()).toBe(
+      'Moving your wallet to this device: 100 of 200. You can send in about 2 minutes. Nothing was sent.',
+    );
+    finish();
+    await move;
+    expect(t.current()).toBeNull();
+    expect(t.message()).toBe(movingMessage(null));
+  });
+
+  test('B2: a move that fails leaves no counts behind', async () => {
+    const t = moveProgressTracker(() => 0);
+    const failed = t.track(async () => {
+      t.admission({ admitted: 3, applied: 0, refused: 0, retired: 0, left: 7 });
+      expect(t.current()?.total).toBe(10);
+      throw new Error('copy to this device failed');
+    });
+    await expect(failed).rejects.toThrow('copy to this device failed');
+    expect(t.current()).toBeNull();
+    expect(t.message()).toBe(movingMessage(null));
+  });
+
+  test('B2: the Store pay sheet shows the same progress line, not the short generic one', () => {
+    const line = movingMessage({ done: 3, total: 9, startedAt: Date.now() - 60_000 });
+    expect(errorLayout(line)).toEqual({ hero: false, notice: true, error: line });
+    expect(errorLayout(movingMessage(null)).error).toBe(movingMessage(null));
   });
 });

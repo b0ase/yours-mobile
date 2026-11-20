@@ -91,6 +91,11 @@ export const outpointsOnDevice =
 
 export type SwitchDeps = {
   remoteUrl: string;
+  /**
+   * The store being switched (the account's storage manager): one switch at a time per key (task 70 review, B1). A
+   * call made while one runs joins it. Absent: keyed by remoteUrl.
+   */
+  key?: object;
   /** Name of the active store's endpoint, undefined when the device's own store is active. */
   activeRemoteUrl: () => string | undefined;
   setActiveStorage: (target: 'local' | string) => Promise<void>;
@@ -126,11 +131,41 @@ export type SwitchResult =
   | { ok: true; remote: StoreSummary; local: StoreSummary }
   | { ok: false; reason: string; remote?: StoreSummary; local?: StoreSummary; activeIsRemote: boolean };
 
+/** The switch running for each store (SwitchDeps.key), so every caller joins it rather than start a second copy. */
+const runningSwitches = new Map<unknown, { remoteUrl: string; run: Promise<SwitchResult> }>();
+
 /**
  * Make the device's store active only once it holds everything the remote holds. On any failure the remote is
  * (made) active again, so the wallet keeps showing the remote's records.
+ *
+ * Never two at once for one store (task 70 review, B1: Recover-mined and Restore from backup started a second copy
+ * beside the one a send or the open had started). A call while one runs for the same backup gets that run's result;
+ * one for a different backup waits for it to finish, then runs.
  */
-export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult> {
+export function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult> {
+  const key = d.key ?? d.remoteUrl;
+  const cur = runningSwitches.get(key);
+  if (cur && cur.remoteUrl === d.remoteUrl) {
+    d.log?.('[restore] a switch to this device is already running: joining it');
+    return cur.run;
+  }
+  const run = cur
+    ? cur.run.then(
+        () => switchOnce(d),
+        () => switchOnce(d),
+      )
+    : switchOnce(d);
+  const entry = { remoteUrl: d.remoteUrl, run };
+  runningSwitches.set(key, entry);
+  const clear = () => {
+    if (runningSwitches.get(key) === entry) runningSwitches.delete(key);
+  };
+  run.then(clear, clear);
+  return run;
+}
+
+/** One switch; onFinished always runs last, whatever the outcome. */
+async function switchOnce(d: SwitchDeps): Promise<SwitchResult> {
   try {
     return await switchVerified(d);
   } finally {
