@@ -12,7 +12,7 @@ import {
   type ContractDescriptor,
   type ContractEnvelope,
 } from './contractNft';
-import { copiedFrom, publishContract, type ContractListing } from './market';
+import { ContractsApiError, copiedFrom, publishContract, type ContractListing } from './market';
 
 /** Contract identity is the code (with no code: the normalised fields and name), not the free text (b-Aware row 352). */
 const person = (n: number) => {
@@ -244,33 +244,42 @@ describe('round 4 of the row 352 review, F3: the author’s code is never rewrit
 });
 
 describe('round 4 of the row 352 review, F2: a retried publish lists the same mint, never a second one', () => {
-  const setup = (answers: (string | null)[]) => {
+  const NOT_YET =
+    'Someone listed this text moments before you. Try again in a few minutes, once your contract has confirmed.';
+  /** Catalogue answers in order: null = listed, a string = a network failure, [status, message] = a refusal. */
+  type Answer = null | string | [number, string];
+  const setup = (answers: Answer[]) => {
     const minted: string[] = [];
     const posted: string[] = [];
+    /** Outpoints this account holds; a test can drop one (never broadcast, spent). */
+    const held = new Set<string>();
     const deps = {
       mintJson: async () => {
         const outpoint = `${'ab'.repeat(32)}_${minted.length}`;
         minted.push(outpoint);
+        held.add(outpoint);
         return outpoint;
       },
-      prove: async () => ({ message: 'm', pubkey_hex: 'k', signature: 's' }),
+      prove: async (_ctx: unknown, _action: string, outpoint: string) => {
+        if (!held.has(outpoint)) throw new Error("Couldn't find the minted output");
+        return { message: 'm', pubkey_hex: 'k', signature: 's' };
+      },
       post: async (body: unknown) => {
         posted.push((body as { outpoint: string }).outpoint);
         const answer = answers.shift();
-        if (answer) throw new Error(answer);
+        if (typeof answer === 'string') throw new Error(answer);
+        if (answer) throw new ContractsApiError(answer[1], answer[0]);
         return { ok: true };
       },
+      owned: async () => [...held],
     } as unknown as Parameters<typeof publishContract>[3];
-    return { minted, posted, deps, ctx: { wallet: ann.wallet } as unknown as OneSatContext };
+    return { minted, posted, held, deps, ctx: { wallet: ann.wallet } as unknown as OneSatContext };
   };
   const listing = (summary: string) =>
     env(ann, {}, asDescriptor(F.descriptor({ source: F.SRC, codeHash: F.HASH, summary })));
 
-  test('the first POST fails (409, try again once confirmed): the retry posts the same outpoint', async () => {
-    const { minted, posted, deps, ctx } = setup([
-      'Someone listed this text moments before you. Try again in a few minutes, once your contract has confirmed.',
-      null,
-    ]);
+  test('409 "once your contract has confirmed": the retry posts the same outpoint, no new mint', async () => {
+    const { minted, posted, deps, ctx } = setup([[409, NOT_YET], null]);
     const e = listing('retry after 409');
     await expect(publishContract(ctx, e, 'ann@bwallet.space', deps)).rejects.toThrow(/moments before you/);
     expect(await publishContract(ctx, e, 'ann@bwallet.space', deps)).toBe(minted[0]);
@@ -278,14 +287,63 @@ describe('round 4 of the row 352 review, F2: a retried publish lists the same mi
     expect(posted).toEqual([minted[0], minted[0]]);
   });
 
-  test('a lost answer ("Already published") counts as listed; a network failure keeps the mint for the retry', async () => {
-    const { minted, posted, deps, ctx } = setup(['Failed to fetch', 'Already published']);
+  test('503, then a network failure: the same outpoint is retried, no new mint', async () => {
+    const { minted, posted, deps, ctx } = setup([[503, 'Couldn’t check the chain just now.'], 'Failed to fetch', null]);
+    const e = listing('retry after 503');
+    await expect(publishContract(ctx, e, undefined, deps)).rejects.toThrow('chain');
+    await expect(publishContract(ctx, e, undefined, deps)).rejects.toThrow('Failed to fetch');
+    expect(await publishContract(ctx, e, undefined, deps)).toBe(minted[0]);
+    expect(minted).toHaveLength(1);
+    expect(posted).toEqual([minted[0], minted[0], minted[0]]);
+  });
+
+  test('a lost answer ("Already published") counts as listed', async () => {
+    const { minted, deps, ctx } = setup(['Failed to fetch', [409, 'Already published']]);
     const e = listing('retry after a lost answer');
     await expect(publishContract(ctx, e, undefined, deps)).rejects.toThrow('Failed to fetch');
     expect(await publishContract(ctx, e, undefined, deps)).toBe(minted[0]);
     expect(minted).toHaveLength(1);
-    expect(posted).toEqual([minted[0], minted[0]]);
   });
+
+  test('a stale record (the outpoint is no longer held) is dropped: one fresh mint, then listed', async () => {
+    const { minted, posted, held, deps, ctx } = setup([[503, 'down'], null]);
+    const e = listing('stale record');
+    await expect(publishContract(ctx, e, undefined, deps)).rejects.toThrow('down');
+    held.delete(minted[0]); // never broadcast, spent, or the guessed outpoint was wrong
+    expect(await publishContract(ctx, e, undefined, deps)).toBe(minted[1]);
+    expect(minted).toHaveLength(2);
+    expect(posted).toEqual([minted[0], minted[1]]);
+  });
+
+  test('a mint whose output never shows up (prove fails) does not stick: the next try mints again', async () => {
+    const { minted, held, deps, ctx } = setup([null]);
+    const mint = deps.mintJson;
+    let first = true;
+    deps.mintJson = (async (...args: Parameters<typeof mint>) => {
+      const outpoint = await mint(...args);
+      if (first) held.delete(outpoint); // the first mint was never broadcast
+      first = false;
+      return outpoint;
+    }) as typeof mint;
+    const e = listing('never broadcast');
+    await expect(publishContract(ctx, e, undefined, deps)).rejects.toThrow("Couldn't find the minted output");
+    expect(await publishContract(ctx, e, undefined, deps)).toBe(minted[1]);
+    expect(minted).toHaveLength(2);
+  });
+
+  for (const [status, message] of [
+    [400, 'That output isn’t a contract inscription'],
+    [403, 'Not your output'],
+    [409, 'This contract is already listed by another author'],
+  ] as [number, string][])
+    test(`a final ${status} drops the record: publishing again is a fresh mint`, async () => {
+      const { minted, posted, deps, ctx } = setup([[status, message], null]);
+      const e = listing(`final ${status}`);
+      await expect(publishContract(ctx, e, undefined, deps)).rejects.toThrow(message);
+      await publishContract(ctx, e, undefined, deps);
+      expect(minted).toHaveLength(2);
+      expect(posted).toEqual(minted);
+    });
 
   test('once listed, the record is gone: publishing again is a new listing (a new mint)', async () => {
     const { minted, posted, deps, ctx } = setup([null, null]);

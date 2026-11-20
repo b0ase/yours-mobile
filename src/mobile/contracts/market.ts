@@ -32,13 +32,23 @@ export type ContractListing = {
   createdAt: string;
 };
 
+/** The catalogue's refusal, with its HTTP status (publishContract keeps or drops a pending publish by it). */
+export class ContractsApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 const api = async <T>(init?: RequestInit, query = ''): Promise<T> => {
   const r = await fetch(`${CONTRACTS_API}${query}`, {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
   });
   const j = (await r.json().catch(() => ({}))) as T & { error?: string };
-  if (!r.ok) throw new Error(j.error || `Contracts catalogue answered ${r.status}`);
+  if (!r.ok) throw new ContractsApiError(j.error || `Contracts catalogue answered ${r.status}`, r.status);
   return j;
 };
 
@@ -103,17 +113,37 @@ const publishFingerprint = (identityKey: string, env: ContractEnvelope, handle?:
  * code hash in lower case), so the catalogue can find a later copy of it by that one form (final review of row 352,
  * F1). A source with lookalike or compatibility characters, or a paid one without a source or whose code hash isn't
  * its source's sha256, is refused before anything is signed or minted. If this exact envelope was already minted by
- * this account and not yet listed (pendingPublishes), that same outpoint is listed again: never a second mint.
- * `deps` is for tests.
+ * this account and not yet listed (pendingPublishes), that same outpoint is listed again: never a second mint. The
+ * record is reused only while this account still holds that outpoint (ownedContractOutpoints): a mint that was never
+ * broadcast, was spent, or whose outpoint was guessed wrong is dropped and minted again. It is kept only for answers
+ * that a retry can change (503, a network failure, 409 "not yet confirmed", anything else unexpected) and dropped on
+ * a final one (400, 403, or 409 refused as a copy): a retry of that same mint could never be listed (follow-up to
+ * round 4 of the row 352 review). `deps` is for tests.
  */
+/**
+ * A catalogue answer no retry of the same mint can change: 400 (the inscription is refused), 403 (not ours), or a 409
+ * that refuses it as a copy. A 409 "…once your contract has confirmed" can change once the mint confirms.
+ */
+const finalRefusal = (e: unknown) =>
+  e instanceof ContractsApiError &&
+  (e.status === 400 ||
+    e.status === 403 ||
+    (e.status === 409 && !e.message.includes('once your contract has confirmed')));
+
 export const publishContract = async (
   ctx: OneSatContext,
   env: ContractEnvelope,
   handle?: string,
-  deps: { mintJson: typeof mintJson; prove: typeof prove; post: (body: unknown) => Promise<unknown> } = {
+  deps: {
+    mintJson: typeof mintJson;
+    prove: typeof prove;
+    post: (body: unknown) => Promise<unknown>;
+    owned: (ctx: OneSatContext) => Promise<string[]>;
+  } = {
     mintJson,
     prove,
     post: (body) => api({ method: 'POST', body: JSON.stringify(body) }),
+    owned: ownedContractOutpoints,
   },
 ) => {
   const normal: ContractEnvelope = { ...env, contract: normaliseContract(env.contract) };
@@ -123,6 +153,10 @@ export const publishContract = async (
   const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
   const fp = publishFingerprint(publicKey, normal, handle);
   let outpoint = pendingPublishes.get(fp);
+  if (outpoint && !(await deps.owned(ctx)).includes(outpoint)) {
+    pendingPublishes.delete(fp);
+    outpoint = undefined;
+  }
   if (!outpoint) {
     const signed = await signContractEnvelope(ctx.wallet, normal, handle);
     outpoint = await deps.mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed));
@@ -133,7 +167,10 @@ export const publishContract = async (
     await deps.post({ action: 'publish', outpoint, ...proof });
   } catch (e) {
     // Listed by an earlier try whose answer was lost: done.
-    if (!(e instanceof Error && e.message === 'Already published')) throw e;
+    if (!(e instanceof Error && e.message === 'Already published')) {
+      if (finalRefusal(e)) pendingPublishes.delete(fp);
+      throw e;
+    }
   }
   pendingPublishes.delete(fp);
   return outpoint;
