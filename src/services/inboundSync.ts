@@ -175,12 +175,6 @@ export type InboundVerifier = {
   owns(row: OutputRow, scriptHex: string): Promise<boolean>;
   /** The chain's word on an outpoint "txid.vout" (WhatsOnChain /spent). */
   spent(outpoint: string): Promise<SpendState>;
-  /**
-   * The same question for many outpoints in one call (the 1Sat stack's bulk lookup). A fast negative only (task 69
-   * review, A1): its 'spent' holds a coin once, briefly; it never admits or refuses one. Every coin is admitted or
-   * refused on `spent` alone, as before. Absent: `spent` alone.
-   */
-  spentMany?(outpoints: string[]): Promise<Map<string, SpendState>>;
   /** A row's record (customInstructions) as JSON, decrypting what the permissions manager encrypted. */
   readRecord?(customInstructions: string): Promise<Record<string, unknown> | undefined>;
   /**
@@ -932,8 +926,6 @@ export type PendingAdmission = Admission & {
   tries: number;
   /** When the chain first said this coin is spent: asked once more an hour later (a mempool spend can be dropped). */
   spentAt?: number;
-  /** The 1Sat bulk lookup held this coin once (it said spent): from now on only `spent` is asked, as before task 69. */
-  bulkHeld?: boolean;
   /**
    * What the last wait was for: 'row' when this device had no row for it yet (its page not merged), else 'other'.
    * Missing on entries written before 6 Nov 2026.
@@ -1104,14 +1096,15 @@ export type AdmitReport = {
   nextAt?: number;
 };
 
-/** Entries one run looks at (one bulk spends lookup's worth). Each costs at most three single chain calls. */
+/**
+ * Entries one run looks at. Each costs at most three single chain calls; UNCLEAR_STOP ends the asking early when the
+ * chain stops answering.
+ */
 const RUN_LIMIT = 100;
 /** An unclear chain answer: asked again after these (then the doubling wait). It never ends the run. */
 const UNCLEAR_RETRY_MS = [5_000, 15_000];
 /** Unclear chain answers in a row after which a run asks the chain nothing more (task 69 review, A4: a WoC outage). */
 const UNCLEAR_STOP = 3;
-/** How long a coin the bulk lookup calls spent is held before `spent` is asked about it (once per coin). */
-const BULK_SPENT_HOLD_MS = 5_000;
 const FIRST_WAIT_MS = 60_000;
 const MAX_WAIT_MS = 6 * 3_600_000;
 const SPENT_RECHECK_MS = 3_600_000;
@@ -1537,14 +1530,6 @@ async function admitOnce(
     if (local === null) return refuse(e, "the stored transaction doesn't hash to its txid");
     if (local && !sameOutput(local.outputs[vout], row, script))
       return refuse(e, 'the row differs from its transaction');
-    // The bulk lookup is a fast negative only (A1): its 'spent' holds the coin once, for a few seconds, and is never
-    // counted toward the spent-twice refusal; its 'unspent' counts for nothing. Whether the coin is spent is decided
-    // by the single lookup (WhatsOnChain, then the 1Sat stack), exactly as before task 69.
-    if (!e.bulkHeld && (await bulkSpent(`${e.txid}.${vout}`))?.state === 'spent') {
-      await list.put({ ...e, bulkHeld: true, waitingFor: 'other', nextAt: now + BULK_SPENT_HOLD_MS });
-      report.waiting++;
-      return;
-    }
     const st = heard(await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' })));
     if (st.state === 'unclear') return unclearWait(e);
     if (st.state === 'spent') {
@@ -1590,16 +1575,6 @@ async function admitOnce(
     return finish(e, ok ? 'admitted' : 'refused');
   };
 
-  // One bulk spends lookup for this run's coins (up to 100 outpoints a call), made when the first coin reaches the
-  // spent check. A3: its answers are read for the rest of the run (up to ~100 s later), so one may be stale; that is
-  // fine because they only ever hold a coin for a few seconds (A1), never admit or refuse one.
-  let bulk: Promise<Map<string, SpendState> | undefined> | undefined;
-  const ops = due.filter((e) => e.kind === 'coin').map((e) => `${e.txid}.${e.vout ?? 0}`);
-  const bulkSpent = async (op: string) => {
-    if (!v.spentMany || !ops.length) return undefined;
-    bulk ??= v.spentMany(ops).catch(() => undefined);
-    return (await bulk)?.get(op);
-  };
   for (const e of due) {
     // A4: after UNCLEAR_STOP unclear answers in a row (WhatsOnChain down or rate-limited) the run asks nothing more;
     // the rest are looked at again in 5 s, their back-off untouched, so outage runs don't each make ~100 calls.

@@ -1,17 +1,16 @@
 /**
- * After a restore: plain BSV coins are checked first, newest first, in bulk, and an unclear answer is a short retry
- * that never stops the run (task 69). Local only: fake-indexeddb for the admission list, an in-memory device store,
+ * After a restore: plain BSV coins are checked first, newest first, and an unclear answer is a short retry that never
+ * stops the run; three in a row stop the asking (task 69). Each coin gets exactly the per-coin checks it always had. Local only: fake-indexeddb for the admission list, an in-memory device store,
  * a stub chain. 3,000 outputs: 2,950 ordinals (oldest in the list) and 50 plain coins. Nothing here reaches a network.
  *
- * The stub counts chain calls and prices them as the real limits do (WhatsOnChain 3 a second app-wide, one second per
- * bulk 1Sat call) so a run's time is measured, not guessed.
+ * The stub counts chain calls and prices them as the real limit does (WhatsOnChain 3 a second app-wide) so a run's
+ * time is measured, not guessed.
  */
 import 'fake-indexeddb/auto';
 import { describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, Script, Transaction } from '@bsv/sdk';
 import { admissionListFor, admitPending, type InboundVerifier, type PendingAdmission } from './inboundSync';
 import type { SpendState } from './unsentExpiry';
-import { oneSatChainLookups } from './chainSources';
 
 const ID = '02' + 'ab'.repeat(32);
 const PLAIN = 50;
@@ -19,20 +18,12 @@ const ORDINALS = 2950;
 
 type Chain = 'unspent' | 'spent' | 'unclear';
 
-function build(opts: {
-  bulk: boolean;
-  unclearPlain?: Set<number>;
-  spentPlain?: Set<number>;
-  unknownPlain?: Set<number>;
-  /** What the 1Sat bulk lookup says about these plain coins, where it disagrees with the single lookup. */
-  bulkSays?: Map<number, Chain>;
-}) {
+function build(opts: { unclearPlain?: Set<number>; spentPlain?: Set<number>; unknownPlain?: Set<number> }) {
   const sik = `sik-${Math.random()}`;
   const key = PrivateKey.fromRandom();
   const outputs: Record<string, unknown>[] = [];
   const txs: Record<string, unknown>[] = [];
   const answer = new Map<string, Chain>();
-  const bulkAnswer = new Map<string, Chain>();
   const unknownTx = new Set<string>();
   const entries: PendingAdmission[] = [];
   const plainOps: string[] = [];
@@ -74,8 +65,6 @@ function build(opts: {
       plainOps.push(op);
       answer.set(op, opts.spentPlain?.has(i) ? 'spent' : opts.unclearPlain?.has(i) ? 'unclear' : 'unspent');
       if (opts.unknownPlain?.has(i)) unknownTx.add(txid);
-      const b = opts.bulkSays?.get(i);
-      if (b) bulkAnswer.set(op, b);
     } else answer.set(op, 'unspent');
     // Listed oldest first, ordinals before the plain coins: today's order checks the 2,950 ordinals first.
     entries.push({
@@ -126,10 +115,10 @@ function build(opts: {
     },
     updateTransaction: async () => undefined,
   };
-  const calls = { single: 0, bulk: 0, bulkOutpoints: 0, known: 0 };
+  const calls = { single: 0, known: 0 };
   let plainDoneAt: typeof calls | undefined;
-  const read = (op: string, from = answer): SpendState => {
-    const a = from.get(op) ?? answer.get(op)!;
+  const read = (op: string): SpendState => {
+    const a = answer.get(op)!;
     return a === 'spent'
       ? { state: 'spent', by: 'ab'.repeat(32) }
       : a === 'unspent'
@@ -141,15 +130,6 @@ function build(opts: {
     spent: async (op) => (calls.single++, read(op)),
     txKnown: async (txid) => (calls.known++, unknownTx.has(txid) ? 'unknown' : 'known'),
     chainTx: async () => ({ state: 'unclear' }),
-    ...(opts.bulk
-      ? {
-          spentMany: async (ops: string[]) => {
-            calls.bulk += Math.ceil(ops.length / 100);
-            calls.bulkOutpoints += ops.length;
-            return new Map(ops.map((o) => [o, read(o, bulkAnswer)]));
-          },
-        }
-      : {}),
   };
   return { store, verifier, entries, outputs, answer, calls, sik, plainOps, t0, plainDone: () => plainDoneAt };
 }
@@ -164,14 +144,12 @@ async function load(w: ReturnType<typeof build>) {
 }
 
 /** Virtual seconds one run's chain calls take under the real limits. */
-const seconds = (
-  c: { single: number; known: number; bulk: number },
-  since: { single: number; known: number; bulk: number },
-) => (c.single - since.single + (c.known - since.known)) / 3 + (c.bulk - since.bulk);
+const seconds = (c: { single: number; known: number }, since: { single: number; known: number }) =>
+  (c.single - since.single + (c.known - since.known)) / 3;
 
 describe('task 69: after a restore, plain coins first', () => {
   test('with 3,000 outputs every plain coin is admitted in the first batch, and the time is measured', async () => {
-    const w = build({ bulk: true });
+    const w = build({});
     await load(w);
     // The scenario is the bad one: today's order (oldest first) puts no plain coin in the first batch.
     const oldFirst = [...w.entries].sort((a, b) => a.nextAt - b.nextAt).slice(0, 100);
@@ -186,12 +164,10 @@ describe('task 69: after a restore, plain coins first', () => {
       if (r.left === 0) break;
     }
     expect(spendableCount(w, true)).toBe(PLAIN);
-    expect(runs).toBe(1); // one batch of 100 outpoints covers all 50 plain coins
-    expect(w.calls.bulkOutpoints).toBe(100);
-    expect(w.calls.bulk).toBe(1);
-    // Chain time until the 50th plain coin was spendable: 50 coins × 2 single WhatsOnChain calls (spent, then txKnown;
-    // the bulk "unspent" counts for nothing, review A1) at 3 a second, plus one bulk call.
-    const zero = { single: 0, known: 0, bulk: 0 };
+    expect(runs).toBe(1); // one run of 100 entries covers all 50 plain coins
+    // Chain time until the 50th plain coin was spendable: 50 coins × 2 WhatsOnChain calls (spent, then txKnown) at 3 a
+    // second. The same per-coin checks as before; only the order changed.
+    const zero = { single: 0, known: 0 };
     const virtual = seconds(w.plainDone()!, zero);
     expect(virtual).toBeLessThan(40);
     console.log(
@@ -201,7 +177,7 @@ describe('task 69: after a restore, plain coins first', () => {
 
   test('an unclear answer is a short retry and never stops the rest of the run', async () => {
     const unclear = new Set([3, 7]);
-    const w = build({ bulk: true, unclearPlain: unclear });
+    const w = build({ unclearPlain: unclear });
     await load(w);
     const now = w.t0 + 60_000;
     const r1 = await admitPending(w.store as never, ID, w.verifier, { now: () => now });
@@ -223,7 +199,7 @@ describe('task 69: after a restore, plain coins first', () => {
   }, 60_000); // real fake-indexeddb work for 3,000 entries: over bun's 5 s default in a loaded full run (review A5)
 
   test('a coin the chain says is spent, or whose transaction is unknown, is still not admitted', async () => {
-    const w = build({ bulk: true, spentPlain: new Set([1]), unknownPlain: new Set([2]) });
+    const w = build({ spentPlain: new Set([1]), unknownPlain: new Set([2]) });
     await load(w);
     const now = w.t0 + 60_000;
     await admitPending(w.store as never, ID, w.verifier, { now: () => now });
@@ -231,16 +207,11 @@ describe('task 69: after a restore, plain coins first', () => {
     expect(spendable.has(w.plainOps[1])).toBe(false);
     expect(spendable.has(w.plainOps[2])).toBe(false);
     expect(spendableCount(w, true)).toBe(PLAIN - 2);
-    // A bulk answer that is unclear falls back to the single lookup; a missing bulk method behaves as before.
-    const w2 = build({ bulk: false, spentPlain: new Set([1]) });
-    await load(w2);
-    await admitPending(w2.store as never, ID, w2.verifier, { now: () => w2.t0 + 60_000 });
-    expect(spendableCount(w2, true)).toBe(PLAIN - 1);
-    expect(w2.calls.single).toBe(100);
+    expect(w.calls.single).toBe(100); // every coin of the run asked one by one
   }, 60_000);
 
   test('the tokens-and-names tail still drains: every batch after is ordinals, each checked', async () => {
-    const w = build({ bulk: true });
+    const w = build({});
     await load(w);
     const now = w.t0 + 60_000;
     let runs = 0;
@@ -254,75 +225,10 @@ describe('task 69: after a restore, plain coins first', () => {
   }, 120_000);
 });
 
-describe('task 69 review: the bulk lookup only ever holds a coin; a WhatsOnChain outage stops the run', () => {
-  /** Plain coins spendable, and the admission entries of the plain coins `idx`, as times relative to the start. */
-  const view = async (w: ReturnType<typeof build>, idx: number[], start: number) => {
-    const list = await admissionListFor(w.sik).list(ID);
-    const spendable = w.plainOps
-      .map((op, i) => (w.outputs.find((o) => `${o.txid}.${o.vout}` === op)!.spendable === true ? i : -1))
-      .filter((i) => i >= 0);
-    const entries = idx.map((i) => {
-      const e = list.find((x) => `${x.txid}.${x.vout}` === w.plainOps[i]);
-      return e ? { spentAt: e.spentAt === undefined ? undefined : e.spentAt - start } : 'gone';
-    });
-    return { spendable, entries };
-  };
-
-  test('A1: 1Sat bulk "unspent" + WhatsOnChain "spent": held, then refused, exactly as without the bulk lookup', async () => {
-    const withBulk = build({ bulk: true, spentPlain: new Set([4]), bulkSays: new Map([[4, 'unspent']]) });
-    const base = build({ bulk: false, spentPlain: new Set([4]) });
-    await load(withBulk);
-    await load(base);
-    const start = withBulk.t0 + 60_000;
-    for (const at of [0, 5_000, 3_600_000 + 5_000]) {
-      for (const w of [withBulk, base]) await admitPending(w.store as never, ID, w.verifier, { now: () => start + at });
-      expect(await view(withBulk, [4], start)).toEqual(await view(base, [4], start));
-      expect((await view(withBulk, [4], start)).spendable).not.toContain(4);
-    }
-    // Asked an hour apart, both times spent: refused (gone from the list), never admitted.
-    expect((await view(withBulk, [4], start)).entries).toEqual(['gone']);
-  }, 120_000);
-
-  test('A1: 1Sat bulk "spent" + WhatsOnChain "unspent": one 5 s hold, then admitted on the single lookup as before', async () => {
-    const withBulk = build({ bulk: true, bulkSays: new Map([[5, 'spent']]) });
-    const base = build({ bulk: false });
-    await load(withBulk);
-    await load(base);
-    const start = withBulk.t0 + 60_000;
-    await admitPending(withBulk.store as never, ID, withBulk.verifier, { now: () => start });
-    await admitPending(base.store as never, ID, base.verifier, { now: () => start });
-    const held = await view(withBulk, [5], start);
-    expect(held.spendable).not.toContain(5);
-    expect(held.entries).toEqual([{ spentAt: undefined }]); // never counted toward the spent-twice refusal
-    await admitPending(withBulk.store as never, ID, withBulk.verifier, { now: () => start + 5_000 });
-    await admitPending(base.store as never, ID, base.verifier, { now: () => start + 5_000 });
-    expect(await view(withBulk, [5], start)).toEqual(await view(base, [5], start));
-    expect((await view(withBulk, [5], start)).spendable).toContain(5);
-  }, 120_000);
-
-  test('A2: a reordered 1Sat bulk answer cannot admit a spent coin', async () => {
-    const w = build({ bulk: false, spentPlain: new Set([1]) });
-    // The 1Sat stack answers the batch in reverse order: by position the spent coin would read "unspent".
-    const said = (op: string) => (w.answer.get(op) === 'spent' ? 'ab'.repeat(32) : null);
-    const svc = {
-      txo: {
-        getSpends: async (ops: string[]) => [...ops].reverse().map(said),
-        request: async (_p: string, init?: RequestInit) =>
-          (JSON.parse(String(init?.body)) as string[]).reverse().map((o) => ({ outpoint: o, spendTxid: said(o) })),
-      },
-      beef: { getRawTx: async () => [] },
-    };
-    w.verifier.spentMany = oneSatChainLookups(svc)!.spentMany;
-    await load(w);
-    const start = w.t0 + 60_000;
-    await admitPending(w.store as never, ID, w.verifier, { now: () => start });
-    expect((await view(w, [1], start)).spendable).not.toContain(1);
-    expect(spendableCount(w, true)).toBe(PLAIN - 1);
-  }, 60_000);
-
+describe('task 69 review: a WhatsOnChain outage stops the run', () => {
   test('A4: three unclear answers in a row and the run asks nothing more; the rest wait 5 s', async () => {
     const all = new Set(Array.from({ length: PLAIN }, (_, i) => i));
-    const w = build({ bulk: true, unclearPlain: all });
+    const w = build({ unclearPlain: all });
     await load(w);
     const start = w.t0 + 60_000;
     const r = await admitPending(w.store as never, ID, w.verifier, { now: () => start });

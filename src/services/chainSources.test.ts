@@ -64,47 +64,6 @@ describe('oneSatChainLookups', () => {
     expect(await make(async () => Promise.reject(httpError(503))).txKnown(txid)).toBe('unclear');
     expect(await make(async () => realTx().toBinary()).txKnown(txid)).toBe('unclear');
   });
-  test('task 69 review A2: bulk spends are keyed by each row’s own outpoint, never by position', async () => {
-    const by = 'ef'.repeat(32);
-    const spentOp = `${'ab'.repeat(32)}.0`;
-    const freeOp = `${'cd'.repeat(32)}.1`;
-    const otherOp = `${'ee'.repeat(32)}.2`;
-    // The server answers out of order (free first). getSpends, like TxoClient's, keeps only spendTxid by position.
-    const rows = [
-      { outpoint: freeOp.replace('.', '_'), spendTxid: null },
-      { outpoint: spentOp, spendTxid: by },
-      { outpoint: otherOp, spendTxid: null }, // never asked: ignored
-    ];
-    const s = oneSatChainLookups({
-      txo: {
-        getSpends: async () => rows.map((r) => r.spendTxid),
-        request: async (path: string) => (path === '/spends' ? rows : undefined),
-      },
-      beef: { getRawTx: async () => [] },
-    })!;
-    const m = await s.spentMany!([spentOp, freeOp]);
-    expect(m.get(spentOp)).toEqual({ state: 'spent', by });
-    expect(m.get(freeOp)).toEqual({ state: 'unspent' });
-    expect(m.has(otherOp)).toBe(false);
-    // Rows that name no outpoint (the live 1sat-stack's SpendResponse), or name one twice: no answer, all unclear.
-    const bare = oneSatChainLookups({
-      txo: { getSpends: async () => [by, null], request: async () => [{ spendTxid: by }, { spendTxid: null }] },
-      beef: { getRawTx: async () => [] },
-    })!;
-    const b = await bare.spentMany!([spentOp, freeOp]);
-    expect([b.get(spentOp), b.get(freeOp)]).toEqual([{ state: 'unclear' }, { state: 'unclear' }]);
-    const twice = oneSatChainLookups({
-      txo: {
-        request: async () => [
-          { outpoint: spentOp, spendTxid: null },
-          { outpoint: spentOp, spendTxid: by },
-        ],
-        getSpends: async () => [],
-      },
-      beef: { getRawTx: async () => [] },
-    })!;
-    expect((await twice.spentMany!([spentOp])).get(spentOp)).toEqual({ state: 'unclear' });
-  });
   test('services without the 1Sat clients: no second source', () => {
     expect(oneSatChainLookups({})).toBeUndefined();
     expect(oneSatChainLookups(undefined)).toBeUndefined();
