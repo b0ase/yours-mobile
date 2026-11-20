@@ -189,7 +189,7 @@ export const REQ_SENDABLE = new Set(['unprocessed', 'unsent', 'sending']);
  * rebroadcast limit. None of those fields is a page's to set: this device counts its own attempts and has broadcast
  * nothing it did not send itself.
  */
-const freshProofState = (q: ReqRow) => {
+export const freshProofState = (q: ReqRow) => {
   q.attempts = 0;
   q.wasBroadcast = false;
   q.rebroadcastAttempts = 0;
@@ -212,7 +212,7 @@ function trimInputBeef(row: { inputBEEF?: Bytes | null }, rawTx: Bytes | null | 
   return true;
 }
 /** See verifyInboundChunk: a page's rows carry only their own bytes. Mutates the page; returns what it changed. */
-function sanitizeRows(chunk: SyncChunk) {
+export function sanitizeRows(chunk: SyncChunk) {
   const out = { reqsDropped: 0, rawCleared: 0, beefTrimmed: 0 };
   for (const t of chunk.transactions ?? []) {
     if (!t) continue;
@@ -2282,6 +2282,25 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       delete proto[CHECKPOINT];
     }
   };
+}
+
+/**
+ * The toolbox's own processSyncChunk for this store, without the guard above (services/spendableFirst.ts only).
+ *
+ * The spendable-first restore merges our storage server's snapshot pages under their own sync state. Those pages are
+ * checked by spendableFirst.ts instead (shape, identity, proofs against headers, token scripts), and every coin they
+ * bring is checked again before it is ever signed for (verified BEEF, its output's satoshis and script). Nothing else
+ * may call this: every other merge goes through the guard. Without the guard installed it is the store's own method.
+ */
+export function unguardedProcessSyncChunk(store: object): (args: unknown, chunk: unknown) => Promise<unknown> {
+  const proto = Object.getPrototypeOf(store) as Record<string | symbol, unknown> | null;
+  const original = proto?.[INSTALLED];
+  const own = (store as { processSyncChunk?: unknown }).processSyncChunk;
+  const fn = (typeof original === 'function' ? original : own) as
+    | ((this: object, args: unknown, chunk: unknown) => Promise<unknown>)
+    | undefined;
+  if (typeof fn !== 'function') throw new Error('this store has no processSyncChunk');
+  return (args, chunk) => fn.call(store, args, chunk);
 }
 
 /** Test hook: take the guard off this class again, whoever installed it (a test that ran the real initWallet). */

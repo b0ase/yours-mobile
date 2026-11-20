@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Smartphone } from 'lucide-react';
-import { moveStatusSend, nextTryText, noticePollMs } from './moveToDevice';
+import { moveNoticeShows, moveStatusSend, nextTryText, noticePollMs } from './moveToDevice';
 
 /** What the background says about moving this account's records to this device (STORAGE_MOVE_STATUS). */
 export type MoveStatus = {
@@ -9,6 +9,8 @@ export type MoveStatus = {
   failures: number;
   nextRetryAt: number;
   reason: string | null;
+  /** An instant restore is loading (services/spendableFirst.ts): the notice stays hidden. */
+  snapshotLoading?: boolean;
 };
 
 type Answer = { success?: boolean; data?: MoveStatus; error?: string } | undefined;
@@ -44,7 +46,7 @@ export const MoveToDeviceNotice = ({
     return () => clearInterval(t);
   }, [load, every]);
 
-  if (!status || status.onDevice) return null;
+  if (!status || !moveNoticeShows(status)) return null;
 
   const retry = async () => {
     setBusy(true);

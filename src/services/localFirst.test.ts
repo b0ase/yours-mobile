@@ -444,3 +444,57 @@ describe("task 70 review: one switch for every caller (B1), the move's own count
     expect(errorLayout(movingMessage(null)).error).toBe(movingMessage(null));
   });
 });
+
+describe('instant restore (services/spendableFirst.ts) in ensureLocalStore', () => {
+  const OURS = 'https://storage.bwalletx.com';
+
+  test('used on a remote-active restore: no verified copy, saved local-first with our server added as a backup', async () => {
+    const { state, deps } = harness({ activeRemote: REMOTE, remotes: [REMOTE] });
+    const asked: string[] = [];
+    deps.spendableFirst = async (url) => {
+      asked.push(url);
+      state.local = true; // the snapshot path makes the device store active itself
+      return { used: true, remotes: [OURS] };
+    };
+    expect(await ensureLocalStore(deps)).toEqual({ ok: true, how: 'snapshot' });
+    expect(asked).toEqual([REMOTE]);
+    expect(state.switches).toBe(0);
+    expect(state.saved).toEqual([{ activeRemote: undefined, remotes: [REMOTE, OURS], localFirst: true }]);
+  });
+
+  test('not used (or throws): exactly the path without it, step for step', async () => {
+    const run = async (snap?: EnsureLocalDeps['spendableFirst']) => {
+      const h = harness({ activeRemote: REMOTE, remotes: [REMOTE] });
+      if (snap) h.deps.spendableFirst = snap;
+      const r = await ensureLocalStore(h.deps);
+      return { r, switches: h.state.switches, saved: h.state.saved, failed: h.state.failed };
+    };
+    const without = await run();
+    expect(await run(async () => ({ used: false }))).toEqual(without);
+    expect(await run(() => Promise.reject(new Error('boom')))).toEqual(without);
+    const runEmpty = async (snap?: EnsureLocalDeps['spendableFirst']) => {
+      const h = harness({ remotes: [REMOTE], localFirst: true }, { localIsEmpty: async () => true });
+      if (snap) h.deps.spendableFirst = snap;
+      const r = await ensureLocalStore(h.deps);
+      return { r, pulls: h.state.pulls, saved: h.state.saved };
+    };
+    expect(await runEmpty(async () => ({ used: false }))).toEqual(await runEmpty());
+  });
+
+  test('an empty local-active device: the snapshot instead of the pull; our server added once', async () => {
+    const h = harness({ remotes: [REMOTE], localFirst: true }, { localIsEmpty: async () => true });
+    h.deps.spendableFirst = async () => ({ used: true, remotes: [OURS] });
+    expect(await ensureLocalStore(h.deps)).toEqual({ ok: true, how: 'snapshot' });
+    expect(h.state.pulls).toBe(0);
+    expect(h.state.saved).toEqual([{ remotes: [REMOTE, OURS], localFirst: true }]);
+    // A device that already holds rows never asks for it.
+    const full = harness({ remotes: [REMOTE], localFirst: true });
+    let asked = 0;
+    full.deps.spendableFirst = async () => {
+      asked++;
+      return { used: false };
+    };
+    expect(await ensureLocalStore(full.deps)).toEqual({ ok: true, how: 'already-local' });
+    expect(asked).toBe(0);
+  });
+});

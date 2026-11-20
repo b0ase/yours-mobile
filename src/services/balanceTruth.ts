@@ -106,7 +106,15 @@ export type BalanceTruth = {
   changeUnbacked?: number;
   /** A restored wallet is being copied to this device (services/restoreProgress.ts): display only. */
   restore?: RestoreView | null;
+  /**
+   * An instant restore (services/spendableFirst.ts) is still bringing the rest in: the balance is the snapshot's, and
+   * the card shows one calm line, never "Arriving…" or the copy's progress.
+   */
+  snapshot?: boolean;
 };
+
+/** The one line the balance card shows while an instant restore brings the rest in. */
+export const SNAPSHOT_LOADING_LINE = 'Loading older history…';
 
 export type TruthLine =
   | { kind: 'held'; text: string; sats: number; payments: HeldPayment[] }
@@ -187,11 +195,16 @@ export function truthLines(
       sats: heldSats,
       payments: held,
     });
-  const arriving = Math.max(0, Math.round(t.arrivingSats || 0));
-  if (!o.hideAmounts && arriving > 0)
-    lines.push({ kind: 'arriving', text: `Arriving from your other device: ${fmt(arriving)}`, sats: arriving });
-  // The backup's own total while the wallet moves to this device: display only, never part of the balance.
-  lines.push(...restoreLines(t.restore, fmt, o));
+  if (t.snapshot) {
+    // Instant restore: no "Arriving…" and no copy progress while the rest comes in, one calm line instead.
+    lines.push({ kind: 'progress', text: SNAPSHOT_LOADING_LINE });
+  } else {
+    const arriving = Math.max(0, Math.round(t.arrivingSats || 0));
+    if (!o.hideAmounts && arriving > 0)
+      lines.push({ kind: 'arriving', text: `Arriving from your other device: ${fmt(arriving)}`, sats: arriving });
+    // The backup's own total while the wallet moves to this device: display only, never part of the balance.
+    lines.push(...restoreLines(t.restore, fmt, o));
+  }
   const s = syncLine(t, now);
   if (s) lines.push(s);
   const b = backupLine(t);

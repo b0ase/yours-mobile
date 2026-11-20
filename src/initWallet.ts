@@ -248,6 +248,9 @@ import {
 } from './services/balanceTruth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 import { settleWithin } from './utils/settleWithin';
+import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
+import { createSpendableFirst, type OurServerClient } from './services/spendableFirstWiring';
+import { fillBackup } from './services/backupFill';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
 const WATCH_STORES_CLOSE_CAP_MS = 2000;
@@ -367,6 +370,18 @@ export interface AccountContext {
    * admitPending), whichever store is active: after a restore copy, before its counts are compared.
    */
   admitBackupRows: () => Promise<AdmitReport | undefined>;
+  /**
+   * Instant restore (services/spendableFirst.ts; flag off by default): tried first by the move to this device. Not
+   * used: today's path runs.
+   */
+  spendableFirst: (remoteUrl: string) => Promise<{ used: true; remotes: string[] } | { used: false }>;
+  /** An instant restore is still bringing the rest in: "Loading older history…", no move notice. */
+  snapshotLoading: () => boolean;
+  /**
+   * With the flag on, our storage server as a backup for this session: its user row pointed here, then its first fill
+   * (services/backupFill.ts), then registered. True once registered.
+   */
+  addOurBackup: () => Promise<boolean>;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
   backupBeforeSend: () => Promise<BackupBeforeSend>;
   /** The backup's state for the honest copy: configured, a push waiting, failures, the last good push. */
@@ -572,7 +587,10 @@ export const openAccountStorageForBackup = async (
   }
 
   const { account } = chromeStorageService.getCurrentAccountObject();
-  const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
+  const resolved = resolveStorageConfig(account?.storageConfig);
+  const { activeRemote } = resolved;
+  // Our storage server only with the instant-restore flag on (services/spendableFirst.ts): off, never connected.
+  const backups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
@@ -640,7 +658,10 @@ export const initWallet = async (
   // per-install and lazily materialized.
   const { account } = chromeStorageService.getCurrentAccountObject();
   ownStoresAccount = account?.addresses?.identityAddress;
-  const { activeRemote, backups } = resolveStorageConfig(account?.storageConfig);
+  const resolved = resolveStorageConfig(account?.storageConfig);
+  const { activeRemote } = resolved;
+  // Our storage server only with the instant-restore flag on (services/spendableFirst.ts): off, never connected.
+  const backups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
@@ -952,10 +973,16 @@ export const initWallet = async (
       { partial: { transactionId: backupTxId }, noScript: true },
     );
   };
+  /**
+   * The backup an instant restore left this session on (services/spendableFirst.ts): the account was on the remote
+   * store at open, so `backups` is empty until the next open. Empty with the flag off, so nothing below changes then.
+   */
+  let snapshotBackups: string[] = [];
   const deviceSync = createDeviceSync({
-    applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
+    applies: () => storage.isActiveStorageProvider() && ((backups?.length ?? 0) > 0 || snapshotBackups.length > 0),
     // A backup naming another store is healed first; a set-aside one only reconnects on its probe and back-off, never
     // as a second connection (services/deviceActive.ts, review 19 F1/F5).
+    // (After an instant restore the old remote is already a connected backup, so no url is needed for it.)
     ensureBackup: () => ensureBackupConnected({ storage, keep: keepActive, url: backups?.[0], addRemote }),
     // What the pull left for the chain to settle runs soon after, outside every storage lock; not awaited here (F-A).
     pull: pullThenAdmitSoon(
@@ -1059,6 +1086,42 @@ export const initWallet = async (
     log: (...a) => console.warn(...a),
     // The balance card's sync line is written by the pull itself (recordPullOk / recordPullFailed): one writer.
   });
+  // Instant restore (services/spendableFirst.ts), behind its flag (default off): inert unless it is on.
+  const spendableFirst = createSpendableFirst({
+    on: await spendableFirstOn(chrome.storage?.local as never),
+    newClient: () =>
+      new StorageClient(baseWallet as never, SNAPSHOT_SERVER_URL, {
+        binaryRequests: true,
+      } as never) as unknown as OurServerClient,
+    device: () => ownStore() as never,
+    identityKey: async () => (await storage.getAuth()).identityKey,
+    deviceActive: () => storage.isActiveStorageProvider(),
+    tracker: async () => (await toolboxServices.getChainTracker()) as never,
+    remoteDefaultCoins: async () => (await baseWallet.listOutputs({ basket: 'default', limit: 1 })).totalOutputs,
+    // No copy of the backup: the guard's 'defer' stops the switch's merge at its first page (fullPass.ts), as a heal does.
+    makeDeviceActive: () =>
+      withFullPassMode(ownSik(), 'defer', () => switchActiveAs(keepActive, setActiveStorage)('local')),
+    withLock: (fn) => storage.runAsSync(() => fn()),
+    fill: (writer, restorePoint) =>
+      fillBackup({
+        manager: storage as never,
+        reader: ownStore() as never,
+        writer: writer as never,
+        restorePoint,
+        yieldWhile: () => ownPayments.waiting(),
+      }),
+    addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
+    owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
+    kv: {
+      get: (k) => chrome.storage.local.get(k) as Promise<Record<string, unknown>>,
+      set: (items) => chrome.storage.local.set(items),
+    },
+    markKey: SNAPSHOT_MARK_KEY(keys.identityAddress),
+    // The rest of the history: the ordinary pull from the start, as today (natural-key merges, no duplicates).
+    onSettled: () => void deviceSync.syncNow().catch(() => undefined),
+    log: (...a) => console.warn(...a),
+  });
+  void spendableFirst.resume();
   /**
    * The pull's outcome for the balance card (services/balanceTruth.ts), through the one writer of deviceSyncPull. A pull
    * that went through while its pass from the start has not moved for STUCK_SHOW_MS (fullPass.ts stuckMs), or while
@@ -2346,6 +2409,7 @@ export const initWallet = async (
     step('start');
     walletClosed = true;
     admitClosed = true;
+    spendableFirst.stop();
     clearInterval(stalePullTimer);
     writeAhead?.stop();
     clearRestoreMark(); // another account's wallet never inherits this one's restore backlog
@@ -2427,6 +2491,8 @@ export const initWallet = async (
         syncApplies: storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
         sync,
         changeUnbacked: writeAhead?.count() ?? 0,
+        // Only while an instant restore runs (flag on): the card's one calm line instead of "Arriving…".
+        ...(spendableFirst.loading() ? { snapshot: true } : {}),
       };
     },
     receiveWatch: {
@@ -2438,6 +2504,13 @@ export const initWallet = async (
     },
     syncDevices: () => deviceSync.syncNow(),
     admitBackupRows,
+    spendableFirst: async (remoteUrl: string) => {
+      const r = await spendableFirst.spendableFirst(remoteUrl);
+      if (r.used) snapshotBackups = [remoteUrl];
+      return r;
+    },
+    snapshotLoading: spendableFirst.loading,
+    addOurBackup: spendableFirst.addOurBackup,
     backupState: () => {
       const st = deviceSync.state();
       return {

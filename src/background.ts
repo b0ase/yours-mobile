@@ -143,6 +143,7 @@ import {
   moveProgressTracker,
   type EnsureLocalResult,
 } from './services/localFirst';
+import { SNAPSHOT_SEND_WAIT, spendableFirstOn, withSnapshotRemote } from './services/spendableFirst';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
@@ -893,7 +894,8 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     startSyncsAfter: heavyWorkMayStart,
     // No payment builds change on the remote store: this device's store first (services/localFirst.ts, P0 3 Nov 2026).
     ensureLocalStore: () => ensureLocalForPayment(),
-    refusal: () => moveProgress.message(),
+    // An instant restore's first pages are still coming in: a short wait, never "Retry moving…" (spendableFirst.ts).
+    refusal: () => (accountContext?.snapshotLoading() ? SNAPSHOT_SEND_WAIT : moveProgress.message()),
     // The restore's own coin checks: "N of M" on a send refused while the move runs (task 70 review, B2).
     onAdmitReport: (r) => moveProgress.admission(r),
     // One line on the balance card's sync label (a full re-pull over mobile data: services/fullPass.ts).
@@ -1048,10 +1050,15 @@ const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>,
  * services/localFirst.ts). An account still on the remote store, whatever its old localFirst flag, gets its device copy
  * verified (or created) and switched to; an already-local account with an empty device store is pulled in.
  */
-const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<EnsureLocalResult> => {
+const settleLocalStore = async (ctx: NonNullable<typeof accountContext>): Promise<EnsureLocalResult> => {
   const { account } = chromeStorageService.getCurrentAccountObject();
   const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
+  // Instant restore (services/spendableFirst.ts): offered only with its flag on; off, the call below is as before.
+  const instant = (await spendableFirstOn(chrome.storage?.local as never))
+    ? { spendableFirst: (remoteUrl: string) => ctx.spendableFirst(remoteUrl) }
+    : {};
   return ensureLocalStore({
+    ...instant,
     account: () => (account ? { id: account.addresses.identityAddress, config } : null),
     // Backoff, not a lockout: the next open, payment or the user's Retry tries again (review F4).
     failedThisSession: (id) => moveInBackoff(id),
@@ -1086,11 +1093,36 @@ const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) =
   const r = await settleLocalStore(ctx);
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   if (r.ok && id) moveFailures.delete(id);
+  // In the background: our server's first fill can take a while, and nothing here waits for it.
+  if (r.ok) void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
   if (!r.ok) {
     console.warn('[background] storage: this device is not the active store yet:', r);
     const entry = id ? moveFailures.get(id) : undefined;
     if (entry && r.reason) entry.reason = r.reason;
   }
+};
+
+/**
+ * With the instant-restore flag on, our storage server is a BACKUP beside 1Sat for an account on this device (README
+ * Phase 1). Its user row is pointed here, it is filled (services/backupFill.ts: the bulk outside the storage locks) and
+ * registered for this session; only then is it saved in the account's remotes, so a later open never connects a
+ * half-filled one whose first ordinary push would send everything inside the locks. Flag off: nothing.
+ */
+const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
+  if (!(await spendableFirstOn(chrome.storage?.local as never))) return;
+  if (!ctx.storage.isActiveStorageProvider()) return;
+  const before = chromeStorageService.getCurrentAccountObject().account;
+  const config = before?.storageConfig as StorageConfig | undefined;
+  if (!before || !config || withSnapshotRemote(config, true) === config) return;
+  if (!(await ctx.addOurBackup())) return;
+  // Read again: the account may have changed while the fill ran.
+  const account = chromeStorageService.getCurrentAccountObject().account;
+  if (account?.addresses.identityAddress !== before.addresses.identityAddress) return;
+  const next = withSnapshotRemote(account.storageConfig as StorageConfig | undefined, true);
+  if (!next || next === account.storageConfig) return;
+  await chromeStorageService.updateNested('accounts', {
+    [account.addresses.identityAddress]: { storageConfig: next } as unknown as Account,
+  });
 };
 
 /** Where the move to this device stands, for the "Retry moving this account to this device" notice. */
@@ -1108,6 +1140,8 @@ const moveStatus = () => {
   };
   return {
     onDevice: !!ctx?.storage.isActiveStorageProvider(),
+    // An instant restore is loading: the notice stays hidden (no "Retry moving…" while it runs).
+    snapshotLoading: !!ctx?.snapshotLoading(),
     moving: !!storageSwitch,
     failures: f?.failures ?? 0,
     nextRetryAt: f?.nextAt ?? 0,
