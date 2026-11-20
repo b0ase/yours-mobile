@@ -16,7 +16,8 @@ import {
   type SnapshotMark,
 } from '../../services/spendableFirst';
 import { walletOwnership } from '../../services/inboundSync';
-import { fillBackup, type FillManager } from '../../services/backupFill';
+import { FILL_MARGIN_MS, fillBackup, type FillManager } from '../../services/backupFill';
+import { installFastFakeIdb } from '../fastFakeIdb';
 
 /** Off unless asked for: it starts the storage repo's server on an embedded Postgres (minutes, another repo). */
 const ON = process.env.BWX_STORAGE_E2E === '1';
@@ -184,6 +185,8 @@ const pay = (w: Wallet, sats: number) =>
 
 beforeAll(async () => {
   if (!ON) return;
+  // Thousands of rows: fake-indexeddb seeks like a real IndexedDB (src/testing/fastFakeIdb.ts).
+  await installFastFakeIdb();
   proc = Bun.spawn([`${STORAGE_REPO}/node_modules/.bin/tsx`, `${DIR}/storageServer.ts`], {
     cwd: DIR,
     stdin: 'pipe',
@@ -502,6 +505,8 @@ describe.skipIf(!ON)(`review 4: the first push to our server (${FILL_TXS} coins)
     expect(await serverCount(a.kd.identityKey)).toBe(FILL_TXS);
 
     const b = await device(FILL_TXS);
+    // A real wallet's rows are older than the fill's margin; these were all written seconds ago.
+    await new Promise((res) => setTimeout(res, FILL_MARGIN_MS + 1_000));
     const t1 = Date.now();
     const readB = balanceWait(b.wallet, 200);
     const r = await fillBackup({
