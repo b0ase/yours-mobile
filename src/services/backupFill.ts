@@ -36,7 +36,7 @@ const ENTITIES: [name: string, key: string][] = [
 ];
 
 /** Clock skew and in-flight writes: pass 2 starts this long before pass 1 did. */
-export const FILL_MARGIN_MS = 5 * 60_000;
+export const FILL_MARGIN_MS = 60_000;
 
 type Settings = { storageIdentityKey: string; storageName?: string };
 type Args = Record<string, unknown> & { since?: Date | string };
