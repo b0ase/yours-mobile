@@ -10,6 +10,8 @@ const RED = 'var(--bw-danger, #F97066)';
 export const TRUTH_POLL_MS = 60_000;
 /** A failed ask (the wallet still opening) is tried again this soon, once. */
 export const TRUTH_RETRY_MS = 5_000;
+/** While a restored wallet is moving to this device, the lines are asked for this often (its progress moves). */
+export const RESTORE_POLL_MS = 3_000;
 
 type Answer = { success?: boolean; data?: BalanceTruth } | undefined;
 
@@ -120,6 +122,8 @@ export const BalanceTruthLines = ({
   const [now, setNow] = useState(() => Date.now());
   const lastAsk = useRef(0);
   const askRef = useRef<() => void>(() => undefined);
+  const restoringRef = useRef(false);
+  restoringRef.current = !!truth?.restore;
 
   useEffect(() => {
     if (!on) return;
@@ -143,6 +147,9 @@ export const BalanceTruthLines = ({
     askRef.current = () => ask();
     ask();
     const t = setInterval(() => ask(), TRUTH_POLL_MS);
+    const fast = setInterval(() => {
+      if (restoringRef.current) ask();
+    }, RESTORE_POLL_MS);
     const onVis = () => {
       if (visible()) ask();
     };
@@ -150,6 +157,7 @@ export const BalanceTruthLines = ({
     return () => {
       live = false;
       clearInterval(t);
+      clearInterval(fast);
       if (retry) clearTimeout(retry);
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
       askRef.current = () => undefined;

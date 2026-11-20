@@ -1864,14 +1864,14 @@ export const BsvWallet = () => {
           )}
           {/* One small line each when it applies: held by an unsent payment, arriving from the other device, last sync
               with the other devices (services/balanceTruth.ts, plan fix 5). The phone shows them under WalletCard. */}
-          {balanceKnown && (
+          {/* Also while a restored wallet moves to this device, when the balance can't load yet: the backup's total shows
+              here (services/restoreProgress.ts). */}
+          {(balanceKnown || !!restoreMessage) && (
             <BalanceTruthLines
-              fmt={(n) =>
-                exchangeRate > 0
-                  ? formatBalanceUsd(n, exchangeRate, 0)
-                  : `${formatNumberWithCommasAndDecimals(n, 0)} sats`
-              }
-              refreshKey={bsvBalance}
+            fmt={(n) =>
+              exchangeRate > 0 ? formatBalanceUsd(n, exchangeRate, 0) : `${formatNumberWithCommasAndDecimals(n, 0)} sats`
+            }
+            refreshKey={bsvBalance}
             />
           )}
           {/* Payments this device holds and never sends by itself (restored from a backup): Send now or Cancel. */}

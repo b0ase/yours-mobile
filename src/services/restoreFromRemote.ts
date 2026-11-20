@@ -12,6 +12,8 @@
  * every step is a toolbox merge. The same routine repairs a device already stuck local-active and empty.
  */
 
+import { withTimeout } from './restoreProgress';
+
 export type StoreSummary = {
   outputs: number;
   spendableSats: number;
@@ -27,24 +29,30 @@ type ListOutputs = (args: { basket: string; limit: number; offset: number }) => 
 type ListActions = (args: { labels: string[]; limit: number }) => Promise<{ totalActions: number }>;
 
 /** What the ACTIVE store holds: default-basket outputs, their spendable sats, and actions. */
-export async function summarizeActive(wallet: {
-  listOutputs: ListOutputs;
-  listActions: ListActions;
-}): Promise<StoreSummary> {
+export async function summarizeActive(
+  wallet: {
+    listOutputs: ListOutputs;
+    listActions: ListActions;
+  },
+  /** `callMs`: a deadline on each request (the backup's first read); `pageSize`: outputs per page. */
+  o: { callMs?: number; pageSize?: number } = {},
+): Promise<StoreSummary> {
+  const page_ = o.pageSize ?? 1000;
+  const bound = <T>(p: Promise<T>, what: string) => (o.callMs ? withTimeout(p, o.callMs, what) : p);
   let outputs = 0;
   let spendableSats = 0;
   const coins: string[] = [];
-  for (let offset = 0; ; offset += 1000) {
-    const page = await wallet.listOutputs({ basket: 'default', limit: 1000, offset });
+  for (let offset = 0; ; offset += page_) {
+    const page = await bound(wallet.listOutputs({ basket: 'default', limit: page_, offset }), 'the wallet listing');
     outputs = page.totalOutputs;
     for (const o of page.outputs)
       if (o.spendable !== false) {
         spendableSats += o.satoshis;
         if (typeof o.outpoint === 'string') coins.push(normOutpoint(o.outpoint));
       }
-    if (page.outputs.length < 1000 || offset + 1000 >= page.totalOutputs) break;
+    if (page.outputs.length < page_ || offset + page_ >= page.totalOutputs) break;
   }
-  const { totalActions } = await wallet.listActions({ labels: [], limit: 1 });
+  const { totalActions } = await bound(wallet.listActions({ labels: [], limit: 1 }), 'the wallet listing');
   return { outputs, spendableSats, actions: totalActions, coins };
 }
 
@@ -87,6 +95,17 @@ export type SwitchDeps = {
   activeRemoteUrl: () => string | undefined;
   setActiveStorage: (target: 'local' | string) => Promise<void>;
   summarize: () => Promise<StoreSummary>;
+  /**
+   * The backup's first read, with a page size and a deadline on each request (restoreProgress): its spendable total is
+   * shown on the card at once (onPreview). Falls back to `summarize`.
+   */
+  summarizeBackup?: () => Promise<StoreSummary>;
+  /** The backup's total, before the copy starts: display only (restoreProgress.ts), never spendable. */
+  onPreview?: (remote: StoreSummary) => void;
+  /** The copy is in and the coin checks are running. */
+  onChecking?: () => void;
+  /** Always last, whatever the outcome: the card goes back to the real balance. */
+  onFinished?: () => void;
   /** One more merge of the remote into the (now local) active store. */
   pullRemote: () => Promise<void>;
   /** Which of these outpoints the device's store holds in any state (outpointsOnDevice). */
@@ -112,6 +131,14 @@ export type SwitchResult =
  * (made) active again, so the wallet keeps showing the remote's records.
  */
 export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult> {
+  try {
+    return await switchVerified(d);
+  } finally {
+    d.onFinished?.();
+  }
+}
+
+async function switchVerified(d: SwitchDeps): Promise<SwitchResult> {
   const log = d.log ?? (() => undefined);
   const backToRemote = async (reason: string, remote?: StoreSummary, local?: StoreSummary): Promise<SwitchResult> => {
     log('[restore] staying on the backup store:', reason);
@@ -138,11 +165,17 @@ export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult
   }
   let remote: StoreSummary;
   try {
-    remote = await d.summarize();
+    remote = await (d.summarizeBackup ?? d.summarize)();
   } catch (e) {
     return backToRemote(`could not read the backup: ${String(e)}`);
   }
   log('[restore] backup holds', remote);
+  // Shown on the card before the copy starts (display only: nothing here spends or selects from it).
+  try {
+    d.onPreview?.(remote);
+  } catch {
+    /* a display problem never stops the restore */
+  }
 
   // 2. Switch: the toolbox copies the remote into the device's store first.
   /**
@@ -171,6 +204,7 @@ export async function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult
   }
 
   // 3. Verify; one more pull if short.
+  d.onChecking?.();
   await admit();
   let local = await d.summarize().catch(() => undefined);
   if (!local || !(await complete(local))) {

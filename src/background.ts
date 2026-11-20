@@ -125,6 +125,16 @@ import { foundHeadline, restoredLine, scanNote, type ScanReport } from './servic
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, outpointsOnDevice, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
 import { asRestore } from './services/fullPass';
+import {
+  PREVIEW_CALL_MS,
+  PREVIEW_PAGE,
+  boundCopyRequests,
+  clearRestoreView,
+  getRestoreView,
+  noteRestoreProgress,
+  setRestoreView,
+  withTimeout,
+} from './services/restoreProgress';
 import { isUncheckedPage } from './services/inboundSync';
 import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
 import { markMayBeOut } from './services/refusalRecheck';
@@ -1148,8 +1158,38 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
     remoteUrl,
     activeRemoteUrl,
     // A restore's merges run whole, whatever re-pull is under way (services/fullPass.ts, re-check N2).
-    setActiveStorage: (target) => asRestore(() => ctx.setActiveStorage(target)),
+    setActiveStorage: (target) =>
+      asRestore(async () => {
+        // The copy to this device asks the backup for small pages, each with a deadline, and counts them for the card.
+        const remote = (
+          ctx.storage as unknown as { _stores: { storage: { endpointUrl?: string } }[] }
+        )._stores.find((s) => s.storage.endpointUrl === remoteUrl)?.storage;
+        const unbound =
+          target === 'local' && remote
+            ? boundCopyRequests(remote as never, { onRows: (n) => noteRestoreProgress((getRestoreView()?.done ?? 0) + n) })
+            : () => undefined;
+        try {
+          await ctx.setActiveStorage(target);
+        } finally {
+          unbound();
+        }
+      }),
     summarize: () => summarizeActive(ctx.baseWallet as never),
+    // The backup's first read: small pages, a deadline on each request (shown on the card before the copy starts).
+    summarizeBackup: () =>
+      summarizeActive(ctx.baseWallet as never, { callMs: PREVIEW_CALL_MS, pageSize: PREVIEW_PAGE }),
+    onPreview: (r) =>
+      setRestoreView({
+        phase: 'copying',
+        arrivingSats: r.spendableSats,
+        done: 0,
+        total: r.outputs + r.actions,
+      }),
+    onChecking: () => {
+      const v = getRestoreView();
+      if (v) setRestoreView({ ...v, phase: 'checking', done: v.total });
+    },
+    onFinished: () => clearRestoreView(),
     pullRemote: async () => {
       const store = (
         ctx.storage as unknown as { _stores: { storage: { endpointUrl?: string } }[] }
@@ -3820,7 +3860,17 @@ if (!(
               await ensureWallet(true);
               const ctx = accountContext;
               if (!ctx) throw new Error('Wallet not initialized');
-              sendResponse({ type: 'BALANCE_TRUTH', success: true, data: await ctx.balanceTruth() });
+              // The card's own line while a restored wallet moves to this device: from memory, so it never waits behind
+              // the copy's storage lock. The wallet's own reads get a few seconds, then the line stands alone.
+              const restore = getRestoreView();
+              const truth = restore
+                ? await withTimeout(ctx.balanceTruth(), 3_000, 'the wallet').catch(() => ({
+                    held: [],
+                    arrivingSats: 0,
+                    syncApplies: false,
+                  }))
+                : await ctx.balanceTruth();
+              sendResponse({ type: 'BALANCE_TRUTH', success: true, data: { ...truth, restore } });
             } catch (error) {
               sendResponse({
                 type: 'BALANCE_TRUTH',
