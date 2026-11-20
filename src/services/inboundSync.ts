@@ -1266,7 +1266,7 @@ export type AdmitReport = {
    * output of a transaction it holds failed with nothing queued to settle it). Never one waiting on the chain (D2).
    */
   retired: number;
-  /** The run stopped at an unclear chain answer: the rest waits for the next run. */
+  /** Some entry got no clear chain answer this run: it is asked again shortly (the rest of the run went on). */
   deferred: boolean;
   /** Entries still on the list after this run. */
   left: number;
@@ -1276,8 +1276,15 @@ export type AdmitReport = {
   nextAt?: number;
 };
 
-/** Entries one run looks at. Each costs at most three chain calls, and an unclear answer ends the run. */
-const RUN_LIMIT = 25;
+/**
+ * Entries one run looks at. Each costs at most three single chain calls; UNCLEAR_STOP ends the asking early when the
+ * chain stops answering.
+ */
+const RUN_LIMIT = 100;
+/** An unclear chain answer: asked again after these (then the doubling wait). It never ends the run. */
+const UNCLEAR_RETRY_MS = [5_000, 15_000];
+/** Unclear chain answers in a row after which a run asks the chain nothing more (task 69 review, A4: a WoC outage). */
+const UNCLEAR_STOP = 3;
 const FIRST_WAIT_MS = 60_000;
 const MAX_WAIT_MS = 6 * 3_600_000;
 const SPENT_RECHECK_MS = 3_600_000;
@@ -1377,6 +1384,66 @@ async function hasRow(store: AdmitStore, userId: number, e: PendingAdmission): P
   return rows.some((r) => typeof r.outputId === 'number');
 }
 
+/** 0 plain BSV (the default basket, wallet change), 1 token, 2 anything else (names, NFTs, ordinals). */
+type CoinClass = 0 | 1 | 2;
+
+/**
+ * `due` with its coin entries ordered plain BSV first, then tokens, then the rest, each newest first. Transactions stay
+ * in front. Reads this device's own rows only; the order is all it decides. Not reordered when everything fits one run.
+ */
+async function plainFirst(
+  store: AdmitStore,
+  userId: number,
+  due: PendingAdmission[],
+  limit: number,
+): Promise<PendingAdmission[]> {
+  if (due.length <= limit) return due;
+  const baskets = new Map<number, string>();
+  try {
+    for (const b of (await store.findOutputBaskets?.({ partial: { userId } })) ?? [])
+      if (typeof b.basketId === 'number' && b.name) baskets.set(b.basketId, b.name);
+  } catch {
+    // no basket names: change and token scripts still sort
+  }
+  const rank = new Map<string, { cls: CoinClass; at: number; id: number }>();
+  for (const e of due) {
+    if (e.kind !== 'coin') continue;
+    let r: { cls: CoinClass; at: number; id: number } = { cls: 2, at: 0, id: 0 };
+    try {
+      const [t] = await store.findTransactions({ partial: { userId, txid: e.txid }, noRawTx: true });
+      const rows =
+        t && typeof t.transactionId === 'number'
+          ? await store.findOutputs({ partial: { userId, transactionId: t.transactionId, vout: e.vout } })
+          : await store.findOutputs({ partial: { userId, txid: e.txid, vout: e.vout } });
+      const row = rows.length === 1 ? rows[0] : undefined;
+      if (row) {
+        const name = row.basketId != null ? baskets.get(row.basketId) : undefined;
+        const script = hex(row.lockingScript);
+        const cls: CoinClass =
+          isWalletChange(row) || name === 'default'
+            ? 0
+            : (name !== undefined && TOKEN_BASKETS.includes(name)) || (script && tokenFacts(script, e.txid, e.vout))
+              ? 1
+              : 2;
+        const at = time(row.updated_at);
+        r = { cls, at: Number.isNaN(at) ? Number.MAX_SAFE_INTEGER : at, id: row.outputId ?? 0 };
+      }
+    } catch {
+      // unreadable: ordered last, still checked
+    }
+    rank.set(e.key, r);
+  }
+  const txs = due.filter((e) => e.kind === 'tx');
+  const coins = due
+    .filter((e) => e.kind === 'coin')
+    .sort((a, b) => {
+      const x = rank.get(a.key)!;
+      const y = rank.get(b.key)!;
+      return x.cls - y.cls || y.at - x.at || y.id - x.id;
+    });
+  return [...txs, ...coins];
+}
+
 async function admitOnce(
   store: AdmitStore,
   identityKey: string,
@@ -1432,10 +1499,13 @@ async function admitOnce(
       e.tries = 0;
     }
   }
-  const due = all
+  const limit = opts.limit ?? RUN_LIMIT;
+  const dueAll = all
     .filter((e) => e.nextAt <= now)
-    .sort((a, b) => (a.kind !== b.kind ? (a.kind === 'tx' ? -1 : 1) : a.nextAt - b.nextAt))
-    .slice(0, opts.limit ?? RUN_LIMIT);
+    .sort((a, b) => (a.kind !== b.kind ? (a.kind === 'tx' ? -1 : 1) : a.nextAt - b.nextAt));
+  // Only the order changes (never what counts as spendable): when more are due than one run takes, plain BSV coins go
+  // first, newest first, then tokens, then names, NFTs and ordinals.
+  const due = (await plainFirst(store, userId, dueAll, limit)).slice(0, limit);
   /** Transactions still to be settled: a coin of one of them waits as long as its transaction does. */
   const txQueued = new Set(all.filter((e) => e.kind === 'tx').map((e) => e.txid));
 
@@ -1469,6 +1539,19 @@ async function admitOnce(
     );
     report.waiting++;
   };
+  /** Unclear chain answers in a row this run; any clear answer resets it. At UNCLEAR_STOP the run asks no more. */
+  let unclearInRow = 0;
+  const heard = <T extends string | { state: string }>(x: T): T => {
+    if ((typeof x === 'string' ? x : x.state) !== 'unclear') unclearInRow = 0;
+    return x;
+  };
+  /** An unclear chain answer: a short retry (5 s, then 15 s), then the usual doubling wait. */
+  const unclearWait = (e: PendingAdmission) => {
+    report.deferred = true;
+    unclearInRow++;
+    const at = UNCLEAR_RETRY_MS[e.tries];
+    return wait(e, 'chain', at === undefined ? undefined : now + at);
+  };
   const cache = <T>(ask: (txid: string) => Promise<T>) => {
     const m = new Map<string, Promise<T>>();
     return (txid: string) => {
@@ -1477,12 +1560,13 @@ async function admitOnce(
     };
   };
   const known = cache((txid) =>
-    v.txKnown ? v.txKnown(txid).catch((): 'unclear' => 'unclear') : Promise.resolve<'unknown'>('unknown'),
+    (v.txKnown ? v.txKnown(txid).catch((): 'unclear' => 'unclear') : Promise.resolve<'unknown'>('unknown')).then(heard),
   );
   const chainTx = cache((txid) =>
-    v.chainTx
+    (v.chainTx
       ? v.chainTx(txid).catch((): ChainTx => ({ state: 'unclear' }))
-      : Promise.resolve<ChainTx>({ state: 'unclear' }),
+      : Promise.resolve<ChainTx>({ state: 'unclear' })
+    ).then(heard),
   );
   const txStatus = async (transactionId: number | null | undefined) =>
     typeof transactionId === 'number'
@@ -1560,10 +1644,7 @@ async function admitOnce(
     // backup on WhatsOnChain's word (D7: WoC can take minutes to index a broadcast).
     if (toFailed && BROADCAST.has(String(t.status)) && (await ownRequestLive(e.txid))) return finish(e, 'refused');
     const k = await known(e.txid);
-    if (k === 'unclear') {
-      report.deferred = true;
-      return wait(e, 'chain');
-    }
+    if (k === 'unclear') return unclearWait(e);
     // To failed: only when the chain has never seen it (a payment another device saw refused or aborted).
     if (toFailed)
       return k === 'unknown' && (await setStatus(t, 'failed')) ? finish(e, 'applied') : finish(e, 'refused');
@@ -1629,25 +1710,22 @@ async function admitOnce(
     if (local === null) return refuse(e, "the stored transaction doesn't hash to its txid");
     if (local && !sameOutput(local.outputs[vout], row, script))
       return refuse(e, 'the row differs from its transaction');
-    const st = await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' }));
-    if (st.state === 'unclear') {
-      report.deferred = true;
-      return wait(e, 'chain');
-    }
+    const st = heard(await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' })));
+    if (st.state === 'unclear') return unclearWait(e);
     if (st.state === 'spent') {
       if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return refuse(e, 'the chain says spent');
       return wait({ ...e, spentAt: e.spentAt ?? now }, 'chain', (e.spentAt ?? now) + SPENT_RECHECK_MS);
     }
     if (!local) {
       const c = await chainTx(e.txid);
-      if (c.state === 'unclear') report.deferred = true;
+      if (c.state === 'unclear') return unclearWait(e);
       if (c.state !== 'found') return wait(e, 'chain');
       if (!sameOutput(parseRawTx(c.rawTx, e.txid)?.outputs[vout], row, script))
         return refuse(e, "the chain's transaction differs from the row");
     } else {
       // WhatsOnChain answers /spent with 404 for an outpoint it has never seen (F4b): unspent only for a known one.
       const k = await known(e.txid);
-      if (k === 'unclear') report.deferred = true;
+      if (k === 'unclear') return unclearWait(e);
       if (k !== 'known') return wait(e, 'chain');
     }
     // A BSV-21 coin the chain calls unspent: the token overlay is asked last (fix 7). Only its 'spent' holds the coin
@@ -1678,7 +1756,14 @@ async function admitOnce(
   };
 
   for (const e of due) {
-    if (report.deferred) break;
+    // A4: after UNCLEAR_STOP unclear answers in a row (WhatsOnChain down or rate-limited) the run asks nothing more;
+    // the rest are looked at again in 5 s, their back-off untouched, so outage runs don't each make ~100 calls.
+    if (unclearInRow >= UNCLEAR_STOP) {
+      await list.put({ ...e, nextAt: now + UNCLEAR_RETRY_MS[0] });
+      report.deferred = true;
+      report.waiting++;
+      continue;
+    }
     await (e.kind === 'tx' ? settleTx(e) : settleCoin(e));
   }
   if (report.admitted || report.applied || report.retired)
