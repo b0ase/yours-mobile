@@ -26,6 +26,8 @@
  * Display only: everything here reads; nothing decides what is signed, sent or spent.
  */
 
+import { restoreLines, type RestoreView } from './restoreProgress';
+
 /** A chain of payments all younger than this is still on its way (a Store payment is signed noSend, sent in seconds). */
 export const UNSENT_GRACE_MS = 2 * 60_000;
 /** The sync line may turn red when the last good pull is older than this (and a pull since did not get through). */
@@ -102,11 +104,14 @@ export type BalanceTruth = {
    * on this device (services/changeWriteAhead.ts, fix 4). Absent from older wallets.
    */
   changeUnbacked?: number;
+  /** A restored wallet is being copied to this device (services/restoreProgress.ts): display only. */
+  restore?: RestoreView | null;
 };
 
 export type TruthLine =
   | { kind: 'held'; text: string; sats: number; payments: HeldPayment[] }
   | { kind: 'arriving'; text: string; sats: number }
+  | { kind: 'progress'; text: string }
   | { kind: 'sync'; text: string; warn: boolean }
   | { kind: 'backup'; text: string; warn: true };
 
@@ -185,6 +190,8 @@ export function truthLines(
   const arriving = Math.max(0, Math.round(t.arrivingSats || 0));
   if (!o.hideAmounts && arriving > 0)
     lines.push({ kind: 'arriving', text: `Arriving from your other device: ${fmt(arriving)}`, sats: arriving });
+  // The backup's own total while the wallet moves to this device: display only, never part of the balance.
+  lines.push(...restoreLines(t.restore, fmt, o));
   const s = syncLine(t, now);
   if (s) lines.push(s);
   const b = backupLine(t);

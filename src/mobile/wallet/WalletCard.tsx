@@ -876,13 +876,12 @@ const WalletCardInner = ({
       </div>
       {/* Under the card, one small line each when it applies: held by an unsent payment, arriving from the other device,
           last sync with the other devices (services/balanceTruth.ts, plan fix 5, 13 Nov 2026). */}
-      {known && (
-        <BalanceTruthLines
-          fmt={(n) => (unit === 'usd' && rate > 0 ? formatUSD((n * rate) / 100_000_000) : cardSats(n))}
-          hidden={balanceHidden}
-          refreshKey={sats}
-        />
-      )}
+      {/* Not gated on `known`: while a restored wallet moves to this device the balance can't load, and the backup's total shows here. */}
+      <BalanceTruthLines
+        fmt={(n) => (unit === 'usd' && rate > 0 ? formatUSD((n * rate) / 100_000_000) : cardSats(n))}
+        hidden={balanceHidden}
+        refreshKey={sats}
+      />
       {/* History moved to the wallet's top row (wallet/BuyBsv.tsx BsvPriceBar, owner round 6). */}
       {handleOpen && <HandleFlow onClose={() => setHandleOpen(false)} />}
       {adjusting && (
