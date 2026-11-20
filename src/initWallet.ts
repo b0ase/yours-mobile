@@ -972,8 +972,8 @@ export const initWallet = async (
     applies: () => storage.isActiveStorageProvider() && ((backups?.length ?? 0) > 0 || snapshotBackups.length > 0),
     // A backup naming another store is healed first; a set-aside one only reconnects on its probe and back-off, never
     // as a second connection (services/deviceActive.ts, review 19 F1/F5).
-    ensureBackup: () =>
-      ensureBackupConnected({ storage, keep: keepActive, url: backups?.[0] ?? snapshotBackups[0], addRemote }),
+    // (After an instant restore the old remote is already a connected backup, so no url is needed for it.)
+    ensureBackup: () => ensureBackupConnected({ storage, keep: keepActive, url: backups?.[0], addRemote }),
     // What the pull left for the chain to settle runs soon after, outside every storage lock; not awaited here (F-A).
     pull: pullThenAdmitSoon(
       async () => {
