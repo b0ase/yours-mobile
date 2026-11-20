@@ -78,6 +78,34 @@ describe('a real restore', () => {
     expect(restoreMarked()).toBe(false);
   });
 
+  test('one latch per open: marks after the cap stay off (a store with no sync row re-marks every pull) until reopen', async () => {
+    markRestore(T0);
+    expect(restoreBacklog(undefined, T0 + 1)).toBe(true);
+    // Every later pull of a store still without a row marks again; past the cap none of them take effect.
+    const seen: boolean[] = [];
+    for (let k = 0; k < 5; k++) {
+      const at = T0 + RESTORE_BACKLOG_MS + k * 60_000;
+      markRestore(at);
+      seen.push(restoreBacklog(undefined, at));
+    }
+    expect(seen).toEqual([false, false, false, false, false]);
+    // An asRestore that keeps failing re-arms nothing either (Date.now() here is long past T0 + cap).
+    for (let k = 0; k < 3; k++) await asRestore(() => Promise.reject(new Error('copy failed'))).catch(() => undefined);
+    expect(restoreMarked()).toBe(false);
+    // A new open (the wallet's close clears the latch): a mark takes effect again.
+    clearRestoreMark();
+    markRestore(T0 + 10 * RESTORE_BACKLOG_MS);
+    expect(restoreBacklog(undefined, T0 + 10 * RESTORE_BACKLOG_MS + 1)).toBe(true);
+  });
+
+  test('a re-mark inside the cap counts from the first start (never extends it)', () => {
+    markRestore(T0);
+    restoreCaughtUp(); // first pass caught up
+    markRestore(T0 + RESTORE_BACKLOG_MS - 10); // e.g. a second restore copy in the same open
+    expect(restoreBacklog(undefined, T0 + RESTORE_BACKLOG_MS - 5)).toBe(true);
+    expect(restoreBacklog(undefined, T0 + RESTORE_BACKLOG_MS)).toBe(false);
+  });
+
   test('the skip ends at the cap, whatever the pass is doing, and a second mark never extends it', () => {
     markRestore(T0);
     markRestore(T0 + RESTORE_BACKLOG_MS - 1); // not moved later

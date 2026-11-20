@@ -581,7 +581,7 @@ export async function asRestore<T>(fn: () => Promise<T>): Promise<T> {
     restoring--;
     // The copy went through whole (its pass from the start included): the backlog is over. One that threw leaves the
     // mark: the device-sync pulls carry the same first pass on, and restoreCaughtUp clears it when they catch up.
-    if (done && !restoring) clearRestoreMark();
+    if (done && !restoring) endRestoreBacklog();
   }
 }
 
@@ -590,20 +590,32 @@ export async function asRestore<T>(fn: () => Promise<T>): Promise<T> {
 /** The longest a restore's backlog holds the pushes before broadcasts off, from the restore's start (task 71 review). */
 export const RESTORE_BACKLOG_MS = 2 * HOUR;
 /**
- * When the current restore's copy, or a store's first pass from the start, started (ms). In memory only: a restarted
- * worker or a reopened wallet forgets it, and the pushes run as normal (the safe side). Never moved later by a second
- * mark, so the cap counts from the first start.
+ * One latch per wallet open (task 71 re-check): the first mark's start (ms). Every later mark in this open counts from
+ * it, and once it is RESTORE_BACKLOG_MS old no mark takes effect again, so the cap holds whatever re-marks (a store that
+ * still has no sync-state row on every pull, an asRestore that keeps failing). Only clearRestoreMark (the wallet's close)
+ * resets it. In memory only: a restarted worker or a reopened wallet forgets it, and the pushes run as normal.
  */
+let latchAt: number | undefined;
+/** The backlog is on (a mark not yet ended): from latchAt. */
 let restoreMarkAt: number | undefined;
 
-/** A fresh restore's copy, or a store's first pass from the start, is starting now. */
-export const markRestore = (startedAt = Date.now()) => void (restoreMarkAt ??= startedAt);
-/** The restore's backlog is over (its copy and first pass done), or the wallet closed. */
-export const clearRestoreMark = () => void (restoreMarkAt = undefined);
+/** A fresh restore's copy, or a store's first pass from the start, is starting now (`startedAt`). */
+export const markRestore = (startedAt = Date.now()) => {
+  if (latchAt === undefined) latchAt = startedAt;
+  else if (!(Math.abs(startedAt - latchAt) < RESTORE_BACKLOG_MS)) return; // spent for this open
+  restoreMarkAt ??= latchAt;
+};
+/** The backlog is over (copy done, caught up, stuck pass, past the cap): the latch stays spent for this open. */
+const endRestoreBacklog = () => void (restoreMarkAt = undefined);
+/** The wallet closed: the next open starts with no mark and a fresh latch. */
+export const clearRestoreMark = () => {
+  restoreMarkAt = undefined;
+  latchAt = undefined;
+};
 /** Is a restore mark set (no store read needed when not)? */
 export const restoreMarked = () => restoreMarkAt !== undefined;
 /** A device-sync pull caught up with the backup (pullIntegrity afterPull: no pass under way): the backlog is over. */
-export const restoreCaughtUp = () => clearRestoreMark();
+export const restoreCaughtUp = () => endRestoreBacklog();
 
 /**
  * Is a fresh restore's backlog still running? Only with a restore mark (asRestore's copy, or a store's first pass), for
@@ -617,7 +629,7 @@ export function restoreBacklog(row: SyncStateRow | undefined, now = Date.now(), 
   if (at === undefined) return false;
   // Past the cap (or a clock moved back past it): the push runs again, whatever the pass is doing.
   if (!(Math.abs(now - at) < capMs)) {
-    clearRestoreMark();
+    endRestoreBacklog();
     return false;
   }
   if (restoring > 0) return true; // the copy itself is running
@@ -625,11 +637,11 @@ export function restoreBacklog(row: SyncStateRow | undefined, now = Date.now(), 
   const mark = markOf(row);
   if ((mark.stuckMs ?? 0) >= STUCK_PASS_MS) return false; // reported stuck: not a backlog that is draining
   if (typeof mark.pullOkAt === 'number' && mark.pullOkAt >= at) {
-    clearRestoreMark(); // a pull caught up since the restore started
+    endRestoreBacklog(); // a pull caught up since the restore started
     return false;
   }
   if (passFromStart(row) || passUnderWay(row)) return true;
-  clearRestoreMark();
+  endRestoreBacklog();
   return false;
 }
 
