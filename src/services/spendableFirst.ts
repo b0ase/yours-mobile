@@ -880,6 +880,8 @@ export type SpendableFirstDeps = {
   backupDefaultCoins?: () => Promise<number | undefined>;
   /** Make this device's store the active one without copying the backup (remote-active accounts only). */
   makeDeviceActive?: () => Promise<void>;
+  /** Each page's merge inside the storage manager's locks (runAsSync), so no other merge interleaves. */
+  withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
   onPhase?: (phase: 'lean' | null) => void;
   log?: (...a: unknown[]) => void;
 };
@@ -942,6 +944,7 @@ export async function restoreSpendableFirst(d: SpendableFirstDeps): Promise<Spen
       identityKey,
       serverSik,
       lean: true,
+      withLock: d.withLock,
       onPage: (_next, r) => {
         if (r.coins.length || r.held) merged = true;
       },

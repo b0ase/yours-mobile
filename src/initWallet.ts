@@ -1097,6 +1097,7 @@ export const initWallet = async (
     // No copy of the backup: the guard's 'defer' stops the switch's merge at its first page (fullPass.ts), as a heal does.
     makeDeviceActive: () =>
       withFullPassMode(ownSik(), 'defer', () => switchActiveAs(keepActive, setActiveStorage)('local')),
+    withLock: (fn) => storage.runAsSync(() => fn()),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
     kv: {

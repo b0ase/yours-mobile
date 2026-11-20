@@ -709,3 +709,30 @@ describe('review 3 (MED): a hold stays on this device', () => {
     expect(sum(await spendable(db))).toBe(TOTAL);
   });
 });
+
+describe('review 5 (LOW-MED): background pages and the ordinary pull never interleave', () => {
+  test('the full snapshot and a history pull at the same time: no duplicate rows', async () => {
+    const r = await restored({ fullPageMax: 1 }, [11_000, 12_000, 13_000, 14_000, 15_000, 16_000]);
+    const locks: number[] = [];
+    const withLock = <T>(fn: () => Promise<T>) => r.sm.runAsSync(async () => (locks.push(1), fn()));
+    await Promise.all([
+      runFullSnapshot({
+        client: r.client,
+        device: r.dev as unknown as SnapshotDevice,
+        identityKey: r.kd.identityKey,
+        serverSik: r.db.getSettings().storageIdentityKey,
+        tracker,
+        withLock,
+        mark: { stage: 'full', after: 0, at: 0 },
+        save: async () => undefined,
+      }),
+      r.sm.syncFromReader(r.kd.identityKey, r.db as never),
+    ]);
+    expect(locks.length).toBe(6); // one per page
+    const txids = (await r.dev.findTransactions({ partial: {} })).map((t) => t.txid);
+    expect(new Set(txids).size).toBe(txids.length);
+    expect(txids.length).toBe((await r.db.findTransactions({ partial: {} })).length);
+    const proofs = (await r.dev.findProvenTxs({ partial: {} })).map((p) => p.txid);
+    expect(new Set(proofs).size).toBe(proofs.length);
+  });
+});

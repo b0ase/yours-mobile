@@ -66,6 +66,7 @@ describe('initWallet wiring', () => {
       tracker: async () => ({ isValidRootForHeight: async () => true }),
       remoteDefaultCoins: async () => 0,
       makeDeviceActive: async () => void log.push('makeDeviceActive'),
+      withLock: (fn) => fn(),
       addRemote: async (url) => void log.push(`addRemote:${url}`),
       kv: { get: async (k) => ({ [k]: kvStore[k] }), set: async (i) => void Object.assign(kvStore, i) },
       markKey: 'mark',
@@ -111,5 +112,15 @@ describe('review 7: flag off never connects or pushes to our server', () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
     expect(src.match(/backupsFor\(resolved\.backups, await spendableFirstOn\(/g)?.length).toBe(2);
+  });
+});
+
+describe('review 5: wired', () => {
+  test('initWallet runs every snapshot page inside the storage manager’s locks', async () => {
+    const { readFileSync } = await import('node:fs');
+    const init = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
+    expect(init).toContain('withLock: (fn) => storage.runAsSync(() => fn())');
+    const wiring = readFileSync(new URL('./spendableFirstWiring.ts', import.meta.url), 'utf8');
+    expect(wiring.match(/withLock: d\.withLock/g)?.length).toBe(2); // the lean pages and the background pages
   });
 });

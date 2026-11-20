@@ -39,6 +39,11 @@ export type SpendableFirstWiringDeps = {
   remoteDefaultCoins: () => Promise<number>;
   /** Make this device's store active without the toolbox's full copy (a remote-active account). */
   makeDeviceActive: () => Promise<void>;
+  /**
+   * Run one snapshot page's merge inside the storage manager's locks (runAsSync): no device-sync pull or other merge
+   * interleaves with it (review, 20 Nov 2026). The network fetch stays outside.
+   */
+  withLock: <T>(fn: () => Promise<T>) => Promise<T>;
   /** The factory's addRemote: register a backup for this session. */
   addRemote: (url: string) => Promise<void>;
   owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>;
@@ -112,6 +117,8 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
           identityKey: await d.identityKey(),
           serverSik,
           tracker: await d.tracker(),
+          owns: d.owns,
+          withLock: d.withLock,
           mark: mark!,
           save: saveMark,
           log,
@@ -160,6 +167,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
           ? () => withTimeout(d.remoteDefaultCoins(), COUNT_MS, 'the backup (count)')
           : undefined,
         makeDeviceActive: remoteActive ? d.makeDeviceActive : undefined,
+        withLock: d.withLock,
         onPhase: (p) => void (lean = p === 'lean'),
         log,
       });
