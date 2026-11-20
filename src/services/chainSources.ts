@@ -14,7 +14,11 @@ export type ChainLookups = {
   spent(outpoint: string): Promise<SpendState>;
   txKnown(txid: string): Promise<'known' | 'unknown' | 'unclear'>;
   chainTx(txid: string): Promise<ChainTxAnswer>;
-  /** Many outpoints at once (the 1Sat stack's bulk spends lookup, up to SPENDS_BATCH a call). An outpoint with no clear answer is 'unclear'. */
+  /**
+   * Many outpoints at once (the 1Sat stack's bulk spends lookup, up to SPENDS_BATCH a call), keyed by the outpoint each
+   * answer row names. An outpoint with no clear answer is 'unclear'. The live 1sat-stack's rows (pkg/txo/routes.go
+   * SpendResponse, Nov 2026) carry only spendTxid, so today every outpoint reads 'unclear' and the caller asks one by one.
+   */
   spentMany?(outpoints: string[]): Promise<Map<string, SpendState>>;
 };
 
@@ -25,7 +29,11 @@ const TXID = /^[0-9a-f]{64}$/;
 const OUTPOINT = /^[0-9a-f]{64}\.(?:0|[1-9]\d{0,9})$/;
 
 type OneSatServices = {
-  txo?: { getSpends?: (outpoints: string[]) => Promise<(string | null | undefined)[]> };
+  txo?: {
+    getSpends?: (outpoints: string[]) => Promise<(string | null | undefined)[]>;
+    /** TxoClient's own JSON request (BaseClient.request): the bulk lookup reads the raw rows, outpoints included. */
+    request?: (path: string, init?: RequestInit) => Promise<unknown>;
+  };
   beef?: { getRawTx?: (txid: string) => Promise<Uint8Array | number[]> };
 };
 
@@ -59,30 +67,50 @@ export function oneSatChainLookups(services: unknown): ChainLookups | undefined 
       }
       return { state: 'unclear' };
     },
-    spentMany: async (outpoints) => {
-      const out = new Map<string, SpendState>();
-      const unclear: SpendState = { state: 'unclear' };
-      for (let i = 0; i < outpoints.length; i += SPENDS_BATCH) {
-        const chunk = outpoints.slice(i, i + SPENDS_BATCH);
-        const valid = chunk.filter((o) => OUTPOINT.test(o));
-        for (const o of chunk) if (!OUTPOINT.test(o)) out.set(o, unclear);
-        if (!valid.length) continue;
-        let answers: (string | null | undefined)[] | undefined;
-        try {
-          answers = await txo.getSpends!.call(txo, valid);
-        } catch {
-          // no answer for this batch
+    // Only when the raw rows can be read: TxoClient.getSpends keeps each row's spendTxid and drops its outpoint, and an
+    // answer matched by position alone could pair a spent outpoint with another's "unspent" (task 69 review, A2).
+    ...(typeof txo.request === 'function'
+      ? {
+          spentMany: async (outpoints: string[]) => {
+            const out = new Map<string, SpendState>();
+            const unclear: SpendState = { state: 'unclear' };
+            for (const o of outpoints) out.set(o, unclear);
+            for (let i = 0; i < outpoints.length; i += SPENDS_BATCH) {
+              const valid = outpoints.slice(i, i + SPENDS_BATCH).filter((o) => OUTPOINT.test(o));
+              if (!valid.length) continue;
+              let rows: unknown;
+              try {
+                rows = await txo.request!.call(txo, '/spends', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(valid),
+                });
+              } catch {
+                continue; // no answer for this batch: all unclear
+              }
+              if (!Array.isArray(rows)) continue;
+              // Keyed by each row's own outpoint. A row without one, for an outpoint not asked, or a second row for the
+              // same outpoint is no answer: that outpoint stays unclear.
+              const asked = new Set(valid);
+              const said = new Map<string, SpendState | 'conflict'>();
+              for (const r of rows as { outpoint?: unknown; spendTxid?: unknown }[]) {
+                const op = typeof r?.outpoint === 'string' ? r.outpoint.toLowerCase().replace('_', '.') : undefined;
+                if (!op || !asked.has(op)) continue;
+                const by = r.spendTxid;
+                const st: SpendState =
+                  by === null
+                    ? { state: 'unspent' }
+                    : typeof by === 'string' && TXID.test(by.toLowerCase())
+                      ? { state: 'spent', by: by.toLowerCase() }
+                      : unclear;
+                said.set(op, said.has(op) ? 'conflict' : st);
+              }
+              for (const [op, st] of said) if (st !== 'conflict') out.set(op, st);
+            }
+            return out;
+          },
         }
-        valid.forEach((o, n) => {
-          const by = answers && answers.length === valid.length ? answers[n] : undefined;
-          if (by === null) out.set(o, { state: 'unspent' });
-          else if (typeof by === 'string' && TXID.test(by.toLowerCase()))
-            out.set(o, { state: 'spent', by: by.toLowerCase() });
-          else out.set(o, unclear);
-        });
-      }
-      return out;
-    },
+      : {}),
     txKnown: async (txid) => {
       const r = await chainTx(txid);
       return r.state === 'found' ? 'known' : r.state;

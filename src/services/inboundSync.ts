@@ -176,8 +176,9 @@ export type InboundVerifier = {
   /** The chain's word on an outpoint "txid.vout" (WhatsOnChain /spent). */
   spent(outpoint: string): Promise<SpendState>;
   /**
-   * The same question for many outpoints in one call (the 1Sat stack's bulk lookup), asked first. An outpoint missing
-   * or 'unclear' in the answer is then asked through `spent` (WhatsOnChain). Absent: `spent` alone.
+   * The same question for many outpoints in one call (the 1Sat stack's bulk lookup). A fast negative only (task 69
+   * review, A1): its 'spent' holds a coin once, briefly; it never admits or refuses one. Every coin is admitted or
+   * refused on `spent` alone, as before. Absent: `spent` alone.
    */
   spentMany?(outpoints: string[]): Promise<Map<string, SpendState>>;
   /** A row's record (customInstructions) as JSON, decrypting what the permissions manager encrypted. */
@@ -931,6 +932,8 @@ export type PendingAdmission = Admission & {
   tries: number;
   /** When the chain first said this coin is spent: asked once more an hour later (a mempool spend can be dropped). */
   spentAt?: number;
+  /** The 1Sat bulk lookup held this coin once (it said spent): from now on only `spent` is asked, as before task 69. */
+  bulkHeld?: boolean;
   /**
    * What the last wait was for: 'row' when this device had no row for it yet (its page not merged), else 'other'.
    * Missing on entries written before 6 Nov 2026.
@@ -1105,6 +1108,10 @@ export type AdmitReport = {
 const RUN_LIMIT = 100;
 /** An unclear chain answer: asked again after these (then the doubling wait). It never ends the run. */
 const UNCLEAR_RETRY_MS = [5_000, 15_000];
+/** Unclear chain answers in a row after which a run asks the chain nothing more (task 69 review, A4: a WoC outage). */
+const UNCLEAR_STOP = 3;
+/** How long a coin the bulk lookup calls spent is held before `spent` is asked about it (once per coin). */
+const BULK_SPENT_HOLD_MS = 5_000;
 const FIRST_WAIT_MS = 60_000;
 const MAX_WAIT_MS = 6 * 3_600_000;
 const SPENT_RECHECK_MS = 3_600_000;
@@ -1359,9 +1366,16 @@ async function admitOnce(
     );
     report.waiting++;
   };
+  /** Unclear chain answers in a row this run; any clear answer resets it. At UNCLEAR_STOP the run asks no more. */
+  let unclearInRow = 0;
+  const heard = <T extends string | { state: string }>(x: T): T => {
+    if ((typeof x === 'string' ? x : x.state) !== 'unclear') unclearInRow = 0;
+    return x;
+  };
   /** An unclear chain answer: a short retry (5 s, then 15 s), then the usual doubling wait. */
   const unclearWait = (e: PendingAdmission) => {
     report.deferred = true;
+    unclearInRow++;
     const at = UNCLEAR_RETRY_MS[e.tries];
     return wait(e, 'chain', at === undefined ? undefined : now + at);
   };
@@ -1373,12 +1387,13 @@ async function admitOnce(
     };
   };
   const known = cache((txid) =>
-    v.txKnown ? v.txKnown(txid).catch((): 'unclear' => 'unclear') : Promise.resolve<'unknown'>('unknown'),
+    (v.txKnown ? v.txKnown(txid).catch((): 'unclear' => 'unclear') : Promise.resolve<'unknown'>('unknown')).then(heard),
   );
   const chainTx = cache((txid) =>
-    v.chainTx
+    (v.chainTx
       ? v.chainTx(txid).catch((): ChainTx => ({ state: 'unclear' }))
-      : Promise.resolve<ChainTx>({ state: 'unclear' }),
+      : Promise.resolve<ChainTx>({ state: 'unclear' })
+    ).then(heard),
   );
   const txStatus = async (transactionId: number | null | undefined) =>
     typeof transactionId === 'number'
@@ -1522,12 +1537,15 @@ async function admitOnce(
     if (local === null) return refuse(e, "the stored transaction doesn't hash to its txid");
     if (local && !sameOutput(local.outputs[vout], row, script))
       return refuse(e, 'the row differs from its transaction');
-    // The bulk answer when it was clear; otherwise (or without one) the single lookup, as before.
-    const bulk = bulkSpent?.get(`${e.txid}.${vout}`);
-    const st =
-      bulk && bulk.state !== 'unclear'
-        ? bulk
-        : await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' }));
+    // The bulk lookup is a fast negative only (A1): its 'spent' holds the coin once, for a few seconds, and is never
+    // counted toward the spent-twice refusal; its 'unspent' counts for nothing. Whether the coin is spent is decided
+    // by the single lookup (WhatsOnChain, then the 1Sat stack), exactly as before task 69.
+    if (!e.bulkHeld && (await bulkSpent(`${e.txid}.${vout}`))?.state === 'spent') {
+      await list.put({ ...e, bulkHeld: true, waitingFor: 'other', nextAt: now + BULK_SPENT_HOLD_MS });
+      report.waiting++;
+      return;
+    }
+    const st = heard(await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' })));
     if (st.state === 'unclear') return unclearWait(e);
     if (st.state === 'spent') {
       if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return refuse(e, 'the chain says spent');
@@ -1572,12 +1590,25 @@ async function admitOnce(
     return finish(e, ok ? 'admitted' : 'refused');
   };
 
-  // One bulk spends lookup for this run's coins (up to 100 an outpoint call). Read-only: each answer is used only when
-  // the coin reaches the same check as before, and an unclear one falls back to the single lookup.
-  let bulkSpent: Map<string, SpendState> | undefined;
+  // One bulk spends lookup for this run's coins (up to 100 outpoints a call), made when the first coin reaches the
+  // spent check. A3: its answers are read for the rest of the run (up to ~100 s later), so one may be stale; that is
+  // fine because they only ever hold a coin for a few seconds (A1), never admit or refuse one.
+  let bulk: Promise<Map<string, SpendState> | undefined> | undefined;
   const ops = due.filter((e) => e.kind === 'coin').map((e) => `${e.txid}.${e.vout ?? 0}`);
-  if (ops.length && v.spentMany) bulkSpent = await v.spentMany(ops).catch(() => undefined);
+  const bulkSpent = async (op: string) => {
+    if (!v.spentMany || !ops.length) return undefined;
+    bulk ??= v.spentMany(ops).catch(() => undefined);
+    return (await bulk)?.get(op);
+  };
   for (const e of due) {
+    // A4: after UNCLEAR_STOP unclear answers in a row (WhatsOnChain down or rate-limited) the run asks nothing more;
+    // the rest are looked at again in 5 s, their back-off untouched, so outage runs don't each make ~100 calls.
+    if (unclearInRow >= UNCLEAR_STOP) {
+      await list.put({ ...e, nextAt: now + UNCLEAR_RETRY_MS[0] });
+      report.deferred = true;
+      report.waiting++;
+      continue;
+    }
     await (e.kind === 'tx' ? settleTx(e) : settleCoin(e));
   }
   if (report.admitted || report.applied || report.retired)
