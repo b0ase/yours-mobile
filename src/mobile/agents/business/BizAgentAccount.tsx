@@ -13,6 +13,7 @@ import {
   bizAgentSweep,
   bizSpentToday,
   createBizAgent,
+  defaultBizTxStatus,
   defaultFindBizCoins,
   getBizAgent,
   getBizLog,
@@ -209,8 +210,15 @@ export function AgentRefundButton({
       const { address, data } = await resolve();
       const r = await bizAgentPay(
         { ticker, address, sats, data, detail: label },
-        { wallet, findCoins: defaultFindBizCoins, broadcast: broadcastRaw, usdPerBsv: await rate() },
+        {
+          wallet,
+          findCoins: defaultFindBizCoins,
+          broadcast: broadcastRaw,
+          txStatus: defaultBizTxStatus,
+          usdPerBsv: await rate(),
+        },
       );
+      // Unsure (pending): said plainly, and nothing new is paid from this room until it is seen on chain or refused.
       if (!r.ok) throw new Error(r.reason);
       await onPaid(r.txid);
     } catch (e) {

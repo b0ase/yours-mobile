@@ -10,6 +10,11 @@
  * ⚠ Every agent payment goes through `bizAgentPay`, which checks Stop and the daily cap BEFORE fetching coins and
  * AGAIN immediately before signing, and books the spend (as 'pending') before broadcasting, so a Stop pressed
  * mid-payment or two payments racing can never go past the cap.
+ *
+ * A broadcast that errs or times out is unsure, never 'failed' (task 72 review, B1): the tx may have reached the network
+ * (a refund that timed out but landed, then a second tap, refunded twice). The entry stays 'pending' with its signed tx,
+ * and no new payment is signed for that room until its txid is seen on chain (then 'paid'; the same payment tapped again
+ * gets that txid back) or the network refuses it.
  */
 import {
   LockingScript,
@@ -53,6 +58,12 @@ export type BizLogEntry = {
   usd: number;
   txid?: string;
   id?: string;
+  /** A 'pending' entry: the signed tx (public once broadcast), so the same tx can be posted again, never a new one. */
+  rawTx?: string;
+  /** What was paid (to, sats, data): a tap for the same payment finds its earlier tx instead of paying again. */
+  key?: string;
+  /** A 'paid' entry settled by a later check: the same payment's next tap gets its txid back (once). */
+  late?: boolean;
 };
 
 export const normTicker = (t: string) =>
@@ -216,11 +227,21 @@ export const checkBizSpend = (ticker: string, usd: number, s: KV | null = kv(), 
 // ── paying ───────────────────────────────────────────────────────────────────
 export type BizCoin = { txid: string; vout: number; sats: number; sourceTx: Transaction };
 
+/** Where a txid stands: 'seen' (on the network or mined), 'rejected' (refused), 'missing' (never heard of), 'unknown'. */
+export type BizTxStatus = 'seen' | 'rejected' | 'missing' | 'unknown';
+
+/** The longest a broadcast or a status check is waited for: past it, the payment is unsure (kept pending). */
+export const BIZ_BROADCAST_TIMEOUT_MS = 30_000;
+
 export type BizPayDeps = {
   wallet: Pick<WalletInterface, 'createHmac'>;
   /** Unspent coins of an address with their source txs. */
   findCoins: (address: string) => Promise<BizCoin[]>;
   broadcast: (rawTx: string) => Promise<void>;
+  /** Where an earlier payment's txid stands (defaultBizTxStatus). Absent: 'unknown' (a pending payment keeps waiting). */
+  txStatus?: (txid: string) => Promise<BizTxStatus>;
+  /** Bound on one broadcast or status check (default BIZ_BROADCAST_TIMEOUT_MS). */
+  broadcastTimeoutMs?: number;
   /** USD per BSV now; the cap is checked on sats × rate (never on a figure the server sent). */
   usdPerBsv: number;
   stopAll?: () => boolean;
@@ -229,7 +250,10 @@ export type BizPayDeps = {
 };
 
 export type BizPayment = { ticker: string; address: string; sats: number; data?: string[]; detail: string };
-export type BizPayResult = { ok: true; txid: string; usd: number } | { ok: false; reason: string };
+export type BizPayResult =
+  | { ok: true; txid: string; usd: number }
+  /** pending: signed and posted, outcome unknown; nothing new is paid from this room until it settles. */
+  | { ok: false; reason: string; pending?: true; txid?: string };
 
 const P2PKH_ADDR = /^1[1-9A-HJ-NP-Za-km-z]{25,34}$/;
 const inFlight = new Set<string>();
@@ -247,6 +271,22 @@ const dataScript = (hexParts: string[]) =>
 
 export const usdOf = (sats: number, usdPerBsv: number) => (sats / 1e8) * usdPerBsv;
 
+const paymentKey = (p: BizPayment) => `${p.address}:${p.sats}:${(p.data ?? []).join(',')}`;
+
+const TIMED_OUT = 'The network took too long to answer';
+const within = <T>(work: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(TIMED_OUT)), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+};
+
+/** Plain words for a payment that is out but not confirmed. */
+const waitingReason = (e: BizLogEntry) =>
+  `An earlier payment from this agent account (${e.detail}, ${String(e.txid).slice(0, 8)}…) hasn’t shown up on the ` +
+  'network yet. No new payment until it does or the network refuses it. Try again in a few minutes.';
+
 /** Pay from the room's agent account, inside the cap. Refused payments are logged with the reason. */
 export async function bizAgentPay(p: BizPayment, d: BizPayDeps): Promise<BizPayResult> {
   const s = d.store === undefined ? kv() : d.store;
@@ -263,14 +303,49 @@ export async function bizAgentPay(p: BizPayment, d: BizPayDeps): Promise<BizPayR
   const usd = usdOf(p.sats, d.usdPerBsv);
   const gate = () => bizSpendAllowed(getBizAgent(t, s), stopAll(), getBizLog(t, s), usd, now());
 
-  const first = gate();
-  if (!first.ok) return refuse(first.reason);
+  const ms = d.broadcastTimeoutMs ?? BIZ_BROADCAST_TIMEOUT_MS;
+  const key = paymentKey(p);
+
   if (inFlight.has(t)) return refuse('Another agent payment is in progress');
   inFlight.add(t);
   try {
+    // An earlier payment settled late, tapped again: its txid, never a second payment.
+    const late = getBizLog(t, s).find((e) => e.action === 'paid' && e.late && e.key === key && e.txid);
+    if (late?.id) {
+      replaceLog(t, late.id, { ...late, late: undefined }, s);
+      return { ok: true, txid: late.txid!, usd: late.usd };
+    }
+    // A payment still unsure (its broadcast erred or timed out): find out where it stands before anything new is signed.
+    for (const e of getBizLog(t, s).filter((x) => x.action === 'pending' && x.txid && x.id)) {
+      const st = await within((d.txStatus ?? (async () => 'unknown' as const))(e.txid!), ms).catch(
+        (): BizTxStatus => 'unknown',
+      );
+      let out: 'paid' | 'failed' | 'waiting' = st === 'seen' ? 'paid' : st === 'rejected' ? 'failed' : 'waiting';
+      if (st === 'missing') {
+        if (e.rawTx) {
+          // The network never heard of it: post the SAME signed tx again (same txid; idempotent, can't pay twice).
+          out = await within(d.broadcast(e.rawTx), ms).then(
+            () => 'paid' as const,
+            () => 'waiting' as const,
+          );
+        } else out = 'failed'; // an entry from before the signed tx was kept: nobody holds it, it can't go out now
+      }
+      if (out === 'waiting') return refuse(waitingReason(e));
+      const { rawTx: _raw, ...rest } = e;
+      if (out === 'failed') {
+        replaceLog(t, e.id!, { ...rest, action: 'failed', detail: `${e.detail}: refused by the network` }, s);
+        continue;
+      }
+      const same = e.key === key;
+      replaceLog(t, e.id!, { ...rest, action: 'paid', ...(same ? {} : { late: true }) }, s);
+      if (same) return { ok: true, txid: e.txid!, usd: e.usd };
+    }
+
+    const first = gate();
+    if (!first.ok) return refuse(first.reason);
     const a = getBizAgent(t, s)!;
-    const key = await deriveBizAgentKey(d.wallet, t);
-    if (key.toAddress() !== a.address) return refuse('Agent key does not match this wallet');
+    const priv = await deriveBizAgentKey(d.wallet, t);
+    if (priv.toAddress() !== a.address) return refuse('Agent key does not match this wallet');
     const coins = (await d.findCoins(a.address)).filter((c) => c.sats > 1);
 
     const tx = new Transaction();
@@ -282,7 +357,7 @@ export async function bizAgentPay(p: BizPayment, d: BizPayDeps): Promise<BizPayR
       tx.addInput({
         sourceTransaction: c.sourceTx,
         sourceOutputIndex: c.vout,
-        unlockingScriptTemplate: new P2PKH().unlock(key),
+        unlockingScriptTemplate: new P2PKH().unlock(priv),
       });
       added += c.sats;
       if (added >= p.sats + 1000) break;
@@ -296,17 +371,27 @@ export async function bizAgentPay(p: BizPayment, d: BizPayDeps): Promise<BizPayR
     await tx.sign();
     const txid = tx.id('hex') as string;
     const id = txid;
-    // Booked before broadcast: counts toward the cap even if the app dies here.
-    appendLog(t, { at: now(), action: 'pending', detail: p.detail, usd, txid, id }, s);
+    const rawTx = tx.toHex();
+    // Booked before broadcast, with the signed tx: counts toward the cap even if the app dies here, and only this tx is
+    // ever posted for it.
+    appendLog(t, { at: now(), action: 'pending', detail: p.detail, usd, txid, id, rawTx, key }, s);
     try {
-      await d.broadcast(tx.toHex());
+      await within(d.broadcast(rawTx), ms);
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
-      // Kept on the cap: a broadcast error can still mean the tx reached the network.
-      replaceLog(t, id, { at: now(), action: 'failed', detail: `${p.detail}: ${why}`, usd, txid, id }, s);
-      return { ok: false, reason: why };
+      // Any error or a timeout is unsure: the tx may have reached the network. It stays pending (on the cap), and the
+      // next tap checks it on chain before anything new is signed.
+      console.warn(`[bizAgent] payment ${txid} unsure after broadcast: ${why}`);
+      return {
+        ok: false,
+        pending: true,
+        txid,
+        reason:
+          'Sent, but the network hasn’t confirmed it yet. No new payment from this agent account until it does; ' +
+          'tap again in a few minutes to check.',
+      };
     }
-    replaceLog(t, id, { at: now(), action: 'paid', detail: p.detail, usd, txid, id }, s);
+    replaceLog(t, id, { at: now(), action: 'paid', detail: p.detail, usd, txid, id, key }, s);
     return { ok: true, txid, usd };
   } catch (e) {
     return refuse(e instanceof Error ? e.message : String(e));
@@ -399,6 +484,17 @@ export const defaultFindBizCoins = async (address: string): Promise<BizCoin[]> =
     });
   }
   return out;
+};
+
+/** Where a txid stands, from 1sat-stack's status passthrough (the endpoint broadcastRaw posts to). */
+export const defaultBizTxStatus = async (txid: string): Promise<BizTxStatus> => {
+  const { OneSatServices } = await import('@1sat/wallet-browser');
+  const r = await new OneSatServices('main').getStackStatus(txid);
+  if (!r) return 'missing';
+  if (['MINED', 'IMMUTABLE', 'SEEN_ON_NETWORK', 'SEEN_MULTIPLE_NODES', 'ACCEPTED_BY_NETWORK'].includes(r.txStatus))
+    return 'seen';
+  if (['REJECTED', 'DOUBLE_SPEND_ATTEMPTED', 'INVALID', 'MALFORMED'].includes(r.txStatus)) return 'rejected';
+  return 'unknown';
 };
 
 /** Balance in sats of the agent account. */

@@ -8,7 +8,6 @@ import { payeeDestination, type PayeeDestination } from './payeeBinding';
 import { isPayingPot, type Payee } from './pots';
 import { PNEE_TOKEN_ID } from '../notes/pnee';
 import { assertNotPaused } from '../config/killSwitch';
-import { BROADCAST_TIMEOUT_MS } from './payDue';
 import { pickPneeInputs, pneeOverlayFee, type PneeCandidate } from './pneePot';
 
 /**
@@ -323,16 +322,10 @@ export const broadcastRaw = async (rawTx: string): Promise<void> => {
   // Checked at broadcast time, not only when the payment started: escrow, partnership, business-agent and pot
   // payments are signed outside createAction, so this is where the spending pause stops them (b-Aware 25 Oct 2026).
   await assertNotPaused('spending');
-  let timer: ReturnType<typeof setTimeout>;
-  const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error('The network took too long to answer; will check and retry')),
-      BROADCAST_TIMEOUT_MS,
-    );
-  });
-  const r = await Promise.race([svc().submitToStack(Utils.toArray(rawTx, 'hex')), late]).finally(() =>
-    clearTimeout(timer),
-  );
+  // No timeout here: a caller that gives up on a broadcast must treat it as unsure, and only it knows how (payDue keeps
+  // the pending record and bounds the pot path itself; the business agent keeps its payment pending). A shared timeout
+  // here made other callers read a slow broadcast as failed and let a second tap pay again (task 72 review, B1).
+  const r = await svc().submitToStack(Utils.toArray(rawTx, 'hex'));
   if (REFUSED.has(r.txStatus))
     throw new Error(`Payment refused by the network (${r.txStatus}${r.extraInfo ? `: ${r.extraInfo}` : ''})`);
 };

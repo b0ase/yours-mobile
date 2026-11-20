@@ -178,6 +178,107 @@ describe('agent account', () => {
     expect((await bizAgentPay({ ticker: 'SHOP', address: TO, sats: 4_000_000, detail: 'R' }, deps())).ok).toBe(false);
   });
 
+  test('a refund that timed out, then a second tap: no second signature or broadcast until it is seen on chain', async () => {
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    await fund(a.address, 50_000_000);
+    const refund = { ticker: 'SHOP', address: TO, sats: 2_000_000, data: ['00ff'], detail: 'Refund $amy' };
+    let finds = 0;
+    const hung = deps({
+      findCoins: async () => (finds++, coins),
+      broadcast: (raw: string) => (sent.push(raw), new Promise<void>(() => undefined)), // landed, but never answers
+      broadcastTimeoutMs: 30,
+    });
+    const r1 = await bizAgentPay(refund, hung);
+    expect(r1.ok).toBe(false);
+    if (r1.ok) return;
+    expect(r1.pending).toBe(true);
+    expect(r1.reason).toMatch(/hasn’t confirmed it yet/);
+    const txid = r1.txid!;
+    expect(sent.length).toBe(1);
+    expect(getBizLog('SHOP', store)[0]).toMatchObject({ action: 'pending', txid });
+
+    // Second tap while the network has no word on it: refused plainly, nothing signed or posted.
+    let status: 'unknown' | 'seen' = 'unknown';
+    const tap = deps({
+      findCoins: async () => (finds++, coins),
+      txStatus: async () => status,
+      broadcastTimeoutMs: 30,
+    });
+    const r2 = await bizAgentPay(refund, tap);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.reason).toMatch(/hasn’t shown up on the network yet/);
+    expect(sent.length).toBe(1);
+    expect(finds).toBe(1);
+    // A different payment from the same room waits too.
+    expect((await bizAgentPay({ ...refund, sats: 1000, detail: 'Other' }, tap)).ok).toBe(false);
+    expect(sent.length).toBe(1);
+    expect(finds).toBe(1);
+
+    // Seen on chain: recorded as paid, and the same refund tapped again gets that txid (the server records it).
+    status = 'seen';
+    const r3 = await bizAgentPay(refund, tap);
+    expect(r3).toEqual({ ok: true, txid, usd: 1 });
+    expect(sent.length).toBe(1);
+    expect(finds).toBe(1);
+    expect(getBizLog('SHOP', store).find((e) => e.txid === txid)).toMatchObject({ action: 'paid', usd: 1 });
+    expect(bizSpentToday(getBizLog('SHOP', store), DAY)).toBeCloseTo(1);
+  });
+
+  test('any broadcast error is pending, not failed; a refusal on chain settles it and payments go on', async () => {
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    await fund(a.address, 50_000_000);
+    const r1 = await bizAgentPay(
+      { ticker: 'SHOP', address: TO, sats: 2_000_000, detail: 'R1' },
+      deps({ broadcast: async () => Promise.reject(new Error('Payment refused by the network (REJECTED)')) }),
+    );
+    expect(r1.ok).toBe(false);
+    if (!r1.ok) expect(r1.pending).toBe(true);
+    expect(getBizLog('SHOP', store)[0].action).toBe('pending');
+    const r2 = await bizAgentPay(
+      { ticker: 'SHOP', address: TO, sats: 1000, detail: 'R2' },
+      deps({ txStatus: async () => 'rejected' }),
+    );
+    expect(r2.ok).toBe(true);
+    const log = getBizLog('SHOP', store);
+    expect(log.find((e) => e.detail.startsWith('R1'))).toMatchObject({ action: 'failed' });
+    expect(log.find((e) => e.detail === 'R1: refused by the network')?.rawTx).toBeUndefined();
+  });
+
+  test('a pending payment the network never heard of: the SAME signed tx is posted again, never a new one', async () => {
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    await fund(a.address, 50_000_000);
+    const pay = { ticker: 'SHOP', address: TO, sats: 2_000_000, detail: 'R' };
+    const posted: string[] = [];
+    const r1 = await bizAgentPay(
+      pay,
+      deps({ broadcast: async (raw: string) => (posted.push(raw), Promise.reject(new Error('timeout'))) }),
+    );
+    expect(r1.ok).toBe(false);
+    const r2 = await bizAgentPay(
+      pay,
+      deps({ txStatus: async () => 'missing', broadcast: async (raw: string) => void posted.push(raw) }),
+    );
+    expect(r2.ok).toBe(true);
+    if (r2.ok && !r1.ok) expect(r2.txid).toBe(r1.txid!);
+    expect(posted.length).toBe(2);
+    expect(posted[1]).toBe(posted[0]);
+  });
+
+  test('an earlier payment settled while another was tapped: its own next tap gets its txid, not a second payment', async () => {
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    await fund(a.address, 50_000_000);
+    const first = { ticker: 'SHOP', address: TO, sats: 2_000_000, data: ['01'], detail: 'Refund A' };
+    const r1 = await bizAgentPay(first, deps({ broadcast: async () => Promise.reject(new Error('timeout')) }));
+    expect(r1.ok).toBe(false);
+    const seen = deps({ txStatus: async () => 'seen' });
+    expect((await bizAgentPay({ ...first, data: ['02'], detail: 'Refund B' }, seen)).ok).toBe(true);
+    expect(sent.length).toBe(1); // B only
+    const again = await bizAgentPay(first, seen);
+    expect(again.ok).toBe(true);
+    if (again.ok && !r1.ok) expect(again.txid).toBe(r1.txid!);
+    expect(sent.length).toBe(1);
+  });
+
   test('no price, bad address or no account → refused', async () => {
     expect((await bizAgentPay({ ticker: 'NONE', address: TO, sats: 1000, detail: 'R' }, deps())).ok).toBe(false);
     await createBizAgent(wallet, 'SHOP', 10, store, DAY);

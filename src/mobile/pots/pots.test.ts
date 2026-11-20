@@ -468,6 +468,78 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     expect(sent).toEqual(['RAWH']);
   });
 
+  test('broadcastRaw has no timeout of its own: only the pot path bounds it (payDue keeps the record)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./potSend.ts', import.meta.url), 'utf8');
+    const body = src.slice(src.indexOf('export const broadcastRaw'));
+    expect(body.slice(0, body.indexOf('\n};'))).not.toMatch(/setTimeout|Promise\.race|BROADCAST_TIMEOUT_MS/);
+    expect(src).not.toMatch(/from '\.\/payDue'/);
+  });
+
+  test('after an unsure broadcast, nothing more is signed from that pot in the same run (its coins may be in flight)', async () => {
+    const a = setup({ start: NOW - 1000 }); // one $10 period due
+    setAgentDailyCap('1Pot', null);
+    const b = addSubscription(
+      {
+        potId: '1Pot',
+        payee: { name: 'Gym', address: '1Gym' },
+        amount: { value: 5, currency: 'USD' },
+        period: 'day',
+        start: NOW - 1000,
+        maxCount: null,
+      },
+      50,
+      NOW,
+    );
+    const signed: string[] = [];
+    const deps = (broadcast: (raw: string) => Promise<void>) => ({
+      bsvUsd: 50,
+      resolve: async (p: { address?: string }) => p.address ?? '1L',
+      sign: async (_pot: string, outs: { address: string }[]) => {
+        signed.push(outs[0].address);
+        return { rawTx: `RAW-${outs[0].address}`, txid: `TX-${outs[0].address}` };
+      },
+      broadcast,
+      broadcastTimeoutMs: 30,
+    });
+    // Run 1: the first order's broadcast never answers (unsure): the second order is left for the next run.
+    const r1 = await payDue(
+      deps(() => new Promise<void>(() => undefined)),
+      NOW,
+    );
+    expect(signed.length).toBe(1);
+    const first = signed[0];
+    const firstSub = first === '1Landlord' ? a : b;
+    const secondSub = first === '1Landlord' ? b : a;
+    expect(getPending(firstSub.id)?.rawTx).toBe(`RAW-${first}`);
+    expect(getPending(secondSub.id)).toBeNull();
+    const skipped = r1.find((r) => r.id === secondSub.id);
+    expect(skipped?.ok).toBe(false);
+    if (skipped && !skipped.ok) expect(skipped.reason).toMatch(/earlier payment from this pot/);
+    expect(getSub(secondSub.id)?.lastError).toBeUndefined(); // no alert: just the next run
+
+    // Run 2: the waiting payment is still unsure: it is re-posted first, and the other order still waits.
+    const posted: string[] = [];
+    await payDue(
+      deps((raw) => (posted.push(raw), Promise.reject(new Error('network down')))),
+      NOW + 1,
+    );
+    expect(posted).toEqual([`RAW-${first}`]);
+    expect(signed.length).toBe(1);
+
+    // Run 3: the waiting payment goes through, and only then the other order is signed and paid.
+    const ok: string[] = [];
+    const r3 = await payDue(
+      deps(async (raw) => void ok.push(raw)),
+      NOW + 2,
+    );
+    expect(r3.every((r) => r.ok)).toBe(true);
+    expect(ok[0]).toBe(`RAW-${first}`);
+    expect(signed.length).toBe(2);
+    expect(getPending(firstSub.id)).toBeNull();
+    expect(getPending(secondSub.id)).toBeNull();
+  });
+
   test('stopped pot and the daily cap refuse; nothing is signed', async () => {
     const s = setup();
     setAgentStopped('1Pot', true, NOW);
