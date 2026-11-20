@@ -108,6 +108,9 @@ describe('forwarded names', () => {
     expect(r.nameBinding).toBe('signed');
     expect(forwardLabel(r)).toBe('boase@ forwards to b0asex@ (same owner)');
     expect(destinationFor(r, 'bsv').ok).toBe(true);
+    // A token send to the same name: the card refuses (no ord address), so no "same owner" line beside the refusal.
+    expect(destinationFor(r, 'token').ok).toBe(false);
+    expect(forwardLabel(r, 'token')).toBeUndefined();
   });
 
   test('another name served with no forward is a mismatch: never paid, clear message', async () => {
@@ -239,6 +242,37 @@ describe('forwarded names', () => {
     expect(again.pubkey).toBe(kc.key);
     expect(forwardLabel(again)).toBe('alice@ forwards to carol@ (same owner)');
     expect(destinationFor(again, 'bsv').ok).toBe(true);
+  });
+
+  // Final review (P4): the remembered key (the last forward's target) signs a new forward; the payment stops as a key
+  // change, so the card must not say "(same owner)".
+  test('P4: remembered key signs a new forward: refusal shown, no "(same owner)"', async () => {
+    mem.clear();
+    const owner = wallet(73);
+    const kb = wallet(74);
+    const kx = wallet(75);
+    confirmed(
+      await resolveRecipient(
+        host({
+          pubkey: kb.key,
+          binding: await bindingFrom(kb, 'bob', 1),
+          forward: await signedForward(owner, 'alice', 'bob', null),
+        }),
+        parseRecipient(alice),
+      ),
+    );
+    const r = await resolveRecipient(
+      host({
+        pubkey: kx.key,
+        binding: await bindingFrom(kx, 'carol', 1),
+        forward: await signedForward(kb, 'alice', 'carol', null),
+      }),
+      parseRecipient(alice),
+    );
+    expect(r.forwardsTo).toBe('carol');
+    expect(r.nameBinding).toBe('changed');
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: KEY_CHANGED });
+    expect(forwardLabel(r)).toBeUndefined();
   });
 
   // F2: paid alice directly, then she forwards to a new key; trusting the change must also remember the signer.

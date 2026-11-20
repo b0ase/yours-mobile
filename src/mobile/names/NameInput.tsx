@@ -282,15 +282,15 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       Did you mean {r.didYouMean}? (a {APP_NAME} name)
                     </button>
                   )}
-                  {r.nameBinding === 'signed' && (
+                  {r.nameBinding === 'signed' && d.ok && (
                     <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
                       <Check size={11} /> Signed by its owner{r.forwardsTo ? ` as ${r.forwardsTo}@` : ''} · bound to{' '}
                       {short(r.pubkey ?? '')}
                     </div>
                   )}
-                  {r.forwardsTo && (
+                  {forwardLabel(r, asset) && (
                     <div data-testid="name-forward" className="text-[11px] break-all" style={{ color: fg }}>
-                      {forwardLabel(r)}
+                      {forwardLabel(r, asset)}
                     </div>
                   )}
                   {r.nameProof?.status === 'proven' && (
