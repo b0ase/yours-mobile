@@ -14,7 +14,12 @@ export type ChainLookups = {
   spent(outpoint: string): Promise<SpendState>;
   txKnown(txid: string): Promise<'known' | 'unknown' | 'unclear'>;
   chainTx(txid: string): Promise<ChainTxAnswer>;
+  /** Many outpoints at once (the 1Sat stack's bulk spends lookup, up to SPENDS_BATCH a call). An outpoint with no clear answer is 'unclear'. */
+  spentMany?(outpoints: string[]): Promise<Map<string, SpendState>>;
 };
+
+/** Outpoints the 1Sat stack answers for in one call. */
+export const SPENDS_BATCH = 100;
 
 const TXID = /^[0-9a-f]{64}$/;
 const OUTPOINT = /^[0-9a-f]{64}\.(?:0|[1-9]\d{0,9})$/;
@@ -54,6 +59,30 @@ export function oneSatChainLookups(services: unknown): ChainLookups | undefined 
       }
       return { state: 'unclear' };
     },
+    spentMany: async (outpoints) => {
+      const out = new Map<string, SpendState>();
+      const unclear: SpendState = { state: 'unclear' };
+      for (let i = 0; i < outpoints.length; i += SPENDS_BATCH) {
+        const chunk = outpoints.slice(i, i + SPENDS_BATCH);
+        const valid = chunk.filter((o) => OUTPOINT.test(o));
+        for (const o of chunk) if (!OUTPOINT.test(o)) out.set(o, unclear);
+        if (!valid.length) continue;
+        let answers: (string | null | undefined)[] | undefined;
+        try {
+          answers = await txo.getSpends!.call(txo, valid);
+        } catch {
+          // no answer for this batch
+        }
+        valid.forEach((o, n) => {
+          const by = answers && answers.length === valid.length ? answers[n] : undefined;
+          if (by === null) out.set(o, { state: 'unspent' });
+          else if (typeof by === 'string' && TXID.test(by.toLowerCase()))
+            out.set(o, { state: 'spent', by: by.toLowerCase() });
+          else out.set(o, unclear);
+        });
+      }
+      return out;
+    },
     txKnown: async (txid) => {
       const r = await chainTx(txid);
       return r.state === 'found' ? 'known' : r.state;
@@ -76,6 +105,11 @@ export function eitherChainSource(first: ChainLookups, second: () => ChainLookup
     return s ? b(s).catch(() => unclear) : r;
   };
   return {
+    // The bulk lookup is the 1Sat stack's alone; the caller asks `spent` for any outpoint it leaves unclear.
+    spentMany: async (ops) =>
+      (await second()
+        ?.spentMany?.(ops)
+        .catch(() => undefined)) ?? new Map(),
     spent: (op) =>
       ask(
         () => first.spent(op),

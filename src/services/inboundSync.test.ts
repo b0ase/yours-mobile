@@ -1655,7 +1655,7 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     expect((await run).admitted).toBe(1);
   }, 20_000);
 
-  test('C5: one run looks at 25 entries, and stops at the first unclear answer', async () => {
+  test('C5: one run looks at a bounded number of entries, and an unclear answer never stops it', async () => {
     const d = await phoneWithBackup();
     const list = (await import('./inboundSync')).admissionListFor(d.phone.getSettings().storageIdentityKey);
     const ghosts = Array.from({ length: 30 }, () => ({
@@ -1665,13 +1665,13 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     }));
     // Rows the device doesn't hold (yet: their page may still be merging, D3): each waits, no chain call.
     await list.add(d.kd.identityKey, ghosts, now());
-    const r = await admit(d.phone, d.kd.identityKey, d.verifier);
+    const r = await admitPending(d.phone as never, d.kd.identityKey, d.verifier, { now, limit: 25 });
     expect(r.waiting).toBe(25);
     expect(r.refused).toBe(0);
     expect(r.left).toBe(30);
     expect(d.chain.asked).toEqual([]);
     await admit(d.phone, d.kd.identityKey, d.verifier);
-    // Two coins waiting, WhatsOnChain unclear: asked once, then the run stops.
+    // Two coins waiting, WhatsOnChain unclear: both asked (task 69: an unclear answer never stops the run).
     for (const c of [d.coin, d.coin2]) {
       const o = await d.row(d.phone, c);
       await d.phone.updateOutput(o.outputId, { spendable: false } as never);
@@ -1684,11 +1684,14 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     d.chain.answer = 'unclear';
     const u = await admit(d.phone, d.kd.identityKey, d.verifier);
     expect(u.deferred).toBe(true);
-    expect(d.chain.asked.length).toBe(1);
-    // Backed off: an immediate run asks nothing more about the coin it asked.
+    expect(d.chain.asked.length).toBe(2);
+    // A short retry (5 s), not a minute: an immediate run asks nothing more, one 5 s on asks again.
     d.chain.asked.length = 0;
     await admit(d.phone, d.kd.identityKey, d.verifier);
-    expect(d.chain.asked.length).toBeLessThanOrEqual(1);
+    expect(d.chain.asked.length).toBe(0);
+    tick(5_000);
+    await admit(d.phone, d.kd.identityKey, d.verifier);
+    expect(d.chain.asked.length).toBe(2);
   }, 20_000); // real IndexedDB work for 30 entries: over bun's 5 s default under a loaded full-suite run
 
   test('D2: a coin waiting only on the chain is never given up on: admitted whenever the chain learns of it', async () => {
