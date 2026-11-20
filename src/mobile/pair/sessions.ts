@@ -39,6 +39,7 @@ import { handleBitsignCall, isBitsignAction } from './bitsign';
 import { handleTwetchCall, isTwetchAction, type TwetchWallet } from '../twetch/twetchCalls';
 import type { TwetchStore } from '../twetch/twetchLink';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
+import { isRefusalCode } from '../../services/refusalCodes';
 import { PAIR_MIRROR_KEY, toPairMirror } from '../../services/pairedPromptGuard';
 import { closeConnectCardsFor, forgetLogin, handlePairLoginCall, watchConnectCard } from './pairLogin';
 import { accountNamesFor } from '../names/accountNames';
@@ -616,8 +617,8 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
     // The user declined on the phone: the standard code (services/userDenied.ts), not the generic REJECTED.
     else if (r?.code === USER_DENIED_CODE || isUserDenied(r?.error))
       await reply(l, { t: 'res', id, error: { code: USER_DENIED_CODE, message: USER_DENIED_MESSAGE } });
-    // wallet.mintPrivate refusals keep their own code (services/mintPrivateAction.ts).
-    else if (isMintPrivateCode(r?.code))
+    // wallet.mintPrivate refusals, and the wallet's own refusals (services/refusalCodes.ts), keep their own code.
+    else if (isMintPrivateCode(r?.code) || isRefusalCode(r?.code))
       await reply(l, { t: 'res', id, error: { code: r!.code!, message: r?.error || 'Request refused' } });
     else await reply(l, { t: 'res', id, error: { code: 'REJECTED', message: r?.error || 'Request refused' } });
   } catch (e) {

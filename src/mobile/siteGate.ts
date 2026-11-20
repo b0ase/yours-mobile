@@ -16,12 +16,20 @@
  * Pure: the native prompt, clock and timers come in as deps so it can be unit-tested.
  */
 import { userDeniedError } from '../services/userDenied';
+import { walletLockedError } from '../services/refusalCodes';
 import { APP_NAME } from './storeBuild';
 
 export type VerifiedBy = 'biometric' | 'passcode' | 'password' | 'none';
 export type GatedCall = 'createSignature' | 'createAction' | 'confirmUser';
 export type GateKind = 'sign' | 'pay';
 export type LastVerification = { verifiedBy: VerifiedBy; at: string; call: GatedCall };
+
+/**
+ * The password fallback's answer: 'ok', 'cancelled' (its Cancel button: the person's No) or 'locked' (too many wrong
+ * passwords, or no sheet could be shown: ERR_WALLET_LOCKED, never the denial). A plain boolean is read as before:
+ * true = 'ok', false = 'cancelled'.
+ */
+export type PasswordOutcome = 'ok' | 'cancelled' | 'locked';
 
 export type AuthResult =
   | { status: 'ok'; method: 'biometric' | 'passcode' }
@@ -66,7 +74,7 @@ export type GateDeps = {
    * Resolves true (right password), false (cancelled or wrong). Never skipped silently: with this dep present, an
    * unavailable OS prompt asks for the password instead of passing as 'none' (owner, 30 Oct 2026).
    */
-  passwordAuth?: (reason: string, host: string) => Promise<boolean>;
+  passwordAuth?: (reason: string, host: string) => Promise<boolean | PasswordOutcome>;
   now?: () => number;
   timeoutMs?: number;
   graceMs?: number;
@@ -135,18 +143,30 @@ export const createSiteGate = (deps: GateDeps) => {
           reject(timeoutError());
         }, timeoutMs);
         deps.passwordAuth(GATE_REASON[kind], hostOf(origin)).then(
-          (ok) => {
+          (r) => {
             if (done) return;
             done = true;
             clearTimer(h2);
-            if (ok) resolve('password');
-            else reject(userDeniedError());
+            if (r === true || r === 'ok') resolve('password');
+            // Only the password sheet's Cancel is the person's No.
+            else if (r === false || r === 'cancelled') reject(userDeniedError());
+            else {
+              console.warn(
+                `[bwx-req] refused ${kind} host=${hostOf(origin)} code=ERR_WALLET_LOCKED reason=${String(r)}`,
+              );
+              reject(walletLockedError());
+            }
           },
-          () => {
+          (e: unknown) => {
             if (done) return;
             done = true;
             clearTimer(h2);
-            reject(userDeniedError());
+            // The password sheet could not run: not the person's No.
+            console.warn(
+              `[bwx-req] refused ${kind} host=${hostOf(origin)} code=ERR_WALLET_LOCKED reason=password prompt failed: ` +
+                (e instanceof Error ? e.message : String(e)),
+            );
+            reject(walletLockedError());
           },
         );
       }

@@ -6,7 +6,7 @@
 import { canDeviceOwnerAuth } from './deviceOwnerAuth';
 import { loadPrefs } from './settings/prefs';
 import { createSiteGate, type AuthResult } from './siteGate';
-import { askWalletPassword } from './siteGatePassword';
+import { askWalletPasswordResult } from './siteGatePassword';
 
 export const nativeAuth = async (
   reason: string,
@@ -35,5 +35,5 @@ export const siteGate = createSiteGate({
   enabled: () => canDeviceOwnerAuth() && loadPrefs().confirmWithBiometrics,
   auth: nativeAuth,
   // No biometrics and no passcode (or a failed prompt): the wallet password, never a silent pass.
-  passwordAuth: askWalletPassword,
+  passwordAuth: askWalletPasswordResult,
 });
