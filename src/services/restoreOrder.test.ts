@@ -216,7 +216,7 @@ describe('task 69: after a restore, plain coins first', () => {
   test('the tokens-and-names tail still drains: every batch after is ordinals, each checked', async () => {
     const w = build({ bulk: true });
     await load(w);
-    let now = w.t0 + 60_000;
+    const now = w.t0 + 60_000;
     let runs = 0;
     while (runs < 40) {
       const r = await admitPending(w.store as never, ID, w.verifier, { now: () => now });
