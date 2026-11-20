@@ -24,6 +24,7 @@ import {
   Utils,
 } from '@bsv/sdk';
 import {
+  EntityProvenTxReq,
   Services,
   StorageIdb,
   StorageProvider,
@@ -1241,12 +1242,16 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     const listed = await w2.listOutputs({ basket: 'bsv21', includeCustomInstructions: true, includeTags: true });
     return listed.outputs.map((o) => ({ outpoint: o.outpoint, ...bsv21FieldsFromOutput(o as never) }));
   };
-  /** A transaction of the backup's own (a copy of a real one's row), with this status and raw bytes. */
+  /**
+   * A transaction of the backup's own (a copy of a real one's row), with this status and raw bytes. Without `raw` the
+   * row carries none, but its txid is a real transaction's (`bytes`), for a proof request of it to carry.
+   */
   const backupTx = async (d: D, status: string, raw?: Transaction) => {
     const ru = await userOf(d.remote, d);
     const RT = (await d.remote.findTransactions({ partial: { userId: ru, txid: d.coin2 }, noRawTx: true }))[0];
     const t = later();
-    const txid = raw ? raw.id('hex') : Utils.toHex(Random(32));
+    const own = raw ?? minedTx(new P2PKH().lock(PrivateKey.fromRandom().toAddress()), 1_000);
+    const txid = own.id('hex');
     const id = await d.remote.insertTransaction({
       ...RT,
       transactionId: 0,
@@ -1258,7 +1263,7 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
       created_at: t,
       updated_at: t,
     } as never);
-    return { id, txid };
+    return { id, txid, bytes: own.toBinary() };
   };
   /** A payment of this device's own, not yet on the network, spending `coin` (a pot's pre-signed payment). */
   const unsentSpend = async (d: D, coin: string, withReq = false) => {
@@ -1803,7 +1808,7 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
       notified: false,
       history: '{}',
       notify: '{}',
-      rawTx: [1, 2, 3],
+      rawTx: X.bytes,
     } as never);
     const RT = (await d.remote.findTransactions({ partial: { txid: d.coin }, noRawTx: true }))[0];
     await d.remote.updateTransaction(RT.transactionId, { status: 'unfail', updated_at: later() } as never);
@@ -1813,6 +1818,221 @@ describe('16c: a merge never makes a coin spendable; only the admission list doe
     expect((await d.phone.findTransactions({ partial: { userId, txid: d.coin }, noRawTx: true }))[0].status).toBe(
       'completed',
     );
+  });
+
+  for (const status of ['unprocessed', 'unsent', 'sending'])
+    test(`b-Aware 310/316: a '${status}' request new to the device is admitted as 'nosend', never sent on a page's word`, async () => {
+      const d = await phoneWithBackup();
+      const X = await backupTx(d, 'completed');
+      const at = later();
+      await d.remote.insertProvenTxReq({
+        provenTxReqId: 0,
+        created_at: at,
+        updated_at: at,
+        txid: X.txid,
+        status,
+        attempts: 0,
+        notified: false,
+        history: '{}',
+        notify: '{}',
+        rawTx: X.bytes,
+      } as never);
+      await d.pull();
+      expect((await d.phone.findProvenTxReqs({ partial: { txid: X.txid } })).map((q) => q.status)).toEqual(['nosend']);
+    });
+
+  /** A history whose status note makes the toolbox count the request as broadcast (EntityProvenTxReq.wasBroadcast). */
+  const BROADCAST_HISTORY = JSON.stringify({
+    notes: [{ what: 'status', status_was: 'sending', status_now: 'unmined', when: '2026-11-01T00:00:00.000Z' }],
+  });
+  /** What the proof timeout reads to decide between 'invalid' and a resend ('unsent'). */
+  const proofState = async (d: D, txid: string) => {
+    const [q] = await d.phone.findProvenTxReqs({ partial: { txid } });
+    const e = new EntityProvenTxReq(q as never);
+    return { status: q.status, attempts: q.attempts, wasBroadcast: e.wasBroadcast, rebroadcast: e.rebroadcastAttempts };
+  };
+  const tamperedReq = async (d: D, txid: string, status: string, bytes: number[]) => {
+    const at = later();
+    await d.remote.insertProvenTxReq({
+      provenTxReqId: 0,
+      created_at: at,
+      updated_at: at,
+      txid,
+      status,
+      attempts: 10_000,
+      wasBroadcast: true,
+      rebroadcastAttempts: 3,
+      notified: false,
+      history: BROADCAST_HISTORY,
+      notify: '{}',
+      rawTx: bytes,
+    } as never);
+  };
+
+  for (const status of ['nosend', 'unmined', 'unknown', 'callback', 'unconfirmed', 'unsigned', 'nonfinal', 'unsent'])
+    test(`task 54 F1: a '${status}' request new to the device, with attempts / wasBroadcast / history forged, is admitted as 'nosend' with its proof state afresh`, async () => {
+      const d = await phoneWithBackup();
+      const X = await backupTx(d, 'completed');
+      await tamperedReq(d, X.txid, status, X.bytes);
+      await d.pull();
+      expect(await proofState(d, X.txid)).toEqual({
+        status: 'nosend',
+        attempts: 0,
+        wasBroadcast: false,
+        rebroadcast: 0,
+      });
+    });
+
+  for (const status of ['invalid', 'unfail'])
+    test(`task 54 F1: a forged '${status}' request new to the device is re-checked ('unknown') with its proof state afresh`, async () => {
+      const d = await phoneWithBackup();
+      const X = await backupTx(d, 'failed');
+      await tamperedReq(d, X.txid, status, X.bytes);
+      await d.pull();
+      expect(await proofState(d, X.txid)).toEqual({
+        status: 'unknown',
+        attempts: 0,
+        wasBroadcast: false,
+        rebroadcast: 0,
+      });
+    });
+
+  test("task 54 F1: a page adds no 'was broadcast' history to a request the device already has", async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'failed');
+    await tamperedReq(d, X.txid, 'invalid', X.bytes);
+    await d.pull();
+    expect((await proofState(d, X.txid)).wasBroadcast).toBe(false);
+    const [rq] = await d.remote.findProvenTxReqs({ partial: { txid: X.txid } });
+    await d.remote.updateProvenTxReq(rq.provenTxReqId, { history: BROADCAST_HISTORY, updated_at: later() } as never);
+    await d.pull();
+    expect(await proofState(d, X.txid)).toEqual({
+      status: 'unknown',
+      attempts: 0,
+      wasBroadcast: false,
+      rebroadcast: 0,
+    });
+  });
+
+  /** An unproven transaction spending `parent`'s first output (or a random one). */
+  const spend = (parent?: Transaction) => {
+    const tx = new Transaction();
+    tx.addInput({
+      sourceTXID: parent ? parent.id('hex') : Utils.toHex(Random(32)),
+      sourceOutputIndex: 0,
+      unlockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()),
+      sequence: 0xffffffff,
+    });
+    tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 500 });
+    return tx;
+  };
+  const backupReq = async (d: D, txid: string, rawTx: number[], inputBEEF?: number[]) => {
+    const at = later();
+    await d.remote.insertProvenTxReq({
+      provenTxReqId: 0,
+      created_at: at,
+      updated_at: at,
+      txid,
+      status: 'unmined',
+      attempts: 0,
+      notified: false,
+      history: '{}',
+      notify: '{}',
+      rawTx,
+      inputBEEF,
+    } as never);
+  };
+
+  test("task 54 round 2: a request whose raw bytes aren't its txid's is left out of the page", async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'completed');
+    await backupReq(d, X.txid, spend().toBinary()); // another transaction's bytes under X's txid
+    await d.pull();
+    expect(await d.phone.findProvenTxReqs({ partial: { txid: X.txid } })).toEqual([]);
+  });
+
+  test("task 54 round 2: a transaction row's bytes that aren't its txid's are cleared", async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'completed');
+    const [rt] = await d.remote.findTransactions({ partial: { txid: X.txid } });
+    await d.remote.updateTransaction(rt.transactionId, { rawTx: spend().toBinary(), updated_at: later() } as never);
+    await d.pull();
+    const [pt] = await d.phone.findTransactions({ partial: { txid: X.txid } });
+    expect(pt).toBeDefined();
+    expect(pt.rawTx?.length ?? 0).toBe(0);
+  });
+
+  test("task 54 round 2: a request's inputBEEF keeps only its own transaction's ancestors (a withheld payment riding in it is dropped)", async () => {
+    const d = await phoneWithBackup();
+    const P = minedTx(new P2PKH().lock(PrivateKey.fromRandom().toAddress()), 1_000); // proven parent
+    const S = spend(P); // the request's own transaction
+    const W = spend(); // withheld, unrelated: never to be broadcast
+    const beef = new Beef();
+    beef.mergeRawTx(P.toBinary(), beef.mergeBump(P.merklePath!));
+    beef.mergeRawTx(W.toBinary());
+    const X = await backupTx(d, 'unproven', S);
+    await backupReq(d, X.txid, S.toBinary(), beef.toBinary());
+    await d.pull();
+    const [q] = await d.phone.findProvenTxReqs({ partial: { txid: X.txid } });
+    const kept = Beef.fromBinary(Array.from(q.inputBEEF!));
+    expect(kept.findTxid(P.id('hex'))).toBeDefined();
+    expect(kept.findTxid(W.id('hex'))).toBeUndefined();
+  });
+
+  for (const held of ['nosend', 'unsigned', 'unprocessed'])
+    for (const to of ['unproven', 'sending', 'completed'])
+      test(`task 54 round 3 F1a: a payment the device holds as '${held}' is not moved to '${to}' by a page`, async () => {
+        const d = await phoneWithBackup();
+        const X = await backupTx(d, held);
+        await d.pull(); // the device has it, as the backup had it then
+        const userId = await userOf(d.phone, d);
+        const mine = async () =>
+          (await d.phone.findTransactions({ partial: { userId, txid: X.txid }, noRawTx: true }))[0];
+        expect((await mine()).status).toBe(held);
+        const [rt] = await d.remote.findTransactions({ partial: { txid: X.txid }, noRawTx: true });
+        await d.remote.updateTransaction(rt.transactionId, { status: to, updated_at: later() } as never);
+        await d.pull();
+        expect((await mine()).status).toBe(held);
+      });
+
+  const RECLAIM = {
+    noSendExpiryMode: 'timestamp',
+    noSendExpiryValue: 1,
+    noSendExpiryDeadline: 1,
+    noSendExpiryState: 'revocation-requested',
+    noSendExpiryAnchorTxid: 'ab'.repeat(32),
+    noSendExpiryAnchorVout: 0,
+    noSendExpiryReclaimTxid: 'cd'.repeat(32),
+    noSendExpiryReclaimRawTx: [1, 2, 3],
+    noSendExpiryReclaimDerivationPrefix: 'p',
+    noSendExpiryReclaimDerivationSuffix: 's',
+    noSendExpiryReclaimSatoshis: 1,
+  };
+  const expiryOf = (t: Record<string, unknown>) =>
+    Object.fromEntries(Object.keys(RECLAIM).map((k) => [k, t[k] ?? null]));
+  const NONE = Object.fromEntries(Object.keys(RECLAIM).map((k) => [k, null]));
+
+  test("task 54 round 4: a new transaction (a restore) keeps the page's BRC-177 fields (checked before any reclaim)", async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'nosend');
+    const [rt] = await d.remote.findTransactions({ partial: { txid: X.txid }, noRawTx: true });
+    await d.remote.updateTransaction(rt.transactionId, { ...RECLAIM, updated_at: later() } as never);
+    await d.pull();
+    const userId = await userOf(d.phone, d);
+    const [t] = await d.phone.findTransactions({ partial: { userId, txid: X.txid } });
+    expect(expiryOf(t as never)).toEqual(RECLAIM);
+  });
+
+  test('task 54 round 3 F2: …nor change a transaction the device has', async () => {
+    const d = await phoneWithBackup();
+    const X = await backupTx(d, 'nosend');
+    await d.pull();
+    const [rt] = await d.remote.findTransactions({ partial: { txid: X.txid }, noRawTx: true });
+    await d.remote.updateTransaction(rt.transactionId, { ...RECLAIM, updated_at: later() } as never);
+    await d.pull();
+    const userId = await userOf(d.phone, d);
+    const [t] = await d.phone.findTransactions({ partial: { userId, txid: X.txid } });
+    expect(expiryOf(t as never)).toEqual(NONE);
   });
 
   test("a page whose admissions can't be written to the device's list is not taken (fetched again), and isn't a broken backup", async () => {

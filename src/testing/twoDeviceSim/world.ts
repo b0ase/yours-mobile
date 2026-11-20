@@ -71,7 +71,16 @@ import {
 } from '../../services/unsentExpiry';
 import { chainLookups, expiryLookups, releaseLookups } from '../../services/unsentGuard';
 import { abortTargetKnownOnChain, knownOnChain } from '../../services/recoverFailed';
-import { releaseStuckSends, type QueuedSend } from '../../services/stuckSends';
+import {
+  listQueuedSends,
+  releaseStuckSends,
+  sendHeld,
+  type QueueStore,
+  type UnsentDeps,
+} from '../../services/stuckSends';
+import { createReleaseMarks, markReleases, watchSigned, type ReleaseMarks } from '../../services/releaseMarks';
+import { guardPostBeef, heldLocally, knownByServices } from '../../services/beefAncestors';
+import { guardReclaimActivation, reclaimLockFor, reclaimVerdict } from '../../services/reclaimGuard';
 import {
   AUTO_RESYNC_GAP_MS,
   OWN_PENDING_STATUSES,
@@ -129,9 +138,13 @@ export type Device = {
   monitor: Monitor;
   /** The push before a broadcast (services/changeWriteAhead.ts), on builds that have it. */
   writeAhead?: WriteAheadLike;
+  /** This device's release / arm marks (services/releaseMarks.ts; chrome.storage.local in the app, lost on a wipe). */
+  marks: ReleaseMarks;
 };
 
 let dbn = 0;
+/** The wallet's own originator in the sim (initWallet's ADMIN_ORIGINATOR); a call with none is the wallet's too. */
+export const SIM_ADMIN = 'admin.sim';
 /** The real clock, captured before any World moves Date.now. */
 const realNow = Date.now.bind(Date);
 let uninstallGuard: (() => void) | undefined;
@@ -331,6 +344,29 @@ export class World {
       maxRebroadcastAttempts: 0,
     } as never);
     monitor.addDefaultTasks();
+    // initWallet's broadcast stack (task 54 review, rounds 3 and 4): the wallet's own actions make this device's
+    // records (held, released, who made what); every post keeps only the named transactions and their ancestors and
+    // refuses one carrying a payment held here without a release, or a reclaim that isn't structurally the wallet's
+    // own; the toolbox activates a reclaim only when that same check passes.
+    const marks = createReleaseMarks();
+    markReleases(wallet, marks, { admin: SIM_ADMIN });
+    if (!watchSigned(sm, marks)) throw new Error('storage processAction not watched');
+    const lockFor = reclaimLockFor(wallet as never);
+    if (
+      !guardPostBeef(svc, {
+        released: (txid) => marks.released(txid),
+        known: async (txid) => {
+          const k = await knownByServices(svc as never, txid);
+          if (k) await marks.markSeen(txid);
+          return k;
+        },
+        held: heldLocally(marks, () => s as never),
+        reclaim: (txid) => reclaimVerdict(s as never, txid, lockFor),
+        log: (m) => this.log(`[${name}] ${m}`),
+      })
+    )
+      throw new Error('postBeef not guarded');
+    if (!guardReclaimActivation(s, lockFor, (m) => this.log(`[${name}] ${m}`))) throw new Error('reclaims not guarded');
     const log = (...a: unknown[]) => this.log(`[${name}]`, ...a);
     // initWallet's checkBackupRows verifier, over the fake chain (WhatsOnChain first, then the 1Sat stack).
     const verifier: IS.InboundVerifier = {
@@ -470,6 +506,7 @@ export class World {
       svc,
       monitor,
       writeAhead,
+      marks,
     };
   }
 
@@ -765,30 +802,39 @@ export class World {
   async releaseStuck(on: Device | 'A' | 'B') {
     const d = this.dev(on);
     this.step(`${d.name} gives up on queued sends the network never had`);
+    return releaseStuckSends({ ...this.stuckDeps(d), log: (m) => this.log(`[${d.name}] ${m}`) });
+  }
+
+  /**
+   * initWallet's by-hand send/cancel deps on `on` (resolveUnsent): its stuck-send deps, the Monitor's SendWaiting, the
+   * wallet's own post of a held payment (sendHeld), and the spending kill switch (`paused`: it refuses).
+   */
+  unsentDeps(on: Device | 'A' | 'B', o: { paused?: boolean } = {}): UnsentDeps {
+    const d = this.dev(on);
+    const m = d.monitor as unknown as { runTask: (n: string) => Promise<string> };
+    return {
+      ...this.stuckDeps(d),
+      sendWaiting: () => m.runTask('SendWaiting'),
+      sendWith: sendHeld(d.wallet as never),
+      assertSpending: async () => {
+        if (o.paused) throw new Error('Payments are paused for now');
+      },
+    };
+  }
+
+  private stuckDeps(d: Device) {
     const f = this.chain.fetch;
     const sm = d.sm as unknown as { runAsStorageProvider: <T>(fn: (sp: StorageIdb) => Promise<T>) => Promise<T> };
-    return releaseStuckSends({
+    return {
       listQueued: () =>
-        sm.runAsStorageProvider(async (sp) => {
-          const out: QueuedSend[] = [];
-          for (const t of await sp.findTransactions({
-            partial: { status: 'sending', isOutgoing: true },
-            noRawTx: true,
-          })) {
-            if (!t.txid) continue;
-            const [req] = await sp.findProvenTxReqs({ partial: { txid: t.txid } });
-            out.push({
-              transactionId: t.transactionId,
-              txid: t.txid,
-              createdAt: new Date(t.created_at).getTime(),
-              attempts: req?.attempts ?? 0,
-              reqStatus: req?.status,
-              description: t.description,
-              satoshis: t.satoshis,
-            });
-          }
-          return out;
-        }),
+        sm.runAsStorageProvider((sp) =>
+          listQueuedSends(
+            sp as unknown as QueueStore,
+            (t) => d.marks.released(t),
+            IS.walletOwnership(this.root) as never,
+            { heldHere: (t) => d.marks.heldHere(t), seen: (t) => d.marks.seen(t) },
+          ),
+        ),
       knownOnChain: (txid) => knownOnChain(txid, chainLookups(f)),
       cancel: (q) =>
         sm.runAsStorageProvider(async (sp) => {
@@ -796,8 +842,7 @@ export class World {
             await sp.updateProvenTxReq(req.provenTxReqId, { status: 'invalid' });
           await sp.updateTransactionStatus('failed', q.transactionId);
         }),
-      log: (m) => this.log(`[${d.name}] ${m}`),
-    });
+    } satisfies Parameters<typeof releaseStuckSends>[0];
   }
 
   /** `on` gives up on a payment (as the stuck-send release does): request 'invalid', payment failed, inputs freed. */

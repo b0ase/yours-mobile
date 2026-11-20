@@ -37,8 +37,12 @@
  */
 import 'fake-indexeddb/auto';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { teardownSim, World } from '../testing/twoDeviceSim/world';
+import { inputsOf, SIM_ADMIN, teardownSim, World } from '../testing/twoDeviceSim/world';
 import { rng } from '../testing/twoDeviceSim/chain';
+import { Beef, Script, Transaction } from '@bsv/sdk';
+import { Wallet, WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
+import { NOT_YOURS } from '../services/releaseMarks';
+import { isHeld, NEEDS_CONFIRMATION, NEVER_SEEN, resolveUnsent, visibleUnsent } from '../services/stuckSends';
 
 // The Store client (mobile/themeOrder/api.ts, imported by the Store open) reads its API base once, when it is first
 // loaded. bun runs every file in one process: whichever file loads it first fixes it for the rest, so this file sets
@@ -152,6 +156,604 @@ describe('two devices, one seed: named cases', () => {
     await w.settleAndCheck();
     expect(w.B.expiry.reports.flatMap((r) => r.released)).toContain(p.txid);
   });
+
+  for (const status of ['unsent', 'sending', 'unprocessed'] as const)
+    sim(
+      `b-Aware 310/316: a pulled '${status}' request for a noSend payment posts nothing from the other device`,
+      async () => {
+        const w = await threeCoins();
+        const p = await w.storePay('A', 20_000, { outbox: false }); // signed, withheld: never to be broadcast
+        await w.sync('A');
+        // A hostile backup: the request goes out as one the Monitor would post.
+        const [q] = await w.backup.findProvenTxReqs({ partial: { txid: p.txid } });
+        expect(q).toBeDefined();
+        await w.backup.updateProvenTxReq(q.provenTxReqId, {
+          status,
+          updated_at: new Date(Date.now() + 60_000),
+        } as never);
+        await w.wipe('B'); // B is new to it: restored from the backup
+        await w.sync('B');
+        expect((await w.statusOf('B', p.txid)).req).not.toMatch(/^(unsent|sending|unprocessed)$/);
+        expect(await w.sendWaiting('B')).toEqual([]);
+        expect(w.chain.unspent('bsv').size).toBeGreaterThan(0);
+      },
+    );
+
+  sim(
+    "b-Aware 310/316: a delayed send's request goes to the backup as 'nosend' on a routine sync; this device still sends it",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.sendDelayed('A', 20_000);
+      await w.sync('A');
+      expect((await w.statusOf('A', p.txid)).req).toBe('unsent');
+      expect((await w.statusOf('backup', p.txid)).req).toBe('nosend');
+      await w.sync('B');
+      expect(await w.sendWaiting('B')).toEqual([]);
+      expect((await w.sendWaiting('A')).length).toBeGreaterThan(0);
+    },
+  );
+
+  /** A history whose status note makes the toolbox count a request as broadcast (EntityProvenTxReq.wasBroadcast). */
+  const BROADCAST_HISTORY = JSON.stringify({
+    notes: [{ what: 'status', status_was: 'sending', status_now: 'unmined', when: '2026-11-01T00:00:00.000Z' }],
+  });
+  /** A hostile backup rewrites the request for `txid` (with a newer time, so the next pull carries it). */
+  const tamper = async (w: World, txid: string, patch: Record<string, unknown>) => {
+    const [q] = await w.backup.findProvenTxReqs({ partial: { txid } });
+    expect(q).toBeDefined();
+    w.advance(60_000);
+    await w.backup.updateProvenTxReq(q.provenTxReqId, { ...patch, updated_at: new Date(Date.now()) } as never);
+  };
+  /** `on`'s proof task, `runs` times, each counted as an attempt (as each new block does in the app). */
+  const proveTimes = async (w: World, on: 'A' | 'B', runs: number) => {
+    for (let i = 0; i < runs; i++) await w.prove(on);
+  };
+
+  for (const status of ['nosend', 'unmined', 'unknown', 'callback', 'unconfirmed', 'unsent', 'invalid'] as const)
+    sim(
+      `task 54 F1: a pulled '${status}' request for a noSend payment, forged attempts / wasBroadcast / history, posts nothing after the proof tasks`,
+      async () => {
+        const w = await threeCoins();
+        const p = await w.storePay('A', 20_000, { outbox: false }); // signed, withheld: never to be broadcast
+        await w.sync('A');
+        await tamper(w, p.txid, {
+          status,
+          attempts: 10_000,
+          wasBroadcast: true,
+          rebroadcastAttempts: 0,
+          history: BROADCAST_HISTORY,
+        });
+        await w.wipe('B'); // B is new to it: restored from the backup
+        await w.sync('B');
+        await w.prove('B', { noSends: true }); // the proof timeout runs here (CheckForProofs / CheckNoSends)
+        expect(await w.sendWaiting('B')).toEqual([]);
+        expect(w.chain.has(p.txid)).toBe(false);
+      },
+    );
+
+  sim(
+    "task 54 F1: a pulled 'unmined' request (attempts, flags and history untouched) posts nothing after 150 proof runs",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.storePay('A', 20_000, { outbox: false });
+      await w.sync('A');
+      await tamper(w, p.txid, { status: 'unmined' });
+      await w.wipe('B');
+      await w.sync('B');
+      await proveTimes(w, 'B', 150); // past unprovenAttemptsLimitMain (144)
+      await w.prove('B', { noSends: true });
+      expect(await w.sendWaiting('B')).toEqual([]);
+      expect(w.chain.has(p.txid)).toBe(false);
+    },
+  );
+
+  sim(
+    "task 54 F1: a later page's 'was broadcast' history on a request B already re-checks ('unknown') posts nothing after 150 proof runs",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.storePay('A', 20_000, { outbox: false });
+      await w.sync('A');
+      await tamper(w, p.txid, { status: 'invalid' });
+      await w.wipe('B');
+      await w.sync('B');
+      expect((await w.statusOf('B', p.txid)).req).toBe('unknown');
+      await tamper(w, p.txid, { history: BROADCAST_HISTORY });
+      await w.sync('B');
+      await proveTimes(w, 'B', 150);
+      expect(await w.sendWaiting('B')).toEqual([]);
+      expect(w.chain.has(p.txid)).toBe(false);
+    },
+  );
+
+  sim(
+    "task 54 F2: a delayed send queued before setActive reaches the new active store as 'unsent' and is sent from there",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.sendDelayed('A', 20_000);
+      expect((await w.statusOf('A', p.txid)).req).toBe('unsent');
+      await w.A.sm.setActive(w.backup.getSettings().storageIdentityKey);
+      expect((await w.statusOf('backup', p.txid)).req).toBe('unsent');
+      expect(w.chain.has(p.txid)).toBe(false);
+      // A's Monitor now works on the backup store; the backup's own services post (not A's, so not in A's list).
+      await w.sendWaiting('A');
+      expect(w.chain.has(p.txid)).toBe(true);
+    },
+  );
+
+  sim(
+    "task 54 round 2: a withheld payment the backup slips into another payment's inputBEEF never reaches the network",
+    async () => {
+      const w = await threeCoins();
+      const W = await w.storePay('A', 20_000, { outbox: false }); // signed, withheld: never to be broadcast
+      const S1 = await w.send('A', 20_000); // a normal send: on the network, its change A's to spend
+      await w.sync('A');
+      // A hostile backup adds W (with its parents) to S1's request inputBEEF.
+      const [wq] = await w.backup.findProvenTxReqs({ partial: { txid: W.txid } });
+      const [sq] = await w.backup.findProvenTxReqs({ partial: { txid: S1.txid } });
+      expect(wq && sq).toBeTruthy();
+      const beef = Beef.fromBinary(Array.from(sq.inputBEEF!));
+      for (const parent of new Set(W.inputs.map((o) => o.split('.')[0]))) {
+        const path = w.chain.merklePath(parent);
+        expect(path).toBeDefined(); // the coins W spends are mined
+        beef.mergeRawTx(w.chain.txs.get(parent)!.raw, beef.mergeBump(path!));
+      }
+      beef.mergeRawTx(Array.from(wq.rawTx));
+      expect(beef.isValid()).toBe(true);
+      expect(beef.findTxid(W.txid)).toBeDefined();
+      w.advance(60_000);
+      await w.backup.updateProvenTxReq(sq.provenTxReqId, {
+        inputBEEF: beef.toBinary(),
+        updated_at: new Date(Date.now()),
+      } as never);
+      await w.wipe('B'); // B is new to S1: restored from the backup
+      await w.sync('B');
+      await w.admit(w.B);
+      // S1 is mined (a payment held on B goes out with B's send only once the chain has it in a block: round 4, item 5).
+      w.chain.mine();
+      // B spends more than its untouched coin: S1's change goes in, and S1's request builds the BEEF it is posted in.
+      const s2 = await w.send('B', 150_000);
+      expect(s2.inputs.some((o) => o.startsWith(`${S1.txid}.`))).toBe(true);
+      expect(w.chain.has(s2.txid)).toBe(true);
+      expect(w.chain.has(W.txid)).toBe(false);
+    },
+  );
+
+  sim(
+    "task 54 round 2: a queued send restored from a backup is listed as held and goes out only on the user's Send now, never while paused",
+    async () => {
+      const w = await threeCoins();
+      const p = await w.sendDelayed('A', 20_000); // queued on A; A's device is then lost before it sends
+      await w.sync('A');
+      await w.wipe('B'); // B restored from the backup: the queued send arrives held ('nosend')
+      await w.sync('B');
+      const listed = (await w.unsentDeps('B').listQueued()).find((q) => q.txid === p.txid);
+      expect(listed?.reqStatus).toBe('nosend');
+      expect(isHeld(listed!)).toBe(true);
+      // Nothing goes out without the user: B's Monitor, the stuck-send review.
+      expect(await w.sendWaiting('B')).toEqual([]);
+      await w.releaseStuck('B');
+      expect(w.chain.has(p.txid)).toBe(false);
+      // Spending paused: refused, nothing sent.
+      const paused = await resolveUnsent(w.unsentDeps('B', { paused: true }), p.txid, 'send', { confirmed: true });
+      expect(paused).toEqual({ ok: false, txid: p.txid, error: 'Payments are paused for now' });
+      expect(w.chain.has(p.txid)).toBe(false);
+      // Send now without the confirmation sheet's yes: refused, nothing sent (review round 3, d).
+      expect(await resolveUnsent(w.unsentDeps('B'), p.txid, 'send')).toEqual({
+        ok: false,
+        txid: p.txid,
+        error: NEEDS_CONFIRMATION,
+      });
+      expect(w.chain.has(p.txid)).toBe(false);
+      // The user's confirmed Send now: exactly that payment goes out, from B.
+      const before = w.B.posted.length;
+      const sent = await resolveUnsent(w.unsentDeps('B'), p.txid, 'send', { confirmed: true });
+      expect(sent).toEqual({ ok: true, txid: p.txid, result: 'network-may-have-it' });
+      expect(w.B.posted.slice(before)).toEqual([p.txid]);
+      expect(w.chain.has(p.txid)).toBe(true);
+    },
+  );
+
+  for (const to of ['unproven', 'sending', 'completed'] as const)
+    sim(
+      `task 54 round 3 F1: a page moving A's own withheld payment to '${to}' frees none of its change and never sends it`,
+      async () => {
+        const w = await threeCoins();
+        const W = await w.storePay('A', 20_000, { outbox: false }); // signed on A, withheld
+        await w.sync('A');
+        const [bt] = await w.backup.findTransactions({ partial: { txid: W.txid }, noRawTx: true });
+        w.advance(60_000);
+        await w.backup.updateTransaction(bt.transactionId, { status: to, updated_at: new Date(Date.now()) } as never);
+        await w.sync('A'); // A pulls the backup's word on its own payment
+        expect((await w.statusOf('A', W.txid)).tx).toBe('nosend');
+        // An ordinary send needing more than A's two untouched coins: W's change is not there to take.
+        let s2: Awaited<ReturnType<typeof w.send>> | undefined;
+        try {
+          s2 = await w.send('A', 250_000);
+        } catch {
+          // refused: not enough spendable coins without W's change
+        }
+        if (s2) expect(s2.inputs.some((o) => o.startsWith(`${W.txid}.`))).toBe(false);
+        await w.sendWaiting('A');
+        expect(w.chain.has(W.txid)).toBe(false);
+      },
+    );
+
+  for (const on of ['A', 'B'] as const)
+    sim(
+      `task 54 round 3 F2: a page's BRC-177 reclaim pointed at a withheld payment itself never posts it (${on === 'A' ? 'the device that signed it' : 'a device restored from the backup'})`,
+      async () => {
+        const w = await threeCoins();
+        // A withheld payment with one input and one output (the shape the toolbox's validateReclaim accepts).
+        const r = await w.A.wallet.createAction({
+          description: 'Withheld payment',
+          outputs: [{ lockingScript: w.externalScript(), satoshis: 99_950, outputDescription: 'payment' }],
+          options: { noSend: true, randomizeOutputs: false },
+        });
+        const W = Transaction.fromAtomicBEEF(r.tx as number[]);
+        const wid = W.id('hex');
+        expect([W.inputs.length, W.outputs.length]).toEqual([1, 1]);
+        const [anchor] = inputsOf(W);
+        await w.sync('A');
+        // The hostile backup: W's expiry "revocation-requested", its reclaim W itself, anchored on W's own input.
+        const [bt] = await w.backup.findTransactions({ partial: { txid: wid }, noRawTx: true });
+        w.advance(60_000);
+        await w.backup.updateTransaction(bt.transactionId, {
+          noSendExpiryMode: 'timestamp',
+          noSendExpiryValue: 1,
+          noSendExpiryDeadline: 1,
+          noSendExpiryState: 'revocation-requested',
+          noSendExpiryAnchorTxid: anchor.split('.')[0],
+          noSendExpiryAnchorVout: Number(anchor.split('.')[1]),
+          noSendExpiryReclaimTxid: wid,
+          noSendExpiryReclaimRawTx: W.toBinary(),
+          noSendExpiryReclaimDerivationPrefix: 'p',
+          noSendExpiryReclaimDerivationSuffix: 's',
+          noSendExpiryReclaimSatoshis: 99_950,
+          updated_at: new Date(Date.now()),
+        } as never);
+        if (on === 'B') await w.wipe('B'); // W new to B: restored from the backup with the forged fields
+        await w.sync(on);
+        const [t] = await w.dev(on).s.findTransactions({ partial: { txid: wid }, noRawTx: true });
+        expect(t).toBeDefined();
+        // A transaction the device has keeps its own expiry fields; a new one (a restore) keeps the page's, which are
+        // checked structurally before any reclaim is activated or posted (round 4).
+        if (on === 'A') expect([t.noSendExpiryState ?? null, t.noSendExpiryReclaimTxid ?? null]).toEqual([null, null]);
+        else expect(t.noSendExpiryReclaimTxid).toBe(wid);
+        const m = w.dev(on).monitor as unknown as { runTask: (n: string) => Promise<string> };
+        await m.runTask('NoSendExpiry');
+        await w.sendWaiting(on);
+        expect(w.chain.has(wid)).toBe(false);
+        // Not activated and never cancelled: the row is left as it was.
+        const [after] = await w.dev(on).s.findTransactions({ partial: { txid: wid }, noRawTx: true });
+        expect(after.noSendExpiryState ?? null).toBe(on === 'A' ? null : 'revocation-requested');
+      },
+    );
+
+  /** The permissions manager with no prompts (every grant given), as a site's calls reach the wallet in the app. */
+  const NO_PROMPTS = Object.fromEntries(
+    [
+      'seekProtocolPermissionsForSigning',
+      'seekProtocolPermissionsForEncrypting',
+      'seekProtocolPermissionsForHMAC',
+      'seekPermissionsForKeyLinkageRevelation',
+      'seekPermissionsForPublicKeyRevelation',
+      'seekPermissionsForIdentityKeyRevelation',
+      'seekPermissionsForIdentityResolution',
+      'seekBasketInsertionPermissions',
+      'seekBasketRemovalPermissions',
+      'seekBasketListingPermissions',
+      'seekPermissionWhenApplyingActionLabels',
+      'seekPermissionWhenListingActionsByLabel',
+      'seekCertificateDisclosurePermissions',
+      'seekCertificateAcquisitionPermissions',
+      'seekCertificateRelinquishmentPermissions',
+      'seekCertificateListingPermissions',
+      'encryptWalletMetadata',
+      'seekSpendingPermissions',
+      'differentiatePrivilegedOperations',
+    ].map((k) => [k, false]),
+  );
+  const pmOf = (w: World, on: 'A' | 'B') =>
+    new WalletPermissionsManager(w.dev(on).wallet as never, SIM_ADMIN, NO_PROMPTS as never);
+  const expiringArgs = (w: World) => ({
+    description: 'Expiring payment',
+    outputs: [{ lockingScript: w.externalScript(), satoshis: 20_000, outputDescription: 'payment' }],
+    labels: ['p nosend expiry seconds 60'],
+    options: { noSend: true },
+  });
+  /** A BRC-177 expiring noSend payment on `on`: through the permissions manager (two-step), or the bare toolbox. */
+  const expiring = async (w: World, on: 'A' | 'B', how: 'site' | 'legacy') => {
+    const r = (
+      how === 'site'
+        ? await pmOf(w, on).createAction(expiringArgs(w) as never, 'shop.example')
+        : // Made before this release: straight through the toolbox's own createAction, none of this device's records.
+          await (Wallet.prototype.createAction as (a: unknown) => Promise<unknown>).call(
+            w.dev(on).wallet,
+            expiringArgs(w),
+          )
+    ) as { txid: string };
+    const [t] = await w.dev(on).s.findTransactions({ partial: { txid: r.txid }, noRawTx: true });
+    expect(t.noSendExpiryState).toBe('signed');
+    return { txid: r.txid, reclaimTxid: t.noSendExpiryReclaimTxid as string };
+  };
+  /** Past the deadline, the Monitor's NoSendExpiry task; then the reclaim mined, proved and settled. */
+  const expireAndReclaim = async (w: World, on: 'A' | 'B', reclaimTxid: string) => {
+    w.advance(11 * 60_000);
+    const m = w.dev(on).monitor as unknown as { runTask: (n: string) => Promise<string> };
+    await m.runTask('NoSendExpiry');
+    const posted = w.chain.has(reclaimTxid);
+    if (posted) {
+      w.chain.mine();
+      await w.prove(on);
+      await m.runTask('NoSendExpiry');
+    }
+    return posted;
+  };
+  const reclaimSettled = async (w: World, on: 'A' | 'B', target: string, reclaimTxid: string) => {
+    const s = w.dev(on).s;
+    const [t] = await s.findTransactions({ partial: { txid: target }, noRawTx: true });
+    const [r] = await s.findTransactions({ partial: { txid: reclaimTxid }, noRawTx: true });
+    const outs = r ? await s.findOutputs({ partial: { transactionId: r.transactionId }, noScript: true }) : [];
+    return { state: t.noSendExpiryState, coinsBack: outs.some((o) => o.spendable === true) };
+  };
+
+  for (const how of ['site', 'legacy'] as const)
+    sim(
+      `task 54 round 4 (1): a BRC-177 action ${how === 'site' ? 'made by a site through the permissions manager (two-step)' : 'made before this release (no records of it here)'} is reclaimed after expiry and its coins come back`,
+      async () => {
+        const w = await threeCoins();
+        const { txid, reclaimTxid } = await expiring(w, 'A', how);
+        expect(await expireAndReclaim(w, 'A', reclaimTxid)).toBe(true);
+        expect(await reclaimSettled(w, 'A', txid, reclaimTxid)).toEqual({ state: 'reclaimed', coinsBack: true });
+        expect(w.chain.has(txid)).toBe(false);
+      },
+    );
+
+  sim('task 54 round 4 (1): a BRC-177 action restored onto a wiped device is reclaimed there', async () => {
+    const w = await threeCoins();
+    const { txid, reclaimTxid } = await expiring(w, 'A', 'site');
+    await w.sync('A');
+    await w.wipe('B');
+    await w.sync('B');
+    await w.admit(w.B);
+    // The funding transaction (the anchor's) is mined by the deadline: on a restored device it came back held, and a held
+    // parent goes out with the reclaim only once the chain has it in a block (round 4, item 5).
+    w.chain.mine();
+    expect(await expireAndReclaim(w, 'B', reclaimTxid)).toBe(true);
+    expect(w.chain.has(txid)).toBe(false);
+  });
+
+  for (const forge of ['pays a foreign key', 'an extra input'] as const)
+    sim(
+      `task 54 round 4 (1): a forged reclaim (${forge}) restored from a backup is not posted, and its row is not cancelled`,
+      async () => {
+        const w = await threeCoins();
+        const { txid, reclaimTxid } = await expiring(w, 'A', 'site');
+        await w.sync('A');
+        // The hostile backup rewrites the reclaim it hands a restored device.
+        const [bt] = await w.backup.findTransactions({ partial: { txid } });
+        const real = Transaction.fromBinary(Array.from(bt.noSendExpiryReclaimRawTx as number[]));
+        const forged = new Transaction(real.version, [], [], real.lockTime);
+        forged.addInput({ ...real.inputs[0] });
+        if (forge === 'an extra input')
+          forged.addInput({
+            sourceTXID: 'ab'.repeat(32),
+            sourceOutputIndex: 0,
+            unlockingScript: real.inputs[0].unlockingScript,
+            sequence: 0xffffffff,
+          });
+        forged.addOutput({
+          lockingScript:
+            forge === 'pays a foreign key' ? Script.fromHex(w.externalScript()) : real.outputs[0].lockingScript,
+          satoshis: real.outputs[0].satoshis,
+        });
+        w.advance(60_000);
+        await w.backup.updateTransaction(bt.transactionId, {
+          noSendExpiryReclaimTxid: forged.id('hex'),
+          noSendExpiryReclaimRawTx: forged.toBinary(),
+          updated_at: new Date(Date.now()),
+        } as never);
+        await w.wipe('B');
+        await w.sync('B');
+        await w.admit(w.B);
+        w.chain.mine(); // the funding transaction is mined: only the reclaim check stands in the way
+        expect(await expireAndReclaim(w, 'B', forged.id('hex'))).toBe(false);
+        await w.sendWaiting('B');
+        expect([w.chain.has(forged.id('hex')), w.chain.has(txid), w.chain.has(reclaimTxid)]).toEqual([
+          false,
+          false,
+          false,
+        ]);
+        const [t] = await w.B.s.findTransactions({ partial: { txid }, noRawTx: true });
+        expect(t.noSendExpiryState).not.toBe('cancelled');
+      },
+    );
+
+  sim(
+    "task 54 round 4 (2): a site can't send a noSend payment the wallet or another site made; its own it can",
+    async () => {
+      const w = await threeCoins();
+      const pm = pmOf(w, 'A');
+      const noSend = (sats: number) => ({
+        description: 'Held payment',
+        outputs: [{ lockingScript: w.externalScript(), satoshis: sats, outputDescription: 'payment' }],
+        options: { noSend: true },
+      });
+      const byWallet = (await w.A.wallet.createAction(noSend(10_000) as never)) as { txid: string };
+      const byB = (await pm.createAction(noSend(11_000) as never, 'b.example')) as { txid: string };
+      const byA = (await pm.createAction(noSend(12_000) as never, 'a.example')) as { txid: string };
+      for (const W of [byWallet.txid, byB.txid])
+        await expect(
+          pm.createAction({ description: 'Send it now', options: { sendWith: [W] } } as never, 'a.example'),
+        ).rejects.toThrow(NOT_YOURS);
+      expect([w.chain.has(byWallet.txid), w.chain.has(byB.txid)]).toEqual([false, false]);
+      await pm.createAction(
+        { description: 'Send it now', options: { sendWith: [byA.txid], acceptDelayedBroadcast: false } } as never,
+        'a.example',
+      );
+      expect(w.chain.has(byA.txid)).toBe(true);
+    },
+  );
+
+  /** A's payment P reaches B as sent but unconfirmed (B's copy: 'unproven', request 'nosend'), then drops out. */
+  const droppedElsewhere = async () => {
+    const w = await threeCoins();
+    const P = await w.send('A', 20_000);
+    await w.sync('A');
+    await w.sync('B');
+    expect(await w.statusOf('B', P.txid)).toEqual({ tx: 'unproven', req: 'nosend' });
+    // B's list read (initWallet's listUnsent): one the network has is marked seen on B.
+    const listed = async () =>
+      (
+        await visibleUnsent(
+          await w.unsentDeps('B').listQueued(),
+          (t) => Promise.resolve(w.chain.has(t)),
+          (t) => w.B.marks.markSeen(t),
+        )
+      ).find((q) => q.txid === P.txid);
+    expect(await listed()).toBeUndefined(); // in the mempool: nothing to do
+    w.chain.drop(P.txid); // A's device is gone; the network forgot P
+    return { w, P, listed };
+  };
+
+  sim(
+    "task 54 round 5 (4): another device's payment that dropped out of the mempool is listed; Send now re-posts exactly it",
+    async () => {
+      const { w, P, listed } = await droppedElsewhere();
+      const q = await listed();
+      expect([q?.elsewhere, q?.reqStatus, q?.amountSats]).toEqual([true, 'nosend', 20_000]);
+      expect(await resolveUnsent(w.unsentDeps('B'), P.txid, 'send')).toEqual({
+        ok: false,
+        txid: P.txid,
+        error: NEEDS_CONFIRMATION,
+      });
+      expect(w.chain.has(P.txid)).toBe(false);
+      const before = w.B.posted.length;
+      expect(await resolveUnsent(w.unsentDeps('B'), P.txid, 'send', { confirmed: true })).toEqual({
+        ok: true,
+        txid: P.txid,
+        result: 'network-may-have-it',
+      });
+      expect(w.B.posted.slice(before)).toEqual([P.txid]);
+      expect(w.chain.has(P.txid)).toBe(true);
+    },
+  );
+
+  sim('task 54 round 5 (4): …Cancel releases its inputs with nothing broadcast; paused, Send now refuses', async () => {
+    const { w, P, listed } = await droppedElsewhere();
+    expect((await listed())?.elsewhere).toBe(true);
+    expect((await resolveUnsent(w.unsentDeps('B', { paused: true }), P.txid, 'send', { confirmed: true })).ok).toBe(
+      false,
+    );
+    const before = w.B.posted.length;
+    expect(await resolveUnsent(w.unsentDeps('B'), P.txid, 'cancel')).toEqual({
+      ok: true,
+      txid: P.txid,
+      result: 'cancelled',
+      elsewhere: true, // "Released here. If the other device sends it, it will still go through."
+    });
+    expect(w.B.posted.slice(before)).toEqual([]);
+    expect(w.chain.has(P.txid)).toBe(false);
+    for (const o of P.inputs)
+      expect(
+        (await w.B.s.findOutputs({ partial: { txid: o.split('.')[0], vout: Number(o.split('.')[1]) } }))[0]?.spendable,
+      ).toBe(true);
+  });
+
+  sim(
+    'task 54 round 5 (4): …and the stuck-send review gives it up after its window, inputs released, nothing sent',
+    async () => {
+      const { w, P } = await droppedElsewhere();
+      w.advance(8 * 24 * 60 * 60_000);
+      const before = w.B.posted.length;
+      const r = await w.releaseStuck('B');
+      expect(r.released.map((x) => x.txid)).toContain(P.txid);
+      expect(w.B.posted.slice(before)).toEqual([]);
+      expect(await w.statusOf('B', P.txid)).toEqual({ tx: 'failed', req: 'invalid' });
+    },
+  );
+
+  sim(
+    "task 54 round 6 (d): A's withheld payment a backup brings to B as sent is listed with Cancel only, never sendable",
+    async () => {
+      const w = await threeCoins();
+      const W = await w.storePay('A', 20_000, { outbox: false }); // withheld on A
+      await w.sync('A');
+      const [bt] = await w.backup.findTransactions({ partial: { txid: W.txid }, noRawTx: true });
+      w.advance(60_000);
+      await w.backup.updateTransaction(bt.transactionId, {
+        status: 'unproven',
+        updated_at: new Date(Date.now()),
+      } as never);
+      await w.wipe('B');
+      await w.sync('B');
+      expect(await w.statusOf('B', W.txid)).toEqual({ tx: 'unproven', req: 'nosend' });
+      const q = (
+        await visibleUnsent(
+          await w.unsentDeps('B').listQueued(),
+          (t) => Promise.resolve(w.chain.has(t)),
+          (t) => w.B.marks.markSeen(t),
+        )
+      ).find((x) => x.txid === W.txid);
+      expect([q?.elsewhere, q?.seenOnNetwork]).toEqual([true, false]);
+      expect(await resolveUnsent(w.unsentDeps('B'), W.txid, 'send', { confirmed: true })).toEqual({
+        ok: false,
+        txid: W.txid,
+        error: NEVER_SEEN,
+      });
+      expect(w.chain.has(W.txid)).toBe(false);
+      expect(await resolveUnsent(w.unsentDeps('B'), W.txid, 'cancel')).toEqual({
+        ok: true,
+        txid: W.txid,
+        result: 'cancelled',
+        elsewhere: true,
+      });
+      expect(w.chain.has(W.txid)).toBe(false);
+    },
+  );
+
+  sim(
+    "task 54 round 6 (c): a store's review error naming W can't re-own W to a site, which still can't send it",
+    async () => {
+      const w = await threeCoins();
+      const W = (await w.A.wallet.createAction({
+        description: 'Held payment',
+        outputs: [{ lockingScript: w.externalScript(), satoshis: 10_000, outputDescription: 'payment' }],
+        options: { noSend: true },
+      } as never)) as { txid: string };
+      expect([w.A.marks.owner(W.txid), w.A.marks.heldHere(W.txid)]).toEqual(['', true]);
+      // The active store answers evil.site's next payment with a WERR_REVIEW_ACTIONS that names W.
+      const sm = w.A.sm as unknown as { processAction: (...a: unknown[]) => Promise<unknown> };
+      const real = sm.processAction;
+      sm.processAction = async (...a: unknown[]) => {
+        await real(...a);
+        throw Object.assign(new Error('Undelayed createAction or signAction results require review.'), {
+          name: 'WERR_REVIEW_ACTIONS',
+          txid: W.txid,
+        });
+      };
+      const pm = pmOf(w, 'A');
+      await expect(
+        pm.createAction(
+          {
+            description: 'Evil payment',
+            outputs: [{ lockingScript: w.externalScript(), satoshis: 1_000, outputDescription: 'payment' }],
+          } as never,
+          'evil.site',
+        ),
+      ).rejects.toThrow();
+      sm.processAction = real;
+      expect([w.A.marks.owner(W.txid), w.A.marks.heldHere(W.txid), w.A.marks.released(W.txid)]).toEqual([
+        '',
+        true,
+        false,
+      ]);
+      await expect(
+        pm.createAction({ description: 'Send it now', options: { sendWith: [W.txid] } } as never, 'evil.site'),
+      ).rejects.toThrow(NOT_YOURS);
+      expect(w.chain.has(W.txid)).toBe(false);
+    },
+  );
 
   sim('abort: a payment created but never signed, then aborted, leaves both balances whole', async () => {
     const w = await threeCoins();
@@ -311,6 +913,9 @@ describe('two devices, one seed: named cases', () => {
       await w.failAbandoned('B');
       await w.settleAndCheck('after the restore from the backup');
       // The restored phone spends everything it has, the change included: signed with the derivation from the backup.
+      // Its parent came back from the backup held ('nosend'), so it goes out as a parent only once it is mined (task 54
+      // review, round 4, item 5: a mempool "known" is not enough).
+      w.chain.mine();
       const all = (await w.view(w.A)).shown;
       const s2 = await w.send('A', all - 5_000);
       expect(s2.inputs.some((i) => i.startsWith(`${s.txid}.`))).toBe(true);

@@ -140,6 +140,15 @@ export class FakeChain {
     return { ok: true };
   }
 
+  /** The network forgets an unmined transaction (it dropped out of the mempool): its inputs are unspent again. */
+  drop(txid: string) {
+    const t = this.txs.get(txid);
+    if (!t || t.block !== undefined) throw new Error(`${txid} is not in the mempool`);
+    for (const i of inputsOf(t.tx)) if (this.spentBy.get(i) === txid) this.spentBy.delete(i);
+    for (let v = 0; v < t.tx.outputs.length; v++) this.owned.delete(op(txid, v));
+    this.txs.delete(txid);
+  }
+
   /** Mine everything in the mempool into the next block (one block per call). */
   mine() {
     this.height++;
@@ -289,6 +298,9 @@ export class FakeChain {
           return t.raw;
         },
       },
+      // A coin is unspent when the network has it and nothing spends it (the BRC-177 expiry task's anchor check).
+      isUtxo: async (o: { txid?: string; vout?: number }) =>
+        !!o?.txid && this.has(o.txid) && !this.spentBy.has(op(o.txid, Number(o.vout))),
       getChainTracker: async () => tracker,
       getHeight: async () => this.height,
       getHeaderForHeight: async () => new Array(80).fill(0),
@@ -338,6 +350,12 @@ export class FakeChain {
             },
           ];
         const refused: { txid: string; reason: string }[] = [];
+        // ARC processes every unproven transaction a BEEF carries, not only the ones named (task 54 review, round 2):
+        // a transaction riding in a BEEF reaches the network whether or not it is an ancestor of the named ones.
+        for (const b of beef.txs) {
+          if (b.hasProof || !b.tx || txids.includes(b.txid)) continue;
+          this.accept(b.tx, { walletBroadcast: true });
+        }
         for (const t of txids) {
           const tx = beef.findTxid(t)?.tx;
           if (!tx) continue;

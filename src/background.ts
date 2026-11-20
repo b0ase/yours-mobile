@@ -3307,10 +3307,11 @@ if (!(
       void (async () => {
         const ctx = accountContext;
         if (!ctx) throw new Error('Unlock your wallet first');
-        const m = message as { txid?: string; how?: 'send' | 'cancel' };
+        const m = message as { txid?: string; how?: 'send' | 'cancel'; confirmed?: boolean };
         if (!m.txid) return { queued: await ctx.listUnsent() };
         if (m.how !== 'send' && m.how !== 'cancel') throw new Error('Say send or cancel');
-        const out = await ctx.resolveUnsent(m.txid, m.how);
+        // `confirmed`: a held payment's Send now after the wallet's confirmation sheet (components/HeldPayments.tsx).
+        const out = await ctx.resolveUnsent(m.txid, m.how, { confirmed: m.confirmed === true });
         if (out.ok && out.result === 'cancelled') notifyBalanceUpdate();
         if (out.ok && out.result === 'still-queued') sendRetry.arm();
         return out;

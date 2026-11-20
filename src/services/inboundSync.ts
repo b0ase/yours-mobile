@@ -58,6 +58,7 @@ import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import type { SpendState } from './unsentExpiry';
 import { readPushPage, type ParentStore, type PushArgs, type PushPage } from './pushParents';
 import { noteAwaiting } from './pullIntegrity';
+import { ancestorsOnly, txidOfRaw } from './beefAncestors';
 import {
   abandonTail,
   afterPage,
@@ -128,11 +129,146 @@ type TxRow = {
   updated_at?: Date;
 };
 type ProvenRow = { txid?: string; rawTx?: Bytes | null };
-type ReqRow = { txid?: string; status?: string };
+type ReqRow = {
+  txid?: string;
+  status?: string;
+  rawTx?: Bytes | null;
+  inputBEEF?: Bytes | null;
+  attempts?: number;
+  history?: string;
+  wasBroadcast?: boolean;
+  rebroadcastAttempts?: number;
+};
 /** Transaction states of a payment this device has made but the network may not have yet ('unfail': being re-checked). */
 export const IN_FLIGHT = new Set(['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail']);
 /** Proof-request states in which the toolbox's monitor fails the transaction. */
 const REQ_FAILED = new Set(['invalid', 'doubleSpend']);
+/** Transaction states of a payment this device holds back or is still building: a page never moves them forward. */
+export const HELD_TX = new Set(['nosend', 'unsigned', 'unprocessed']);
+/** Every BRC-177 expiry / reclaim field of a transaction row (the toolbox's noSendExpirySnapshot). */
+export const EXPIRY_FIELDS = [
+  'noSendExpiryMode',
+  'noSendExpiryValue',
+  'noSendExpiryDeadline',
+  'noSendExpiryState',
+  'noSendExpiryAnchorTxid',
+  'noSendExpiryAnchorVout',
+  'noSendExpiryReleasedAt',
+  'noSendExpiryObservedAt',
+  'noSendExpiryReclaimTxid',
+  'noSendExpiryReclaimRawTx',
+  'noSendExpiryReclaimDerivationPrefix',
+  'noSendExpiryReclaimDerivationSuffix',
+  'noSendExpiryReclaimSatoshis',
+] as const;
+/**
+ * A page row's expiry fields, for a transaction the device has: the device row's (so the merge changes none). A new
+ * one keeps the page's (a device restored from its backup needs them to reclaim): its reclaim is only ever activated
+ * or posted once services/reclaimGuard.ts checkReclaim finds it structurally the wallet's own (review round 4).
+ */
+function keepExpiryFields(t: TxRow, d: TxRow | undefined) {
+  if (!d) return;
+  const row = t as Record<string, unknown>;
+  const mine = d as Record<string, unknown>;
+  for (const k of EXPIRY_FIELDS) {
+    if (mine[k] != null) row[k] = mine[k];
+    else delete row[k];
+  }
+}
+/**
+ * Proof-request states in which this device's Monitor (SendWaiting) posts the payment to the network. A request new to
+ * this device is never admitted in one (b-Aware 310/316): only this device's own createAction/signAction (or a release it
+ * makes) may arm a send, never a page from a backup, which a hostile one could have written.
+ */
+export const REQ_SENDABLE = new Set(['unprocessed', 'unsent', 'sending']);
+/**
+ * A request new to this device starts its proof bookkeeping afresh (b-Aware 310/316, review of task 54, F1). The toolbox's
+ * proof timeout (EntityProvenTxReq.applyProofTimeout, run by CheckForProofs / CheckNoSends once `attempts` passes the
+ * limit) puts a request it thinks "was broadcast" (its `wasBroadcast` flag, an 'unmined' / 'callback' / 'unconfirmed'
+ * status, or such a status note in its `history`) back to 'unsent', and SendWaiting then posts it; the app sets no
+ * rebroadcast limit. None of those fields is a page's to set: this device counts its own attempts and has broadcast
+ * nothing it did not send itself.
+ */
+const freshProofState = (q: ReqRow) => {
+  q.attempts = 0;
+  q.wasBroadcast = false;
+  q.rebroadcastAttempts = 0;
+  q.history = '{}';
+};
+/**
+ * A page as another store or file should keep it: a proof request in a state that makes a copy's Monitor send the
+ * payment ('unprocessed', 'unsent', 'sending') goes as 'nosend'. This device's own rows are untouched (it still sends
+ * what it queued); the toolbox never changes a request's status in a store that has it, so what is written here is what
+ * every copy keeps. Same rewrite as the write-ahead push (changeWriteAhead.ts asSending), now on every push path.
+ */
+const sameBytes = (a: Bytes | null | undefined, b: number[] | undefined) =>
+  !!a && !!b && a.length === b.length && Array.from(a).every((x, i) => x === b[i]);
+/** One row's inputBEEF cut to its own transaction's ancestors: true when it changed (trimmed or cleared). */
+function trimInputBeef(row: { inputBEEF?: Bytes | null }, rawTx: Bytes | null | undefined): boolean {
+  if (!row.inputBEEF?.length) return false;
+  const cut = ancestorsOnly(row.inputBEEF, rawTx);
+  if (sameBytes(row.inputBEEF, cut)) return false;
+  row.inputBEEF = cut;
+  return true;
+}
+/** See verifyInboundChunk: a page's rows carry only their own bytes. Mutates the page; returns what it changed. */
+function sanitizeRows(chunk: SyncChunk) {
+  const out = { reqsDropped: 0, rawCleared: 0, beefTrimmed: 0 };
+  for (const t of chunk.transactions ?? []) {
+    if (!t) continue;
+    if (t.rawTx?.length) {
+      const id = txidOfRaw(t.rawTx);
+      if (!id || (t.txid && id !== t.txid.toLowerCase())) {
+        t.rawTx = undefined;
+        out.rawCleared++;
+      }
+    }
+    if (trimInputBeef(t, t.rawTx)) out.beefTrimmed++;
+  }
+  const reqs = chunk.provenTxReqs;
+  if (reqs?.length) {
+    const keep = reqs.filter((q) => {
+      if (!q) return true;
+      const id = txidOfRaw(q.rawTx);
+      if (!id || !q.txid || id !== q.txid.toLowerCase()) {
+        out.reqsDropped++;
+        return false;
+      }
+      if (trimInputBeef(q, q.rawTx)) out.beefTrimmed++;
+      return true;
+    });
+    if (keep.length !== reqs.length) reqs.splice(0, reqs.length, ...keep);
+  }
+  return out;
+}
+const hasSendableRequest = (chunk: { provenTxReqs?: ReqRow[] } | undefined) =>
+  !!chunk?.provenTxReqs?.some((q) => q && REQ_SENDABLE.has(String(q.status)));
+/**
+ * Is this page going to the store the account has made active? WalletStorageManager.setActive writes the new active's key
+ * into the reading store's user row (StorageProvider.setActive) before it syncs that store's rows to every other store,
+ * so during a switch the user row names the target. An unreadable row counts as no (the page goes as 'nosend').
+ */
+async function toActiveStore(store: DeviceStore, args: PushArgs | undefined): Promise<boolean> {
+  const to = args?.toStorageIdentityKey;
+  if (!to || !args?.identityKey || to === store.getSettings?.()?.storageIdentityKey) return false;
+  try {
+    const [user] = (await store.findUsers({ partial: { identityKey: args.identityKey } })) as {
+      activeStorage?: string;
+    }[];
+    return user?.activeStorage === to;
+  } catch {
+    return false;
+  }
+}
+export function noSendRequests<T extends { provenTxReqs?: ReqRow[] }>(chunk: T): T {
+  if (!hasSendableRequest(chunk)) return chunk;
+  return {
+    ...chunk,
+    provenTxReqs: (chunk.provenTxReqs ?? []).map((q) =>
+      q && REQ_SENDABLE.has(String(q.status)) ? { ...q, status: 'nosend' } : q,
+    ),
+  };
+}
 type TagRow = { outputTagId?: number; tag?: string };
 type TagMapRow = { outputId?: number; outputTagId?: number; isDeleted?: boolean; updated_at?: Date };
 export type SyncChunk = {
@@ -233,6 +369,11 @@ export type InboundReport = {
   linksDropped: number;
   /** Transaction rows kept as the device has them, and failed proof requests taken as to be checked again. */
   keptTx: number;
+  /**
+   * Proof requests left out because their raw bytes don't hash to their txid, transaction rows whose such bytes were
+   * cleared, and inputBEEFs cut to the ancestors of their own transaction (task 54 review, round 2).
+   */
+  forged?: { reqsDropped: number; rawCleared: number; beefTrimmed: number };
   /**
    * Wallet change the backup holds as spendable that this page leaves NOT spendable here (kept spent, held, not taken).
    * For the log: the restore switch checks the device's store itself (restoreFromRemote.outpointsOnDevice).
@@ -517,6 +658,18 @@ export async function verifyInboundChunk(
     !args?.identityKey
   )
     return report;
+  // No row brings bytes that aren't its own (task 54 review, round 2): a request whose raw bytes don't hash to its txid
+  // is left out of the page, a transaction row's such bytes are cleared, and every inputBEEF keeps only the ancestors
+  // of its own transaction (the toolbox merges a request's inputBEEF into the BEEF of every payment spending its
+  // outputs, and the broadcaster sends every unproven transaction a BEEF carries: a withheld payment slipped into one
+  // went out with this device's next send). An inputBEEF whose transaction can't be read is cleared.
+  const forged = sanitizeRows(chunk);
+  if (forged.reqsDropped || forged.rawCleared || forged.beefTrimmed) {
+    report.forged = forged;
+    v.log?.(
+      `[inbound-sync] backup page: left out ${forged.reqsDropped} proof request(s) whose bytes aren't their txid's, cleared ${forged.rawCleared} transaction row's bytes, trimmed ${forged.beefTrimmed} inputBEEF(s) to their ancestors`,
+    );
+  }
   const user = (await store.findUsers({ partial: { identityKey: args.identityKey } }))[0];
   if (!user) return report; // the toolbox refuses a page for an unknown user on its own
   const userId = user.userId;
@@ -625,6 +778,10 @@ export async function verifyInboundChunk(
     if (!t) continue;
     let d = t.txid ? (await store.findTransactions({ partial: { userId, txid: t.txid } }))[0] : undefined;
     if (!d && t.reference) d = (await store.findTransactions({ partial: { userId, reference: t.reference } }))[0];
+    // BRC-177 expiry and reclaim fields of a transaction the device has are never a page's (review round 3, F2): a
+    // page that set a payment's state to 'revocation-requested' and pointed its reclaim at the payment itself made the
+    // Monitor's NoSendExpiry task post a withheld payment. A new one keeps the page's, checked before any reclaim.
+    keepExpiryFields(t, d);
     if (!d) {
       if (typeof t.transactionId === 'number') (report.newTx ??= []).push(t.transactionId);
       continue;
@@ -658,23 +815,45 @@ export async function verifyInboundChunk(
       keepTx();
       if (toFailed && !offCompleted && d.provenTxId == null && txid)
         report.admissions.push({ kind: 'tx', txid, claim: 'failed' });
+      continue;
     }
+    // A payment this device holds back or is still building ('nosend', 'unsigned', 'unprocessed') never moves forward
+    // on a page's word (review round 3, F1a): a page that set a withheld payment 'unproven' made its change spendable
+    // here (the toolbox picks change by its transaction's status), and the next ordinary send carried the withheld
+    // payment out as a parent. Only this device's own action moves it, or the chain (CheckNoSends takes its proof once
+    // the network has it).
+    const addsProof = t.provenTxId != null && d.provenTxId == null;
+    if (HELD_TX.has(String(d.status)) && ((t.status !== undefined && t.status !== d.status) || addsProof)) keepTx();
   }
 
   // A proof request is what the device's monitor fails a transaction by ('invalid' -> failed, which frees the coins
   // linked to it), and 'unfail' restores a failed one's outputs on the chain's word alone. Such a request, new to the
   // device, arrives as one to be checked again (R3): for a transaction the device holds or this page brings, and any
   // 'unfail'. A request the device has keeps its own status (EntityProvenTxReq.mergeExisting never changes it).
+  // Every other request new to the device that isn't settled ('completed') arrives as 'nosend' (b-Aware 310/316): no
+  // copy's Monitor sends it on a page's word, and CheckNoSends collects its proof once the chain has the payment. Both
+  // start their attempts, rebroadcast count, "was broadcast" flag and history afresh (freshProofState), so the proof
+  // timeout can never turn one back into a send.
   const pageTxids = new Set((chunk.transactions ?? []).map((t) => t?.txid).filter((x): x is string => !!x));
   for (const q of chunk.provenTxReqs ?? []) {
-    if (!q?.txid) continue;
+    if (!q) continue;
+    // A page adds no history to any request (EntityProvenTxReq.mergeExisting merges a page's notes into the device's
+    // row, and a status note such as 'unmined' makes the toolbox count it as broadcast: review of task 54, F1).
+    q.history = '{}';
+    if (!q.txid) continue;
     const status = String(q.status);
-    if (!REQ_FAILED.has(status) && status !== 'unfail') continue;
+    if (status === 'completed') continue;
     if (
       typeof store.findProvenTxReqs === 'function' &&
       (await store.findProvenTxReqs({ partial: { txid: q.txid } }))[0]
     )
       continue;
+    if (!REQ_FAILED.has(status) && status !== 'unfail') {
+      // Not counted as a kept transaction: every request new to the device arrives this way, its own included.
+      q.status = 'nosend';
+      freshProofState(q);
+      continue;
+    }
     if (
       status !== 'unfail' &&
       !pageTxids.has(q.txid) &&
@@ -682,6 +861,7 @@ export async function verifyInboundChunk(
     )
       continue;
     q.status = 'unknown';
+    freshProofState(q);
     report.keptTx++;
   }
 
@@ -1800,11 +1980,17 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
       const own = (this as unknown as Record<string, unknown>).processSyncChunk;
       if (Object.prototype.hasOwnProperty.call(this, 'processSyncChunk') && own === original)
         return (await read.call(this, args)) as SyncChunk;
-      return (await readPushPage(
+      const page = (await readPushPage(
         this as unknown as ParentStore,
         args as PushArgs,
         async (a) => (await read.call(this, a)) as PushPage,
       )) as SyncChunk;
+      // Every page this device hands on to a copy (a routine sync, BackupSync, updateBackups, a file export or USB
+      // backup) carries its sendable requests as 'nosend', so no copy it reaches ever sends them (b-Aware 310/316). A
+      // page to the store this account has made active (setActive) carries them as they are: that store's Monitor sends
+      // this device's queued payments from now on, and a 'nosend' there would strand them (review of task 54, F2).
+      if (!hasSendableRequest(page) || (await toActiveStore(this, args as PushArgs))) return page;
+      return noSendRequests(page);
     };
   }
   // A pull starts a little before the newest time it has seen (review 23, M1): a row another copy pushed a few minutes

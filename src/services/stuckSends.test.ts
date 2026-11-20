@@ -204,3 +204,249 @@ describe('resolveUnsent: send now or cancel one queued send by hand', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe("task 54 round 2: a held payment (restored as 'nosend') goes out only on the user's Send now", () => {
+  const TX = 'c'.repeat(64);
+  const held = { transactionId: 9, txid: TX, createdAt: 0, attempts: 0, reqStatus: 'nosend', description: 'Rent' };
+  const deps = (o: { paused?: boolean; onChain?: () => boolean; sendThrows?: boolean } = {}) => {
+    const calls = { sendWith: [] as string[], sendWaiting: 0 };
+    let posted = false;
+    return {
+      calls,
+      d: {
+        listQueued: async () => [held],
+        knownOnChain: async () => (o.onChain ? o.onChain() : posted),
+        cancel: async () => undefined,
+        sendWaiting: async () => void calls.sendWaiting++,
+        sendWith: async (txid: string) => {
+          calls.sendWith.push(txid);
+          if (o.sendThrows) throw new Error('broadcast refused');
+          posted = true;
+        },
+        assertSpending: async () => {
+          if (o.paused) throw new Error('Payments are paused for now');
+        },
+      },
+    };
+  };
+  test('Send now posts exactly that payment (sendWith), not SendWaiting', async () => {
+    const { d, calls } = deps();
+    expect(await resolveUnsent(d, TX, 'send', { confirmed: true })).toEqual({
+      ok: true,
+      txid: TX,
+      result: 'network-may-have-it',
+    });
+    expect(calls).toEqual({ sendWith: [TX], sendWaiting: 0 });
+  });
+  test('refused while spending is paused: nothing posted', async () => {
+    const { d, calls } = deps({ paused: true });
+    expect(await resolveUnsent(d, TX, 'send', { confirmed: true })).toEqual({
+      ok: false,
+      txid: TX,
+      error: 'Payments are paused for now',
+    });
+    expect(calls).toEqual({ sendWith: [], sendWaiting: 0 });
+  });
+  test('a refused post is reported as not sent', async () => {
+    const { d } = deps({ sendThrows: true });
+    expect(await resolveUnsent(d, TX, 'send', { confirmed: true })).toEqual({
+      ok: false,
+      txid: TX,
+      error: 'It was not sent: broadcast refused',
+    });
+  });
+  test('without a way to post it, it is not sent (and SendWaiting, which ignores it, is not pretended)', async () => {
+    const { d, calls } = deps();
+    const { sendWith: _omit, ...noSend } = d;
+    expect((await resolveUnsent(noSend, TX, 'send', { confirmed: true })).ok).toBe(false);
+    expect(calls).toEqual({ sendWith: [], sendWaiting: 0 });
+  });
+  test('Cancel still releases it when the network has no copy', async () => {
+    const { d, calls } = deps({ onChain: () => false });
+    expect(await resolveUnsent(d, TX, 'cancel')).toEqual({ ok: true, txid: TX, result: 'cancelled' });
+    expect(calls.sendWith).toEqual([]);
+  });
+});
+
+import { P2PKH, PrivateKey, Transaction, Utils } from '@bsv/sdk';
+import {
+  createUnsentVisibility,
+  decodePayment,
+  listQueuedSends,
+  NEEDS_CONFIRMATION,
+  NEVER_SEEN,
+  unsentOutcomeText,
+  NOSEND_COPY_GIVE_UP_MS,
+  stuckVerdict,
+  visibleUnsent,
+} from './stuckSends';
+
+describe('task 54 round 3 (d): a held payment shows what its own bytes pay, and goes out only once confirmed', () => {
+  const TX = 'e'.repeat(64);
+  const held = { transactionId: 3, txid: TX, createdAt: 0, attempts: 0, reqStatus: 'nosend' };
+  test('Send now without confirmation: refused, nothing posted (a row a backup made look like ours included)', async () => {
+    const sent: string[] = [];
+    const d = {
+      listQueued: async () => [{ ...held, queuedHere: true, description: 'Rent (from the backup)' }],
+      knownOnChain: async () => false,
+      cancel: async () => undefined,
+      sendWaiting: async () => undefined,
+      sendWith: async (t: string) => void sent.push(t),
+    };
+    expect(await resolveUnsent(d, TX, 'send')).toEqual({ ok: false, txid: TX, error: NEEDS_CONFIRMATION });
+    expect(sent).toEqual([]);
+    expect((await resolveUnsent(d, TX, 'send', { confirmed: true })).ok).toBe(true);
+    expect(sent).toEqual([TX]);
+  });
+
+  const stranger = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+  const change = new P2PKH().lock(PrivateKey.fromRandom().toAddress());
+  const pay = () => {
+    const t = new Transaction();
+    t.addInput({ sourceTXID: 'f'.repeat(64), sourceOutputIndex: 0, unlockingScript: change, sequence: 0xffffffff });
+    t.addOutput({ lockingScript: stranger, satoshis: 20_000 });
+    t.addOutput({ lockingScript: change, satoshis: 79_000 });
+    return t;
+  };
+  test("decodePayment: the recipients are the outputs that aren't the wallet's, with their address and amount", async () => {
+    const t = pay();
+    const r = await decodePayment(t.toBinary(), (_vout, script) => script === change.toHex());
+    expect(r).toEqual({
+      recipients: [{ to: Utils.toBase58Check(stranger.chunks[2].data!, [0]), sats: 20_000 }],
+      amountSats: 20_000,
+    });
+    expect(await decodePayment([1, 2, 3], () => false)).toBeUndefined();
+  });
+  const queueStore = (t: Transaction, rows: { vout: number; change: boolean; basketId: number | null }[]) => ({
+    findTransactions: async () => [
+      { transactionId: 1, txid: t.id('hex'), created_at: new Date(0), description: 'Coffee', satoshis: -5 },
+    ],
+    findProvenTxReqs: async () => [{ status: 'nosend', attempts: 0, rawTx: t.toBinary() }],
+    findOutputs: async () => rows,
+  });
+  /** This wallet's keys derive only the change script (inboundSync walletOwnership in the app). */
+  const owns = async (_row: never, script: string) => script === change.toHex();
+  test("listQueuedSends: amount and recipients from the request's bytes (not the row's), and queuedHere from this device's marks", async () => {
+    const t = pay();
+    const sp = queueStore(t, [
+      { vout: 1, change: true, basketId: 1 },
+      { vout: 0, change: false, basketId: null },
+    ]);
+    const [q] = await listQueuedSends(sp, () => false, owns);
+    expect([q.amountSats, q.recipients?.length, q.queuedHere, q.satoshis]).toEqual([20_000, 1, false, -5]);
+    expect((await listQueuedSends(sp, (x) => x === t.id('hex'), owns))[0].queuedHere).toBe(true);
+  });
+  test("round 4 (4): a backup that marks the recipient's output as the wallet's change doesn't hide it: our keys decide", async () => {
+    const t = pay();
+    const sp = queueStore(t, [
+      { vout: 0, change: true, basketId: 1 }, // the stranger's output, flagged as change by the backup
+      { vout: 1, change: true, basketId: 1 },
+    ]);
+    const [q] = await listQueuedSends(sp, () => false, owns);
+    expect([q.amountSats, q.recipients?.map((r) => r.sats)]).toEqual([20_000, [20_000]]);
+    // Without a way to tell, nothing counts as ours: every output is shown as paid out.
+    expect((await listQueuedSends(sp))[0].amountSats).toBe(99_000);
+  });
+
+  test("round 5 (4): another device's sent-but-unconfirmed copy ('unproven' + request 'nosend') is listed as elsewhere; this device's own sent one is not", async () => {
+    const t = pay();
+    const mk = (status: string, req: string) => ({
+      findTransactions: async (a: { partial: Record<string, unknown> }) =>
+        a.partial.status === status
+          ? [{ transactionId: 1, txid: t.id('hex'), created_at: new Date(0), description: 'Coffee', satoshis: -5 }]
+          : [],
+      findProvenTxReqs: async () => [{ status: req, attempts: 0, rawTx: t.toBinary() }],
+      findOutputs: async () => [{ vout: 1, change: true, basketId: 1 }],
+    });
+    const [q] = await listQueuedSends(mk('unproven', 'nosend'), () => false, owns);
+    expect([q.elsewhere, q.amountSats, q.reqStatus]).toEqual([true, 20_000, 'nosend']);
+    expect(await listQueuedSends(mk('unproven', 'unmined'), () => false, owns)).toEqual([]);
+    // Shown to the user only once the network has no copy (a failed check keeps it off the list).
+    expect(await visibleUnsent([q], async () => true)).toEqual([]);
+    expect(await visibleUnsent([q], async () => false)).toEqual([q]);
+    expect(
+      await visibleUnsent([q], async () => {
+        throw new Error('woc down');
+      }),
+    ).toEqual([]);
+    // Given up on after the held-copy window like any other, by the same review.
+    expect(stuckVerdict({ ...q, createdAt: 0 }, NOSEND_COPY_GIVE_UP_MS + 1)).toBe('give-up');
+  });
+
+  const elsewhereStore = (t: Transaction) => ({
+    findTransactions: async (a: { partial: Record<string, unknown> }) =>
+      a.partial.status === 'unproven'
+        ? [{ transactionId: 1, txid: t.id('hex'), created_at: new Date(0), description: 'x', satoshis: -5 }]
+        : [],
+    findProvenTxReqs: async () => [{ status: 'nosend', attempts: 0, rawTx: t.toBinary() }],
+    findOutputs: async () => [{ vout: 1, change: true, basketId: 1 }],
+  });
+  test("round 6 (d): this device's own withheld payment a backup marks as sent is not listed as another device's", async () => {
+    const t = pay();
+    expect(await listQueuedSends(elsewhereStore(t), () => false, owns, { heldHere: (x) => x === t.id('hex') })).toEqual(
+      [],
+    );
+    const [q] = await listQueuedSends(elsewhereStore(t), () => false, owns, { heldHere: () => false });
+    expect(q.elsewhere).toBe(true);
+  });
+  test('round 6 (d): Send now only for one this device saw on the network; Cancel always (released here only)', async () => {
+    const t = pay();
+    const deps = (seen: boolean) => {
+      const sent: string[] = [];
+      return {
+        sent,
+        d: {
+          listQueued: () => listQueuedSends(elsewhereStore(t), () => false, owns, { seen: () => seen }),
+          knownOnChain: async () => false,
+          cancel: async () => undefined,
+          sendWaiting: async () => undefined,
+          sendWith: async (x: string) => void sent.push(x),
+        },
+      };
+    };
+    const never = deps(false);
+    expect(await resolveUnsent(never.d, t.id('hex'), 'send', { confirmed: true })).toEqual({
+      ok: false,
+      txid: t.id('hex'),
+      error: NEVER_SEEN,
+    });
+    expect(never.sent).toEqual([]);
+    const cancelled = await resolveUnsent(never.d, t.id('hex'), 'cancel');
+    expect(cancelled).toEqual({ ok: true, txid: t.id('hex'), result: 'cancelled', elsewhere: true });
+    expect(unsentOutcomeText(cancelled)).toBe('Released here. If the other device sends it, it will still go through.');
+    const seen = deps(true);
+    expect((await resolveUnsent(seen.d, t.id('hex'), 'send', { confirmed: true })).ok).toBe(true);
+    expect(seen.sent).toEqual([t.id('hex')]);
+  });
+  test('round 6 (e): the network answer is reused for a few minutes, and only a few are asked per read', async () => {
+    const rows = ['1', '2', '3'].map((d) => ({
+      transactionId: Number(d),
+      txid: d.repeat(64),
+      createdAt: 0,
+      attempts: 0,
+      reqStatus: 'nosend',
+      elsewhere: true,
+    }));
+    let clock = 0;
+    const asked: string[] = [];
+    const seen: string[] = [];
+    const read = createUnsentVisibility({
+      knownOnChain: async (x) => {
+        asked.push(x);
+        return x === rows[0].txid; // the first is on the network
+      },
+      onSeen: (x) => void seen.push(x),
+      ttlMs: 60_000,
+      maxLookups: 2,
+      now: () => clock,
+    });
+    expect((await read(rows)).map((q) => q.txid)).toEqual([rows[1].txid]); // the third waits for a later read
+    expect(asked).toEqual([rows[0].txid, rows[1].txid]);
+    expect(seen).toEqual([rows[0].txid]);
+    expect((await read(rows)).map((q) => q.txid)).toEqual([rows[1].txid, rows[2].txid]); // cached two, asked one
+    expect(asked).toHaveLength(3);
+    clock = 60_000; // reuse over: asked again
+    await read(rows);
+    expect(asked).toHaveLength(5);
+  });
+});
