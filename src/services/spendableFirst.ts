@@ -39,8 +39,7 @@ export const SPENDABLE_FIRST_KEY = 'bwxSpendableFirstRestore';
 export const SNAPSHOT_SYNC_SUFFIX = '#spendable-snapshot';
 /** Lean transaction rows are stamped this old, so the full snapshot's and the history sync's rows win the merge. */
 export const LEAN_STAMP = new Date('1970-01-01T00:00:01Z');
-/** The one line the balance card shows while a snapshot restore runs (never "Arriving…", never "Retry moving…"). */
-export const SNAPSHOT_LOADING_LINE = 'Loading older history…';
+export { SNAPSHOT_LOADING_LINE } from './balanceTruth';
 /** A payment refused while the snapshot's first pages are still coming in. */
 export const SNAPSHOT_SEND_WAIT = 'Loading your wallet. Nothing was sent. You can send in a moment.';
 

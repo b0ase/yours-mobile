@@ -28,3 +28,11 @@ export const NOTICE_FAST_POLL_MS = 5_000;
  */
 export const noticePollMs = (status: { onDevice: boolean } | null, steadyMs: number): number =>
   !status || !status.onDevice ? NOTICE_FAST_POLL_MS : steadyMs;
+
+/**
+ * Does the move notice show? Not once the account is on this device, and never while an instant restore runs
+ * (services/spendableFirst.ts): "Retry moving this account to this device" would only confuse a wallet that is loading
+ * its own snapshot (owner's restore, 20 Nov 2026).
+ */
+export const moveNoticeShows = (status: { onDevice: boolean; snapshotLoading?: boolean } | null): boolean =>
+  !!status && !status.onDevice && !status.snapshotLoading;

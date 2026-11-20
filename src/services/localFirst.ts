@@ -101,11 +101,17 @@ export type EnsureLocalDeps = {
   onFailed: (id: string) => Promise<void>;
   /** "Loading your wallet from backup…" status: undefined = done, null = done without the copy. */
   status?: (m: string | undefined | null) => void;
+  /**
+   * Instant restore (services/spendableFirst.ts), passed only while its flag is on: tried first on a device with
+   * nothing from the backup yet. `used`: the device store is active and holds the snapshot, and `remotes` are added to
+   * the account's backups. Not used (or a throw): the path below runs exactly as without it.
+   */
+  spendableFirst?: (remoteUrl: string) => Promise<{ used: true; remotes?: string[] } | { used: false }>;
   log?: (...a: unknown[]) => void;
 };
 
 export type EnsureLocalResult =
-  | { ok: true; how: 'switched' | 'already-local' | 'no-remote' | 'pulled' }
+  | { ok: true; how: 'switched' | 'already-local' | 'no-remote' | 'pulled' | 'snapshot' }
   /** This device stays active; pulling the backup's records into it failed (the next open or sync tries again). */
   | { ok: true; how: 'pull-failed'; reason?: string }
   | { ok: false; how: 'failed' | 'failed-this-session' | 'busy' | 'no-account'; reason?: string };
@@ -125,7 +131,24 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
     if (d.backupInFlight()) return d.isLocalActive() ? { ok: true, how: 'already-local' } : { ok: false, how: 'busy' };
     const remotes = config.remotes?.includes(remoteUrl) ? config.remotes : [...(config.remotes ?? []), remoteUrl];
 
+    /** The instant restore, when offered: its outcome, or undefined to carry on as before. */
+    const snapshot = async () => {
+      if (!d.spendableFirst) return undefined;
+      const r = await d.spendableFirst(remoteUrl).catch((e: unknown) => {
+        log('[localFirst] instant restore did not run:', e);
+        return { used: false as const };
+      });
+      return r.used ? r : undefined;
+    };
+    const plus = (list: string[], more: string[] = []) => [...list, ...more.filter((u) => !list.includes(u))];
+
     if (config.activeRemote || !d.isLocalActive()) {
+      const snap = await snapshot();
+      if (snap) {
+        d.status?.(undefined);
+        await d.save({ ...config, activeRemote: undefined, remotes: plus(remotes, snap.remotes), localFirst: true });
+        return { ok: true, how: 'snapshot' };
+      }
       log('[localFirst] the remote store is active: verifying the device copy, then switching to it');
       const r = await d.switchVerified(remoteUrl);
       d.status?.(r.ok ? undefined : null);
@@ -142,6 +165,13 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
     // backup's records into this device's store; it stays the active one throughout, and nothing is saved, so a slow
     // or failing backup can never put the account back on the remote (release click-through, 4 Nov 2026).
     if (!(await d.localIsEmpty())) return { ok: true, how: 'already-local' };
+    const snap = await snapshot();
+    if (snap) {
+      d.status?.(undefined);
+      const more = plus(config.remotes ?? [], snap.remotes);
+      if (more.length !== (config.remotes ?? []).length) await d.save({ ...config, remotes: more });
+      return { ok: true, how: 'snapshot' };
+    }
     log('[localFirst] this device holds nothing; pulling the backup into it (this device stays the active store)');
     try {
       await d.pullIntoLocal(remoteUrl);
