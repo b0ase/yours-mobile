@@ -28,7 +28,7 @@
  */
 import { Beef, MerklePath, Transaction, Utils } from '@bsv/sdk';
 import { ancestorsOnly, txidOfRaw } from './beefAncestors';
-import { freshProofState, tokenFacts, unguardedProcessSyncChunk } from './inboundSync';
+import { freshProofState, isWalletChange, tokenFacts, unguardedProcessSyncChunk } from './inboundSync';
 import { withTimeout } from './restoreProgress';
 
 /** Our storage server (bwalletx-storage), a BACKUP beside 1Sat when the flag is on. */
@@ -243,15 +243,29 @@ const bearsToken = (o: SnapOutput) => {
 export type PageReport = {
   /** Coins taken in as spendable. */
   coins: string[];
-  /** Coins taken in held back (not spendable): token scripts in the change basket, coins without a script. */
+  /** Coins taken in held back (not spendable): anything but wallet change, tokens, no script, a mismatch. */
   held: number;
   sats: number;
-  /** Spendable coins in the default basket (compared with the 1Sat backup's count). */
+  /** Coins in the default basket, held or not (compared with the 1Sat backup's count). */
   defaultCoins: number;
+  /** Rows this device already holds that their verified transaction contradicts: held after the merge. */
+  holds?: { outputId: number; updated_at?: Date }[];
 };
 
-/** Output rows new to the device: shape, own transaction, spendable, no spend link; tokens never as change. */
-function checkNewOutputs(chunk: SnapChunk, outputs: SnapOutput[], report: PageReport, txById: Map<number, SnapTx>) {
+/**
+ * Output rows new to the device: shape, own transaction, spendable, no spend link. Only wallet change (the toolbox's
+ * own BRC-29 change, no token script) arrives spendable; every other coin (a site's output, a token, an inscription, a
+ * coin with no script) arrives held, not spendable, and today's checks admit it (the ordinary pull puts it on the
+ * admission list: inboundSync.admissibleRow, recordAgrees, then the chain). `mismatch`: coins whose verified
+ * transaction says otherwise, held too (review, 20 Nov 2026).
+ */
+function checkNewOutputs(
+  chunk: SnapChunk,
+  outputs: SnapOutput[],
+  report: PageReport,
+  txById: Map<number, SnapTx>,
+  mismatch?: Set<SnapOutput>,
+) {
   const basketName = new Map<number, string>();
   for (const b of chunk.outputBaskets ?? [])
     if (typeof b.basketId === 'number' && typeof b.name === 'string') basketName.set(b.basketId, b.name);
@@ -266,16 +280,15 @@ function checkNewOutputs(chunk: SnapChunk, outputs: SnapOutput[], report: PageRe
     if (o.spendable !== true) throw new SnapshotRefused('a snapshot coin that is not spendable');
     o.spentBy = undefined;
     const name = typeof o.basketId === 'number' ? basketName.get(o.basketId) : undefined;
-    const asChange = o.change === true || name === 'default';
-    if (!o.lockingScript?.length || (asChange && bearsToken(o))) {
-      // No script (deferred: its bytes come with the history sync) or a token posing as change: held back.
+    // How complete the server's snapshot is (compared with the 1Sat backup's count), held or not.
+    if (name === 'default') report.defaultCoins++;
+    if (!o.lockingScript?.length || !isWalletChange(o as never) || bearsToken(o) || mismatch?.has(o)) {
       o.spendable = false;
       report.held++;
       continue;
     }
     report.coins.push(`${o.txid}.${o.vout}`);
     report.sats += o.satoshis;
-    if (name === 'default') report.defaultCoins++;
   }
 }
 
@@ -352,8 +365,10 @@ export async function verifyProvenRow(p: SnapProven, tracker: ChainTrackerLike):
 export type HeldLookup = {
   /** The device's row for this txid, if any (no bytes). */
   tx(txid: string): Promise<{ rawTx?: Bytes | null; provenTxId?: number | null } | undefined>;
-  /** Does the device hold this coin (any state)? */
-  has(txid: string, vout: number): Promise<boolean>;
+  /** The device's row for this coin (any state), if it holds it. */
+  row(txid: string, vout: number): Promise<SnapOutput | undefined>;
+  /** The transaction as this device holds it (its own or already-verified bytes), if it does. */
+  raw(txid: string): Promise<Transaction | undefined>;
   /** Does the device hold a proof request for this txid? */
   hasReq(txid: string): Promise<boolean>;
 };
@@ -370,9 +385,15 @@ export async function checkFullPage(
   want: { identityKey: string; after: number },
   tracker: ChainTrackerLike,
   held: HeldLookup,
+  owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>,
 ) {
   const { chunk, next } = checkEnvelope(raw, { ...want, lean: false });
-  for (const p of chunk.provenTxs ?? []) await verifyProvenRow(p, tracker);
+  /** Transactions whose bytes this page proves: by proof against the headers, or by SPV with their input BEEF. */
+  const verified = new Map<string, Transaction>();
+  for (const p of chunk.provenTxs ?? []) {
+    await verifyProvenRow(p, tracker);
+    verified.set(p.txid.toLowerCase(), Transaction.fromBinary(Array.from(p.rawTx)));
+  }
   const reqs: SnapReq[] = [];
   for (const q of chunk.provenTxReqs ?? []) {
     const txid = q.txid?.toLowerCase();
@@ -384,6 +405,7 @@ export async function checkFullPage(
     q.inputBEEF = q.inputBEEF?.length ? ancestorsOnly(q.inputBEEF, q.rawTx) : undefined;
     if (!(await spvValid(txid, q.rawTx!, q.inputBEEF ?? undefined, tracker)))
       throw new SnapshotRefused('a broadcast record that does not verify against the headers');
+    verified.set(txid, Transaction.fromBinary(Array.from(q.rawTx!)));
     q.history = '{}';
     q.batch = undefined;
     if (q.status !== 'completed') {
@@ -402,19 +424,41 @@ export async function checkFullPage(
     const leanStub = d && !d.rawTx?.length && d.provenTxId == null;
     if (d && !leanStub) t.updated_at = LEAN_STAMP;
   }
-  const report: PageReport = { coins: [], held: 0, sats: 0, defaultCoins: 0 };
+  const report: PageReport = { coins: [], held: 0, sats: 0, defaultCoins: 0, holds: [] };
   const fresh: SnapOutput[] = [];
+  const mismatch = new Set<SnapOutput>();
+  /** Does this coin row say what its verified transaction says (amount, script, and it pays this wallet)? */
+  const agrees = async (row: SnapOutput, tx: Transaction) => {
+    const out = tx.outputs[row.vout];
+    if (!out || out.satoshis !== row.satoshis) return false;
+    const script = out.lockingScript.toHex();
+    if (row.lockingScript?.length && hexOf(row.lockingScript) !== script) return false;
+    if (owns && isWalletChange(row as never) && !(await owns(row, script).catch(() => false))) return false;
+    return true;
+  };
   for (const o of chunk.outputs ?? []) {
     const t = typeof o.transactionId === 'number' ? txById.get(o.transactionId) : undefined;
-    if (t?.txid && (await held.has(t.txid.toLowerCase(), o.vout))) {
+    const txid = t?.txid?.toLowerCase();
+    const mine = txid ? await held.row(txid, o.vout) : undefined;
+    // From here on this device builds the coin's BEEF from its own data and no spend-time check runs again (stage 2),
+    // so the coin is checked now against the transaction this page (or the device) has verified (review, 20 Nov 2026).
+    const tx = txid
+      ? (verified.get(txid) ??
+        (t?.rawTx?.length ? Transaction.fromBinary(Array.from(t.rawTx)) : undefined) ??
+        (await held.raw(txid)))
+      : undefined;
+    if (mine) {
       // The device's own row stands (a payment may have spent it since): the merge only maps it.
       o.updated_at = LEAN_STAMP;
       o.spentBy = undefined;
+      if (mine.spendable && tx && typeof mine.outputId === 'number' && !(await agrees(mine, tx)))
+        report.holds!.push({ outputId: mine.outputId, updated_at: mine.updated_at });
       continue;
     }
+    if (tx && !(await agrees(o, tx))) mismatch.add(o);
     fresh.push(o);
   }
-  checkNewOutputs(chunk, fresh, report, txById);
+  checkNewOutputs(chunk, fresh, report, txById, mismatch);
   return { chunk, next, report };
 }
 
@@ -488,6 +532,10 @@ type RunArgs = {
   lean: boolean;
   /** Required for full pages: the wallet's own chain tracker. */
   tracker?: ChainTrackerLike;
+  /** Does a script pay the wallet's key from the row's derivation (inboundSync.walletOwnership)? Full pages. */
+  owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>;
+  /** Each page's merge (and its holds) runs inside this: the storage manager's locks (review, 20 Nov 2026). */
+  withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
   after?: number;
   limit?: number;
   /** After each merged page: the cursor to resume from (null = done) and what it brought. */
@@ -510,8 +558,14 @@ export async function runSnapshot(a: RunArgs): Promise<PageReport> {
   const held: HeldLookup = {
     tx: async (txid) =>
       (await a.device.findTransactions({ partial: { userId: user.userId, txid }, noRawTx: false }))[0] as never,
-    has: async (txid, vout) =>
-      (await a.device.findOutputs({ partial: { userId: user.userId, txid, vout }, noScript: true })).length > 0,
+    row: async (txid, vout) => (await a.device.findOutputs({ partial: { userId: user.userId, txid, vout } }))[0],
+    raw: async (txid) => {
+      const r = await a.device
+        .getProvenOrRawTx(txid)
+        .catch(() => ({}) as { proven?: { rawTx?: Bytes }; rawTx?: Bytes });
+      const bytes = (r.proven as { rawTx?: Bytes } | undefined)?.rawTx ?? r.rawTx;
+      return bytes?.length ? Transaction.fromBinary(Array.from(bytes)) : undefined;
+    },
     hasReq: async (txid) => (await a.device.findProvenTxReqs({ partial: { txid } })).length > 0,
   };
   let after = a.after ?? 0;
@@ -535,24 +589,28 @@ export async function runSnapshot(a: RunArgs): Promise<PageReport> {
     if (a.lean) checked = checkLeanPage(raw, want);
     else {
       if (!a.tracker) throw new Error('a full snapshot needs the chain tracker');
-      checked = await checkFullPage(raw, want, a.tracker, held);
+      checked = await checkFullPage(raw, want, a.tracker, held, a.owns);
     }
     const { chunk, next, report } = checked;
     const rows = ENTITY_KEYS.reduce((n, k) => n + (chunk[k]?.length ?? 0), 0);
-    if (rows)
-      await merge(
-        {
-          fromStorageIdentityKey: name,
-          toStorageIdentityKey: deviceSik,
-          identityKey: a.identityKey,
-          since: undefined,
-          maxRoughSize: 0,
-          maxItems: 0,
-          offsets: [],
-          syncStateId: syncState.syncStateId,
-        },
-        { ...chunk, fromStorageIdentityKey: name, toStorageIdentityKey: deviceSik, userIdentityKey: a.identityKey },
-      );
+    const lock = a.withLock ?? (<T>(fn: () => Promise<T>) => fn());
+    await lock(async () => {
+      if (rows)
+        await merge(
+          {
+            fromStorageIdentityKey: name,
+            toStorageIdentityKey: deviceSik,
+            identityKey: a.identityKey,
+            since: undefined,
+            maxRoughSize: 0,
+            maxItems: 0,
+            offsets: [],
+            syncStateId: syncState.syncStateId,
+          },
+          { ...chunk, fromStorageIdentityKey: name, toStorageIdentityKey: deviceSik, userIdentityKey: a.identityKey },
+        );
+      for (const h of report.holds ?? []) await holdRow(a.device, h);
+    });
     total.coins.push(...report.coins);
     total.held += report.held;
     total.sats += report.sats;
@@ -570,7 +628,7 @@ export async function runSnapshot(a: RunArgs): Promise<PageReport> {
  */
 export async function holdUnverified(device: SnapshotDevice, userId: number): Promise<number> {
   const PAGE = 500;
-  const ids: number[] = [];
+  const ids: { outputId: number; updated_at?: Date }[] = [];
   const known = new Map<string, boolean>();
   for (let offset = 0; ; offset += PAGE) {
     const page = await device.findOutputs({
@@ -585,12 +643,25 @@ export async function holdUnverified(device: SnapshotDevice, userId: number): Pr
         const r = await device.getProvenOrRawTx(txid).catch(() => ({}) as { proven?: unknown; rawTx?: Bytes });
         known.set(txid, !!r.proven || !!r.rawTx?.length);
       }
-      if (!known.get(txid)) ids.push(o.outputId);
+      if (!known.get(txid)) ids.push({ outputId: o.outputId, updated_at: o.updated_at });
     }
     if (page.length < PAGE) break;
   }
-  for (const id of ids) await device.updateOutput(id, { spendable: false });
+  for (const id of ids) await holdRow(device, id);
   return ids.length;
+}
+
+/**
+ * Hold one coin on this device only: not spendable, its own time kept (review, 20 Nov 2026). A new time would make
+ * every later push carry "not spendable" to our server, to 1Sat and to the owner's other devices; with the row's own
+ * time a backup's equal copy wins nothing and keeps its own word, and this device's ordinary pull still puts the coin
+ * on its admission list (inboundSync: a coin held here that a backup calls spendable).
+ */
+export async function holdRow(device: SnapshotDevice, row: { outputId: number; updated_at?: Date }): Promise<void> {
+  await device.updateOutput(row.outputId, {
+    spendable: false,
+    ...(row.updated_at ? { updated_at: row.updated_at } : {}),
+  });
 }
 
 // ── 2. pay before the rest arrives ──
@@ -671,14 +742,17 @@ export async function fetchVerifiedBeef(
     }
     if (!ok) throw new SnapshotRefused(`coin data for ${txid.slice(0, 12)}… does not verify against the headers`);
     for (const row of rows.get(txid) ?? []) {
+      // A coin its verified transaction contradicts is refused AND held (review, 20 Nov 2026): never offered again.
+      const refuse = (why: string): never => {
+        throw Object.assign(new SnapshotRefused(`${txid.slice(0, 12)}…:${row.vout} ${why}`), { hold: [row] });
+      };
       const o = tx.outputs[row.vout];
-      if (!o) throw new SnapshotRefused(`${txid.slice(0, 12)}… has no output ${row.vout}`);
-      if (o.satoshis !== row.satoshis) throw new SnapshotRefused(`${txid.slice(0, 12)}…:${row.vout} amount differs`);
+      if (!o) refuse('has no such output');
+      if (o.satoshis !== row.satoshis) refuse('amount differs');
       const script = o.lockingScript.toHex();
-      if (row.lockingScript?.length && hexOf(row.lockingScript) !== script)
-        throw new SnapshotRefused(`${txid.slice(0, 12)}…:${row.vout} script differs`);
-      if (row.spendable && d.owns && !(await d.owns(row, script).catch(() => false)))
-        throw new SnapshotRefused(`${txid.slice(0, 12)}…:${row.vout} does not pay this wallet`);
+      if (row.lockingScript?.length && hexOf(row.lockingScript) !== script) refuse('script differs');
+      if (d.owns && isWalletChange(row as never) && !(await d.owns(row, script).catch(() => false)))
+        refuse('does not pay this wallet');
     }
     // Only this transaction and its ancestors (beefAncestors.ts): nothing else rides along to the broadcaster.
     out.mergeTransaction(tx);
@@ -701,8 +775,45 @@ export function installSnapshotBeef(device: SnapshotDevice, d: SnapshotBeefDeps)
   if (s[HOOKED]) return () => undefined;
   const many = s.getBeefForTransactions;
   const one = s.getBeefForTransaction;
+  const create = (s as { createAction?: (...a: unknown[]) => Promise<unknown> }).createAction;
   if (typeof many !== 'function' || typeof one !== 'function') return () => undefined;
   s[HOOKED] = true;
+  /**
+   * Coins a refusal holds. Inside createAction the hold waits for it to end: the toolbox frees a failed payment's inputs
+   * (spendable again) in its own error path, after this throw, and the hold must come after that.
+   */
+  const pending: SnapOutput[] = [];
+  let inCreate = 0;
+  const flush = async () => {
+    while (pending.length) {
+      const row = pending.shift()!;
+      if (typeof row.outputId === 'number')
+        await holdRow(device, { outputId: row.outputId, updated_at: row.updated_at }).catch((e: unknown) =>
+          d.log?.('[spendable-first] a refused coin was not held:', e),
+        );
+    }
+  };
+  const verifiedBeef = async (need: string[]) => {
+    try {
+      return await fetchVerifiedBeef(device, await userId(), need, d);
+    } catch (e) {
+      const hold = (e as { hold?: SnapOutput[] }).hold;
+      if (hold?.length) {
+        pending.push(...hold);
+        if (!inCreate) await flush();
+      }
+      throw e;
+    }
+  };
+  if (typeof create === 'function')
+    (s as { createAction?: unknown }).createAction = async function (this: unknown, ...args: unknown[]) {
+      inCreate++;
+      try {
+        return await create.apply(this, args);
+      } finally {
+        if (--inCreate === 0) await flush();
+      }
+    };
   const userId = async () => (await device.findOrInsertUser(await d.identityKey())).user.userId;
   /** The txids this device can't build BEEF for from its own data. */
   const lacking = async (txids: string[]) => {
@@ -725,7 +836,7 @@ export function installSnapshotBeef(device: SnapshotDevice, d: SnapshotBeefDeps)
   s.getBeefForTransactions = async function (this: unknown, txids: string[], options) {
     const need = await lacking(txids);
     if (!need.length) return many.call(this, txids, options);
-    const fetched = await fetchVerifiedBeef(device, await userId(), need, d);
+    const fetched = await verifiedBeef(need);
     const rest = txids.filter((t) => !need.includes(t));
     const beef = rest.length ? await many.call(this, rest, { ...options, mergeToBeef: undefined }) : new Beef();
     beef.mergeBeef(fetched);
@@ -734,11 +845,12 @@ export function installSnapshotBeef(device: SnapshotDevice, d: SnapshotBeefDeps)
   s.getBeefForTransaction = async function (this: unknown, txid: string, options) {
     const need = await lacking([txid]);
     if (!need.length) return one.call(this, txid, options);
-    return into(await fetchVerifiedBeef(device, await userId(), need, d), options);
+    return into(await verifiedBeef(need), options);
   };
   return () => {
     s.getBeefForTransactions = many;
     s.getBeefForTransaction = one;
+    if (typeof create === 'function') (s as { createAction?: unknown }).createAction = create;
     delete s[HOOKED];
   };
 }
@@ -855,6 +967,8 @@ export async function runFullSnapshot(a: {
   identityKey: string;
   serverSik: string;
   tracker: ChainTrackerLike;
+  owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>;
+  withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
   mark: SnapshotMark;
   save: (m: SnapshotMark) => Promise<void>;
   log?: (...a: unknown[]) => void;
@@ -868,6 +982,8 @@ export async function runFullSnapshot(a: {
       serverSik: a.serverSik,
       lean: false,
       tracker: a.tracker,
+      owns: a.owns,
+      withLock: a.withLock,
       after: mark.after,
       onPage: async (next) => {
         mark =

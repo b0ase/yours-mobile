@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Random, Script, Transaction, Utils } from '@bsv/sdk';
 import { StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import { fakeSnapshotServer, type FakeServerOptions } from '../testing/fakeSnapshotServer';
+import { walletOwnership } from './inboundSync';
 import {
   checkLeanPage,
   holdUnverified,
@@ -403,7 +404,8 @@ describe('stage 1: the lean snapshot', () => {
 
 /** A device after stage 1, with the BEEF hook on (as initWallet installs it). */
 async function restored(opts: FakeServerOptions = {}, payments = PAYMENTS) {
-  const s = await serverWith(PrivateKey.fromRandom(), payments);
+  const root = PrivateKey.fromRandom();
+  const s = await serverWith(root, payments);
   const client = fakeSnapshotServer(s.db, opts);
   const d = await device(s.kd);
   const r = await restoreSpendableFirst(deps(client, d.dev, s.kd));
@@ -413,8 +415,9 @@ async function restored(opts: FakeServerOptions = {}, payments = PAYMENTS) {
     client: () => connected,
     tracker: async () => tracker,
     identityKey: async () => s.kd.identityKey,
+    owns: walletOwnership(root),
   });
-  return { ...s, ...d, client, unhook, disconnect: () => void (connected = undefined) };
+  return { ...s, ...d, root, client, unhook, disconnect: () => void (connected = undefined) };
 }
 
 const pay = (w: Wallet, sats: number) =>
@@ -614,5 +617,95 @@ describe('then the ordinary history sync', () => {
     const { user } = await r.dev.findOrInsertUser(r.kd.identityKey);
     expect(await holdUnverified(r.dev as unknown as SnapshotDevice, user.userId)).toBe(0);
     expect(sum(await spendable(r.dev))).toBe(TOTAL);
+  });
+});
+
+// ── independent review (SAFE-WITH-FIXES, 20 Nov 2026): each finding, failing first ──
+
+type Page = { chunk: { outputs: Record<string, unknown>[]; transactions: Record<string, unknown>[] } };
+/** Change one coin (by its true amount) on every page, lean and full, as a buggy or hostile server could. */
+const forge = (sats: number, change: (o: Record<string, unknown>) => void) => (p: Record<string, unknown>) => {
+  for (const o of (p as unknown as Page).chunk.outputs) if (o.satoshis === sats) change(o);
+};
+const fullRun = (r: Awaited<ReturnType<typeof restored>>, over: { owns?: boolean } = {}) =>
+  runFullSnapshot({
+    client: r.client,
+    device: r.dev as unknown as SnapshotDevice,
+    identityKey: r.kd.identityKey,
+    serverSik: r.db.getSettings().storageIdentityKey,
+    tracker,
+    owns: over.owns === false ? undefined : walletOwnership(r.root),
+    mark: { stage: 'full', after: 0, at: 0 },
+    save: async () => undefined,
+  });
+
+describe('review 1 (HIGH): after the full snapshot, every coin is checked against its verified transaction', () => {
+  test('an inflated amount (41k shown as 4.1M) is held once the proofs land, never counted', async () => {
+    const r = await restored({ tamperPage: forge(41_000, (o) => void (o.satoshis = 4_100_000)) });
+    expect(sum(await spendable(r.dev))).toBe(TOTAL - 41_000 + 4_100_000); // lean: the server's word, unchecked
+    expect((await fullRun(r)).stage).toBe('done');
+    expect(sum(await spendable(r.dev))).toBe(TOTAL - 41_000);
+    // and the next send never picks it
+    expect((await pay(r.wallet, 1000)).txid).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test('a coin that does not pay this wallet (another derivation) is held once the proofs land', async () => {
+    const r = await restored({ tamperPage: forge(52_000, (o) => void (o.derivationSuffix = 'bm90IG91cnM=')) });
+    expect((await fullRun(r)).stage).toBe('done');
+    expect(sum(await spendable(r.dev))).toBe(TOTAL - 52_000);
+  });
+
+  test('a coin refused at signing is held (not offered to the next send); the next send signs from the others', async () => {
+    const r = await restored();
+    const [o] = (await spendable(r.dev)).sort((a, b) => b.satoshis - a.satoshis);
+    await r.dev.updateOutput(o.outputId, { satoshis: o.satoshis + 1 });
+    await expect(pay(r.wallet, 59_000)).rejects.toThrow(/amount differs/);
+    const after = (await r.dev.findOutputs({ partial: { outputId: o.outputId } }))[0];
+    expect(after.spendable).toBe(false);
+    expect((await pay(r.wallet, 1000)).txid).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('review 2 (HIGH): only wallet change arrives spendable', () => {
+  test('a non-change coin (a site output, a token record) arrives held for today’s checks', async () => {
+    const r = await restored({
+      tamperPage: forge(55_000, (o) => {
+        o.change = false;
+        o.purpose = '';
+        o.providedBy = 'you';
+        o.customInstructions = JSON.stringify({ id: `${'cd'.repeat(32)}_0`, amt: '1000' });
+      }),
+    });
+    expect(sum(await spendable(r.dev))).toBe(TOTAL - 55_000);
+    expect((await fullRun(r)).stage).toBe('done');
+    expect(sum(await spendable(r.dev))).toBe(TOTAL - 55_000);
+  });
+});
+
+describe('review 3 (MED): a hold stays on this device', () => {
+  test('held coins keep their own time, so a push never marks them spent on the backup (probe C)', async () => {
+    const { kd, db } = await serverWith(PrivateKey.fromRandom());
+    const client = fakeSnapshotServer(db);
+    const { dev } = await device(kd);
+    const r = await restoreSpendableFirst(deps(client, dev, kd, { backupDefaultCoins: async () => 99 }));
+    expect(r.used).toBe(false);
+    const serverTimes = new Map(
+      (await db.findOutputs({ partial: {} })).map((o) => [`${o.txid}.${o.vout}`, o.updated_at.getTime()]),
+    );
+    for (const o of await dev.findOutputs({ partial: {} })) {
+      expect(o.spendable).toBe(false);
+      expect(o.updated_at.getTime()).toBe(serverTimes.get(`${o.txid}.${o.vout}`)!);
+    }
+    // Today's path pushes this device to its backups: the backup's coins stay spendable.
+    const { user } = await db.findOrInsertUser(kd.identityKey);
+    await db.setActive(
+      { identityKey: kd.identityKey, userId: user.userId } as never,
+      dev.getSettings().storageIdentityKey,
+    );
+    const sm = new WalletStorageManager(kd.identityKey, dev, [db]);
+    await sm.makeAvailable();
+    sm.setServices(services);
+    await sm.updateBackups();
+    expect(sum(await spendable(db))).toBe(TOTAL);
   });
 });
