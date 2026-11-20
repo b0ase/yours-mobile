@@ -313,6 +313,13 @@ export const memoScript = (memo: string) => {
 };
 
 const REFUSED = new Set(['REJECTED', 'DOUBLE_SPEND_ATTEMPTED', 'INVALID', 'MALFORMED']);
+const KNOWN = new Set(['MINED', 'IMMUTABLE', 'SEEN_ON_NETWORK', 'SEEN_MULTIPLE_NODES', 'ACCEPTED_BY_NETWORK']);
+
+/** Is this txid on the network or mined, by 1sat-stack's status (the endpoint broadcastRaw posts to)? */
+export const potTxKnown = async (txid: string): Promise<boolean> => {
+  const r = await svc().getStackStatus(txid);
+  return !!r && KNOWN.has(r.txStatus);
+};
 
 /**
  * Broadcast a signed raw tx. Idempotent: sending the same tx again gets its current status (seen / mined),
@@ -322,6 +329,9 @@ export const broadcastRaw = async (rawTx: string): Promise<void> => {
   // Checked at broadcast time, not only when the payment started: escrow, partnership, business-agent and pot
   // payments are signed outside createAction, so this is where the spending pause stops them (b-Aware 25 Oct 2026).
   await assertNotPaused('spending');
+  // No timeout here: a caller that gives up on a broadcast must treat it as unsure, and only it knows how (payDue keeps
+  // the pending record and bounds the pot path itself; the business agent keeps its payment pending). A shared timeout
+  // here made other callers read a slow broadcast as failed and let a second tap pay again (task 72 review, B1).
   const r = await svc().submitToStack(Utils.toArray(rawTx, 'hex'));
   if (REFUSED.has(r.txStatus))
     throw new Error(`Payment refused by the network (${r.txStatus}${r.extraInfo ? `: ${r.extraInfo}` : ''})`);

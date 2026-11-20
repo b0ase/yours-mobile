@@ -34,6 +34,17 @@ import {
 } from './pots';
 import { PayeeReviewError, legacyPin, scheduledOutputsRefusal, type PayeeDestination } from './payeeBinding';
 
+/** A hung broadcast would hold the spend queue, and with it every agent and CLI spend on the device. */
+export const BROADCAST_TIMEOUT_MS = 30_000;
+
+const withTimeout = <T>(work: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout>;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The network took too long to answer; will check and retry')), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+};
+
 // PNEE pots are bWalletX only (storeBuild.ts PNEE_POTS_ENABLED): the wording is not in a store bundle.
 const PNEE_NO_SEND = PNEE_POTS_ENABLED
   ? 'PNEE payments can’t be sent from this device'
@@ -58,8 +69,14 @@ export type PayDeps = {
     outputs: { address: string; sats: number }[],
     memo?: string,
   ) => Promise<{ rawTx: string; txid: string }>;
-  /** Broadcast a signed tx. Must be idempotent: the same raw tx again is fine (already known / mined). */
+  /** Broadcast a signed tx. Must be idempotent: the same raw tx again is fine. Any error is an unsure result. */
   broadcast: (rawTx: string) => Promise<void>;
+  /**
+   * Is this txid already on the network or mined (potSend potTxKnown)? Asked before a waiting payment is posted again:
+   * a tx already mined can be answered REJECTED on a re-post (its inputs are spent, by itself), which must not leave it
+   * stuck. Absent, or an error or timeout: not known (the same tx is posted again).
+   */
+  txKnown?: (txid: string) => Promise<boolean>;
   /**
    * Sign (don't broadcast) one PNEE transfer from a PNEE pot: `units` PNEEs (1 unit = 1¢) per output. Absent = PNEE
    * orders wait. rawTx is what broadcastPnee takes.
@@ -71,6 +88,8 @@ export type PayDeps = {
   ) => Promise<{ rawTx: string; txid: string }>;
   /** Broadcast a signed PNEE transfer (and hand it to the token overlay). Idempotent like broadcast. */
   broadcastPnee?: (rawTx: string) => Promise<void>;
+  /** Bound on one broadcast (default BROADCAST_TIMEOUT_MS). A timeout is an unsure result: the record stays. */
+  broadcastTimeoutMs?: number;
   /** More than MAX_CATCH_UP periods are owed: pay them all? */
   confirm?: (s: Subscription, missed: number) => Promise<boolean>;
   notify?: (title: string, body: string) => void;
@@ -119,7 +138,17 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
   const cap = deps.cap ?? MAX_CATCH_UP;
   const subsOn = deps.subsOn ?? SUBSCRIPTIONS_ENABLED;
   const out: PayOutcome[] = [];
-  for (const { id } of listSubs()) {
+  /**
+   * Pots whose waiting payment got an unsure broadcast in this run (an error or a timeout, record kept): the tx may be
+   * out, and a new signature from the pot could pick the same coins (they come from the indexer), so one order would be
+   * refused and pending forever. Nothing more is signed from such a pot in this run; its orders wait for the next.
+   */
+  const unsure = new Set<string>();
+  // Orders with a waiting payment first, so every unsure pot is known before any new signature (stable order otherwise).
+  const ids = listSubs()
+    .map((x) => x.id)
+    .sort((a, b) => Number(!getPending(a)) - Number(!getPending(b)));
+  for (const id of ids) {
     let s = getSub(id);
     if (!s) continue;
     const pending = getPending(id);
@@ -130,7 +159,8 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       // only after the broadcast, so a spend running beside this one could otherwise pass the same daily cap.
       const r = await serialSpend(async (): Promise<PayOutcome> => {
         const cur = live(id);
-        const gate = cur ? checkAgentSpend(cur.potId, pending.usd, now) : null;
+        // Gated against the pot the signed tx spends (pending.potId), not the order's current pot (moveSub).
+        const gate = cur ? checkAgentSpend(pending.potId, pending.usd, now) : null;
         if (!cur || !gate?.ok) {
           return {
             id,
@@ -138,7 +168,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
             reason: gate && !gate.ok ? gate.reason : 'Stopped: the waiting payment was not sent',
           };
         }
-        return settlePending(cur, pending, deps, now);
+        return settlePending(cur, pending, deps, now, unsure, true);
       });
       out.push(r);
       if (!r.ok) continue; // still unsettled: never sign anything new for this order
@@ -208,6 +238,9 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
     const r = await serialSpend(async (): Promise<PayOutcome | null> => {
       let s = live(id);
       if (!s) return null;
+      // A payment from this pot is unsure in this run: its coins may be in flight. Left for the next run, no alert.
+      if (unsure.has(s.potId))
+        return { id: s.id, ok: false, reason: 'Waiting for an earlier payment from this pot to go through' };
       const gate = checkAgentSpend(s.potId, usd, now);
       if (!gate.ok) {
         return fail(s, gate.reason, deps);
@@ -283,31 +316,55 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
         ...(pnee ? { unit: 'PNEE' as const } : { sats: sats! * count }),
       };
       savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
-      return settlePending(s, p, deps, now);
+      return settlePending(s, p, deps, now, unsure, false);
     });
     if (r) out.push(r);
   }
   return out;
 }
 
-/** Broadcast a recorded payment (again, if it may already be out) and, once accepted, mark its periods paid. */
-async function settlePending(s: Subscription, p: PendingPayment, deps: PayDeps, now: number): Promise<PayOutcome> {
+/**
+ * Broadcast a recorded payment (again, if it may already be out) and, once accepted, mark its periods paid. An unsure
+ * result (error or timeout, record kept) adds the pot to `unsure`: nothing more is signed from it in this run.
+ */
+async function settlePending(
+  s: Subscription,
+  p: PendingPayment,
+  deps: PayDeps,
+  now: number,
+  unsure: Set<string>,
+  /** A waiting payment from an earlier run (not a tx just signed): its status is asked for first. */
+  repost: boolean,
+): Promise<PayOutcome> {
   // Checked again at broadcast time: the pause may have been switched on while this order was resolving or signing.
   if (await paused(deps)) return { id: s.id, ok: false, reason: 'Spending is paused' };
-  try {
-    if (p.unit === 'PNEE') {
-      if (!deps.broadcastPnee) throw new Error(PNEE_NO_SEND);
-      await deps.broadcastPnee(p.rawTx);
-    } else await deps.broadcast(p.rawTx);
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    if (!/already|duplicate/i.test(m)) {
-      // Unknown outcome: keep the record and retry this exact tx next time.
+  const ms = deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS;
+  // A waiting payment the network already has (seen or mined) is paid: settled without posting it again. A re-post of a
+  // mined tx can be answered REJECTED (its inputs are spent, by itself), which would leave it waiting for good.
+  const known =
+    repost && deps.txKnown
+      ? await withTimeout(deps.txKnown(p.txid), ms).then(
+          (k) => k === true,
+          () => false,
+        )
+      : false;
+  // Otherwise the SAME signed tx is posted again (same txid, same signature): idempotent at the network, accepted once,
+  // so it can never pay twice. A fresh signature for these periods is what could, and none is made while the record
+  // exists. Any error or a timeout is an unsure result: the record stays.
+  if (!known)
+    try {
+      if (p.unit === 'PNEE') {
+        if (!deps.broadcastPnee) throw new Error(PNEE_NO_SEND);
+        await withTimeout(deps.broadcastPnee(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
+      } else await withTimeout(deps.broadcast(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      // Unknown outcome: keep the record and retry this exact tx next time; no more signing from this pot in this run.
+      unsure.add(p.potId);
       patch(s.id, () => ({ lastError: m }));
       deps.notify?.(`Payment to ${s.payee.name} is waiting to go through`, m);
       return { id: s.id, ok: false, reason: m };
     }
-  }
   // Already advanced past these periods (crash after saveSub, before clearPending)? Then only clear.
   const cur = getSub(s.id) ?? s;
   if (cur.periodIndex === p.periodIndex) {
@@ -318,7 +375,7 @@ async function settlePending(s: Subscription, p: PendingPayment, deps: PayDeps, 
       status: cur.status === 'paused' || cur.status === 'cancelled' ? cur.status : next.status,
       lastReceipt: { at: now, txid: p.txid, usd: p.usd, sats: p.sats ?? 0, ...(p.to ? { to: p.to } : {}) },
     });
-    appendAgentLog(s.potId, {
+    appendAgentLog(p.potId, {
       at: now,
       action: 'sub-pay',
       detail: `Paid ${s.payee.name} ${formatAmount(s.amount)}${p.count > 1 ? ` × ${p.count}` : ''}`,
