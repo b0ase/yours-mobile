@@ -34,6 +34,17 @@ import {
 } from './pots';
 import { PayeeReviewError, legacyPin, scheduledOutputsRefusal, type PayeeDestination } from './payeeBinding';
 
+/** A hung broadcast would hold the spend queue, and with it every agent and CLI spend on the device. */
+export const BROADCAST_TIMEOUT_MS = 30_000;
+
+const withTimeout = <T>(work: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout>;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('The network took too long to answer; will check and retry')), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+};
+
 // PNEE pots are bWalletX only (storeBuild.ts PNEE_POTS_ENABLED): the wording is not in a store bundle.
 const PNEE_NO_SEND = PNEE_POTS_ENABLED
   ? 'PNEE payments can’t be sent from this device'
@@ -71,6 +82,8 @@ export type PayDeps = {
   ) => Promise<{ rawTx: string; txid: string }>;
   /** Broadcast a signed PNEE transfer (and hand it to the token overlay). Idempotent like broadcast. */
   broadcastPnee?: (rawTx: string) => Promise<void>;
+  /** Bound on one broadcast (default BROADCAST_TIMEOUT_MS). A timeout is an unsure result: the record stays. */
+  broadcastTimeoutMs?: number;
   /** More than MAX_CATCH_UP periods are owed: pay them all? */
   confirm?: (s: Subscription, missed: number) => Promise<boolean>;
   notify?: (title: string, body: string) => void;
@@ -130,7 +143,8 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       // only after the broadcast, so a spend running beside this one could otherwise pass the same daily cap.
       const r = await serialSpend(async (): Promise<PayOutcome> => {
         const cur = live(id);
-        const gate = cur ? checkAgentSpend(cur.potId, pending.usd, now) : null;
+        // Gated against the pot the signed tx spends (pending.potId), not the order's current pot (moveSub).
+        const gate = cur ? checkAgentSpend(pending.potId, pending.usd, now) : null;
         if (!cur || !gate?.ok) {
           return {
             id,
@@ -297,8 +311,8 @@ async function settlePending(s: Subscription, p: PendingPayment, deps: PayDeps, 
   try {
     if (p.unit === 'PNEE') {
       if (!deps.broadcastPnee) throw new Error(PNEE_NO_SEND);
-      await deps.broadcastPnee(p.rawTx);
-    } else await deps.broadcast(p.rawTx);
+      await withTimeout(deps.broadcastPnee(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
+    } else await withTimeout(deps.broadcast(p.rawTx), deps.broadcastTimeoutMs ?? BROADCAST_TIMEOUT_MS);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     if (!/already|duplicate/i.test(m)) {
@@ -318,7 +332,7 @@ async function settlePending(s: Subscription, p: PendingPayment, deps: PayDeps, 
       status: cur.status === 'paused' || cur.status === 'cancelled' ? cur.status : next.status,
       lastReceipt: { at: now, txid: p.txid, usd: p.usd, sats: p.sats ?? 0, ...(p.to ? { to: p.to } : {}) },
     });
-    appendAgentLog(s.potId, {
+    appendAgentLog(p.potId, {
       at: now,
       action: 'sub-pay',
       detail: `Paid ${s.payee.name} ${formatAmount(s.amount)}${p.count > 1 ? ` × ${p.count}` : ''}`,

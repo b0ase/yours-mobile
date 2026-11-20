@@ -400,6 +400,74 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     expect(total).toBeLessThanOrEqual(20);
   });
 
+  test('moveSub while a payment is waiting: the old pot (the one the tx spends) is capped and logged', async () => {
+    const s = setup({ start: NOW - 1000 }); // one $10 period due
+    makePot('1NewPot', 'New');
+    setAgentDailyCap('1Pot', 20);
+    const { appendAgentLog } = await import('../agents/agentAccounts');
+    const { moveSub } = await import('./pots');
+    const failing = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => ({ rawTx: 'RAWM', txid: 'TXM' }),
+      broadcast: async () => {
+        throw new Error('network down');
+      },
+    };
+    expect((await payDue(failing, NOW))[0].ok).toBe(false);
+    expect(getPending(s.id)?.potId).toBe('1Pot');
+    moveSub(s.id, '1NewPot', NOW);
+    const newLogBefore = getAgentLog('1NewPot').length;
+    const sent: string[] = [];
+    const ok = { ...failing, broadcast: async (raw: string) => void sent.push(raw) };
+    // The old pot already spent $15 today: this $10 payment would pass $20, so it must be held back.
+    appendAgentLog('1Pot', { at: NOW, action: 'sub-pay', detail: 'earlier', usd: 15 });
+    const held = (await payDue(ok, NOW + 1))[0];
+    expect(held.ok).toBe(false);
+    if (!held.ok) expect(held.reason).toMatch(/Over today.s cap/);
+    expect(sent).toEqual([]);
+    expect(getPending(s.id)?.rawTx).toBe('RAWM');
+    // Under the cap it goes out, and the log lands on the old pot only.
+    setAgentDailyCap('1Pot', 100);
+    expect((await payDue(ok, NOW + 2))[0].ok).toBe(true);
+    expect(sent).toEqual(['RAWM']);
+    expect(getAgentLog('1Pot').some((l) => l.action === 'sub-pay' && l.txid === 'TXM')).toBe(true);
+    expect(getAgentLog('1NewPot').filter((l) => l.action === 'sub-pay')).toEqual([]);
+    expect(getAgentLog('1NewPot').length).toBe(newLogBefore);
+  });
+
+  test('a broadcast that never answers: the queue is freed at the timeout, the record stays, others can spend', async () => {
+    const s = setup({ start: NOW - 1000 });
+    const { checkAgentSpend } = await import('../agents/agentAccounts');
+    const { serialSpend } = await import('../agents/spendQueue');
+    const hung = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => ({ rawTx: 'RAWH', txid: 'TXH' }),
+      broadcast: () => new Promise<void>(() => {}),
+      broadcastTimeoutMs: 100,
+    };
+    const paying = payDue(hung, NOW);
+    await new Promise((r) => setTimeout(r, 20));
+    let other = false;
+    const agent = serialSpend(async () => {
+      other = checkAgentSpend('1Pot', 1, NOW).ok;
+    });
+    const t0 = Date.now();
+    const r = (await paying)[0];
+    await agent;
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(r.ok).toBe(false);
+    expect(other).toBe(true);
+    expect(getPending(s.id)?.rawTx).toBe('RAWH'); // kept; nothing new signed, not marked paid
+    expect(getSub(s.id)?.periodIndex).toBe(0);
+    // Next run re-posts the same tx.
+    const sent: string[] = [];
+    const again = await payDue({ ...hung, broadcast: async (raw: string) => void sent.push(raw) }, NOW + 1000);
+    expect(again[0].ok).toBe(true);
+    expect(sent).toEqual(['RAWH']);
+  });
+
   test('stopped pot and the daily cap refuse; nothing is signed', async () => {
     const s = setup();
     setAgentStopped('1Pot', true, NOW);
