@@ -319,10 +319,13 @@ describe('reserved action labels', () => {
     });
     test('no sheet is ever raised for one, and a grouped grant drops it', () => {
       expect(bg).toContain('isReservedLabelProtocol(request.protocolID) &&');
-      expect(bg).toContain('return Promise.reject(new Error(RESERVED_LABEL_REFUSAL));');
+      // Refused with its own code (services/refusalCodes.ts), never the person's ERR_PERMISSION_DENIED.
+      expect(bg).toContain('return refuseRequest(request, internalRefusal(RESERVED_LABEL_REFUSAL));');
       expect(bg).toContain('protocolPermissions: withoutReservedLabels(');
       // The refusal comes before the sheetless answers (pinned mint, stream passes) in showPermissionPrompt.
-      expect(bg.indexOf('new Error(RESERVED_LABEL_REFUSAL)')).toBeLessThan(bg.indexOf('answerWithoutSheet(request as'));
+      expect(bg.indexOf('internalRefusal(RESERVED_LABEL_REFUSAL)')).toBeLessThan(
+        bg.indexOf('answerWithoutSheet(request as'),
+      );
     });
     test('the wallet chain has the guard inside every outer guard, and stored grants are removed at unlock', () => {
       expect(init).toMatch(/guardReservedBaskets\(\s*guardReservedLabels\(\s*guardReservedProtocols\(/);
