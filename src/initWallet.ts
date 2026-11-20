@@ -1307,7 +1307,7 @@ export const initWallet = async (
       adminOriginator: ADMIN_ORIGINATOR,
       normalize: normalizeOriginator,
       prompt: showOneSatPrompt,
-      listConsent: chromeConsentStore(),
+      listConsent: chromeConsentStore(undefined, accountId || 'no-account'),
     },
   );
   // Store edition, outermost of all: a site's purchase, listing or cancelled listing (as @1sat/permission-module
