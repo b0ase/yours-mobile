@@ -147,7 +147,8 @@ export function switchToLocalVerified(d: SwitchDeps): Promise<SwitchResult> {
   const cur = runningSwitches.get(key);
   if (cur && cur.remoteUrl === d.remoteUrl) {
     d.log?.('[restore] a switch to this device is already running: joining it');
-    return cur.run;
+    // The joiner's own onFinished (e.g. clearing the restore view) still runs when the shared run ends.
+    return d.onFinished ? cur.run.finally(() => d.onFinished?.()) : cur.run;
   }
   const run = cur
     ? cur.run.then(
