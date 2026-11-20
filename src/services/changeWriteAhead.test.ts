@@ -186,6 +186,30 @@ describe('the post-restore backlog', () => {
     expect(h.wa.count()).toBe(0); // the push that started after the earlier payment carried it too
   });
 
+  test('a backlog check that never settles does not hold the broadcast: read as no backlog, the push runs', async () => {
+    const h = harness({
+      commitEvent: true,
+      backlogCheckMs: 40,
+      backlog: () => new Promise<boolean>(() => undefined),
+    });
+    const t0 = Date.now();
+    const out = await Promise.race([h.pa({ txid: TX }), sleep(2_000).then(() => 'hung')]);
+    expect(out).toBe('done');
+    expect(Date.now() - t0).toBeLessThan(1_000);
+    expect(h.events).toEqual(['local record durable', 'push', `post ${TX.slice(0, 2)}`]);
+    expect(h.wa.count()).toBe(0);
+  });
+
+  test('a backlog check slower than the limit is not waited for, even if it would say yes', async () => {
+    const h = harness({
+      commitEvent: true,
+      backlogCheckMs: 30,
+      backlog: () => sleep(300).then(() => true),
+    });
+    await h.pa({ txid: TX });
+    expect(h.events).toEqual(['local record durable', 'push', `post ${TX.slice(0, 2)}`]);
+  });
+
   test('a backlog check that fails does not skip the push', async () => {
     const h = harness({
       commitEvent: true,

@@ -109,11 +109,14 @@ import {
 } from './services/storagePaymentGuard';
 import { KNOWN_PROVIDERS } from './components/storageProviders';
 import {
+  clearRestoreMark,
   FULL_PASS_NEXT_SLICE_MS,
-  passFromStart,
+  markRestore,
   passLooksStuck,
-  passUnderWay,
   paymentYields,
+  restoreBacklog,
+  restoreCaughtUp,
+  restoreMarked,
   requestFullPass,
   requestTailPass,
   syncStateFor,
@@ -958,11 +961,21 @@ export const initWallet = async (
           const backupSik = (reader as { getSettings?: () => { storageIdentityKey?: string } }).getSettings?.()
             ?.storageIdentityKey;
           if (pullHealth.get().lastPullOkAt === 0) await hydratePullHealth(backupSik);
+          // A store that has never pulled from this backup: its first pass from the start begins now (a restore of a
+          // wallet with history, or a fresh install's empty backup that catches up at once). The restore mark lets
+          // payments skip the push before broadcast while it runs (fullPass.ts restoreBacklog); cleared on catch-up.
+          const own = ownStore();
+          if (own && backupSik) {
+            const never = await syncStateFor(own as never, identityKey, backupSik).then(
+              (r) => !r,
+              () => false, // can't tell: no mark (the push runs as normal)
+            );
+            if (never) markRestore();
+          }
           pullHealth.plan(await fullPassIfDue(backupSik));
           // Rows another copy pushed late, with times older than the cursor (extension, 6 Nov 2026: 8734977f never
           // arrived): every TAIL_CHECK_EVERY_MS, found by the backup's insert order with one-row probes, and pulled from
           // the first one (services/pullTail.ts). Its own deadlines; never while a pass is under way.
-          const own = ownStore();
           if (own && backupSik) {
             const plan = await requestTailPass({
               manager: storage,
@@ -995,6 +1008,8 @@ export const initWallet = async (
               console.warn('[sync-integrity] the coin check after the pull did not run:', e);
               return undefined;
             });
+            // Caught up (no pass under way): a restore's first pass, if one was marked, is done.
+            if (report?.caughtUp) restoreCaughtUp();
             pullHealth.succeeded(report);
             void recordPullOk();
             if (report?.plan === 'healing') {
@@ -1089,14 +1104,16 @@ export const initWallet = async (
     storage: storage as unknown as WriteAheadStorage,
     inFlightFor: pushInFlightFor,
     pushNow: () => deviceSync.pushNow(),
-    // After a restore the pull's full pass from the backup runs for a long while: no push is waited for until it ends.
+    // A fresh restore's copy and first pass run for a long while: no push is waited for until they end, for at most
+    // RESTORE_BACKLOG_MS from the restore's start. Only with a restore mark (fullPass.ts restoreBacklog): the weekly,
+    // daily and heal passes, or an empty cursor, never skip the push. The write-ahead bounds this check (250 ms).
     backlog: async () => {
+      if (!restoreMarked()) return false;
       const own = ownStore();
       const backupSik = backupSikNow();
       if (!own || !backupSik) return false;
       const { identityKey } = await storage.getAuth();
-      const row = await syncStateFor(own as never, identityKey, backupSik);
-      return !!row && (passFromStart(row) || passUnderWay(row));
+      return restoreBacklog(await syncStateFor(own as never, identityKey, backupSik));
     },
     onChange: (n) => pullHealth.changeNotBackedUp(n),
     kv: {
@@ -2278,6 +2295,7 @@ export const initWallet = async (
     admitClosed = true;
     clearInterval(stalePullTimer);
     writeAhead?.stop();
+    clearRestoreMark(); // another account's wallet never inherits this one's restore backlog
     unregisterPullHealth();
     receiveWatch.stop();
     // The receive watch's processed-tx stores close with the wallet, capped so a stuck one never holds the close

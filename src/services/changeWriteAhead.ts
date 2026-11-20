@@ -42,9 +42,11 @@
  *    After a failed push the write-ahead is skipped for COOL_OFF_MS (each payment flagged at once) until a push goes
  *    through again.
  *
- *  - While the post-restore backlog is still running (deps.backlog: the pull's full pass from the backup has not
- *    finished), no push at all before a broadcast: each payment is flagged at once and the urgent retry pushes (the
- *    same path as an unreachable backup). The device's own record is committed before the post either way.
+ *  - While a fresh restore's backlog is still running (deps.backlog: its copy or first pass from the backup has not
+ *    finished, at most fullPass.ts RESTORE_BACKLOG_MS after the restore started), no push at all before a broadcast:
+ *    each payment is flagged at once and the urgent retry pushes (the same path as an unreachable backup). The weekly,
+ *    daily and heal passes never count. The check itself is bounded (BACKLOG_CHECK_MS): one that hasn't answered by
+ *    then reads as no backlog and the push runs. The device's own record is committed before the post either way.
  *
  * POLICY (flag for the owner): the backup being down never stops a payment. If the push fails or runs out of time, the
  * payment is still broadcast, its txids are recorded as "change not backed up yet" (count shown on the balance card and
@@ -86,6 +88,8 @@ export const DELAYED_ARM_MS = 24 * 3_600_000;
 export const URGENT_RETRY_MS = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
 /** After a failed write-ahead push, payments skip it (flagged at once) this long, or until a push goes through. */
 export const COOL_OFF_MS = 60_000;
+/** The longest the backlog check (deps.backlog) is waited for before a broadcast: no answer by then = no backlog. */
+export const BACKLOG_CHECK_MS = 250;
 
 type Auth = unknown;
 
@@ -114,11 +118,14 @@ export type WriteAheadDeps = {
   /** The device sync's pushNow (services/deviceSync.ts): the urgent retry after a payment went out unbacked. */
   pushNow: () => Promise<DeviceSyncResult>;
   /**
-   * The post-restore copy or upload backlog is still running (initWallet: the pull's full pass from the backup has not
-   * finished). True: the push before a broadcast is skipped and the payment flagged for the next push, as when the
-   * backup is unreachable. Throws or rejects: read as false (the push runs). Optional (default: no backlog).
+   * A fresh restore's copy or first pass is still running (initWallet: fullPass.ts restoreBacklog, keyed to the restore
+   * mark and capped). True: the push before a broadcast is skipped and the payment flagged for the next push, as when
+   * the backup is unreachable. Throws, rejects, or no answer within backlogCheckMs: read as false (the push runs).
+   * Optional (default: no backlog).
    */
   backlog?: () => boolean | Promise<boolean>;
+  /** How long the backlog check is waited for (default BACKLOG_CHECK_MS). */
+  backlogCheckMs?: number;
   budgetMs?: number;
   retryMs?: number[];
   coolOffMs?: number;
@@ -154,6 +161,27 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
   const log = d.log ?? ((m: string) => console.warn(m));
   const retryTimers = d.retryTimer ?? { set: setTimer, clear: clearTimer };
   const budgetMs = d.budgetMs ?? WRITE_AHEAD_MS;
+  const backlogCheckMs = d.backlogCheckMs ?? BACKLOG_CHECK_MS;
+  /**
+   * The backlog check, raced against backlogCheckMs: it runs under the writer lock inside the broadcast, so a check that
+   * never settles must not hold the payment. Only `true` within the limit skips the push; anything else pushes.
+   */
+  const inBacklog = async (): Promise<boolean> => {
+    if (!d.backlog) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        (async () => (await d.backlog!()) === true)(),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), backlogCheckMs);
+        }),
+      ]);
+    } catch {
+      return false;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
   const retryMs = d.retryMs?.length ? d.retryMs : URGENT_RETRY_MS;
   const coolOffMs = d.coolOffMs ?? COOL_OFF_MS;
   /** Until when payments skip the write-ahead after a failed one (0: not cooling off). */
@@ -283,7 +311,7 @@ export function createChangeWriteAhead(d: WriteAheadDeps) {
     // The post-restore backlog is still draining: every cycle is many pages, so a payment would wait the whole budget
     // (and hold the writer lock) for nothing. Flagged for the urgent retry instead. Not a backup failure: no cool-off.
     // The payment's rows are already committed on this device by now (the toolbox does that before it posts).
-    if (await (async () => d.backlog?.())().catch(() => false))
+    if (await inBacklog())
       return flag(mine, 'the backup is still catching up after a restore: not waited for', { coolOff: false });
     const t0 = now();
     const deadlineAt = t0 + budgetMs;

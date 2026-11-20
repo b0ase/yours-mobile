@@ -432,6 +432,19 @@ describe('the real initWallet wiring', () => {
     expect(src).toMatch(/writeAhead\?\.stop\(\);/);
   });
 
+  test('the push before a broadcast is skipped only for a marked restore backlog (task 71 review, A1)', () => {
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    // The check is the restore mark's, never "any pass from the start or under way" (weekly, daily, heal, when:null).
+    expect(src).toMatch(
+      /backlog: async \(\) => \{\s*if \(!restoreMarked\(\)\) return false;[\s\S]*?return restoreBacklog\(await syncStateFor\(/,
+    );
+    expect(src).not.toMatch(/passFromStart\(row\) \|\| passUnderWay\(row\)/);
+    // A store's first pull marks its first pass; a pull that caught up ends it; a closed wallet forgets it.
+    expect(src).toMatch(/if \(never\) markRestore\(\);/);
+    expect(src).toMatch(/if \(report\?\.caughtUp\) restoreCaughtUp\(\);/);
+    expect(src).toMatch(/writeAhead\?\.stop\(\);\s*clearRestoreMark\(\);/);
+  });
+
   test('a heal leaves a pass from the start to the device-sync pulls, and a failed one asks for a full pass (review 23, M2)', () => {
     const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
     const heal = src.slice(src.indexOf('    setDeviceActive: async () => {'), src.indexOf('  if (!keepActive)'));
