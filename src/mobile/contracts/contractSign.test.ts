@@ -50,7 +50,7 @@ const base = {
     version: '1',
     network: 'mainnet',
     summary: 's',
-    codeHash: 'c1'.repeat(32),
+    source: 'return true',
   },
   description: 'A plain NDA',
   author: { name: 'Ann Lawyer', address: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT' },
@@ -199,7 +199,7 @@ describe('the wallet signs its own publish', () => {
   const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
   test('publishContract signs as the account and mints the signed envelope', () => {
     const src = read('./market.ts');
-    expect(src).toContain('const signed = await signContractEnvelope(ctx.wallet, env, handle);');
+    expect(src).toContain('const signed = await signContractEnvelope(ctx.wallet, normal, handle);');
     expect(src).toContain('await mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed))');
   });
   test("the Contracts publish passes the account's bWalletX paymail as the handle", () => {

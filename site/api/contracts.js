@@ -13,6 +13,7 @@ const K = require('../lib/strategyKeys');
 const {
   CONTRACT_TYPE,
   envelopeRefusal,
+  formProblem,
   judgeListings,
   normaliseSource,
   parseContractEnvelope,
@@ -90,13 +91,13 @@ const enc = (s) => {
 };
 const quote = (v) => `"${String(v).replace(/["\\]/g, '\\$&')}"`;
 /**
- * Every listing that may be the same contract as these (lib/contracts.js contractKeys): by name, code hash and
- * source, since the identity leaves the name out and a copier can rename. Each is asked as written and as identity
- * normalises it (a code hash in lower and upper case, a source or name NFKC-normalised and trimmed), so a copy that
- * only re-cases or re-spaces the code still meets an original stored in its plain form, as the wallet writes it. A
- * listing with neither code hash nor source (free only) is found by name. Earliest first, so if there are ever more
- * rows than the limit, the ones cut are the latest, never an original. (A later migration could store the keys in a
- * column and look up by those instead.)
+ * Every listing that may be the same contract as these (lib/contracts.js contractKeys): by name, and by source, since
+ * the identity leaves the name out and a copier can rename. The source is asked in its normalised form only: since the
+ * final review of row 352 (F1) a new listing must be stored in that form (formProblem), so a copy that only re-spaces
+ * or re-cases the code meets the original. Rows listed before that check whose source isn't normalised can be missed
+ * (scripts/contractsUnnormalised.js lists them; migrations-proposed/ has the identity-key column that ends this). A
+ * listing with no source (free only) is found by name. Earliest first, so if there are ever more rows than the limit,
+ * the ones cut are the latest, never an original.
  */
 async function sameBehaviour(contracts) {
   const by = (f, forms) => [
@@ -108,12 +109,10 @@ async function sameBehaviour(contracts) {
         .filter((v) => v !== ''),
     ),
   ];
-  const nfkc = (v) => [v, v.normalize('NFKC').trim()];
   const out = new Map();
   for (const [col, values] of [
-    ['name', by('name', nfkc)],
-    ['codeHash', by('codeHash', (v) => [v, v.toLowerCase(), v.toUpperCase()])],
-    ['source', by('source', (v) => [v, normaliseSource(v)])],
+    ['name', by('name', (v) => [v, v.normalize('NFKC').trim()])],
+    ['source', by('source', (v) => [normaliseSource(v)])],
   ])
     for (let i = 0; i < values.length; i += 25) {
       const list = `(${values
@@ -186,6 +185,8 @@ async function publish(b, res) {
   if (!a) return send(res, 400, { error: 'That output isn’t a contract inscription' });
   const refused = await envelopeRefusal(a.env);
   if (refused) return send(res, refused[0], { error: refused[1] });
+  const form = formProblem(a.env.contract);
+  if (form) return send(res, 400, { error: form });
   // The earliest listing on chain stays: refused if an earlier one of this contract is by another author.
   const others = (await sameBehaviour([a.env.contract])).filter((e) => e.origin !== p.outpoint);
   // Not in the catalogue yet: among unconfirmed (or same-block) listings it ranks last.

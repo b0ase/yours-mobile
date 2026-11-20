@@ -15,6 +15,7 @@ import {
   CONTRACT_CONTENT_TYPE,
   contractAuthorKey,
   contractCodeProblem,
+  normaliseContract,
   sameContract,
   signContractEnvelope,
   type ContractEnvelope,
@@ -56,12 +57,15 @@ export const ownedContractOutpoints = async (ctx: OneSatContext) => {
 /**
  * Publish: sign the envelope as this account (signContractEnvelope: its identity key, `handle` = its bWalletX
  * paymail, and the reserved contract-signing key; the wallet's own publish, no site involved), mint the original
- * and list it.
+ * and list it. The contract is put in its stored form first (normaliseContract: source normalised, code hash in lower
+ * case), so the catalogue can find a later copy of it by that one form (final review of row 352, F1). A paid one
+ * without a source, or whose code hash isn't its source's sha256, is refused before anything is signed or minted.
  */
 export const publishContract = async (ctx: OneSatContext, env: ContractEnvelope, handle?: string) => {
-  const noCode = env.sale.priceUsd > 0 ? contractCodeProblem(env.contract) : null;
+  const normal: ContractEnvelope = { ...env, contract: normaliseContract(env.contract) };
+  const noCode = normal.sale.priceUsd > 0 ? contractCodeProblem(normal.contract) : null;
   if (noCode) throw new Error(`${noCode}. Nothing was published.`);
-  const signed = await signContractEnvelope(ctx.wallet, env, handle);
+  const signed = await signContractEnvelope(ctx.wallet, normal, handle);
   const outpoint = await mintJson(ctx, signed, CONTRACT_CONTENT_TYPE, MAP(signed));
   const proof = await prove(ctx, 'publish', outpoint);
   await api({ method: 'POST', body: JSON.stringify({ action: 'publish', outpoint, ...proof }) });
@@ -104,8 +108,8 @@ export const checkAgainstOriginal = async (listing: Pick<ContractListing, 'origi
 };
 
 /**
- * An earlier listing of the same contract (sameContract: the same code, or for a free listing with no code the same
- * normalised fields and name; a changed name, version, summary or description, or reworded params, don't make a
+ * An earlier listing of the same contract (sameContract: the same normalised source, or for a listing with no source
+ * the same normalised fields and name; a changed name, version, summary or description, or reworded params, don't make a
  * different one) by another author, or undefined. Anyone can inscribe a copy of someone's contract with their own name
  * and payee and list it (review of row 115, 14 Nov 2026): the copy is a valid inscription, so checkAgainstOriginal
  * passes it. The earliest listing is the one paid. Same rule as the catalogue (site/lib/contracts.js mayFollow): a

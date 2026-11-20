@@ -72,19 +72,21 @@ async function contractAuthorKey(env) {
 }
 
 /**
- * What makes two listings the same contract (b-Aware row 352, UID 630, and its review). Free text (name, version,
+ * What makes two listings the same contract (b-Aware row 352, UID 630, and its reviews). Free text (name, version,
  * summary, the envelope's description) never does. Mirrors the wallet's contractKeys (src/mobile/contracts/
  * contractNft.ts) line for line; a test runs both on the same fixtures.
- * - A listing with code (every paid one must have it; codeProblem) IS its code: `hash:` + its code hash in lower case,
- *   and `src:` + sha256 of its normalised source. Params, spend paths, oracle and network are text typed around the
- *   code, so a junk param, `5` for "5" or an empty oracle don't make a new contract. Two listings are the same contract
- *   when they share either key, so dropping the code hash or the source of an original that has both doesn't either.
- * - A free listing with no code: `free:` + the canonical JSON of its normalised format, network, params, spend paths,
- *   oracle and NAME (without the name every unrelated free contract on one network would be "the same").
- * Known limit: a real edit to the code itself is a different contract; the backstop is the signed author handle on the
+ * - A listing with a source IS its source: `src:` + sha256 of the normalised source. Params, spend paths, oracle and
+ *   network are text typed around the code, so a junk param, `5` for "5" or an empty oracle don't make a new contract.
+ * - The code hash is never an identity on its own (final review of row 352, F2): nothing proves a bare hash, so a junk
+ *   listing carrying someone else's hash could squat their contract. A paid listing must carry its source, and a code
+ *   hash it carries must be sha256 of that normalised source (codeProblem).
+ * - A listing without a source (free only; a bare code hash counts as no code): `free:` + the canonical JSON of its
+ *   normalised format, network, params, spend paths, oracle and NAME (without the name every unrelated free contract
+ *   on one network would be "the same").
+ * An array of one key, so a later identity_keys column (site/migrations-proposed) can hold it as it is.
+ * Known limit: a real edit to the source is a different contract; the backstop is the signed author handle on the
  * sheet.
  */
-const CODE_HASH_RE = /^[0-9a-f]{64}$/i;
 const FREE_IDENTITY_FIELDS = ['format', 'network', 'params', 'spendPaths', 'oracle', 'name'];
 
 /** Source as identity sees it: NFKC, CRLF/CR → LF, trailing whitespace per line and blank lines at the ends dropped. */
@@ -98,6 +100,9 @@ const normaliseSource = (s) =>
         .join('\n')
         .trim()
     : '';
+
+/** sha256 (lower-case hex) of the normalised source: the code hash a listing with this source must carry, if any. */
+const sourceHash = (source) => Utils.toHex(Hash.sha256(Utils.toArray(normaliseSource(source), 'utf8')));
 
 /** Every string and number as NFKC-trimmed text; null, '', [] and {} dropped (undefined); object keys sorted. */
 const tidy = (v) => {
@@ -117,35 +122,45 @@ const tidy = (v) => {
   return s === '' ? undefined : s;
 };
 
-/** The identity keys of a contract descriptor (see above). Never empty. */
+/** The identity keys of a contract descriptor (see above): one key, never empty. */
 const contractKeys = (c) => {
   const src = c && typeof c === 'object' ? c : {};
-  const keys = [];
-  if (typeof src.codeHash === 'string' && CODE_HASH_RE.test(src.codeHash))
-    keys.push(`hash:${src.codeHash.toLowerCase()}`);
-  const source = normaliseSource(src.source);
-  if (source !== '') keys.push(`src:${Utils.toHex(Hash.sha256(Utils.toArray(source, 'utf8')))}`);
-  if (keys.length) return keys;
+  if (normaliseSource(src.source) !== '') return [`src:${sourceHash(src.source)}`];
   const picked = {};
   for (const k of FREE_IDENTITY_FIELDS) picked[k] = src[k];
   return [`free:${JSON.stringify(tidy(picked) ?? {})}`];
 };
 
-/** One string for an envelope's contract: its code hash, else its source, else its free fields (contractKeys[0]). */
+/** One string for an envelope's contract (contractKeys[0]). */
 const contractId = (e) => contractKeys(e?.contract)[0];
 
 /**
- * Why a PAID listing can't be listed, or null: it must carry code, a valid code hash (64 hex characters) or a
- * source that isn't blank once normalised, and a code hash it carries must be valid (buyers are shown it, and it is
- * the identity).
+ * Why a PAID listing can't be listed, or null: it must carry a source that isn't blank once normalised, and a code
+ * hash it carries must be sha256 of that normalised source in lower-case hex (buyers are shown it).
  */
 const codeProblem = (c) => {
+  if (normaliseSource(c?.source) === '')
+    return 'A paid contract must include its source, so buyers can read what they are paying for';
   const hash = c?.codeHash;
-  const hasHash = hash !== undefined && hash !== null && hash !== '';
-  if (hasHash && (typeof hash !== 'string' || !CODE_HASH_RE.test(hash)))
-    return 'A paid contract’s code hash must be 64 hex characters';
-  if (!hasHash && normaliseSource(c?.source) === '')
-    return 'A paid contract must include its source or code hash, so buyers can read what they are paying for';
+  if (hash !== undefined && hash !== null && hash !== '' && hash !== sourceHash(c?.source))
+    return 'A paid contract’s code hash must be the sha256 of its source';
+  return null;
+};
+
+/**
+ * Why the catalogue refuses a NEW listing's form, or null (final review of row 352, F1): its source must already be
+ * normalised and its code hash in lower case, the one form the catalogue stores and looks up (api/contracts.js
+ * sameBehaviour). The wallet's publish writes that form, so only an older or altered wallet meets this. Asked on
+ * publish only: rows listed before this check keep being served (scripts/contractsUnnormalised.js lists them).
+ */
+const formProblem = (c) => {
+  const source = c?.source;
+  const hash = c?.codeHash;
+  if (
+    (source !== undefined && source !== normaliseSource(source)) ||
+    (hash !== undefined && (typeof hash !== 'string' || hash !== hash.toLowerCase()))
+  )
+    return 'This contract’s source or code hash isn’t in the form the catalogue stores. Update bWalletX and publish it again.';
   return null;
 };
 
@@ -215,8 +230,7 @@ async function checkRow(origin, env) {
  * - two listings are of one contract when they share an identity key (contractKeys). When two such listings disagree
  *   about the author (mayFollow), the earliest ON CHAIN stays (chainOrder, from `position(origin)`, asked only for
  *   listings in such a dispute) and a later one that may not follow an earlier kept one is left out. So listing first
- *   in the catalogue is no way to take over an author's contract. Keys are compared pair by pair, never chained: a
- *   listing carrying one contract's code hash and another's source can't join two unrelated contracts into one;
+ *   in the catalogue is no way to take over an author's contract;
  * - `position` throws when it couldn't find out (null = unconfirmed). Then the order isn't known, so NONE of the
  *   listings in that dispute (and in disputes joined to it) is served and all are `unchecked` (re-review of f3ff8a37:
  *   a failed lookup for the original must never serve the copy). A position the caller already holds doesn't fail, so
@@ -296,7 +310,9 @@ module.exports = {
   codeProblem,
   contractId,
   contractKeys,
+  formProblem,
   normaliseSource,
+  sourceHash,
   contractSigningBytes,
   envelopeRefusal,
   judgeListings,

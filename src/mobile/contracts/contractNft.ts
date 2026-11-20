@@ -65,21 +65,23 @@ export const canonical = (v: unknown): unknown =>
       : v;
 
 /**
- * What makes two listings the same contract (b-Aware row 352, UID 630, and its review). Free text (name, version,
+ * What makes two listings the same contract (b-Aware row 352, UID 630, and its reviews). Free text (name, version,
  * summary, the envelope's description) never does: one changed character there must not make a copy a different
  * contract. Mirrored line for line by the catalogue (site/lib/contracts.js contractKeys); a test runs both on the same
  * fixtures.
- * - A listing with code (every paid one must have it; contractCodeProblem) IS its code: `hash:` + its code hash in
- *   lower case, and `src:` + sha256 of its normalised source. Params, spend paths, oracle and network are text the
- *   author types around the code, so a junk param, `5` for "5" or an empty oracle don't make a new contract. Two
- *   listings are the same contract when they share either key (sameContract), so dropping the code hash or the source
- *   of an original that carries both doesn't make a copy new either.
- * - A free listing with no code: `free:` + the canonical JSON of its normalised format, network, params, spend paths,
- *   oracle and NAME (the name, or every unrelated free contract on one network would be "the same").
- * Known limit: a real edit to the code itself (one changed character of a code hash, a new token in the source) is a
- * different contract; the backstop is the signed author handle on the sheet.
+ * - A listing with a source IS its source: `src:` + sha256 of the normalised source (normaliseSource). Params, spend
+ *   paths, oracle and network are text the author types around the code, so a junk param, `5` for "5" or an empty
+ *   oracle don't make a new contract.
+ * - The code hash is never an identity on its own (final review of row 352, F2): nothing proves a bare hash, so a junk
+ *   listing carrying someone else's hash could squat their contract. A paid listing must carry its source, and a code
+ *   hash it carries must be sha256 of that normalised source (contractCodeProblem).
+ * - A listing without a source (free only; a bare code hash counts as no code): `free:` + the canonical JSON of its
+ *   normalised format, network, params, spend paths, oracle and NAME (the name, or every unrelated free contract on
+ *   one network would be "the same").
+ * An array of one key, so a later identity_keys column (site/migrations-proposed) can hold it as it is.
+ * Known limit: a real edit to the source (a new token) is a different contract; the backstop is the signed author
+ * handle on the sheet.
  */
-export const CODE_HASH_RE = /^[0-9a-f]{64}$/i;
 const FREE_IDENTITY_FIELDS = ['format', 'network', 'params', 'spendPaths', 'oracle', 'name'] as const;
 
 /** Source as identity sees it: NFKC, CRLF/CR → LF, trailing whitespace per line and blank lines at the ends dropped. */
@@ -93,6 +95,10 @@ export const normaliseSource = (s: unknown): string =>
         .join('\n')
         .trim()
     : '';
+
+/** sha256 (lower-case hex) of the normalised source: the code hash a listing with this source must carry, if any. */
+export const sourceHash = (source: unknown): string =>
+  Utils.toHex(Hash.sha256(Utils.toArray(normaliseSource(source), 'utf8')));
 
 /** Every string and number as NFKC-trimmed text; null, '', [] and {} dropped (undefined); object keys sorted. */
 const tidy = (v: unknown): unknown => {
@@ -112,45 +118,62 @@ const tidy = (v: unknown): unknown => {
   return s === '' ? undefined : s;
 };
 
-/** The identity keys of a contract descriptor (see above). Never empty. */
+/** The identity keys of a contract descriptor (see above): one key, never empty. */
 export const contractKeys = (c: Partial<ContractDescriptor> | null | undefined): string[] => {
   const src: Record<string, unknown> = c && typeof c === 'object' ? c : {};
-  const keys: string[] = [];
-  if (typeof src.codeHash === 'string' && CODE_HASH_RE.test(src.codeHash))
-    keys.push(`hash:${src.codeHash.toLowerCase()}`);
-  const source = normaliseSource(src.source);
-  if (source !== '') keys.push(`src:${Utils.toHex(Hash.sha256(Utils.toArray(source, 'utf8')))}`);
-  if (keys.length) return keys;
+  if (normaliseSource(src.source) !== '') return [`src:${sourceHash(src.source)}`];
   const picked: Record<string, unknown> = {};
   for (const k of FREE_IDENTITY_FIELDS) picked[k] = src[k];
   return [`free:${JSON.stringify(tidy(picked) ?? {})}`];
 };
 
-/** One string for a contract's identity: its code hash, else its source, else its free fields (contractKeys[0]). */
+/** One string for a contract's identity (contractKeys[0]). */
 export const contractIdentity = (c: Partial<ContractDescriptor> | null | undefined): string => contractKeys(c)[0];
 
-/** The same contract: the two share an identity key. */
+/** The same contract: the same identity. */
 export const sameContract = (
   a: Partial<ContractDescriptor> | null | undefined,
   b: Partial<ContractDescriptor> | null | undefined,
-) => {
-  const theirs = contractKeys(b);
-  return contractKeys(a).some((k) => theirs.includes(k));
+) => contractIdentity(a) === contractIdentity(b);
+
+/**
+ * Why a PAID listing can't be listed, or null: it must carry a source that isn't blank once normalised, and a code
+ * hash it carries must be sha256 of that normalised source in lower-case hex (buyers are shown it).
+ */
+export const contractCodeProblem = (c: Partial<ContractDescriptor> | null | undefined): string | null => {
+  if (normaliseSource(c?.source) === '')
+    return 'A paid contract must include its source, so buyers can read what they are paying for';
+  const hash = c?.codeHash as unknown;
+  if (hash !== undefined && hash !== null && hash !== '' && hash !== sourceHash(c?.source))
+    return 'A paid contract’s code hash must be the sha256 of its source';
+  return null;
 };
 
 /**
- * Why a PAID listing can't be listed, or null: it must carry code, a valid code hash (64 hex characters) or a
- * source that isn't blank once normalised, and a code hash it carries must be valid (buyers are shown it, and it is
- * the identity).
+ * Why the catalogue refuses a NEW listing's form, or null (final review of row 352, F1): its source must already be
+ * normalised and its code hash in lower case, the one form the catalogue stores and looks up. The wallet's publish
+ * writes that form (normaliseContract), so only an older or altered wallet meets this.
  */
-export const contractCodeProblem = (c: Partial<ContractDescriptor> | null | undefined): string | null => {
+export const contractFormProblem = (c: Partial<ContractDescriptor> | null | undefined): string | null => {
+  const source = c?.source as unknown;
   const hash = c?.codeHash as unknown;
-  const hasHash = hash !== undefined && hash !== null && hash !== '';
-  if (hasHash && (typeof hash !== 'string' || !CODE_HASH_RE.test(hash)))
-    return 'A paid contract’s code hash must be 64 hex characters';
-  if (!hasHash && normaliseSource(c?.source) === '')
-    return 'A paid contract must include its source or code hash, so buyers can read what they are paying for';
+  if (
+    (source !== undefined && source !== normaliseSource(source)) ||
+    (hash !== undefined && (typeof hash !== 'string' || hash !== hash.toLowerCase()))
+  )
+    return 'This contract’s source or code hash isn’t in the form the catalogue stores. Update bWalletX and publish it again.';
   return null;
+};
+
+/** The descriptor as the wallet publishes it: the source normalised (left out when blank), the code hash in lower case. */
+export const normaliseContract = (c: ContractDescriptor): ContractDescriptor => {
+  const { source, codeHash, ...rest } = c;
+  const normal = normaliseSource(source);
+  return {
+    ...rest,
+    ...(normal !== '' && { source: normal }),
+    ...(typeof codeHash === 'string' && codeHash !== '' && { codeHash: codeHash.toLowerCase() }),
+  };
 };
 
 /** The bytes the author signs: the canonical envelope with authorSig left out. */

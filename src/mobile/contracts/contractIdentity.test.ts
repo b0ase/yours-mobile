@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { OneSatContext } from '@1sat/actions';
-import { PrivateKey, ProtoWallet } from '@bsv/sdk';
+import { PrivateKey, ProtoWallet, Utils } from '@bsv/sdk';
 import C from '../../../site/lib/contracts.js';
 import * as F from '../../../site/test/fixtures/contractIdentity.js';
 import * as N from './contractNft';
@@ -25,6 +25,7 @@ const base: ContractDescriptor = {
   version: '1',
   network: 'mainnet',
   summary: 's',
+  source: F.SRC,
   codeHash: F.HASH,
 };
 const env = (who: { address: string }, over: Partial<ContractEnvelope> = {}, contract = base): ContractEnvelope => ({
@@ -82,7 +83,7 @@ describe('copiedFrom uses the contract identity', () => {
 });
 
 describe('review of row 352, F1: a paid copy that only rewrites text around the same code is the same contract', () => {
-  for (const [what, original, copy] of F.sameCode)
+  for (const [what, original, copy] of [...F.sameCode, ...F.sameCodeUnnormalised])
     test(`signed paid copy, ${what}: refused`, async () => {
       const first = row('o1', await signed(ann, env(ann, {}, asDescriptor(original))), '2026-11-01T00:00:00Z');
       const renamed = asDescriptor({ ...copy, name: 'Escrow (copy)' });
@@ -98,6 +99,43 @@ describe('review of row 352, F1: a paid copy that only rewrites text around the 
       const first = row('o1', await signed(ann, env(ann, {}, asDescriptor(original))), '2026-11-01T00:00:00Z');
       const next = row('o2', await signed(mallory, env(mallory, {}, asDescriptor(other))), '2026-11-02T00:00:00Z');
       expect(await copiedFrom(next, [first, next])).toBeUndefined();
+    });
+});
+
+describe('final review of row 352, F2: a code hash alone squats nothing', () => {
+  const squats = [
+    ['a bare code hash, no source', F.descriptor({ codeHash: F.HASH })],
+    ['the code hash with a different source', F.descriptor({ codeHash: F.HASH, source: 'junk' })],
+  ] as const;
+  for (const [what, d] of squats)
+    test(`an earlier listing carrying ${what} doesn't make the real author's listing a copy`, async () => {
+      const squat = row('o1', await signed(mallory, env(mallory, {}, asDescriptor(d))), '2026-11-01T00:00:00Z');
+      const real = asDescriptor(F.descriptor({ source: F.SRC, codeHash: F.HASH }));
+      const anns = row('o2', await signed(ann, env(ann, {}, real)), '2026-11-02T00:00:00Z');
+      expect(await copiedFrom(anns, [squat, anns])).toBeUndefined();
+    });
+});
+
+describe('final review of row 352, F1: the wallet publishes the stored form', () => {
+  for (const [what, original, copy] of F.sameCodeUnnormalised)
+    test(`${what}: normalised before it is signed`, async () => {
+      const signedBytes: number[][] = [];
+      const wallet = new Proxy(ann.wallet, {
+        get: (t, k) =>
+          k === 'createSignature'
+            ? (args: { data: number[] }) => (signedBytes.push(args.data), t.createSignature(args as never))
+            : k === 'getPublicKey'
+              ? t.getPublicKey.bind(t)
+              : undefined,
+      });
+      const ctx = { wallet } as unknown as OneSatContext;
+      await expect(publishContract(ctx, env(ann, {}, asDescriptor(copy)))).rejects.toThrow();
+      expect(signedBytes).toHaveLength(1);
+      const sent = JSON.parse(Utils.toUTF8(signedBytes[0])) as ContractEnvelope;
+      expect(sent.contract.source).toBe(F.SRC);
+      expect(sent.contract.codeHash).toBe((original as { codeHash?: string }).codeHash);
+      expect(N.contractFormProblem(sent.contract)).toBeNull();
+      expect(C.formProblem(sent.contract)).toBeNull();
     });
 });
 
@@ -139,6 +177,7 @@ describe('review of row 352, F2: free contracts with no code', () => {
 describe('wallet and catalogue agree on the identity (byte for byte, the shared fixtures)', () => {
   const all = [
     ...F.sameCode.flatMap(([, a, b]) => [a, b]),
+    ...F.sameCodeUnnormalised.flatMap(([, a, b]) => [a, b]),
     ...F.differentCode.flatMap(([, a, b]) => [a, b]),
     ...F.paidNoCode.map(([, d]) => d),
     ...F.paidWithCode.map(([, d]) => d),
@@ -153,13 +192,17 @@ describe('wallet and catalogue agree on the identity (byte for byte, the shared 
       expect(N.contractKeys(asDescriptor(d))).toEqual(C.contractKeys(d));
       expect(N.contractIdentity(asDescriptor(d))).toBe(C.contractId({ contract: d, description: 'whatever' }));
       expect(N.contractCodeProblem(asDescriptor(d))).toBe(C.codeProblem(d));
+      expect(N.contractFormProblem(asDescriptor(d))).toBe(C.formProblem(d));
     }
   });
-  test('same code: the same identity; a different code hash: a different one; free text never counts', () => {
+  test('same code: the same identity; a different source: a different one; free text never counts', () => {
     expect(N.contractIdentity(F.sameCode[0][1] as ContractDescriptor)).toBe(
       N.contractIdentity(F.sameCode[0][2] as ContractDescriptor),
     );
-    for (const [, a, b] of F.sameCode) expect(N.sameContract(asDescriptor(a), asDescriptor(b))).toBe(true);
+    for (const [, a, b] of [...F.sameCode, ...F.sameCodeUnnormalised])
+      expect(N.sameContract(asDescriptor(a), asDescriptor(b))).toBe(true);
+    // A code hash is never an identity on its own.
+    expect(N.contractKeys(asDescriptor(F.descriptor({ codeHash: F.HASH })))[0]).toMatch(/^free:/);
     for (const [, a, b] of F.differentCode) expect(N.sameContract(asDescriptor(a), asDescriptor(b))).toBe(false);
     expect(N.contractIdentity(base)).toBe(N.contractIdentity({ ...base, name: 'Other', version: '9', summary: 'z' }));
     expect(N.contractIdentity(asDescriptor(F.freeTipJar))).not.toBe(N.contractIdentity(asDescriptor(F.freeEscrow)));
