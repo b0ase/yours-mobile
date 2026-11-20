@@ -1721,7 +1721,7 @@ describe('bMail: flood, clock and load', () => {
       expect(quarantined.every((m) => isQuarantined(m, [EVE]) && m.recheck?.last === 0 && !m.recheck.mine)).toBe(true);
       expect(asked.some((t) => theirs.has(t))).toBe(false);
     }
-  });
+  }, 30_000); // 300 stamps signed: ~2 s alone, over 5 s under the full parallel gate run
 
   test('the notifier peeks a large box less often', () => {
     expect([0, 20, 21, 200, 201, 5000].map(peekGapMs)).toEqual([0, 0, 300_000, 300_000, 900_000, 900_000]);
