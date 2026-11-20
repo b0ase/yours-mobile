@@ -161,7 +161,7 @@ export const contractFormProblem = (c: Partial<ContractDescriptor> | null | unde
     (source !== undefined && source !== normaliseSource(source)) ||
     (hash !== undefined && (typeof hash !== 'string' || hash !== hash.toLowerCase()))
   )
-    return 'This contract’s source or code hash isn’t in the form the catalogue stores. Update bWalletX and publish it again.';
+    return `This contract’s source or code hash isn’t in the form the catalogue stores. Update ${APP_NAME} and publish it again.`;
   return null;
 };
 
