@@ -126,17 +126,20 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
     if (pending) {
       // b-Aware 25 Oct 2026: a waiting payment is only sent while its order is still live and its pot allows it.
       // Cancelled, paused or ended, or the pot stopped: keep the record (nothing new is signed for it), don't send.
-      const cur = live(id);
-      const gate = cur ? checkAgentSpend(cur.potId, pending.usd, now) : null;
-      if (!cur || !gate?.ok) {
-        out.push({
-          id,
-          ok: false,
-          reason: gate && !gate.ok ? gate.reason : 'Stopped: the waiting payment was not sent',
-        });
-        continue;
-      }
-      const r = await settlePending(cur, pending, deps, now);
+      // Re-read, cap check and broadcast-and-log as one queued step, like the fresh branch below: the log entry lands
+      // only after the broadcast, so a spend running beside this one could otherwise pass the same daily cap.
+      const r = await serialSpend(async (): Promise<PayOutcome> => {
+        const cur = live(id);
+        const gate = cur ? checkAgentSpend(cur.potId, pending.usd, now) : null;
+        if (!cur || !gate?.ok) {
+          return {
+            id,
+            ok: false,
+            reason: gate && !gate.ok ? gate.reason : 'Stopped: the waiting payment was not sent',
+          };
+        }
+        return settlePending(cur, pending, deps, now);
+      });
       out.push(r);
       if (!r.ok) continue; // still unsettled: never sign anything new for this order
     }
