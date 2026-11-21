@@ -6,6 +6,7 @@ import {
   fetchRoles,
   identityKeyOf,
   loadCardInputs,
+  opnsCardKey,
   opnsCandidates,
   parseBitsignPublic,
   parseRoles,
@@ -241,5 +242,13 @@ describe('contact card: OpNS names (b-Aware opns-indexer)', () => {
     const inputs = await loadCardInputs(contact({ paymail: null }), f, async () => null);
     expect(inputs.opns?.find((o) => o.name === 'alice')?.pubkey).toBeUndefined();
     expect(buildCard(inputs).opnsNames).toEqual([]);
+  });
+
+  test('a signed binding counts only when the name index check also passed (opnsChecked chain)', () => {
+    const r = { pubkey: KEY, opnsKeySigned: true };
+    expect(opnsCardKey({ ...r, opnsChecked: 'chain' })).toBe(KEY);
+    // The 1sat name index couldn't be reached: the coin may not be this name's inscription.
+    expect(opnsCardKey({ ...r, opnsChecked: 'index' })).toBeUndefined();
+    expect(opnsCardKey({ pubkey: KEY, opnsChecked: 'chain', opnsKeySigned: false })).toBeUndefined();
   });
 });
