@@ -8,7 +8,7 @@
  * then the sub is advanced and the pending record cleared. A run that finds a pending record rebroadcasts that
  * same raw tx (idempotent: one txid) and marks its periods paid; it never signs a fresh tx for them.
  */
-import { appendAgentLog, checkAgentSpend } from '../agents/agentAccounts';
+import { appendAgentLog, checkAgentSpend, getAgentLog } from '../agents/agentAccounts';
 import { serialSpend } from '../agents/spendQueue';
 import { SUBSCRIPTIONS_ENABLED, PNEE_POTS_ENABLED } from '../storeBuild';
 import { isPaused } from '../config/killSwitch';
@@ -130,6 +130,10 @@ const fail = (s: Subscription, reason: string, deps: PayDeps, lowFunds = false):
   return { id: s.id, ok: false, reason };
 };
 
+/** This payment is on the pot's log (and so on its day ledger) already. */
+const booked = (potId: string, txid: string) =>
+  getAgentLog(potId).some((e) => e.action === 'sub-pay' && e.txid === txid);
+
 const paused = (deps: PayDeps) => (deps.spendingPaused ?? (() => isPaused('spending')))().catch(() => true);
 
 async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
@@ -159,8 +163,11 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       // only after the broadcast, so a spend running beside this one could otherwise pass the same daily cap.
       const r = await serialSpend(async (): Promise<PayOutcome> => {
         const cur = live(id);
-        // Gated against the pot the signed tx spends (pending.potId), not the order's current pot (moveSub).
-        const gate = cur ? checkAgentSpend(pending.potId, pending.usd, now) : null;
+        // Gated against the pot the signed tx spends (pending.potId), not the order's current pot (moveSub). Already
+        // booked (a kill after the log, before the record was cleared): its dollars are on the cap already, so only
+        // Stop and Stop all are checked again.
+        const usd = booked(pending.potId, pending.txid) ? 0 : pending.usd;
+        const gate = cur ? checkAgentSpend(pending.potId, usd, now) : null;
         if (!cur || !gate?.ok) {
           return {
             id,
@@ -368,6 +375,16 @@ async function settlePending(
       deps.notify?.(`Payment to ${s.payee.name} is waiting to go through`, m);
       return { id: s.id, ok: false, reason: m };
     }
+  // Booked once per txid, whichever run settles it, before the order advances: a run killed after the advance but
+  // before the log left the payment off the cap for good, so its cap space was spent twice (b-Aware row 272).
+  if (!booked(p.potId, p.txid))
+    appendAgentLog(p.potId, {
+      at: now,
+      action: 'sub-pay',
+      detail: `Paid ${s.payee.name} ${formatAmount(s.amount)}${p.count > 1 ? ` × ${p.count}` : ''}`,
+      usd: p.usd,
+      txid: p.txid,
+    });
   // Already advanced past these periods (crash after saveSub, before clearPending)? Then only clear.
   const cur = getSub(s.id) ?? s;
   if (cur.periodIndex === p.periodIndex) {
@@ -377,13 +394,6 @@ async function settlePending(
       ...next,
       status: cur.status === 'paused' || cur.status === 'cancelled' ? cur.status : next.status,
       lastReceipt: { at: now, txid: p.txid, usd: p.usd, sats: p.sats ?? 0, ...(p.to ? { to: p.to } : {}) },
-    });
-    appendAgentLog(p.potId, {
-      at: now,
-      action: 'sub-pay',
-      detail: `Paid ${s.payee.name} ${formatAmount(s.amount)}${p.count > 1 ? ` × ${p.count}` : ''}`,
-      usd: p.usd,
-      txid: p.txid,
     });
   }
   clearPending(s.id);
