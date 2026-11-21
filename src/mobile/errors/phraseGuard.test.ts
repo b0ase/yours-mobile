@@ -118,3 +118,112 @@ describe('ordinary text is left alone', () => {
     expect(redactSecrets(s)).toBe(s);
   });
 });
+
+/** Every letter run in `out` that is one of `words` (NFKD, accents kept or dropped): the words left readable. */
+const leftOverAny = (out: string, words: string[]) => {
+  const plain = (w: string) => w.normalize('NFKD').toLowerCase().replace(/\p{M}/gu, '');
+  const want = new Set(words.flatMap((w) => [w.normalize('NFKD').toLowerCase(), plain(w)]));
+  return Array.from(
+    out.replaceAll('[recovery words hidden]', ' ').normalize('NFKD').matchAll(/[\p{L}\p{M}]+/gu),
+    (m) => m[0].toLowerCase(),
+  ).filter((w) => want.has(w) || want.has(plain(w)));
+};
+const expectBlocked = (text: string, words: string[]) => {
+  expect(looksLikeSecret(text)).toBe(true);
+  const out = redactSecrets(`Restore failed: ${text}`);
+  expect(out).toContain('[recovery words hidden]');
+  expect(leftOverAny(out, words)).toEqual([]);
+};
+
+describe('recovery phrases joined by any punctuation (b-Aware 634, row 353)', () => {
+  const SEPS = [':', '=', ' : ', ' = ', '::', '=>', '->', '>', '<', '#', '@', '~', '!', '?', '&', '^', '%', '$', '"', "'", '`', '\t', '   '];
+  for (const sep of SEPS)
+    test(`joined by ${JSON.stringify(sep)}`, () => expectBlocked(W12.join(sep), W12));
+  test('each word wrapped in brackets or quotes', () => {
+    expectBlocked(W12.map((w) => `(${w})`).join(''), W12);
+    expectBlocked(W12.map((w) => `[${w}]`).join(''), W12);
+    expectBlocked(W12.map((w) => `"${w}"`).join(','), W12);
+    expectBlocked(W12.map((w) => `{${w}}`).join(''), W12);
+  });
+  test('word=word key/value pairs and numbered word:N', () => {
+    expectBlocked(W12.map((w, i) => `w${i + 1}=${w}`).join('&'), W12);
+    expectBlocked(W12.map((w, i) => `${w}:${i + 1}`).join(' '), W12);
+  });
+  test('24 words colon-joined', () => expectBlocked(W24.join(':'), W24));
+});
+
+describe('recovery phrases with filler words between them (b-Aware 634, row 353)', () => {
+  test('the same filler between every word (the report: abandon zz ability zz …)', () =>
+    expectBlocked(W12.join(' zz '), W12));
+  test('two fillers between every word', () => expectBlocked(W12.join(' zz qq '), W12));
+  test('a two-column note: "word N" labels between the words', () =>
+    expectBlocked(W12.map((w, i) => `word ${i + 1} ${w}`).join('\n'), W12));
+  test('a valid phrase with a different filler between each word', () => {
+    const phrase = bip39.generateMnemonic(128).split(' ');
+    const fill = ['zq', 'xv', 'kj', 'qx', 'vv', 'jz', 'xq', 'zx', 'qj', 'kx', 'jx', 'vq'];
+    expectBlocked(phrase.map((w, i) => `${w} ${fill[i]}`).join(' '), phrase);
+  });
+});
+
+/** The nine non-English BIP39 wordlists (b-Aware 657, row 364). bip39 joins Japanese with U+3000. */
+const OTHER_LISTS = [
+  'spanish',
+  'french',
+  'italian',
+  'portuguese',
+  'czech',
+  'japanese',
+  'korean',
+  'chinese_simplified',
+  'chinese_traditional',
+] as const;
+
+describe('recovery phrases in every BIP39 language (b-Aware 657, row 364)', () => {
+  test("the reporter's Japanese phrase", () => {
+    const jp = 'ごうい すもう あこがれる くろう なふだ うすぎ せめる はいち すくう ていど しゅうかい あわう';
+    expectBlocked(jp, jp.split(' '));
+  });
+  for (const lang of OTHER_LISTS) {
+    const list = bip39.wordlists[lang];
+    for (const bits of [128, 256]) {
+      const words = bip39.generateMnemonic(bits, undefined, list).normalize('NFC').split(/[\s　]+/);
+      const forms: Array<[string, string]> = [
+        ['plain', words.join(' ')],
+        ['as bip39 writes it', bip39.entropyToMnemonic(bip39.mnemonicToEntropy(words.join(' '), list), list)],
+        ['numbered', words.map((w, i) => `${i + 1}. ${w}`).join(' ')],
+        ['one per line', words.join('\n')],
+        ['numbered grid', grid(words.map((w, i) => `${i + 1}. ${w}`), 3)],
+        ['colon-joined', words.join(':')],
+        ['equals-joined', words.join('=')],
+        ['filler between words', words.join(' zz ')],
+      ];
+      if (/^[\p{Script=Latin}]/u.test(words[0]))
+        forms.push(['accents dropped', words.map((w) => w.normalize('NFKD').replace(/\p{M}/gu, '')).join(' ')]);
+      for (const [name, text] of forms)
+        test(`${lang} ${bits / 32 * 3} words, ${name}`, () => expectBlocked(text, words));
+    }
+  }
+});
+
+describe('ordinary text in other languages, and punctuation-heavy text, is left alone', () => {
+  const PROSE = [
+    'Hola, intenté enviar dinero a mi amigo ayer pero la aplicación dijo que la transacción falló. ¿Me puedes ayudar a entender qué pasó y cómo arreglarlo?',
+    "Bonjour, j'ai essayé d'envoyer de l'argent à un ami hier mais l'application a dit que la transaction avait échoué. Pouvez-vous m'aider à comprendre pourquoi ?",
+    "Ciao, ieri ho provato a mandare dei soldi a un amico ma l'applicazione ha detto che la transazione non è andata a buon fine. Potete aiutarmi a capire perché?",
+    'Olá, tentei enviar dinheiro para um amigo ontem mas o aplicativo disse que a transação falhou. Vocês podem me ajudar a entender o que aconteceu e como resolver?',
+    'Dobrý den, včera jsem se pokusil poslat peníze kamarádovi, ale aplikace napsala, že transakce selhala. Můžete mi prosím pomoci pochopit, co se stalo?',
+    '昨日友達にお金を送ろうとしましたが、アプリが取引に失敗したと表示しました。何が起きたのか、どうすれば直せるのか教えてください。',
+    '어제 친구에게 돈을 보내려고 했는데 앱에서 거래가 실패했다고 나왔습니다. 무슨 일이 있었는지, 어떻게 고칠 수 있는지 알려주세요.',
+    '我昨天想给朋友转账，但是应用显示交易失败了。你能告诉我发生了什么，以及怎么解决吗？谢谢！',
+    '我昨天想給朋友轉帳，但是應用顯示交易失敗了。你能告訴我發生了什麼，以及怎麼解決嗎？謝謝！',
+    'Error: request failed: status=500; url=https://api.example.com/v1/send?amount=10&fee=1; retry=true; mode=fast; theme=dark',
+    'Settings: theme = gold; language = english; lock = never; currency = usd; network = main; sound = off; alerts = on',
+    'Step 1: open the menu. Step 2: choose settings. Step 3: pick a theme. Step 4: tap save. Step 5: close the app and open it again.',
+  ];
+  for (const p of PROSE)
+    test(`not flagged: ${p.slice(0, 30)}…`, () => {
+      expect(containsPhrase(p)).toBe(false);
+      expect(looksLikeSecret(p)).toBe(false);
+      expect(redactSecrets(p)).not.toContain('[recovery words hidden]');
+    });
+});
