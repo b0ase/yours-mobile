@@ -16,7 +16,14 @@
  * - Every change goes through one lock per storage key (shared by every store instance and, on the web, every tab),
  *   so two payments racing for the last cents cannot both win.
  * - Another site's payment never reads or touches this envelope.
+ * - One payment without a sheet takes at most a tenth of the envelope (envelopePerSpendLimit, set at each fill and
+ *   shown on the sheet); a bigger one gets the normal pay sheet (b-Aware rows 83, 370).
+ * - A payment is held when it is authorised and settled only when the wallet signs it; an action that fails, is
+ *   aborted or is left unsigned past the hold deadline gives the hold back (guardEnvelopes; rows 214, 322, 326).
+ *   A probe (seekPermission=false) and the BRC-177 prefunding check never take anything.
+ * - Each payment records where it went (`to`), and Settings › Envelopes lists it.
  */
+import { describeLockingScript } from './spendRecipients';
 
 export const ENVELOPES_KEY_PREFIX = 'bwxEnvelopes:';
 
@@ -32,13 +39,26 @@ export const envelopeUsdText = (usd: number): string =>
 export const MAX_ENVELOPE_SATS = 100_000_000;
 /** History kept per envelope (newest last). */
 export const HISTORY_LIMIT = 100;
+/** One payment without a sheet takes at most 1/ENVELOPE_PER_SPEND_DIVISOR of the envelope (rows 83, 370). */
+export const ENVELOPE_PER_SPEND_DIVISOR = 10;
+/** The most one payment may take without a sheet, for an envelope holding `balanceSats` right after a fill. */
+export const envelopePerSpendLimit = (balanceSats: number): number =>
+  Math.max(1, Math.floor((Number.isFinite(balanceSats) ? Math.max(0, balanceSats) : 0) / ENVELOPE_PER_SPEND_DIVISOR));
+/** The reason the toolbox's BRC-177 'nosend' module gives its prefunding check (pinned by envelopeHolds.test.ts). */
+export const BRC177_PREFLIGHT_REASON = 'BRC-177 protected action prefunding';
+/** An action a site built and holds unsigned gives its envelope hold back after this (it is aborted first). */
+export const ENVELOPE_HOLD_TIMEOUT_MS = 10 * 60_000;
 
-export type EnvelopeEventKind = 'fill' | 'spend' | 'return';
-export type EnvelopeEvent = { at: number; kind: EnvelopeEventKind; sats: number };
+/** 'refund': a held payment whose action failed or was aborted before signing, given back. */
+export type EnvelopeEventKind = 'fill' | 'spend' | 'return' | 'refund';
+/** `to`: where a payment went (an address, "data (OP_RETURN)" or "a custom script"), when the wallet saw it. */
+export type EnvelopeEvent = { at: number; kind: EnvelopeEventKind; sats: number; to?: string[] };
 
 export interface Envelope {
   originator: string;
   balanceSats: number;
+  /** The most one payment may take without a sheet (envelopePerSpendLimit at the last fill). */
+  perSpendSats: number;
   createdAt: number;
   updatedAt: number;
   /** Lifetime totals, for the Settings screen. */
@@ -63,16 +83,24 @@ export const parseEnvelopeState = (raw: unknown): EnvelopeState => {
     const e = v as Partial<Envelope> | null;
     const balance = wholeSats(e?.balanceSats);
     if (!e || typeof e.originator !== 'string' || e.originator !== key || balance === undefined) continue;
+    const balanceSats = Math.min(balance, MAX_ENVELOPE_SATS);
+    const filledSats = wholeSats(e.filledSats) ?? 0;
+    // An envelope stored before the limit existed: a tenth of what was put in (or of its balance, if more).
+    const perSpend = wholeSats(e.perSpendSats);
     out.envelopes[key] = {
       originator: key,
-      balanceSats: Math.min(balance, MAX_ENVELOPE_SATS),
+      balanceSats,
+      perSpendSats: perSpend && perSpend > 0 ? perSpend : envelopePerSpendLimit(Math.max(filledSats, balanceSats)),
       createdAt: wholeSats(e.createdAt) ?? 0,
       updatedAt: wholeSats(e.updatedAt) ?? 0,
-      filledSats: wholeSats(e.filledSats) ?? 0,
+      filledSats,
       spentSats: wholeSats(e.spentSats) ?? 0,
       history: Array.isArray(e.history)
         ? e.history
             .filter((h) => h && typeof h.at === 'number' && typeof h.sats === 'number' && typeof h.kind === 'string')
+            .map((h) =>
+              Array.isArray(h.to) ? { ...h, to: h.to.filter((t): t is string => typeof t === 'string') } : h,
+            )
             .slice(-HISTORY_LIMIT)
         : [],
     };
@@ -103,6 +131,7 @@ export const fillEnvelope = (
   const base: Envelope = cur ?? {
     originator,
     balanceSats: 0,
+    perSpendSats: 1,
     createdAt: now,
     updatedAt: now,
     filledSats: 0,
@@ -110,31 +139,74 @@ export const fillEnvelope = (
     history: [],
   };
   const next = withEvent(
-    { ...base, balanceSats: after, filledSats: base.filledSats + added },
+    { ...base, balanceSats: after, perSpendSats: envelopePerSpendLimit(after), filledSats: base.filledSats + added },
     { at: now, kind: 'fill', sats: added },
   );
   return { state: { envelopes: { ...state.envelopes, [originator]: next } }, added };
 };
 
+const spendAmount = (sats: number): number =>
+  typeof sats === 'number' && Number.isFinite(sats) ? Math.ceil(sats) : NaN;
+
+/** Would this payment come out of the envelope without a sheet: it fits the balance and the per-payment limit. */
+export const envelopeFits = (state: EnvelopeState, originator: string, sats: number): boolean => {
+  const cur = originator ? state.envelopes[originator] : undefined;
+  const amount = spendAmount(sats);
+  return !!cur && amount > 0 && amount <= cur.balanceSats && amount <= cur.perSpendSats;
+};
+
 /**
  * Take one payment from a site's envelope. All or nothing: approved only when the whole amount fits. A spend of 0
  * or less, or a non-number, is refused (it never needs an envelope and must not be used to probe one).
+ * `opts.limit`: also refuse a payment over the envelope's per-payment limit (every payment a site makes; the raw form
+ * is kept for the store's own tests). `opts.to`: where it goes, kept in the history.
  */
 export const spendFromEnvelope = (
   state: EnvelopeState,
   originator: string,
   sats: number,
   now: number,
-): { state: EnvelopeState; ok: boolean; balanceSats: number } => {
+  opts: { limit?: boolean; to?: string[] } = {},
+): { state: EnvelopeState; ok: boolean; balanceSats: number; createdAt?: number } => {
   const cur = originator ? state.envelopes[originator] : undefined;
-  const amount = typeof sats === 'number' && Number.isFinite(sats) ? Math.ceil(sats) : NaN;
-  if (!cur || !(amount > 0) || amount > cur.balanceSats)
+  const amount = spendAmount(sats);
+  if (!cur || !(amount > 0) || amount > cur.balanceSats || (opts.limit && amount > cur.perSpendSats))
     return { state, ok: false, balanceSats: cur?.balanceSats ?? 0 };
   const next = withEvent(
     { ...cur, balanceSats: cur.balanceSats - amount, spentSats: cur.spentSats + amount },
-    { at: now, kind: 'spend', sats: amount },
+    { at: now, kind: 'spend', sats: amount, ...(opts.to?.length ? { to: opts.to } : {}) },
   );
-  return { state: { envelopes: { ...state.envelopes, [originator]: next } }, ok: true, balanceSats: next.balanceSats };
+  return {
+    state: { envelopes: { ...state.envelopes, [originator]: next } },
+    ok: true,
+    balanceSats: next.balanceSats,
+    createdAt: cur.createdAt,
+  };
+};
+
+/**
+ * Give a held payment back (its action failed or was aborted before signing). Only to the same envelope it came from
+ * (`createdAt`): an envelope closed with Coin return meanwhile, or closed and opened again, gets nothing back, so a
+ * refund never re-earmarks money the user took out.
+ */
+export const refundToEnvelope = (
+  state: EnvelopeState,
+  originator: string,
+  sats: number,
+  createdAt: number,
+  now: number,
+): { state: EnvelopeState; refunded: number } => {
+  const cur = originator ? state.envelopes[originator] : undefined;
+  const amount = wholeSats(sats) ?? 0;
+  if (!cur || cur.createdAt !== createdAt || amount <= 0) return { state, refunded: 0 };
+  const after = Math.min(MAX_ENVELOPE_SATS, cur.balanceSats + amount);
+  const refunded = after - cur.balanceSats;
+  if (refunded <= 0) return { state, refunded: 0 };
+  const next = withEvent(
+    { ...cur, balanceSats: after, spentSats: Math.max(0, cur.spentSats - refunded) },
+    { at: now, kind: 'refund', sats: refunded },
+  );
+  return { state: { envelopes: { ...state.envelopes, [originator]: next } }, refunded };
 };
 
 /** Coin return: the envelope is closed and its balance released. Returns how much was released. */
@@ -333,11 +405,35 @@ export class EnvelopeStore {
     });
   }
 
-  /** Atomically take one payment; false (and nothing changed) when it does not fit. */
+  /** Atomically take an amount from the balance; false (and nothing changed) when it does not fit. No limit check. */
   trySpend(originator: string, sats: number): Promise<boolean> {
     return this.run((s) => {
       const r = spendFromEnvelope(s, originator, sats, this.now());
       return { state: r.ok ? r.state : undefined, result: r.ok };
+    });
+  }
+
+  /**
+   * A site's payment: atomically take it when it fits the balance and the per-payment limit, recording where it goes.
+   * Resolves to the envelope's createdAt (for refund) when taken, undefined (nothing changed) when not.
+   */
+  reserve(originator: string, sats: number, to?: string[]): Promise<number | undefined> {
+    return this.run((s) => {
+      const r = spendFromEnvelope(s, originator, sats, this.now(), { limit: true, to });
+      return { state: r.ok ? r.state : undefined, result: r.ok ? r.createdAt : undefined };
+    });
+  }
+
+  /** Would this payment come out of the envelope? Reads only: a probe never takes anything. */
+  fits(originator: string, sats: number): Promise<boolean> {
+    return this.run((s) => ({ result: envelopeFits(s, originator, sats) }));
+  }
+
+  /** Give a held payment back to the envelope it came from (refundToEnvelope). Resolves to what was given back. */
+  refund(originator: string, sats: number, createdAt: number): Promise<number> {
+    return this.run((s) => {
+      const r = refundToEnvelope(s, originator, sats, createdAt, this.now());
+      return { state: r.refunded ? r.state : undefined, result: r.refunded };
     });
   }
 
@@ -443,9 +539,25 @@ type SpendArgs = {
 };
 
 type GuardDeps = {
-  envelopes: Pick<EnvelopeStore, 'trySpend'>;
+  envelopes: Pick<EnvelopeStore, 'reserve' | 'fits' | 'refund'>;
   adminOriginator: string;
   normalize: (o: string) => string;
+  /** How long a site may hold a built, unsigned action before its hold is given back (ENVELOPE_HOLD_TIMEOUT_MS). */
+  holdTimeoutMs?: number;
+  log?: (msg: string) => void;
+};
+
+type Hold = { originator: string; sats: number; createdAt: number; timer?: ReturnType<typeof setTimeout> };
+type Bound = { reference: string; originator: string; outputs?: unknown };
+type AnyFn = (...a: unknown[]) => unknown;
+
+/** Where a site's requested outputs pay: one entry per distinct payee (describeLockingScript). */
+const payeesOf = (outputs: unknown): string[] | undefined => {
+  if (!Array.isArray(outputs)) return undefined;
+  const to = [
+    ...new Set(outputs.map((o) => describeLockingScript((o as { lockingScript?: unknown } | null)?.lockingScript))),
+  ];
+  return to.length ? to : undefined;
 };
 
 /**
@@ -453,10 +565,20 @@ type GuardDeps = {
  *
  * The manager calls `this.ensureSpendingAuthorization` for every createAction/signAction spend, with the exact net
  * amount. For a site:
- * - it fits the site's envelope → taken from the balance, approved without a sheet;
+ * - it fits the site's envelope (balance and per-payment limit) → taken from the balance, approved without a sheet;
  * - anything else → the normal pay sheet (`requestPermissionFlow`), covering this payment only.
  * Stored spending grants (old monthly allowances) are never consulted: the original method, which honours them, is
  * only used for the wallet itself and for spends of 0.
+ *
+ * Held, then settled or given back (b-Aware rows 214, 322, 326). The toolbox binds each action's reference
+ * (bindPendingAction) and asks for the spend with no await in between (pinned by envelopeHolds.test.ts), so the
+ * envelope payment is tied to that reference. It is settled when the wallet's signature over the authorised template
+ * is accepted (assertAuthorizedSignResult), and given back when the action is aborted before that: a failed build or
+ * sign (blockAndAbortAction, only when the abort is confirmed), the site's own abortAction, or a built action the site
+ * leaves unsigned past `holdTimeoutMs` (blocked and aborted here first, so it can never be signed after). If an abort
+ * is refused the payment may already be on the network, so it stays taken. A payment the wallet cannot tie to an
+ * action (a site signing its own transaction over a coin of ours, crossSiteSignGuard) is taken at once, as before.
+ * A probe (seekPermission=false) and the BRC-177 prefunding check only look; neither takes anything.
  */
 export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T {
   const m = manager as Record<string, unknown>;
@@ -465,15 +587,157 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
   if (typeof original !== 'function' || typeof flow !== 'function') {
     throw new Error('guardEnvelopes: permissions manager is missing ensureSpendingAuthorization/requestPermissionFlow');
   }
+  const log = deps.log ?? console.warn;
+  const holdTimeoutMs = deps.holdTimeoutMs ?? ENVELOPE_HOLD_TIMEOUT_MS;
+  const holds = new Map<string, Hold>();
+  const signing = new Map<string, number>();
+  const aborting = new Set<string>();
+  const aborted = new Set<string>();
+  let bound: Bound | undefined;
+
+  const settle = (reference: string) => {
+    const h = holds.get(reference);
+    if (!h) return;
+    holds.delete(reference);
+    if (h.timer) clearTimeout(h.timer);
+  };
+  const giveBack = async (reference: string) => {
+    const h = holds.get(reference);
+    if (!h) return;
+    settle(reference);
+    // A refund that fails leaves the payment taken: never more spending than the user allowed.
+    await deps.envelopes
+      .refund(h.originator, h.sats, h.createdAt)
+      .catch((e: unknown) => log(`[envelopes] could not give back ${h.sats} sats to ${h.originator}: ${String(e)}`));
+  };
+  const armTimer = (reference: string) => {
+    const h = holds.get(reference);
+    if (!h || h.timer) return;
+    const fire = () => {
+      const cur = holds.get(reference);
+      if (!cur) return;
+      cur.timer = undefined;
+      // The site is signing it right now: let that finish, look again later.
+      if (signing.has(reference)) return void (cur.timer = schedule());
+      const block = m.blockAndAbortAction as ((r: string) => Promise<void>) | undefined;
+      void Promise.resolve(block?.call(manager, reference)).catch(() => undefined);
+    };
+    const schedule = () => {
+      const t = setTimeout(fire, holdTimeoutMs);
+      (t as { unref?: () => void }).unref?.();
+      return t;
+    };
+    h.timer = schedule();
+  };
+
+  // Hooks on the toolbox's own action lifecycle. A manager without them (a test stand-in) takes payments at once.
+  const wrap = (name: string, make: (orig: AnyFn) => AnyFn) => {
+    const orig = m[name];
+    if (typeof orig === 'function') m[name] = make(orig as AnyFn);
+  };
+  wrap(
+    'bindPendingAction',
+    (orig) =>
+      function (this: unknown, ...a: unknown[]) {
+        const r = orig.apply(manager, a);
+        const mine: Bound = { reference: String(a[0]), originator: String(a[1] ?? '') };
+        bound = mine;
+        // Only the spend check that runs in this same synchronous step belongs to this action.
+        queueMicrotask(() => {
+          if (bound === mine) bound = undefined;
+        });
+        return r;
+      },
+  );
+  wrap(
+    'verifyRequestedOutputsPresent',
+    (orig) =>
+      function (this: unknown, ...a: unknown[]) {
+        const r = orig.apply(manager, a);
+        if (bound && bound.outputs === undefined) bound.outputs = (a[1] as { outputs?: unknown } | null)?.outputs ?? [];
+        return r;
+      },
+  );
+  wrap(
+    'assertAuthorizedSignResult',
+    (orig) =>
+      function (this: unknown, ...a: unknown[]) {
+        const r = orig.apply(manager, a);
+        settle(String(a[0])); // signed over the authorised template: the payment is made
+        return r;
+      },
+  );
+  wrap(
+    'clearPendingAction',
+    (orig) =>
+      function (this: unknown, ...a: unknown[]) {
+        if (aborting.has(String(a[0]))) aborted.add(String(a[0]));
+        return orig.apply(manager, a);
+      },
+  );
+  wrap('blockAndAbortAction', (orig) => async (...a: unknown[]) => {
+    const reference = String(a[0]);
+    aborting.add(reference);
+    try {
+      await orig.apply(manager, a);
+    } catch (e) {
+      settle(reference); // the abort was refused: it may be on the network, so it stays taken
+      throw e;
+    } finally {
+      aborting.delete(reference);
+    }
+    // The toolbox clears the action only when the wallet confirms it was aborted.
+    if (aborted.delete(reference)) await giveBack(reference);
+    else settle(reference);
+  });
+  wrap('abortAction', (orig) => async (...a: unknown[]) => {
+    const r = await orig.apply(manager, a);
+    const reference = (a[0] as { reference?: unknown } | null)?.reference;
+    if ((r as { aborted?: unknown } | null)?.aborted === true && typeof reference === 'string')
+      await giveBack(reference);
+    return r;
+  });
+  wrap('signAction', (orig) => async (...a: unknown[]) => {
+    const reference = String((a[0] as { reference?: unknown } | null)?.reference ?? '');
+    signing.set(reference, (signing.get(reference) ?? 0) + 1);
+    try {
+      return await orig.apply(manager, a);
+    } finally {
+      const n = (signing.get(reference) ?? 1) - 1;
+      if (n > 0) signing.set(reference, n);
+      else signing.delete(reference);
+    }
+  });
+  wrap('createAction', (orig) => async (...a: unknown[]) => {
+    const r = await orig.apply(manager, a);
+    // Handed back unsigned (the site signs it later): its hold waits for the site, up to the deadline.
+    const reference = (r as { signableTransaction?: { reference?: unknown } } | null)?.signableTransaction?.reference;
+    if (typeof reference === 'string') armTimer(reference);
+    return r;
+  });
+
   m.ensureSpendingAuthorization = async (args: SpendArgs) => {
+    // Read before any await: the action the toolbox bound just now, if this check is its spend check.
+    const mine =
+      bound && args?.originator !== undefined && bound.originator === String(args.originator) ? bound : undefined;
+    if (mine) bound = undefined;
     if (!args?.originator || args.originator === deps.adminOriginator || !(args.satoshis > 0))
       return (original as (a: SpendArgs) => Promise<boolean>).call(manager, args);
     const originator = deps.normalize(args.originator);
+    // A probe, or the BRC-177 check before the action is built, only looks (rows 322, 326). The action's own spend
+    // check, after it is built, takes the payment.
+    const lookOnly = args.seekPermission === false || (!mine && args.reason === BRC177_PREFLIGHT_REASON);
     // An envelope that can't be used safely (no shared lock, no answer in time) is treated as "doesn't fit": the
     // normal sheet for this payment, never an unlocked spend (review F4).
     let fits = false;
     try {
-      fits = await deps.envelopes.trySpend(originator, args.satoshis);
+      if (lookOnly) fits = await deps.envelopes.fits(originator, args.satoshis);
+      else {
+        const createdAt = await deps.envelopes.reserve(originator, args.satoshis, payeesOf(mine?.outputs));
+        fits = createdAt !== undefined;
+        if (fits && mine)
+          holds.set(mine.reference, { originator, sats: Math.ceil(args.satoshis), createdAt: createdAt! });
+      }
     } catch (e) {
       if (!isEnvelopeUnavailable(e)) throw e;
     }

@@ -6,6 +6,13 @@ import { sendMessageAsync } from '../utils/chromeHelpers';
 
 type ListData = { envelopes: Envelope[]; usdPerBsv?: number };
 
+/** The last few payments out of an envelope and any given back, newest first: each one with where it went. */
+const recentPayments = (e: Envelope) =>
+  e.history
+    .filter((h) => h.kind === 'spend' || h.kind === 'refund')
+    .slice(-5)
+    .reverse();
+
 /**
  * Settings › Envelopes (services/envelopes.ts): every site's envelope, what is left, what it has spent, and Coin
  * return. The money in an envelope never left the wallet; Coin return just closes the earmark, at once.
@@ -53,9 +60,9 @@ export const EnvelopesSettings = () => {
   return (
     <div className="flex flex-col gap-3 w-full" data-testid="envelopes-settings">
       <p className="m-0 text-xs leading-relaxed" style={{ color: gray }}>
-        A site with an envelope can make small payments from it without asking, and nothing more. The money stays in
-        your wallet until each payment is made. When an envelope is empty, the site asks you again. Coin return closes
-        it at once.
+        A site with an envelope can make small payments from it without asking, each up to a tenth of what you put in,
+        and nothing more. The money stays in your wallet until each payment is made, and each one is listed here with
+        where it went. When an envelope is empty, the site asks you again. Coin return closes it at once.
       </p>
       {note && (
         <p className="m-0 text-xs" style={{ color: contrast }} role="status">
@@ -82,7 +89,8 @@ export const EnvelopesSettings = () => {
                   {e.originator}
                 </span>
                 <span className="text-xs" style={{ color: gray }}>
-                  Spent {money(e.spentSats).main} of {money(e.filledSats).main} put in
+                  Spent {money(e.spentSats).main} of {money(e.filledSats).main} put in · up to{' '}
+                  {money(e.perSpendSats).main} a payment
                 </span>
               </div>
               <div className="flex flex-col items-end">
@@ -92,6 +100,23 @@ export const EnvelopesSettings = () => {
                 </span>
               </div>
             </div>
+            {recentPayments(e).length > 0 && (
+              <ul className="m-0 p-0 flex flex-col gap-1 list-none">
+                {recentPayments(e).map((h, i) => (
+                  <li
+                    key={`${h.at}-${i}`}
+                    className="text-xs break-all"
+                    style={{ color: h.kind === 'refund' ? gray : contrast }}
+                    data-testid="envelope-payment"
+                  >
+                    {h.kind === 'refund'
+                      ? `${money(h.sats).main} given back (the payment did not go through)`
+                      : `${money(h.sats).main} paid to ${h.to?.length ? h.to.join(', ') : 'a payee the wallet could not see'}`}
+                    <span style={{ color: gray }}> · {new Date(h.at).toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             <button
               type="button"
               disabled={busy === e.originator}

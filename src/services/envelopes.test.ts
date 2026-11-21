@@ -190,11 +190,15 @@ describe('guardEnvelopes', () => {
     return { store, pay, ...f };
   };
 
-  test('a payment under the balance goes through without a sheet and ticks the balance down', async () => {
+  test('a payment under the balance and the per-payment limit goes through without a sheet', async () => {
     const { pay, flowCalls, store } = await setup(500);
-    expect(await pay(A, 400)).toBe(true);
+    expect(await pay(A, 50)).toBe(true);
     expect(flowCalls.length).toBe(0);
-    expect((await store.get(normalizeOriginator(A)))?.balanceSats).toBe(100);
+    expect((await store.get(normalizeOriginator(A)))?.balanceSats).toBe(450);
+    // Rank 7 (rows 83, 370): more than a tenth of the envelope in one payment asks, though the balance would cover it.
+    expect(await pay(A, 51)).toBe(false);
+    expect(flowCalls).toHaveLength(1);
+    expect((await store.get(normalizeOriginator(A)))?.balanceSats).toBe(450);
   });
 
   test('a payment over the balance shows the pay sheet and leaves the envelope alone', async () => {
@@ -307,9 +311,11 @@ describe('migration: old monthly allowances grant nothing', () => {
       );
     // Without the guard this would be 'auto' (spendLedger.test.ts shows the allowance path).
     expect(await pay(1_000)).toBe('asks');
-    await envelopes.fill(normalizeOriginator(A), 2_000);
+    await envelopes.fill(normalizeOriginator(A), 20_000);
     expect(await pay(1_000)).toBe('auto');
-    expect(await pay(1_500)).toBe('asks');
+    expect(await pay(2_001)).toBe('asks'); // over the per-payment limit (a tenth)
+    // A probe (seekPermission=false) only looks: nothing was taken (rank 7, rows 322, 326).
+    expect((await envelopes.get(normalizeOriginator(A)))?.balanceSats).toBe(20_000);
   });
 });
 

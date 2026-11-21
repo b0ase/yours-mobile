@@ -53,7 +53,12 @@ type Mode = { signFails?: 'before-share' | 'after-share' };
 function fakeBase(mode: Mode) {
   const calls: string[] = [];
   const src = new Transaction();
-  src.addInput({ sourceTXID: '11'.repeat(32), sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+  src.addInput({
+    sourceTXID: '11'.repeat(32),
+    sourceOutputIndex: 0,
+    unlockingScript: new Script(),
+    sequence: 0xffffffff,
+  });
   src.addOutput({ lockingScript: new P2PKH().lock(new PrivateKey(5).toAddress()), satoshis: FUNDS });
   src.merklePath = new MerklePath(900_000, [[{ offset: 0, hash: src.id('hex'), txid: true }]]);
   const signable = new Map<string, number[]>();
@@ -65,7 +70,12 @@ function fakeBase(mode: Mode) {
       calls.push('createAction');
       await new Promise((r) => setTimeout(r, Math.random() * 3));
       const tx = new Transaction();
-      tx.addInput({ sourceTransaction: src, sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+      tx.addInput({
+        sourceTransaction: src,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script(),
+        sequence: 0xffffffff,
+      });
       let out = 0;
       for (const o of args.outputs ?? []) {
         tx.addOutput({ lockingScript: Script.fromHex(o.lockingScript), satoshis: o.satoshis });
@@ -111,7 +121,9 @@ async function wallet(opts: { mode?: Mode; sheet?: boolean; holdTimeoutMs?: numb
   const store = new InMemoryPermissionStore();
   const mgr = new LocalWalletPermissionsManager(base as never, ADMIN, {}, { store } as never);
   const sheets: { satoshis?: number }[] = [];
-  (mgr as unknown as Record<string, unknown>).requestPermissionFlow = async (r: { spending?: { satoshis: number } }) => {
+  (mgr as unknown as Record<string, unknown>).requestPermissionFlow = async (r: {
+    spending?: { satoshis: number };
+  }) => {
     sheets.push({ satoshis: r.spending?.satoshis });
     if (!opts.sheet) throw new Error('User denied');
     return true;
@@ -196,7 +208,9 @@ describe('rank 7: an envelope payment is held, then settled on signing or given 
     expect(base.calls).toContain('abortAction');
     expect(await balance()).toBe(FILL);
     // It can no longer be signed: the money can't move after it was given back.
-    await expect(w.signAction({ reference: r.signableTransaction.reference, spends: {} } as never, SITE)).rejects.toThrow();
+    await expect(
+      w.signAction({ reference: r.signableTransaction.reference, spends: {} } as never, SITE),
+    ).rejects.toThrow();
   });
 
   test('a site that signs its built action in time pays once and is not aborted by the deadline', async () => {

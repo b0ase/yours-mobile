@@ -29,7 +29,8 @@ import { CARD } from '../../components/approval/cardTheme';
 import { CarefulHero, ConnectHero, PayHero, SignInHero } from '../../components/approval/ApprovalHeroes';
 import { useSheetPrice } from '../../components/DollarAmount';
 import { EnvelopePresets } from '../../components/approval/EnvelopePresets';
-import { envelopeUsdText } from '../../services/envelopes';
+import { envelopePerSpendLimit, envelopeUsdText } from '../../services/envelopes';
+import { usdToSats } from '../../services/streamGrants';
 import { escapeDenies, sheetControls } from './sheetControls';
 import { SEAL_BUTTON, SEAL_SITE_SUB, SealHero, SealSheetBody, SealTitle } from './SealSheetBody';
 import { PaymentRecipients } from './PaymentRecipients';
@@ -576,7 +577,12 @@ export const BundleSheet = (props: {
           {allowanceSetsUsd > 0
             ? `Then up to ${fmtUsd(allowanceSetsUsd)} a month without asking`
             : ENVELOPES_ENABLED && envelopeUsd > 0
-              ? `Then small payments come out of the envelope`
+              ? `Then payments up to ${dollarsInline(
+                  envelopePerSpendLimit(
+                    (envelope?.balanceSats ?? 0) + usdToSats(envelopeUsd, allowance?.usdPerBsv ?? 0),
+                  ),
+                  price,
+                )} each come out of the envelope`
               : 'Every payment asks you first'}
         </div>
         {ENVELOPES_ENABLED && showEnvelope && envelope && (
@@ -587,7 +593,7 @@ export const BundleSheet = (props: {
                   Top up the envelope
                   <span style={{ fontSize: 13, fontWeight: 400, color: CARD.muted }}>
                     {' '}
-                    · {dollarsInline(envelope.balanceSats, price)} left, not enough for this
+                    · {dollarsInline(envelope.balanceSats, price)} left; this payment needs a sheet
                   </span>
                 </>
               ) : (
@@ -605,7 +611,8 @@ export const BundleSheet = (props: {
               disabled={disabled}
             />
             <span style={{ fontSize: 12, color: CARD.muted }}>
-              Stays in your wallet. Small payments from {name} come out of it without asking; Coin return any time.
+              Stays in your wallet. Payments from {name} of up to a tenth of it come out without asking; Coin return any
+              time.
             </span>
           </div>
         )}
