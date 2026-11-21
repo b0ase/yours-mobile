@@ -7,8 +7,14 @@
 import { describe, expect, test } from 'bun:test';
 import { SNAPSHOT_LOADING_LINE, truthLines, type BalanceTruth } from './balanceTruth';
 import { moveNoticeShows } from '../components/moveToDevice';
-import { createSpendableFirst, type OurServerClient, type SpendableFirstWiringDeps } from './spendableFirstWiring';
-import { SNAPSHOT_SERVER_URL } from './spendableFirst';
+import {
+  createSpendableFirst,
+  holdSendsForSnapshot,
+  oneSatSnapshotLookups,
+  type OurServerClient,
+  type SpendableFirstWiringDeps,
+} from './spendableFirstWiring';
+import { SNAPSHOT_SEND_WAIT, SNAPSHOT_SERVER_URL } from './spendableFirst';
 
 const NOW = Date.UTC(2026, 10, 20, 12);
 const usd = (n: number) => `$${(n / 1e6).toFixed(2)}`;
@@ -128,5 +134,87 @@ describe('review 5: wired', () => {
     expect(init).toContain('withLock: (fn) => storage.runAsSync(() => fn())');
     const wiring = readFileSync(new URL('./spendableFirstWiring.ts', import.meta.url), 'utf8');
     expect(wiring.match(/withLock: d\.withLock/g)?.length).toBe(2); // the lean pages and the background pages
+  });
+});
+
+describe('1p checks, 21 Nov 2026 (3): no send runs while the snapshot is still coming in', () => {
+  // A send before the full snapshot built from coins this device had no bytes for: it came back "failed", posted
+  // nothing, and left an unprocessed transaction. Every send (all go through wallet.createAction) waits or refuses.
+  const gated = (g: Partial<Parameters<typeof holdSendsForSnapshot>[1]> = {}) => {
+    const built: unknown[] = [];
+    const wallet = { createAction: async (args: unknown) => (built.push(args), { txid: 'ab'.repeat(32) }) };
+    const calls: string[] = [];
+    holdSendsForSnapshot(wallet, {
+      loading: () => true,
+      leanRunning: () => false,
+      settle: async () => (calls.push('settle'), 'settled' as const),
+      holdUnverified: async () => (calls.push('hold'), 0),
+      waitMs: 5,
+      ...g,
+    });
+    return { wallet, built, calls };
+  };
+  const send = { description: 'a payment', outputs: [{ lockingScript: '00', satoshis: 1, outputDescription: 'x' }] };
+
+  test('nothing pending: goes as before, nothing asked', async () => {
+    const x = gated({ loading: () => false });
+    await x.wallet.createAction(send);
+    expect(x.built).toHaveLength(1);
+    expect(x.calls).toEqual([]);
+  });
+
+  test('first pages still coming in: refused with the wait line, nothing built', async () => {
+    const x = gated({ leanRunning: () => true });
+    await expect(x.wallet.createAction(send)).rejects.toThrow(SNAPSHOT_SEND_WAIT);
+    expect(x.built).toHaveLength(0);
+  });
+
+  test('the rest still coming in: waits for it, then goes', async () => {
+    const x = gated();
+    await x.wallet.createAction(send);
+    expect(x.calls).toEqual(['settle']);
+    expect(x.built).toHaveLength(1);
+  });
+
+  test('still running when the wait ends: refused with the wait line, nothing built', async () => {
+    const x = gated({ settle: async () => 'running' as const });
+    await expect(x.wallet.createAction(send)).rejects.toThrow(SNAPSHOT_SEND_WAIT);
+    expect(x.built).toHaveLength(0);
+  });
+
+  test('our server unreachable (paused): unverified coins are held first, so the send funds from verified ones', async () => {
+    const x = gated({ settle: async () => 'paused' as const });
+    await x.wallet.createAction(send);
+    expect(x.calls).toEqual(['hold']);
+    expect(x.built).toHaveLength(1);
+  });
+
+  test('a sendWith-only call builds nothing: never held', async () => {
+    const x = gated({ leanRunning: () => true });
+    await x.wallet.createAction({ description: 'send the batch', options: { sendWith: ['ab'.repeat(32)] } });
+    expect(x.built).toHaveLength(1);
+  });
+
+  test('wired: initWallet guards the base wallet’s createAction with it', async () => {
+    const { readFileSync } = await import('node:fs');
+    const init = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
+    expect(init).toContain('spendableFirst.guardSends(baseWallet)');
+  });
+});
+
+describe('1p checks, 21 Nov 2026 (1, 2): the chain lookups the snapshot asks', () => {
+  test('spends from the 1Sat spend index: a txid is spent, null unspent, anything else no answer', async () => {
+    const asked: string[][] = [];
+    const l = oneSatSnapshotLookups({
+      txo: { getSpends: async (ops: string[]) => (asked.push(ops), ['cd'.repeat(32), null, 'junk']) },
+      beef: { getBeef: async () => [1, 2, 3] },
+    });
+    expect(await l.spends!(['a.0', 'b.1', 'c.2'])).toEqual(['cd'.repeat(32), null, undefined]);
+    expect(asked).toEqual([['a.0', 'b.1', 'c.2']]);
+    expect(await l.chainBeef!('ef'.repeat(32))).toEqual([1, 2, 3]);
+  });
+
+  test('no 1Sat services: no lookups (the restore then falls back to today’s path)', () => {
+    expect(oneSatSnapshotLookups(undefined)).toEqual({});
   });
 });

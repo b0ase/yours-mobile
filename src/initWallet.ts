@@ -249,7 +249,7 @@ import {
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 import { settleWithin } from './utils/settleWithin';
 import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
-import { createSpendableFirst, type OurServerClient } from './services/spendableFirstWiring';
+import { createSpendableFirst, oneSatSnapshotLookups, type OurServerClient } from './services/spendableFirstWiring';
 import { fillBackup } from './services/backupFill';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
@@ -1112,6 +1112,8 @@ export const initWallet = async (
       }),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
+    // The chain's word on the snapshot's coins, and an unconfirmed payment's ancestry (1p checks, 21 Nov 2026).
+    ...oneSatSnapshotLookups(toolboxServices),
     kv: {
       get: (k) => chrome.storage.local.get(k) as Promise<Record<string, unknown>>,
       set: (items) => chrome.storage.local.set(items),
@@ -1232,6 +1234,9 @@ export const initWallet = async (
     })
   )
     console.error('[initWallet] payments are not held to the device store');
+  // An instant restore still coming in (flag on): every payment waits for it, or is refused before anything is built
+  // (services/spendableFirstWiring.ts holdSendsForSnapshot; 1p checks, 21 Nov 2026). Inert with the flag off.
+  if (!spendableFirst.guardSends(baseWallet)) console.error('[initWallet] payments are not held for the snapshot');
   // The wallet's own calls (its pages, via the admin originator) may name inputs and still get change the 12 words can
   // find (sweeps); a site naming inputs gets random change, so it can't replay old inputs as an oracle (services/seedChange.ts).
   registerWalletOriginator(ADMIN_ORIGINATOR);
