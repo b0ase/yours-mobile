@@ -20,7 +20,10 @@ const {
   PAYEE_ADDRESS_CHANGED,
   PAYEE_KEY_CHANGED,
   PAYEE_LEGACY_CONFIRM,
+  PAYEE_REVIEW_MOVED,
   keyFingerprint,
+  reviewApproval,
+  unverifiableDestination,
   legacyPin,
   pointsSomewhereNew,
   scheduledOutputsRefusal,
@@ -37,6 +40,11 @@ const NOW = Date.parse('2026-10-20T12:00:00Z');
 const DAY = 86_400_000;
 const KEY_A = '02' + 'a'.repeat(64);
 const KEY_B = '02' + 'b'.repeat(64);
+/** A real key and its own P2PKH address: a destination the wallet can derive from the key the host serves. */
+const BOB = new PrivateKey(11);
+const BOB_KEY = BOB.toPublicKey().toString();
+const BOB_ADDR = BOB.toAddress();
+const MALLORY_ADDR = new PrivateKey(13).toAddress();
 const ALICE = { name: 'Alice', paymail: 'alice@example.com' };
 /** An order set up on this version: the confirm card's address and key are pinned. */
 const PINNED = { ...ALICE, pinnedKey: KEY_A, pinnedAddress: '1AliceAddr' };
@@ -320,6 +328,10 @@ describe('orders saved before address pinning (legacy)', () => {
 
 describe('approved app subscription to a paymail', () => {
   test('first payment pins what it pays; a later change stops it', async () => {
+    // The shop's paymail serves its key's own address: a destination the wallet can check (backlog rank 1).
+    const SHOP = new PrivateKey(19);
+    const SHOP_KEY = SHOP.toPublicKey().toString();
+    const SHOP_ADDR = SHOP.toAddress();
     const req = {
       merchantName: 'Example Pro',
       appOrigin: 'https://example.com',
@@ -333,20 +345,149 @@ describe('approved app subscription to a paymail', () => {
     const s = addSubscription(n, 50, NOW);
     const paid: string[] = [];
     await payDue(
-      deps(() => resolved({ input: 'pay@example.com', target: '1Shop' }), paid),
+      deps(
+        () => resolved({ input: 'pay@example.com', target: SHOP_ADDR, pubkey: SHOP_KEY, nameBinding: undefined }),
+        paid,
+      ),
       NOW,
     );
-    expect(paid).toEqual(['1Shop']);
-    expect(getSub(s.id)?.payee.pinnedAddress).toBe('1Shop');
+    expect(paid).toEqual([SHOP_ADDR]);
+    expect(getSub(s.id)?.payee.pinnedAddress).toBe(SHOP_ADDR);
     expect(getSub(s.id)?.payee.pinOnFirstPay).toBeUndefined();
     await payDue(
-      deps(() => resolved({ input: 'pay@example.com', target: '1Mallory' }), paid),
+      deps(
+        () => resolved({ input: 'pay@example.com', target: '1Mallory', pubkey: SHOP_KEY, nameBinding: undefined }),
+        paid,
+      ),
       NOW + 32 * DAY,
     );
-    expect(paid).toEqual(['1Shop']);
+    expect(paid).toEqual([SHOP_ADDR]);
     expect(getSub(s.id)?.needsReview?.servedAddress).toBe('1Mallory');
   });
 });
+
+describe('a new destination must be tied to the key the host serves (backlog rank 1)', () => {
+  const bob = (p: Partial<Resolved> = {}) =>
+    resolved({ input: 'bob@example.com', target: BOB_ADDR, pubkey: BOB_KEY, nameBinding: undefined, ...p });
+  const BOB_PAYEE = { name: 'Bob', paymail: 'bob@example.com' };
+
+  test('basic paymail address that is the served key’s own address → checked', () => {
+    expect(unverifiableDestination(bob(), BOB_ADDR)).toBe(false);
+    expect(payeeDestination(BOB_PAYEE, bob(), { ignorePin: true, fresh: true })).toEqual({
+      address: BOB_ADDR,
+      pubkey: BOB_KEY,
+    });
+  });
+
+  test('host serves an address nothing ties to its key (or no key) → refused when the order is set up', () => {
+    expect(unverifiableDestination(bob({ target: MALLORY_ADDR }), MALLORY_ADDR)).toBe(true);
+    expect(unverifiableDestination(bob({ pubkey: undefined }), BOB_ADDR)).toBe(true);
+    expect(unverifiableDestination(bob({ pubkey: 'not-a-key' }), BOB_ADDR)).toBe(true);
+    for (const r of [bob({ target: MALLORY_ADDR }), bob({ pubkey: undefined })]) {
+      const e = (() => {
+        try {
+          payeeDestination(BOB_PAYEE, r, { ignorePin: true, fresh: true });
+        } catch (err) {
+          return err as Error;
+        }
+      })();
+      expect(e?.message).toMatch(/nothing ties .* to its wallet key/);
+      // A refusal, not a review: there is nothing for the user to approve.
+      expect(e).not.toBeInstanceOf(PayeeReviewError);
+    }
+  });
+
+  test('typed address, raw key and bound OpNS owner are not host-served addresses → not refused', () => {
+    expect(unverifiableDestination(bob({ via: 'address', pubkey: undefined }), BOB_ADDR)).toBe(false);
+    expect(unverifiableDestination(bob({ via: 'pubkey' }), BOB_ADDR)).toBe(false);
+    expect(unverifiableDestination(bob({ via: 'opns-owner', target: MALLORY_ADDR }), MALLORY_ADDR)).toBe(false);
+  });
+
+  test('acceptance: host swaps the address but keeps the key → no payment, order shows payee changed, review', async () => {
+    const pinned = { ...BOB_PAYEE, ...payeeDestinationPins(bob()) };
+    const s = setup(pinned);
+    const paid: string[] = [];
+    await payDue(
+      deps(() => bob(), paid),
+      NOW,
+    );
+    expect(paid).toEqual([BOB_ADDR]);
+    await payDue(
+      deps(() => bob({ target: MALLORY_ADDR }), paid),
+      NOW + DAY,
+    );
+    expect(paid).toEqual([BOB_ADDR]);
+    const review = getSub(s.id)?.needsReview;
+    expect(review).toMatchObject({ reason: PAYEE_ADDRESS_CHANGED, servedAddress: MALLORY_ADDR, servedKey: BOB_KEY });
+    expect(pointsSomewhereNew('bob@example.com')).toMatch(/now points somewhere new/);
+    // Approving that card is refused too: the swapped address isn't the key's, so the pin can't move to it.
+    const resolve = async (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) =>
+      payeeDestination(p, bob({ target: MALLORY_ADDR }), o);
+    await expect(reviewApproval(getSub(s.id)!, resolve)).rejects.toThrow(/nothing ties/);
+    expect(getSub(s.id)?.payee.pinnedAddress).toBe(BOB_ADDR);
+  });
+
+  test('review approval pins only what the card showed, re-checked', async () => {
+    const s = setup({ ...BOB_PAYEE, pinnedKey: KEY_A, pinnedAddress: '1AliceAddr' });
+    await payDue(
+      deps(() => bob(), []),
+      NOW,
+    );
+    expect(getSub(s.id)?.needsReview).toMatchObject({ servedAddress: BOB_ADDR, servedKey: BOB_KEY });
+    // The host now serves something other than the card showed → refused, shown again.
+    const moved = async (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) =>
+      payeeDestination(
+        p,
+        resolved({
+          target: new PrivateKey(17).toAddress(),
+          pubkey: new PrivateKey(17).toPublicKey().toString(),
+          nameBinding: undefined,
+        }),
+        o,
+      );
+    await expect(reviewApproval(getSub(s.id)!, moved)).rejects.toThrow(PAYEE_REVIEW_MOVED);
+    // Same as shown and tied to the key → the destination to pin.
+    const same = async (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) => payeeDestination(p, bob(), o);
+    expect(await reviewApproval(getSub(s.id)!, same)).toEqual({ address: BOB_ADDR, pubkey: BOB_KEY });
+  });
+
+  test('approved app subscription to a paymail with an unchecked address → first payment refused, nothing pinned', async () => {
+    makePot('1Pot', 'Apps', undefined, NOW);
+    const s = addSubscription(
+      {
+        potId: '1Pot',
+        payee: { name: 'Shop', paymail: 'bob@example.com', pinOnFirstPay: true },
+        amount: { value: 1, currency: 'USD' },
+        period: 'day',
+        start: NOW - 1000,
+        maxCount: null,
+      },
+      50,
+      NOW,
+    );
+    const paid: string[] = [];
+    const r = await payDue(
+      deps(() => bob({ target: MALLORY_ADDR }), paid),
+      NOW,
+    );
+    expect(r[0]).toMatchObject({ ok: false });
+    expect(paid).toEqual([]);
+    expect(getSub(s.id)?.payee.pinnedAddress).toBeUndefined();
+    // Tied to the key → first payment pins and pays.
+    await payDue(
+      deps(() => bob(), paid),
+      NOW + 1000,
+    );
+    expect(paid).toEqual([BOB_ADDR]);
+    expect(getSub(s.id)?.payee.pinnedAddress).toBe(BOB_ADDR);
+  });
+});
+
+/** The pins the create sheet takes from a checked destination. */
+const payeeDestinationPins = (r: Resolved) => {
+  const d = payeeDestination({ name: 'x', paymail: r.input }, r, { ignorePin: true, fresh: true });
+  return { pinnedAddress: d.address, ...(d.pubkey ? { pinnedKey: d.pubkey } : {}) };
+};
 
 describe('scheduled amounts are exact (the 5.2.41 host-output check)', () => {
   test('outputs to the destination must add up to count × amount, nowhere else', () => {
