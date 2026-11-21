@@ -157,7 +157,7 @@ describe('paired mint calls', () => {
     expect(r.outpoint).toBe(`${'f'.repeat(64)}_0`);
     expect(g.mint!.items).toBe(1);
     expect(g.mint!.spentUsd).toBeGreaterThan(0);
-    expect(saved.length).toBe(1);
+    expect(saved.length).toBe(2); // the hold before signing (b-Aware row 245), then the settled record
   });
 
   test('refuses over count, over budget, bad types and expired pairings before signing', async () => {
@@ -176,5 +176,81 @@ describe('paired mint calls', () => {
     const old = makeGrant('1Main', 'b0asex', ['mint'], 1, Date.now() - 2 * 86_400_000, makeMintLimits(5, 3));
     expect(await codeOf(() => handleAgentCall(old, 'mint', mp3, d))).toBe('EXPIRED');
     expect(calls.length).toBe(1);
+  });
+});
+
+describe('row 245: the mint budget is held before signing, not recorded after broadcast', () => {
+  beforeEach(() => mem.clear());
+  type Grant = ReturnType<typeof makeGrant>;
+  const mp3 = { base64Content: b64(new Uint8Array(3000)), contentType: 'audio/mpeg', name: 'Echoes' };
+  const deps = (mint: AgentDeps['mintMedia']) => {
+    const saved: Grant[] = [];
+    const d: AgentDeps = {
+      ctx: {} as AgentDeps['ctx'],
+      currentId: '1Main',
+      bsvUsd: async () => 20,
+      feeRate: () => 100,
+      saveGrant: (g) => saved.push(structuredClone(g)),
+      mintMedia: mint,
+    };
+    return { d, saved };
+  };
+  const ok = {
+    txid: 'f'.repeat(64),
+    outpoint: `${'f'.repeat(64)}_0`,
+    origin: `${'f'.repeat(64)}_0`,
+    networkSats: 2000,
+  };
+
+  test('a crash after broadcast still leaves the mint counted: the saved grant holds it before signing', async () => {
+    const g = makeGrant('1Main', 'b0asex', ['mint'], 7, Date.now(), makeMintLimits(1, 3));
+    let seenAtSign: Grant | undefined;
+    const { d, saved } = deps(async () => {
+      seenAtSign = saved.at(-1); // what storage holds when the tx is signed and sent
+      return ok;
+    });
+    await handleAgentCall(g, 'mint', mp3, d);
+    expect(seenAtSign?.mint?.items).toBe(1);
+    expect(seenAtSign?.mint?.spentUsd).toBeGreaterThan(0);
+    // A restart from that saved grant (the app died after the broadcast) can't mint past the 1-item limit.
+    expect(await codeOf(() => handleAgentCall(seenAtSign!, 'mint', mp3, d))).toBe('LIMIT');
+  });
+
+  test('settled on the actual cost, with one record carrying the txid', async () => {
+    const g = makeGrant('1Main', 'b0asex', ['mint'], 7, Date.now(), makeMintLimits(5, 3));
+    const { d, saved } = deps(async () => ok);
+    await handleAgentCall(g, 'mint', mp3, d);
+    const last = saved.at(-1)!.mint!;
+    expect(last.items).toBe(1);
+    expect(last.spentUsd).toBeCloseTo(((2000 + 1) / 1e8) * 20, 6); // networkSats + feeSats at $20, approx
+    expect(last.recent).toHaveLength(1);
+    expect(last.recent[0]).toMatchObject({ txid: 'f'.repeat(64), name: 'Echoes' });
+    expect(last.recent[0].pending).toBeUndefined();
+    expect(g.mint).toEqual(last);
+  });
+
+  test('a mint that fails before anything is sent gives the held budget back', async () => {
+    const g = makeGrant('1Main', 'b0asex', ['mint'], 7, Date.now(), makeMintLimits(1, 3));
+    const { d, saved } = deps(async () => {
+      throw new Error('Not enough funds');
+    });
+    expect(await codeOf(() => handleAgentCall(g, 'mint', mp3, d))).not.toBe('OK');
+    const last = saved.at(-1)!.mint!;
+    expect(last.items).toBe(0);
+    expect(last.spentUsd).toBe(0);
+    expect(last.recent).toEqual([]);
+    expect(g.mint?.items).toBe(0);
+  });
+  test('a mint that fails after a tx went out (new collection minted, item failed) keeps its hold', async () => {
+    const g = makeGrant('1Main', 'b0asex', ['mint'], 7, Date.now(), makeMintLimits(1, 3));
+    const wallet = { createAction: async () => ({ txid: 'c'.repeat(64) }) };
+    const { d, saved } = deps(async (ctx) => {
+      await (ctx as unknown as { wallet: typeof wallet }).wallet.createAction();
+      throw new Error('Mint failed');
+    });
+    d.ctx = { wallet } as unknown as AgentDeps['ctx'];
+    expect(await codeOf(() => handleAgentCall(g, 'mint', mp3, d))).not.toBe('OK');
+    expect(saved.at(-1)!.mint!.items).toBe(1);
+    expect(saved.at(-1)!.mint!.recent[0].pending).toBe(true);
   });
 });
