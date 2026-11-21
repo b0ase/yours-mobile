@@ -124,10 +124,12 @@ export type Resolved = {
    * Only ever set for a full name@domain the user typed; a $handle never resolves outside bWalletX.
    */
   external?: string;
-  /** The ordinal address came with a valid signature by `pubkey` (checkOrdProof). False: served without one. */
+  /** The ordinal address came with a valid signature by `pubkey` (checkOrdProof). */
   ordVerified?: boolean;
   /** The ordinal address came with a proof that does NOT verify against `pubkey`: ordAddress is dropped. */
   ordProofBad?: boolean;
+  /** The host served an ordinal address with no owner signature at all (b-Aware 102/250): ordAddress is dropped. */
+  ordUnsigned?: boolean;
   /** A raw public key exactly as typed (via 'pubkey'); `pubkey` holds its compressed form. */
   rawKey?: string;
 };
@@ -388,12 +390,14 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
     const o = await capJson<Fields & { ordProof?: unknown }>(ord);
     const address = str(o?.address);
     if (address) {
-      // b_feedback 67: the host could swap the address. Trust it only with the key owner's signature over it.
+      // b_feedback 67, b-Aware 102/250: the host could swap the address. Use it only with the key owner's signature
+      // over it; a missing signature is refused like a bad one (fail closed), never kept as a fallback.
       const proof = o?.ordProof === undefined ? 'none' : await checkOrdProof(r.pubkey, address, o.ordProof);
       if (proof === 'bad') r.ordProofBad = true;
+      else if (proof === 'none') r.ordUnsigned = true;
       else {
         r.ordAddress = address;
-        r.ordVerified = proof === 'ok';
+        r.ordVerified = true;
       }
     }
   }
@@ -610,7 +614,8 @@ export const checkOrdProof = async (
 
 /**
  * Whether the destination a send will use is checked against the payee's key: P2P paymail outputs are re-derived
- * at send time (utils/paymailDestination.ts), which only our host supports; token sends need a signed ord address.
+ * at send time (utils/paymailDestination.ts), which only our host supports; token sends need a signed ord address
+ * (an unsigned or badly signed one is refused by destinationFor, so 'unverified' for tokens is a defensive fallback).
  * 'unverified' puts NOT_VERIFIED_NOTE on the pay sheet; null means there's nothing a host could swap.
  */
 export const destinationCheck = (
@@ -674,6 +679,7 @@ export const destinationFor = (
   if (proofErr) return { ok: false, error: proofErr };
   if (asset === 'bsv') return { ok: true, to: r.target };
   if (r.ordProofBad) return { ok: false, error: BAD_ORD_PROOF };
+  if (r.ordUnsigned) return { ok: false, error: UNSIGNED_ORD };
   if (r.ordAddress) return { ok: true, to: r.ordAddress };
   return { ok: false, error: TOKENS_UNSUPPORTED };
 };
