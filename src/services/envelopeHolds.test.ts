@@ -278,12 +278,27 @@ describe('rank 7: probes and prefunding checks never take anything', () => {
     expect(await balance()).toBe(FILL);
   });
 
+  test('a site that names its own payment with the prefunding reason is still charged (line items = a real payment)', async () => {
+    const { w, balance } = await wallet();
+    const ensure = (w as unknown as { ensureSpendingAuthorization: (a: unknown) => Promise<boolean> })
+      .ensureSpendingAuthorization;
+    // pModuleSpendGate passes the site's own description as the reason, with the action's line items.
+    const lineItems = [{ type: 'output', satoshis: 600, description: 'x' }];
+    expect(await ensure.call(w, { originator: SITE, satoshis: 600, lineItems, reason: BRC177_PREFLIGHT_REASON })).toBe(
+      true,
+    );
+    expect(await balance()).toBe(FILL - 600);
+  });
+
   test('the toolbox still uses that prefunding reason and binds the reference just before the spend check', () => {
     const src = readFileSync(
       new URL('../../node_modules/@bsv/wallet-toolbox-client/out/index.client.mjs', import.meta.url),
       'utf8',
     );
-    expect(src).toContain(`reason: "${BRC177_PREFLIGHT_REASON}"`);
+    // The prefunding check sends no line items (that is how it is told apart from a payment a site described).
+    expect(src).toContain(
+      `satoshis: brc177PreflightSatoshis(req.args),\n\t\t\t\t\t\t\treason: "${BRC177_PREFLIGHT_REASON}"\n\t\t\t\t\t\t});`,
+    );
     const create = src.slice(src.indexOf('this.bindPendingAction(reference, originator, vargs.isNoSend);'));
     const between = create.slice(0, create.indexOf('await this.ensureSpendingAuthorization({'));
     expect(between.length).toBeGreaterThan(0);
