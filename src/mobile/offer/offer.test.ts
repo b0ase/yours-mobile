@@ -381,7 +381,14 @@ describe('receipt line (b-Aware row 353: no rate at receipt)', () => {
     status: 'received_shortfall',
     offerRef: 'ACME-1',
     offeree: { handle: null, identityKey: '02'.padEnd(66, '1') },
-    payment: { txid: 'ab', usdValue: '50.00', bsv: '1.00000000', rateUsdPerBsv: '50.00', shortfallUsd: '50.00', firstSeen: '' },
+    payment: {
+      txid: 'ab',
+      usdValue: '50.00',
+      bsv: '1.00000000',
+      rateUsdPerBsv: '50.00',
+      shortfallUsd: '50.00',
+      firstSeen: '',
+    },
     allotment: null,
   };
   test('a short payment says how short', () => {
