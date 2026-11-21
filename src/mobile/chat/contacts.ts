@@ -70,6 +70,42 @@ const paymailOf = (label: string | null | undefined): string | null => {
   return /^[a-z0-9._+-]{1,64}@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(s) ? s : null;
 };
 
+/**
+ * A friend's label proven for its key: resolving `label` (pki / binding) gave exactly `key` (useProvenLabels).
+ * Only then does a friend's "$alice" / "alice@…" become its handle or paymail (b-Aware row 351).
+ */
+export const provenLabel = (label: string, key: string): string => `${label.trim().toLowerCase()}|${key.toLowerCase()}`;
+
+/** A label that reads like a $handle or a paymail: shown with "(not verified)" unless it was proven. */
+export const looksLikeName = (label: string | null | undefined): boolean =>
+  handleFromLabel(label) !== null || paymailOf(label) !== null;
+
+/**
+ * The friends whose "$name" / paymail label resolves (via `keyOf`, the Calls resolver) to that friend's own key.
+ * A failure or another key leaves the label unproven.
+ */
+export const proveLabels = async (
+  friends: readonly FriendLike[],
+  keyOf: (label: string) => Promise<string>,
+): Promise<Set<string>> => {
+  const out = new Set<string>();
+  await Promise.all(
+    friends
+      .filter((f) => looksLikeName(f.name))
+      .map(async (f) => {
+        try {
+          if ((await keyOf(f.name.trim())).toLowerCase() === f.key.toLowerCase()) out.add(provenLabel(f.name, f.key));
+        } catch {
+          /* unproven */
+        }
+      }),
+  );
+  return out;
+};
+
+export const UNVERIFIED_SUFFIX = ' (not verified)';
+const unproven = (label: string) => (looksLikeName(label) ? `${label.trim()}${UNVERIFIED_SUFFIX}` : label.trim());
+
 const blank = (id: string, name: string): Contact => ({
   id,
   name,
@@ -91,6 +127,7 @@ export const mergeContacts = (
   friends: FriendLike[],
   follows: FollowLike[],
   me?: string | null,
+  proven: ReadonlySet<string> = new Set(),
 ): Contact[] => {
   const out: Contact[] = [];
   const find = (c: Partial<Contact>) =>
@@ -121,22 +158,26 @@ export const mergeContacts = (
     if (!handle) continue; // email-only rows can't be messaged from the wallet
     add('bchat', { handle, name: b.name?.trim() || `$${handle}`, bchatId: b.id });
   }
+  // A friend's or follow's name is what someone typed or chose for themselves. It only becomes a handle or paymail
+  // (which joins it to that person and pays them) when resolving it gave this friend's key (b-Aware row 351).
   for (const f of friends) {
     const key = f.key.toLowerCase();
+    const ok = proven.has(provenLabel(f.name, key));
     add('friend', {
       identityKey: key,
-      handle: handleFromLabel(f.name),
-      paymail: paymailOf(f.name),
-      name: f.name.trim() || key.slice(0, 10),
+      handle: ok ? handleFromLabel(f.name) : null,
+      paymail: ok ? paymailOf(f.name) : null,
+      name: (ok ? f.name.trim() : unproven(f.name)) || key.slice(0, 10),
       avatar: f.avatar,
     });
   }
+  // A Feed follow is only an address and a self-chosen name: never a handle.
   for (const f of follows) {
     if (!f.address) continue;
     add('follow', {
       address: f.address,
-      handle: handleFromLabel(f.name),
-      name: f.name.trim() || f.address.slice(0, 10),
+      handle: null,
+      name: unproven(f.name) || f.address.slice(0, 10),
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));

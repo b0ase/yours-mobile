@@ -92,6 +92,10 @@ describe('a $name the payee does not prove (b, row 351)', () => {
     const payee = payeeFromResolved(PM('$mallory'), ours({ input: '$mallory', target: 'mallory@bwalletx.com' }));
     expect(tipName({ name: '$alice', paymail: '$mallory' }, payee)).toBe('$alice (not verified)');
   });
+  test('a name already marked not verified is not marked twice', () => {
+    const payee = payeeFromResolved({ kind: 'address', to: ATTACKER });
+    expect(tipName({ name: '$alice (not verified)', address: ATTACKER }, payee)).toBe('$alice (not verified)');
+  });
   test('a plain display name is left alone', () => {
     const payee = payeeFromResolved({ kind: 'address', to: ATTACKER });
     expect(tipName({ name: 'Vex Void', address: ATTACKER }, payee)).toBe('Vex Void');

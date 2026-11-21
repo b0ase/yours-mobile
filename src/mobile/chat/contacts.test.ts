@@ -9,6 +9,7 @@ import {
   dmRooms,
   filterContacts,
   handleFromLabel,
+  proveLabels,
   provenLabel,
   mergeContacts,
   parseDmTarget,
@@ -166,5 +167,29 @@ describe('parseDmTarget', () => {
     expect(parseDmTarget('bob@bwallet.space')).toEqual({ kind: 'handle', handle: 'bob' });
     expect(parseDmTarget('bob@handcash.io').kind).toBe('invalid');
     expect(parseDmTarget('').kind).toBe('invalid');
+  });
+});
+
+describe('proveLabels (friends whose $name resolves to their own key)', () => {
+  const OTHER = '03' + 'c'.repeat(64);
+  test('only labels that resolve to the friend key are proven; failures and plain names are not', async () => {
+    const asked: string[] = [];
+    const keyOf = async (label: string) => {
+      asked.push(label);
+      if (label === '$alice') return KEY;
+      if (label === '$bob') return OTHER;
+      throw new Error('no such name');
+    };
+    const set = await proveLabels(
+      [
+        { key: KEY, name: '$alice', avatar: null },
+        { key: KEY, name: '$bob', avatar: null },
+        { key: KEY, name: '$ghost', avatar: null },
+        { key: KEY, name: 'Plain Name', avatar: null },
+      ],
+      keyOf,
+    );
+    expect([...set]).toEqual([provenLabel('$alice', KEY)]);
+    expect(asked).not.toContain('Plain Name');
   });
 });

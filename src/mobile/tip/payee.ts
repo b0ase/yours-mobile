@@ -135,6 +135,7 @@ export const payeeChanged = (shown: TipPayee, r: Resolved): string | null => {
   return null;
 };
 
+const NOT_VERIFIED = ' (not verified)';
 const looksLikeName = (s: string) => /^\$/.test(s) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 
 /**
@@ -143,12 +144,12 @@ const looksLikeName = (s: string) => /^\$/.test(s) || /^[^\s@]+@[^\s@]+\.[^\s@]+
  */
 export const tipName = (to: TipRecipient, payee: TipPayee): string => {
   const name = to.name.trim();
-  if (!looksLikeName(name)) return name;
+  if (!looksLikeName(name) || name.endsWith(NOT_VERIFIED)) return name;
   const proven =
     payee.route.kind === 'paymail' &&
     payee.check !== 'address' &&
     !!payee.resolved &&
     payee.resolved.targetKind === 'paymail' &&
     normName(name) === normName(payee.resolved.target);
-  return proven ? name : `${name} (not verified)`;
+  return proven ? name : `${name}${NOT_VERIFIED}`;
 };
