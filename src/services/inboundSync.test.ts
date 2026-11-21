@@ -732,6 +732,27 @@ describe('F4: the chain check holds against a two-step plant, a 404, a status re
     unregister();
   });
 
+  test('1p checks, 21 Nov 2026: a coin the chain says is spent, once refused, reaches the backup as spent', async () => {
+    // A classic restore refused 85126e91.3 (spent on chain); the backup never learned, and the next instant restore
+    // from it counted the coin. The refusal now writes "not spendable" with a fresh time, so the next push carries it.
+    const d = await phoneWithBackup();
+    const spentCheck: InboundVerifier = {
+      ...d.verifier,
+      spent: async (op: string) =>
+        op === `${d.coin}.0` ? { state: 'spent' as const, by: 'ee'.repeat(32) } : { state: 'unspent' as const },
+    };
+    const { fresh, sm2, unregister } = await d.restore(spentCheck);
+    expect((await d.row(fresh, d.coin)).spendable).toBe(false);
+    tick(61 * MIN); // the chain still says spent an hour later: refused for good
+    expect((await admit(fresh, d.kd.identityKey, spentCheck)).refused).toBeGreaterThan(0);
+    expect(await waiting(fresh, d.kd.identityKey)).toEqual([]);
+    expect((await d.row(d.remote, d.coin)).spendable).toBe(true);
+    await sm2.updateBackups();
+    expect((await d.row(d.remote, d.coin)).spendable).toBe(false);
+    expect((await d.row(d.remote, d.coin2)).spendable).toBe(true);
+    unregister();
+  });
+
   test('a coin held because WhatsOnChain did not know its transaction yet is released once it does (no stranding)', async () => {
     const d = await phoneWithBackup();
     d.chain.answer = 'unspent';

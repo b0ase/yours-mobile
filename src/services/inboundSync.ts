@@ -1682,6 +1682,21 @@ async function admitOnce(
     await list.setNote(identityKey, `refused|${e.txid}.${e.vout ?? 0}`, now).catch(() => undefined);
     return finish(e, 'refused');
   };
+  /**
+   * The chain said spent, and still did an hour later (1p checks, 21 Nov 2026): the row, still not spendable as read,
+   * is written again with a fresh time, so the next push tells every backup. Kept at its old time (as a hold is), the
+   * backups went on calling the coin spendable, and the next instant restore from our server counted it (85126e91.3).
+   */
+  const markSpentForBackups = async (outputId: number, read: OutputRow) => {
+    await store
+      .transaction(async (trx) => {
+        const [cur] = await store.findOutputs({ partial: { userId, outputId }, trx });
+        if (!cur || cur.spendable === true || (cur.spentBy ?? null) !== (read.spentBy ?? null)) return;
+        const at = Math.max(now, Date.now(), (time(cur.updated_at) || 0) + 1);
+        await store.updateOutput(outputId, { spendable: false, updated_at: new Date(at) }, trx);
+      })
+      .catch((err: unknown) => v.log?.('[inbound-sync] a spent coin was not marked for the backups:', err));
+  };
   let reserved: Promise<{ outpoints: Set<string>; txids: Set<string> }> | undefined;
   const settleCoin = async (e: PendingAdmission) => {
     const vout = e.vout ?? 0;
@@ -1713,7 +1728,10 @@ async function admitOnce(
     const st = heard(await v.spent(`${e.txid}.${vout}`).catch((): SpendState => ({ state: 'unclear' })));
     if (st.state === 'unclear') return unclearWait(e);
     if (st.state === 'spent') {
-      if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) return refuse(e, 'the chain says spent');
+      if (e.spentAt !== undefined && now - e.spentAt >= SPENT_RECHECK_MS) {
+        await markSpentForBackups(row.outputId!, row);
+        return refuse(e, 'the chain says spent');
+      }
       return wait({ ...e, spentAt: e.spentAt ?? now }, 'chain', (e.spentAt ?? now) + SPENT_RECHECK_MS);
     }
     if (!local) {
