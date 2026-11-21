@@ -15,7 +15,7 @@
  */
 
 import { BLOCK_SITE_BASKET, basketDisplayName, isReservedBasket } from './reservedBaskets';
-import type { SealSheet } from './sealPass';
+import { isSealRequestId, type SealSheet } from './sealPass';
 import {
   isAnyoneCounterparty,
   isOneTapSignIn,
@@ -763,7 +763,13 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
     // in plain view. bchatx.com's Connect left "bchat documents" unticked behind Hide details, so Connect granted
     // nothing it asked for and the site's encrypt failed "Permission denied". Risky and live-joined lines (and any
     // spend) stay unticked: payments still ask first.
-    const checked = once || (!risky && !r.addedLive && !isSharedKeyRequest(r));
+    // The wallet's own one Seal sheet (services/sealPass.ts), alone on its sheet: its Allow IS the approval of that
+    // seal, and the sheet draws no tick to untick (SealSheetBody). Its line has the shape of a key every app shares
+    // ([2,'bitsign seal'], 'anyone'), so without this ae664e79 left it unticked and every Allow answered the seal
+    // "denied" (RB's seals, 20 Nov 2026: ERR_PERMISSION_DENIED, "You cancelled in your wallet"). Only the wallet-made
+    // seal- id counts; a site's request never carries one.
+    const sealAlone = !!r.seal && isSealRequestId(r.requestID) && !r.addedLive && bundle.items.length === 1;
+    const checked = once || sealAlone || (!risky && !r.addedLive && !isSharedKeyRequest(r));
     lines.push({
       requestID: r.requestID,
       ...(once ? { once: true } : {}),
