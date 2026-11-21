@@ -11,8 +11,16 @@
  * and the provider account (sub) is the one this wallet saw before. Any failure stops the payment, like the BRC-169
  * key-change stop (names.ts destinationFor).
  *
- * The archived keys come from our server, so they are trusted only for tokens issued no later than a day after we
- * first logged the key (a key we "found" later can't vouch for an older token). Step 3 anchors the archive on chain.
+ * Rotated keys (b-Aware 357, 21 Nov 2026): the server's archived keys (`proof.keys`, with its own firstSeen) are never
+ * trusted, since the server is the party this check guards against. The wallet keeps its own copy of every key it
+ * fetched from the provider itself, and only those vouch for a token signed by a key the provider no longer
+ * publishes. A token signed by a key this wallet never saw at the provider can't be checked: no badge for a name
+ * never seen proven, and a stop for one this wallet saw proven before (unless it pays the key the payer already
+ * trusts). Step 3 anchors the archive on chain.
+ *
+ * Token validity: the proof is the ID token from the claim, kept as a lasting statement (the server only takes fresh
+ * ones), so a passed `exp` alone doesn't void it. Its window must be sane: exp after iat, at most a day apart, and not
+ * issued in the future.
  *
  * LinkedIn (owner, 28 Oct 2026): its token carries no public name, so `slug.linkedin` is bound to the LinkedIn
  * account (sub) when claimed; the check is the signed token for this key plus the same account as before.
@@ -20,6 +28,7 @@
  * api.github.com directly. TODO (PROVABLE-NAMES.md step 2): X has none either; `.x` names stay server-checked.
  */
 import { ProtoWallet, Utils } from '@bsv/sdk';
+import { trustedKeyFor } from './binding';
 
 declare const __GOOGLE_CLIENT_ID__: string;
 declare const __LINKEDIN_CLIENT_ID__: string;
@@ -102,12 +111,17 @@ export const aliasForClaims = (provider: ProofProvider, c: Record<string, unknow
   return /^[a-z0-9_-]{1,30}$/.test(local) ? `${local.replace(/_/g, '-')}.gmail` : null;
 };
 
-/** How long after we first logged an archived key it may still vouch for a token's issue time. */
-const ARCHIVE_GRACE_S = 24 * 60 * 60;
+/** Longest validity window a provider token may carry (Google and LinkedIn issue one hour). */
+const MAX_TOKEN_LIFE_S = 24 * 60 * 60;
+/** Clock skew allowed on a token's issue time. */
+const SKEW_S = 5 * 60;
+/** The reason verifyNameProof gives when the token's key is neither published now nor in this wallet's own copy. */
+export const UNKNOWN_KEY = 'unknown signing key';
 
 /**
- * Check one ID token for `alias` → `identityKey`. live: the provider's keys now; archived: our name log's copy.
- * Pure (no network, no storage), so tests drive it with locally generated keys.
+ * Check one ID token for `alias` → `identityKey`. live: the provider's keys now; archived: keys this wallet itself
+ * fetched from the provider earlier (never the paymail server's). Pure (no network, no storage), so tests drive it
+ * with locally generated keys.
  */
 export async function verifyNameProof(
   token: string,
@@ -118,6 +132,8 @@ export async function verifyNameProof(
     aud: string;
     live: ProviderKey[];
     archived?: ProviderKey[];
+    /** ms; defaults to now. */
+    now?: number;
   },
 ): Promise<{ ok: true; sub: string } | { ok: false; reason: string }> {
   const cfg = PROOF_PROVIDERS[o.provider];
@@ -133,14 +149,9 @@ export async function verifyNameProof(
   }
   if (header.alg !== 'RS256' || typeof header.kid !== 'string') return { ok: false, reason: 'unsupported signature' };
   const kid = header.kid;
-  let key = o.live.find((k) => k.kid === kid);
-  if (!key) {
-    // A rotated key: only from the archive, and only if we logged it before (or within a day of) the token's issue.
-    const a = (o.archived ?? []).find((k) => k.kid === kid);
-    const seen = a?.firstSeen ? Date.parse(a.firstSeen) / 1000 : NaN;
-    if (a && Number.isFinite(seen) && seen <= Number(c.iat) + ARCHIVE_GRACE_S) key = a;
-  }
-  if (!key) return { ok: false, reason: 'unknown signing key' };
+  // A rotated key: only from this wallet's own copy of what the provider published (see the header).
+  const key = o.live.find((k) => k.kid === kid) ?? (o.archived ?? []).find((k) => k.kid === kid);
+  if (!key) return { ok: false, reason: UNKNOWN_KEY };
   let valid = false;
   try {
     const pub = await crypto.subtle.importKey(
@@ -163,6 +174,19 @@ export async function verifyNameProof(
   if (!cfg.iss.includes(String(c.iss))) return { ok: false, reason: 'wrong issuer' };
   const auds = Array.isArray(c.aud) ? c.aud.map(String) : [String(c.aud)];
   if (!o.aud || !auds.includes(o.aud)) return { ok: false, reason: 'issued to another app' };
+  const iatS = c.iat;
+  const expS = c.exp;
+  const nowS = (o.now ?? Date.now()) / 1000;
+  if (
+    typeof iatS !== 'number' ||
+    typeof expS !== 'number' ||
+    !Number.isFinite(iatS) ||
+    !Number.isFinite(expS) ||
+    expS <= iatS ||
+    expS - iatS > MAX_TOKEN_LIFE_S ||
+    iatS > nowS + SKEW_S
+  )
+    return { ok: false, reason: 'bad token dates' };
   if (typeof c.sub !== 'string' || !c.sub) return { ok: false, reason: 'no account id' };
   if (c.nonce !== (await proofNonce(o.identityKey))) return { ok: false, reason: 'proves a different wallet' };
   // LinkedIn names carry no name in the token: the account (sub) continuity check below is what binds them.
@@ -189,11 +213,54 @@ export const trustProofSub = (alias: string, sub: string) => {
   }
 };
 
+// Every key this wallet has fetched from a provider itself: provider → kid → key (b-Aware 357).
+const SEEN_PROVIDER_KEYS = 'bwallet.names.providerKeys';
+const MAX_SEEN_KEYS = 200;
+type SeenKeys = Record<string, Record<string, { n: string; e: string; firstSeen: string }>>;
+const readSeenKeys = (): SeenKeys => {
+  try {
+    const v = JSON.parse(localStorage.getItem(SEEN_PROVIDER_KEYS) ?? '{}') as unknown;
+    return v && typeof v === 'object' ? (v as SeenKeys) : {};
+  } catch {
+    return {};
+  }
+};
+/** The provider keys this wallet saw published itself, for tokens signed by a key since rotated out. */
+export const walletSeenProviderKeys = (provider: ProofProvider): ProviderKey[] =>
+  Object.entries(readSeenKeys()[provider] ?? {})
+    .filter(([, k]) => k && typeof k.n === 'string' && typeof k.e === 'string')
+    .map(([kid, k]) => ({ kid, jwk: { kty: 'RSA', kid, n: k.n, e: k.e, alg: 'RS256' }, firstSeen: k.firstSeen }));
+const rememberProviderKeys = (provider: ProofProvider, keys: ProviderKey[]) => {
+  if (!keys.length) return;
+  try {
+    const all = readSeenKeys();
+    const mine = { ...(all[provider] ?? {}) };
+    let changed = false;
+    for (const k of keys) {
+      const was = mine[k.kid];
+      // A kid the provider now publishes with other key material is a new key: keep the newer one.
+      if (was && was.n === k.jwk.n && was.e === k.jwk.e) continue;
+      mine[k.kid] = { n: k.jwk.n, e: k.jwk.e, firstSeen: new Date().toISOString() };
+      changed = true;
+    }
+    if (!changed) return;
+    const kept = Object.entries(mine)
+      .sort((a, b) => Date.parse(b[1].firstSeen) - Date.parse(a[1].firstSeen))
+      .slice(0, MAX_SEEN_KEYS);
+    localStorage.setItem(SEEN_PROVIDER_KEYS, JSON.stringify({ ...all, [provider]: Object.fromEntries(kept) }));
+  } catch {
+    /* private mode: nothing remembered */
+  }
+};
+
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 const liveCache = new Map<string, { at: number; keys: ProviderKey[] }>();
 /** Tests: forget the cached published keys. */
 export const resetProviderKeyCache = () => liveCache.clear();
-/** The provider's published keys, straight from the provider (never through our server); cached 10 minutes. */
+/**
+ * The provider's published keys, straight from the provider (never through our server); cached 10 minutes. Each one
+ * is also kept in the wallet's own copy (walletSeenProviderKeys).
+ */
 export const liveProviderKeys = async (f: Fetch, provider: ProofProvider): Promise<ProviderKey[]> => {
   const hit = liveCache.get(provider);
   if (hit && Date.now() - hit.at < 600_000) return hit.keys;
@@ -204,6 +271,7 @@ export const liveProviderKeys = async (f: Fetch, provider: ProofProvider): Promi
       .filter((k) => k && k.kty === 'RSA' && k.kid && k.n && k.e)
       .map((k) => ({ kid: String(k.kid), jwk: k }));
     liveCache.set(provider, { at: Date.now(), keys });
+    rememberProviderKeys(provider, keys);
     return keys;
   } catch {
     return [];
@@ -234,8 +302,16 @@ export async function checkNameProof(
     identityKey,
     aud,
     live: await liveProviderKeys(f, provider),
-    archived: Array.isArray(p.keys) ? p.keys : [],
+    // Never `p.keys`: those come from the server this check guards against (b-Aware 357).
+    archived: walletSeenProviderKeys(provider),
   });
+  if (!v.ok && v.reason === UNKNOWN_KEY) {
+    // Can't check it. Never proven; a name this wallet saw proven before stops, unless the served key is the one the
+    // payer already confirmed paying (then the proof adds nothing an attacker could use).
+    if (!seen || trustedKeyFor(alias) === identityKey.toLowerCase())
+      return { status: 'unproven', provider, reason: v.reason };
+    return { status: 'unchecked', provider, reason: v.reason };
+  }
   if (!v.ok) return { status: 'bad', provider, reason: v.reason };
   if (seen && seen !== v.sub) return { status: 'sub-changed', provider, sub: v.sub };
   // First proof this wallet sees for the name: remember its account, so a later missing or swapped proof stops.

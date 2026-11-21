@@ -34,7 +34,12 @@ const bindingFrom = async (w: ReturnType<typeof wallet>, alias: string, seq: num
   const r = await signRequest(w, 'bind', { alias, seq: String(seq) });
   return { alias, identityKey: r.identityKey, seq, timestamp: String(r.timestamp), signature: r.signature };
 };
-const handedOver = async (from: ReturnType<typeof wallet>, to: ReturnType<typeof wallet>, alias: string, seq: number) => {
+const handedOver = async (
+  from: ReturnType<typeof wallet>,
+  to: ReturnType<typeof wallet>,
+  alias: string,
+  seq: number,
+) => {
   const rel = await signRequest(from, 'release', { alias, to: to.key, seq: String(seq) });
   return {
     ...(await bindingFrom(to, alias, seq)),
@@ -125,7 +130,10 @@ describe('hostile pki: archived keys and firstSeen from the server are not trust
 
   test('first-time payer: the forged proof is never "proven" (pays at most as an unproven name)', async () => {
     const evil = wallet(901);
-    const r = await resolveRecipient(host(await forgedAnswer(evil), [google.pub]), parseRecipient('victim.gmail@bwallet.space'));
+    const r = await resolveRecipient(
+      host(await forgedAnswer(evil), [google.pub]),
+      parseRecipient('victim.gmail@bwallet.space'),
+    );
     expect(r.nameProof?.status).not.toBe('proven');
     expect(r.nameProof?.status).toBe('unproven');
   });
@@ -133,12 +141,15 @@ describe('hostile pki: archived keys and firstSeen from the server are not trust
   test('payer who saw the genuine proof before: the forged proof stops the payment', async () => {
     trustProofSub('victim.gmail', '1111');
     const evil = wallet(902);
-    const r = await resolveRecipient(host(await forgedAnswer(evil), [google.pub]), parseRecipient('victim.gmail@bwallet.space'));
+    const r = await resolveRecipient(
+      host(await forgedAnswer(evil), [google.pub]),
+      parseRecipient('victim.gmail@bwallet.space'),
+    );
     expect(r.nameProof?.status).not.toBe('proven');
     expect(destinationFor(r, 'bsv').ok).toBe(false);
   });
 
-  test("a key this wallet saw at Google itself still checks an older token after Google rotates it out", async () => {
+  test('a key this wallet saw at Google itself still checks an older token after Google rotates it out', async () => {
     const owner = wallet(903);
     const answer = {
       handle: 'victim.gmail@bwalletx.com',
@@ -147,7 +158,10 @@ describe('hostile pki: archived keys and firstSeen from the server are not trust
       proof: { provider: 'google', idToken: await signJwt(rotated, await claimsFor(owner.key)), keys: [] },
     };
     // While the key is published: proven, and the wallet keeps its own copy of the key.
-    let r = await resolveRecipient(host(answer, [rotated.pub, google.pub]), parseRecipient('victim.gmail@bwallet.space'));
+    let r = await resolveRecipient(
+      host(answer, [rotated.pub, google.pub]),
+      parseRecipient('victim.gmail@bwallet.space'),
+    );
     expect(r.nameProof?.status).toBe('proven');
     // Google rotates it out; the server sends nothing (or garbage): the wallet's own copy still proves it.
     resetProviderKeyCache();
@@ -188,7 +202,9 @@ describe('provider token validity (row 391)', () => {
     const c = await claimsFor(k);
     const { exp: _drop, ...noExp } = c;
     expect((await verifyNameProof(await signJwt(google, noExp), await opts(k))).ok).toBe(false);
-    expect((await verifyNameProof(await signJwt(google, { ...c, exp: iat + 30 * 86_400 }), await opts(k))).ok).toBe(false);
+    expect((await verifyNameProof(await signJwt(google, { ...c, exp: iat + 30 * 86_400 }), await opts(k))).ok).toBe(
+      false,
+    );
     const future = { ...c, iat: iat + 86_400, exp: iat + 86_400 + 3600 };
     expect((await verifyNameProof(await signJwt(google, future), await opts(k))).ok).toBe(false);
   });

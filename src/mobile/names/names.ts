@@ -6,7 +6,7 @@ import {
   trustForwardSigner,
   type BindingStatus,
 } from './binding';
-import { checkNameProof, PROOF_PROVIDERS, type ProofCheck } from './proof';
+import { checkNameProof, PROOF_PROVIDERS, UNKNOWN_KEY, type ProofCheck } from './proof';
 import { ProtoWallet, Utils } from '@bsv/sdk';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage } from './paymail';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
@@ -113,6 +113,8 @@ export type Resolved = {
   forwardsTo?: string;
   /** The key that signed the followed forward (set only with `forwardsTo`); confirm() remembers it for the typed name. */
   forwardSigner?: string;
+  /** The version (seq) of the typed name's own signed binding; unset for a forward or an unsigned name. */
+  bindingSeq?: number;
   /** A provable name's provider-signed proof (names/proof.ts, docs PROVABLE-NAMES.md): set only for `name.gmail`. */
   nameProof?: ProofCheck;
   /** Where tokens (BSV-21 / ordinals) would go, if this name can receive them. */
@@ -308,10 +310,12 @@ export const forwardTarget = (alias: string, fw: unknown): string | undefined =>
  * Remember the paid key for the typed name and, for a followed forward, who signed it (only that key may forward the
  * name next time). Used by NameInput's confirm() and by its "I've checked with them: trust the new wallet" override.
  */
-export const trustResolvedKey = (r: Pick<Resolved, 'input' | 'pubkey' | 'forwardsTo' | 'forwardSigner'>) => {
+export const trustResolvedKey = (
+  r: Pick<Resolved, 'input' | 'pubkey' | 'forwardsTo' | 'forwardSigner' | 'bindingSeq'>,
+) => {
   if (!r.pubkey) return;
   const typed = r.input.replace(/^\$/, '').split('@')[0];
-  trustCurrentKey(typed, r.pubkey);
+  trustCurrentKey(typed, r.pubkey, r.forwardsTo ? undefined : r.bindingSeq);
   if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
 };
 
@@ -371,9 +375,12 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
         servedFor && servedFor !== boundTo.toLowerCase()
           ? 'mismatch'
           : await checkBinding(boundTo, r.pubkey, id?.binding);
-      const from = (id?.binding as { handover?: { from?: string } } | undefined)?.handover?.from;
+      const served = id?.binding as { handover?: { from?: string }; seq?: number } | undefined;
+      const from = served?.handover?.from;
+      // The binding's version counts only for the typed name's own binding (a forward's is the target's).
+      if (status === 'signed' && !to && Number.isInteger(served?.seq)) r.bindingSeq = served?.seq;
       // The key-change stop stays on the TYPED name: a forward never resets what this wallet remembers for it.
-      r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from);
+      r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from, r.bindingSeq);
       // Provable names: the provider's own signature says which wallet this name belongs to; checked here.
       // A forward's proof is the target's (the server serves the target row), so check it against the target.
       r.nameProof = (await checkNameProof(f, boundTo, r.pubkey, id?.proof)) ?? undefined;
@@ -652,6 +659,8 @@ export const proofRefusal = (r: Pick<Resolved, 'nameProof'>): string | undefined
     return `This name has no proof from ${who}, so it may not belong to who it says. Not paying it.`;
   if (p.status === 'sub-changed')
     return `This name is now proven by a different ${who} account than before. Not paying it.`;
+  if (p.status === 'unchecked' && p.reason === UNKNOWN_KEY)
+    return `This name's ${who} proof is signed with a key this wallet never saw ${who} publish, so it can't be checked. Not paying it.`;
   if (p.status === 'unchecked') return `This version of ${APP_NAME} can't check ${who} proofs. Not paying it.`;
   return `This name's proof from ${who} doesn't check out, so it may have been moved without its owner. Not paying it.`;
 };

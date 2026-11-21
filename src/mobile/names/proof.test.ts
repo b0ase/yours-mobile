@@ -83,17 +83,16 @@ describe('provable names: verifyNameProof', () => {
     const unverified = await sign(k1, { ...claims, email_verified: false });
     expect((await verifyNameProof(unverified, opts())).ok).toBe(false);
   });
-  test('a rotated key verifies from the archive only if logged before the token was issued', async () => {
+  test("a rotated key verifies from the wallet's own copy of the provider's keys", async () => {
     const t = await sign(k2, claims);
     // k2 is gone from the provider's published keys.
     expect(await verifyNameProof(t, opts())).toEqual({ ok: false, reason: 'unknown signing key' });
-    const early = { ...k2.pub, firstSeen: new Date((iat - 86_400) * 1000).toISOString() };
-    expect(await verifyNameProof(t, opts({ archived: [early] }))).toEqual({ ok: true, sub: '1234567890' });
-    // A key we "found" long after the token can't vouch for it.
+    // `archived` is only what this wallet fetched from the provider itself (checkNameProof never passes the
+    // server's keys, b-Aware 357), so when it first saw the key doesn't matter: the key is the provider's.
     const late = { ...k2.pub, firstSeen: new Date((iat + 30 * 86_400) * 1000).toISOString() };
-    expect((await verifyNameProof(t, opts({ archived: [late] }))).ok).toBe(false);
+    expect(await verifyNameProof(t, opts({ archived: [late] }))).toEqual({ ok: true, sub: '1234567890' });
     // An archive entry under the right kid but the wrong key material fails the signature.
-    const swapped = { ...k1.pub, kid: 'kid-2', firstSeen: early.firstSeen };
+    const swapped = { ...k1.pub, kid: 'kid-2' };
     expect(await verifyNameProof(t, opts({ archived: [swapped] }))).toEqual({ ok: false, reason: 'bad signature' });
   });
   test('a tampered payload fails the signature', async () => {
