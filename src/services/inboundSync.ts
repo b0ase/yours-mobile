@@ -2044,6 +2044,29 @@ export function registerInboundVerifier(storageIdentityKey: string, identityKey:
   };
 }
 
+/**
+ * Put coins this device holds back (not spendable, their own time kept) on its admission list, as a merge does, and
+ * let the account's check know: admitPending then asks the chain about each, admits it, or (spent, still spent an
+ * hour later) marks it spent for the backups. The instant restore's holds (services/spendableFirst.ts; 1p re-review,
+ * 21 Nov 2026): a hold that only waited for the next pull could stay forever once that pull had passed the coin.
+ */
+export async function queueForAdmission(
+  store: { getSettings(): { storageIdentityKey: string } },
+  identityKey: string,
+  coins: { txid: string; vout: number }[],
+): Promise<void> {
+  if (!coins.length) return;
+  const items: Admission[] = coins.map((c) => ({ kind: 'coin', txid: c.txid.toLowerCase(), vout: c.vout }));
+  await admissionListFor(store.getSettings().storageIdentityKey).add(identityKey, items, Date.now());
+  for (const v of verifiers.get(identityKey) ?? []) {
+    try {
+      v.onQueued?.();
+    } catch {
+      // scheduling only
+    }
+  }
+}
+
 const INSTALLED = Symbol.for('bwx.inboundSync.original');
 const READER = Symbol.for('bwx.inboundSync.reader');
 const CHECKPOINT = Symbol.for('bwx.inboundSync.checkpoint');

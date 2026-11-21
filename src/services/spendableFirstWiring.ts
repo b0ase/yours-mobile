@@ -4,8 +4,8 @@
  * is never connected, and the balance card and move notice read `loading() === false`.
  */
 import {
-  holdUnverified,
   installSnapshotBeef,
+  payFromVerifiedOnly,
   restoreSpendableFirst,
   runFullSnapshot,
   SNAPSHOT_SEND_WAIT,
@@ -19,6 +19,7 @@ import {
 } from './spendableFirst';
 import { withTimeout } from './restoreProgress';
 import { buildsTransaction, LocalStoreNeededError } from './localFirst';
+import { isInsufficientFunds } from './fundingPrep';
 import type { FillReport } from './backupFill';
 
 const CONNECT_MS = 8_000;
@@ -48,10 +49,27 @@ export function oneSatSnapshotLookups(services: unknown): {
   return {
     ...(typeof txo?.getSpends === 'function'
       ? {
-          spends: async (ops: string[]) =>
-            (await txo.getSpends!.call(txo, ops)).map((a) =>
-              a === null ? null : typeof a === 'string' && TXID.test(a) ? a.toLowerCase() : undefined,
-            ),
+          /**
+           * The spend index answers a list in the order asked and names no outpoint (checked 21 Nov 2026), so a short or
+           * reordered reply could be read against the wrong coin (1p re-review, F1). It is asked twice, in opposite
+           * orders: an outpoint gets an answer only when both replies are whole and give it the same one.
+           */
+          spends: async (ops: string[]) => {
+            const ask = (list: string[]) => txo.getSpends!.call(txo, list);
+            const back = [...ops].reverse();
+            const [a, b] = await Promise.all([ask(ops), ask(back)]);
+            const out = new Map<string, string | null>();
+            if (!Array.isArray(a) || !Array.isArray(b) || a.length !== ops.length || b.length !== ops.length)
+              return out;
+            const read = (x: unknown) =>
+              x === null ? null : typeof x === 'string' && TXID.test(x) ? x.toLowerCase() : undefined;
+            ops.forEach((op, i) => {
+              const one = read(a[i]);
+              const two = read(b[ops.length - 1 - i]);
+              if (one !== undefined && one === two) out.set(op, one);
+            });
+            return out;
+          },
         }
       : {}),
     ...(typeof beef?.getBeef === 'function' ? { chainBeef: (txid: string) => beef.getBeef!.call(beef, txid) } : {}),
@@ -59,43 +77,50 @@ export function oneSatSnapshotLookups(services: unknown): {
 }
 
 type CreateArgs = { inputs?: unknown[]; outputs?: unknown[] } | undefined;
+type Paid<T> = { ok: true; value: T; setAside: number } | { ok: false; error: unknown; setAside: number };
 export type SendGate = {
+  /** This account was restored from our snapshot (flag on): coins without verified bytes may be on the device. */
+  active: () => boolean;
   /** The snapshot is still coming in (spendableFirst loading()). */
   loading: () => boolean;
   /** Its first (lean) pages are: the device store may not even be active yet. */
   leanRunning: () => boolean;
+  /** Run the payment funding only from verified coins (spendableFirst.payFromVerifiedOnly), between snapshot pages. */
+  verifiedOnly: <T>(pay: () => Promise<T>) => Promise<Paid<T>>;
   /** Wait up to `ms` for the background snapshot: done (or stopped for good), still running, or paused (network). */
   settle: (ms: number) => Promise<'settled' | 'running' | 'paused'>;
-  /** Hold every spendable coin this device has no verified bytes for (spendableFirst.holdUnverified). */
-  holdUnverified: () => Promise<number>;
   waitMs?: number;
   log?: (...a: unknown[]) => void;
 };
 
 /**
- * No payment is built while the snapshot is still coming in (1p checks, 21 Nov 2026: a send before the full snapshot
- * picked coins this device had no bytes for; it came back "failed", posted nothing and left an unprocessed
- * transaction). Wraps wallet.createAction, the one call every send goes through: a call that builds a transaction
- * waits for the background snapshot (SEND_WAIT_MS), then goes; still running, or the first pages still coming in, it
- * is refused with the wait line before anything is built. Paused (our server unreachable): the coins without verified
- * bytes are held first, so the payment funds only from coins this device can broadcast. Returns false when there is
- * no createAction to wrap.
+ * Only coins this device can broadcast fund a payment after an instant restore (1p checks, 21 Nov 2026: a send before
+ * the full snapshot picked coins this device had no bytes for; it came back "failed", posted nothing and left an
+ * unprocessed transaction). Wraps wallet.createAction, the one call every send goes through. A call that builds a
+ * transaction funds from verified coins only (payFromVerifiedOnly) and goes at once (1p re-review, F2: never a wait
+ * because the snapshot is still running). Only a payment those coins can't cover, while the snapshot is still coming
+ * in, waits for it (SEND_WAIT_MS) and tries once more; still running or paused, it is refused with the wait line,
+ * nothing built. The first pages still coming in: refused with the wait line. Returns false when there is no
+ * createAction to wrap.
  */
 export function holdSendsForSnapshot(wallet: unknown, g: SendGate): boolean {
   const w = wallet as { createAction?: (args: CreateArgs, originator?: string) => Promise<unknown> } | null;
   if (!w || typeof w.createAction !== 'function') return false;
   const original = w.createAction.bind(w);
   w.createAction = async (args: CreateArgs, originator?: string) => {
-    if (buildsTransaction(args) && g.loading()) {
-      if (g.leanRunning()) throw new LocalStoreNeededError(SNAPSHOT_SEND_WAIT);
-      const state = await g.settle(g.waitMs ?? SEND_WAIT_MS);
-      if (state === 'running') {
-        g.log?.('[spendable-first] a payment waited for the snapshot and was refused: nothing built');
-        throw new LocalStoreNeededError(SNAPSHOT_SEND_WAIT);
-      }
-      if (state === 'paused') await g.holdUnverified();
+    if (!buildsTransaction(args) || !g.active()) return original(args, originator);
+    if (g.leanRunning()) throw new LocalStoreNeededError(SNAPSHOT_SEND_WAIT);
+    const first = await g.verifiedOnly(() => original(args, originator));
+    if (first.ok) return first.value;
+    // Needs a coin not verified yet: only the snapshot still coming in can change that.
+    if (!first.setAside || !isInsufficientFunds(first.error) || !g.loading()) throw first.error;
+    if ((await g.settle(g.waitMs ?? SEND_WAIT_MS)) !== 'settled') {
+      g.log?.('[spendable-first] a payment needed coins still being verified: refused, nothing built');
+      throw new LocalStoreNeededError(SNAPSHOT_SEND_WAIT);
     }
-    return original(args, originator);
+    const again = await g.verifiedOnly(() => original(args, originator));
+    if (again.ok) return again.value;
+    throw again.error;
   };
   return true;
 }
@@ -154,6 +179,15 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   let lean = false;
   let mark: SnapshotMark | null = null;
   let fullRun: Promise<void> | undefined;
+  /** One at a time: a snapshot page's merge, or a payment's set-aside window (payFromVerifiedOnly). */
+  let turn: Promise<unknown> = Promise.resolve();
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const r = turn.then(fn, fn);
+    turn = r.catch(() => undefined);
+    return r;
+  };
+  /** Each page's merge inside the storage manager's locks, and never inside a payment's set-aside window. */
+  const pageLock = <T>(fn: () => Promise<T>) => serial(() => d.withLock(fn));
   let unhook: (() => void) | undefined;
 
   const connect = (): Promise<OurServerClient> => {
@@ -208,7 +242,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
           serverSik,
           tracker: await d.tracker(),
           owns: d.owns,
-          withLock: d.withLock,
+          withLock: pageLock,
           chainBeef: d.chainBeef,
           mark: mark!,
           save: saveMark,
@@ -268,7 +302,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
           ? () => withTimeout(d.remoteDefaultCoins(), COUNT_MS, 'the backup (count)')
           : undefined,
         makeDeviceActive: remoteActive ? d.makeDeviceActive : undefined,
-        withLock: d.withLock,
+        withLock: pageLock,
         spends: d.spends,
         onPhase: (p) => void (lean = p === 'lean'),
         log,
@@ -310,13 +344,13 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
           if (!ended) return 'running';
           return (mark as SnapshotMark | null)?.stage === 'full' ? 'paused' : 'settled';
         },
-        holdUnverified: async () => {
+        active: () => d.on && (lean || mark !== null),
+        verifiedOnly: async (pay) => {
           const dev = d.device();
-          if (!dev) return 0;
+          if (!dev) return { ok: true as const, value: await pay(), setAside: 0 };
           const { user } = await dev.findOrInsertUser(await d.identityKey());
-          const n = await holdUnverified(dev, user.userId);
-          if (n) log(`[spendable-first] our server unreachable: ${n} unverified coin(s) held before a payment`);
-          return n;
+          // Between snapshot pages: no page's merge or hold lands while coins are set aside.
+          return serial(() => payFromVerifiedOnly(dev, user.userId, pay));
         },
         log,
       }),

@@ -34,7 +34,13 @@
  */
 import { Beef, MerklePath, Transaction, Utils } from '@bsv/sdk';
 import { ancestorsOnly, txidOfRaw } from './beefAncestors';
-import { freshProofState, isWalletChange, tokenFacts, unguardedProcessSyncChunk } from './inboundSync';
+import {
+  freshProofState,
+  isWalletChange,
+  queueForAdmission,
+  tokenFacts,
+  unguardedProcessSyncChunk,
+} from './inboundSync';
 import { withTimeout } from './restoreProgress';
 
 /** Our storage server (bwalletx-storage), a BACKUP beside 1Sat when the flag is on. */
@@ -50,7 +56,8 @@ export { SNAPSHOT_LOADING_LINE } from './balanceTruth';
 export const SNAPSHOT_SEND_WAIT = 'Loading your wallet. Nothing was sent. You can send in a moment.';
 
 const CAPS_MS = 8_000;
-const PAGE_MS = 60_000;
+/** A page our server takes longer than this for is a failure (lean: today's path; full: paused, resumed later). */
+export const PAGE_MS = 20_000;
 const BEEF_MS = 30_000;
 /** A runaway cursor never loops: 20,000 pages of 5,000 coins is far beyond any wallet. */
 const MAX_PAGES = 20_000;
@@ -266,9 +273,11 @@ export type PageReport = {
   /** Coins in the default basket, held or not (compared with the 1Sat backup's count). */
   defaultCoins: number;
   /** Rows this device already holds that their verified transaction contradicts: held after the merge. */
-  holds?: { outputId: number; updated_at?: Date }[];
-  /** Lean: coins the chain says are spent ("txid.vout"). Marked spent here with a fresh time, so backups hear. */
+  holds?: { outputId: number; updated_at?: Date; txid?: string; vout?: number }[];
+  /** Lean: coins the chain says are spent ("txid.vout"): held here, own time kept, for admitPending to settle. */
   spent?: string[];
+  /** Coins held for the chain to settle: put on the admission list after the merge (inboundSync.queueForAdmission). */
+  queue?: { txid: string; vout: number }[];
   /** Lean: coins the chain gave no answer about (held, their own time kept). */
   unchecked?: number;
   /** Coins left out with their transaction: a status no wallet funds from (failed, nosend, unsigned…). */
@@ -374,33 +383,39 @@ export function checkLeanPage(raw: unknown, want: { identityKey: string; after: 
   return { chunk, next, report };
 }
 
-/** The chain's word on outpoints, in order: a spending txid, null (unspent), or undefined (no answer). */
-export type SpendsLookup = (outpoints: string[]) => Promise<(string | null | undefined)[]>;
+/**
+ * The chain's word on outpoints, BY OUTPOINT: a spending txid, null (unspent). An outpoint missing from the map has no
+ * answer (1p re-review: a short or reordered reply must never be read against the wrong coin).
+ */
+export type SpendsLookup = (outpoints: string[]) => Promise<Map<string, string | null>>;
 const SPENDS_BATCH = 100;
 const SPENDS_MS = 8_000;
 
 /**
  * Lean coins count only once the chain says they are unspent (1p checks, 21 Nov 2026: 85126e91.3, spent on chain after
  * the backup, was counted, because the backup never heard). One batched question per 100 coins. A coin the chain calls
- * spent, or gives no clear answer about, arrives held (not spendable); the report lists the spent ones, which the
- * caller marks spent with a fresh time after the merge so the first push tells our server and 1Sat. Mutates the chunk.
+ * spent, or gives no clear answer about, arrives held: not spendable, its OWN time kept, so nothing reaches another
+ * device or backup on one answer (1p re-review, F1). The report lists them (`queue`); the caller puts them on the
+ * admission list, where admitPending asks again: admitted if unspent, and if still spent an hour later marked spent
+ * with a fresh time so the backups hear. Mutates the chunk.
  */
 export async function checkLeanSpends(chunk: SnapChunk, report: PageReport, spends: SpendsLookup | undefined) {
   const verdict = new Map<string, 'unspent' | 'spent' | 'unclear'>();
   for (let i = 0; i < report.coins.length; i += SPENDS_BATCH) {
     const batch = report.coins.slice(i, i + SPENDS_BATCH);
-    let answers: (string | null | undefined)[] = [];
+    let answers = new Map<string, string | null>();
     try {
       if (spends) answers = await withTimeout(spends(batch), SPENDS_MS, 'the chain (spent coins)');
     } catch {
-      answers = [];
+      answers = new Map();
     }
-    batch.forEach((op, j) => {
-      const a = answers[j];
+    for (const op of batch) {
+      const a = answers instanceof Map && answers.has(op) ? answers.get(op) : undefined;
       verdict.set(op, a === null ? 'unspent' : typeof a === 'string' && HEX64.test(a) ? 'spent' : 'unclear');
-    });
+    }
   }
   const spent: string[] = [];
+  const queue: { txid: string; vout: number }[] = [];
   let unchecked = 0;
   for (const o of chunk.outputs ?? []) {
     if (o.spendable !== true) continue;
@@ -410,12 +425,14 @@ export async function checkLeanSpends(chunk: SnapChunk, report: PageReport, spen
     o.spendable = false;
     report.held++;
     report.sats -= o.satoshis;
+    queue.push({ txid: o.txid!, vout: o.vout });
     if (v === 'spent') spent.push(op);
     else unchecked++;
   }
   report.coins = report.coins.filter((op) => verdict.get(op) === 'unspent');
   report.spent = spent;
   report.unchecked = unchecked;
+  report.queue = [...(report.queue ?? []), ...queue];
 }
 
 export type ChainTrackerLike = { isValidRootForHeight(root: string, height: number): Promise<boolean> };
@@ -623,7 +640,7 @@ export async function checkFullPage(
       o.updated_at = LEAN_STAMP;
       o.spentBy = undefined;
       if (mine.spendable && typeof mine.outputId === 'number' && (unverified || (tx && !(await agrees(mine, tx)))))
-        report.holds!.push({ outputId: mine.outputId, updated_at: mine.updated_at });
+        report.holds!.push({ outputId: mine.outputId, updated_at: mine.updated_at, txid, vout: o.vout });
       continue;
     }
     if (unverified || (tx && !(await agrees(o, tx)))) mismatch.add(o);
@@ -803,16 +820,12 @@ export async function runSnapshot(a: RunArgs): Promise<PageReport> {
           { ...chunk, fromStorageIdentityKey: name, toStorageIdentityKey: deviceSik, userIdentityKey: a.identityKey },
         );
       for (const h of report.holds ?? []) await holdRow(a.device, h);
-      // Spent on chain: not spendable here already; a fresh time so the first push tells our server and 1Sat.
-      for (const op of report.spent ?? []) {
-        const dot = op.lastIndexOf('.');
-        const [row] = await a.device.findOutputs({
-          partial: { userId: user.userId, txid: op.slice(0, dot), vout: Number(op.slice(dot + 1)) },
-          noScript: true,
-        });
-        if (typeof row?.outputId === 'number' && row.spendable !== true)
-          await a.device.updateOutput(row.outputId, { spendable: false, updated_at: new Date() });
-      }
+      // Held coins go to the chain to settle (admitPending), never only to the next pull (1p re-review, F3).
+      const queue = [
+        ...(report.queue ?? []),
+        ...(report.holds ?? []).flatMap((h) => (h.txid ? [{ txid: h.txid, vout: h.vout ?? 0 }] : [])),
+      ];
+      await queueForAdmission(a.device, a.identityKey, queue).catch(() => undefined);
     });
     const coins = new Set(report.coins);
     for (const o of chunk.outputs ?? []) {
@@ -837,9 +850,25 @@ export async function runSnapshot(a: RunArgs): Promise<PageReport> {
  * device (what the snapshot brought unverified) is held back, not spendable. The ordinary pull then puts them on the
  * admission list and the chain decides, exactly as for a restore without the snapshot. Returns how many.
  */
-export async function holdUnverified(device: SnapshotDevice, userId: number): Promise<number> {
+export async function holdUnverified(device: SnapshotDevice, userId: number, identityKey?: string): Promise<number> {
+  const rows = await unverifiedCoins(device, userId);
+  for (const r of rows) await holdRow(device, r);
+  // Re-checked and released by admitPending, never left for a pull that may already have passed them (F3).
+  if (identityKey)
+    await queueForAdmission(
+      device,
+      identityKey,
+      rows.map((r) => ({ txid: r.txid, vout: r.vout })),
+    ).catch(() => undefined);
+  return rows.length;
+}
+
+type CoinRef = { outputId: number; updated_at?: Date; txid: string; vout: number };
+
+/** Spendable coins whose transaction this device holds no raw bytes or proof for (what a snapshot brought lean). */
+export async function unverifiedCoins(device: SnapshotDevice, userId: number): Promise<CoinRef[]> {
   const PAGE = 500;
-  const ids: { outputId: number; updated_at?: Date }[] = [];
+  const out: CoinRef[] = [];
   const known = new Map<string, boolean>();
   for (let offset = 0; ; offset += PAGE) {
     const page = await device.findOutputs({
@@ -854,12 +883,46 @@ export async function holdUnverified(device: SnapshotDevice, userId: number): Pr
         const r = await device.getProvenOrRawTx(txid).catch(() => ({}) as { proven?: unknown; rawTx?: Bytes });
         known.set(txid, !!r.proven || !!r.rawTx?.length);
       }
-      if (!known.get(txid)) ids.push({ outputId: o.outputId, updated_at: o.updated_at });
+      if (!known.get(txid)) out.push({ outputId: o.outputId, updated_at: o.updated_at, txid, vout: o.vout });
     }
     if (page.length < PAGE) break;
   }
-  for (const id of ids) await holdRow(device, id);
-  return ids.length;
+  return out;
+}
+
+/**
+ * Run a payment that may fund only from coins this device can broadcast (1p re-review, F2): every spendable coin without
+ * verified bytes is set aside (not spendable, its own time kept) for the call, and put back afterwards if it is still
+ * as it was set aside. With the full snapshot still coming in, a payment its verified coins cover goes at once; only
+ * one that needs an unverified coin has to wait. Returns what the call returned or threw, and how many were set aside.
+ */
+export async function payFromVerifiedOnly<T>(
+  device: SnapshotDevice,
+  userId: number,
+  pay: () => Promise<T>,
+): Promise<{ ok: true; value: T; setAside: number } | { ok: false; error: unknown; setAside: number }> {
+  const aside = await unverifiedCoins(device, userId);
+  for (const r of aside) await holdRow(device, r);
+  try {
+    return { ok: true, value: await pay(), setAside: aside.length };
+  } catch (error) {
+    return { ok: false, error, setAside: aside.length };
+  } finally {
+    for (const r of aside) {
+      const [cur] = await device.findOutputs({ partial: { userId, outputId: r.outputId }, noScript: true });
+      // Only one still exactly as set aside: a merge or hold since then (a newer time, a spend link) stands.
+      if (
+        cur &&
+        cur.spendable !== true &&
+        cur.spentBy == null &&
+        (cur.updated_at?.getTime?.() ?? 0) === (r.updated_at?.getTime?.() ?? 0)
+      )
+        await device.updateOutput(r.outputId, {
+          spendable: true,
+          ...(r.updated_at ? { updated_at: r.updated_at } : {}),
+        });
+    }
+  }
 }
 
 /**
@@ -1135,7 +1198,7 @@ export async function restoreSpendableFirst(d: SpendableFirstDeps): Promise<Spen
   let merged = false;
   const fallBack = async (reason: string) => {
     if (merged) {
-      const n = await holdUnverified(device, userId).catch(() => 0);
+      const n = await holdUnverified(device, userId, identityKey).catch(() => 0);
       log(`[spendable-first] ${n} snapshot coin(s) held back for the ordinary checks`);
     }
     return no(reason);
@@ -1224,7 +1287,7 @@ export async function runFullSnapshot(a: {
           // not verify) is held for today's checks, never left spendable on the page's word. Nothing is spendable that
           // this device can't build a broadcast for from its own data (1p checks: such a send posted nothing).
           const { user } = await a.device.findOrInsertUser(a.identityKey);
-          const n = await holdUnverified(a.device, user.userId).catch(() => 0);
+          const n = await holdUnverified(a.device, user.userId, a.identityKey).catch(() => 0);
           if (n) a.log?.(`[spendable-first] ${n} coin(s) not verified by the snapshot: held for the ordinary checks`);
         }
         await a.save(mark);
@@ -1238,7 +1301,7 @@ export async function runFullSnapshot(a: {
     }
     a.log?.('[spendable-first] background snapshot refused; holding unverified coins:', e.message);
     const { user } = await a.device.findOrInsertUser(a.identityKey);
-    await holdUnverified(a.device, user.userId).catch(() => 0);
+    await holdUnverified(a.device, user.userId, a.identityKey).catch(() => 0);
     mark = { stage: 'refused', after: 0, at: Date.now(), ...(mark.restoredAt ? { restoredAt: mark.restoredAt } : {}) };
     await a.save(mark);
     return mark;

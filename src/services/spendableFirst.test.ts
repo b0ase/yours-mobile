@@ -9,11 +9,14 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Random, Script, Transaction, Utils } from '@bsv/sdk';
 import { StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import { fakeSnapshotServer, type FakeServerOptions } from '../testing/fakeSnapshotServer';
-import { walletOwnership } from './inboundSync';
+import { admitPending, pendingAdmissions, walletOwnership, walletRecords } from './inboundSync';
 import {
   checkLeanPage,
   holdUnverified,
   installSnapshotBeef,
+  PAGE_MS,
+  payFromVerifiedOnly,
+  unverifiedCoins,
   restoreSpendableFirst,
   runFullSnapshot,
   runSnapshot,
@@ -31,6 +34,17 @@ import {
 
 const BASE_HEIGHT = 900_000;
 const broadcasts = { accept: false };
+/** The chain's word, by outpoint: every coin unspent. */
+const unspentAll = async (ops: string[]) => new Map(ops.map((o) => [o, null] as [string, string | null]));
+/** By outpoint: `spent` spent by a stranger, `silent` left out of the reply, the rest unspent. */
+const chainSays =
+  (spent: string[] = [], silent: string[] = []) =>
+  async (ops: string[]) =>
+    new Map(
+      ops
+        .filter((o) => !silent.includes(o))
+        .map((o) => [o, spent.includes(o) ? 'ee'.repeat(32) : null] as [string, string | null]),
+    );
 /** The chain's headers, as the wallet's tracker knows them: height → Merkle root. */
 const headers = new Map<number, string>();
 const tracker = {
@@ -175,7 +189,7 @@ function deps(
     client: async () => client,
     device: () => dev as unknown as SnapshotDevice,
     identityKey: async () => kd.identityKey,
-    spends: async (outpoints) => outpoints.map(() => null), // the chain: every coin unspent
+    spends: unspentAll, // the chain: every coin unspent
     ...over,
   };
 }
@@ -329,7 +343,7 @@ describe('stage 1: the lean snapshot', () => {
       identityKey: kd.identityKey,
       serverSik: db.getSettings().storageIdentityKey,
       lean: true,
-      spends: async (ops) => ops.map(() => null),
+      spends: unspentAll,
       onPage: async (_n, r) => {
         merged += r.coins.length;
         seen.push({ merged, spendable: (await spendable(dev)).length });
@@ -831,40 +845,40 @@ describe('1p 4 + #385: only coins of a real transaction are taken; the count is 
 });
 
 describe('1p 1: a lean coin counts only once the chain says it is unspent', () => {
-  test('a coin spent after the backup is never counted, and is marked spent with a fresh time (our server hears)', async () => {
+  test('a coin the index calls spent is not counted, held with its OWN time, and left to admitPending (re-review F1)', async () => {
     const { kd, db, receipts } = await serverWith(PrivateKey.fromRandom());
     const client = fakeSnapshotServer(db);
     const { dev } = await device(kd);
     const gone = `${receipts[2].txid}.0`;
     const asked: string[] = [];
-    const t0 = Date.now();
+    const said = chainSays([gone]);
     const r = await restoreSpendableFirst(
-      deps(client, dev, kd, {
-        spends: async (ops) => (asked.push(...ops), ops.map((o) => (o === gone ? 'ee'.repeat(32) : null))),
-      }),
+      deps(client, dev, kd, { spends: async (ops) => (asked.push(...ops), said(ops)) }),
     );
     expect(r).toEqual({ used: true, coins: 4, sats: TOTAL - PAYMENTS[2], held: 1 });
     expect(asked.sort()).toEqual(receipts.map((x) => `${x.txid}.0`).sort());
     expect(sum(await spendable(dev))).toBe(TOTAL - PAYMENTS[2]);
     const [row] = await dev.findOutputs({ partial: { txid: receipts[2].txid, vout: 0 } });
+    const [theirs] = await db.findOutputs({ partial: { txid: receipts[2].txid, vout: 0 } });
     expect(row.spendable).toBe(false);
-    // A fresh time: the first push to our server (and to 1Sat) carries "spent".
-    expect(row.updated_at.getTime()).toBeGreaterThanOrEqual(t0);
+    // One answer never reaches another device or backup: the row keeps the backup's time.
+    expect(row.updated_at.getTime()).toBe(theirs.updated_at.getTime());
+    // admitPending asks again (and marks it spent for the backups only if still spent an hour later).
+    expect((await pendingAdmissions(dev, kd.identityKey)).map((e) => `${e.txid}.${e.vout}`)).toEqual([gone]);
   });
 
-  test('a coin the chain gives no answer about is held (its own time kept), not counted', async () => {
+  test('answers are read by outpoint: a coin missing from the reply has no answer (held, queued), never another’s', async () => {
     const { kd, db, receipts } = await serverWith(PrivateKey.fromRandom());
     const client = fakeSnapshotServer(db);
     const { dev } = await device(kd);
-    const unclear = `${receipts[0].txid}.0`;
-    const r = await restoreSpendableFirst(
-      deps(client, dev, kd, { spends: async (ops) => ops.map((o) => (o === unclear ? undefined : null)) }),
-    );
+    const silent = `${receipts[0].txid}.0`;
+    const r = await restoreSpendableFirst(deps(client, dev, kd, { spends: chainSays([], [silent]) }));
     expect(r).toEqual({ used: true, coins: 4, sats: TOTAL - PAYMENTS[0], held: 1 });
     const [row] = await dev.findOutputs({ partial: { txid: receipts[0].txid, vout: 0 } });
     const [theirs] = await db.findOutputs({ partial: { txid: receipts[0].txid, vout: 0 } });
     expect(row.spendable).toBe(false);
     expect(row.updated_at.getTime()).toBe(theirs.updated_at.getTime());
+    expect((await pendingAdmissions(dev, kd.identityKey)).map((e) => `${e.txid}.${e.vout}`)).toEqual([silent]);
   });
 
   test('no chain answer at all (or no chain check): not used, nothing spendable, today’s path runs', async () => {
@@ -880,6 +894,79 @@ describe('1p 1: a lean coin counts only once the chain says it is unspent', () =
     const b = await device(kd);
     expect((await restoreSpendableFirst(deps(client, b.dev, kd, { spends: undefined }))).used).toBe(false);
     expect(await spendable(b.dev)).toHaveLength(0);
+  });
+});
+
+describe('1p re-review F3: a held snapshot coin is re-checked and released, never stuck', () => {
+  test('held for lacking bytes: queued; once the snapshot resumes and brings them, admitPending releases it', async () => {
+    const r = await restored({ fullPageMax: 2 });
+    const { user } = await r.dev.findOrInsertUser(r.kd.identityKey);
+    // Held (as a refused or ended snapshot holds what it could not verify), e.g. after a first pull already went by.
+    expect(await holdUnverified(r.dev as unknown as SnapshotDevice, user.userId, r.kd.identityKey)).toBe(5);
+    expect(await spendable(r.dev)).toHaveLength(0);
+    expect(await pendingAdmissions(r.dev, r.kd.identityKey)).toHaveLength(5);
+    // The snapshot resumes: the device's held rows stand, their transactions get their bytes.
+    expect((await fullRun(r)).stage).toBe('done');
+    const chain = {
+      owns: walletOwnership(r.root),
+      spent: async () => ({ state: 'unspent' as const }),
+      txKnown: async () => 'known' as const,
+      readRecord: walletRecords(r.root),
+    };
+    const rep = await admitPending(r.dev, r.kd.identityKey, chain);
+    expect(rep.admitted).toBe(5);
+    expect(sum(await spendable(r.dev))).toBe(TOTAL);
+  });
+});
+
+describe('1p re-review F2: a payment funds from verified coins at once; only one that needs more waits', () => {
+  /** Restored, the full snapshot stopped after its first page (network): 2 coins verified, 3 still lean. */
+  const halfway = async () => {
+    const r = await restored({ fullPageMax: 2 });
+    const real = r.client.rpcCall.bind(r.client);
+    let pages = 0;
+    r.client.rpcCall = async (m: string, p: unknown[]) => {
+      if (m === 'getSpendableSnapshot' && ++pages === 2) throw new Error('network: connection reset');
+      return real(m, p);
+    };
+    expect((await fullRun(r)).stage).toBe('full');
+    r.unhook(); // no stage-2 fetch: only the device's own data
+    const { user } = await r.dev.findOrInsertUser(r.kd.identityKey);
+    const lean = await unverifiedCoins(r.dev as unknown as SnapshotDevice, user.userId);
+    expect(lean).toHaveLength(3);
+    return { ...r, userId: user.userId, lean };
+  };
+
+  test('covered by verified coins: pays now, spends none of the lean ones, and they come back exactly as they were', async () => {
+    const r = await halfway();
+    const before = await r.dev.findOutputs({ partial: {} });
+    const res = await payFromVerifiedOnly(r.dev as unknown as SnapshotDevice, r.userId, () => pay(r.wallet, 1000));
+    expect(res.ok).toBe(true);
+    expect(res.setAside).toBe(3);
+    const signed = Transaction.fromAtomicBEEF((res as { value: { tx: number[] } }).value.tx);
+    const leanTx = new Set(r.lean.map((c) => c.txid));
+    for (const i of signed.inputs) expect(leanTx.has(i.sourceTXID ?? i.sourceTransaction!.id('hex'))).toBe(false);
+    for (const c of r.lean) {
+      const [now] = await r.dev.findOutputs({ partial: { outputId: c.outputId } });
+      const was = before.find((o) => o.outputId === c.outputId)!;
+      expect(now.spendable).toBe(true);
+      expect(now.updated_at.getTime()).toBe(was.updated_at.getTime());
+    }
+  });
+
+  test('needs a lean coin: refused with insufficient funds (the caller waits), lean coins put back', async () => {
+    const r = await halfway();
+    const res = await payFromVerifiedOnly(r.dev as unknown as SnapshotDevice, r.userId, () =>
+      pay(r.wallet, TOTAL - 5000),
+    );
+    expect(res.ok).toBe(false);
+    expect(res.setAside).toBe(3);
+    expect(String((res as { error: unknown }).error)).toMatch(/Insufficient funds/i);
+    expect((await spendable(r.dev)).length).toBe(PAYMENTS.length);
+  });
+
+  test('a page wait is capped: a hung server can not hold a page for a minute', () => {
+    expect(PAGE_MS).toBeLessThanOrEqual(20_000);
   });
 });
 

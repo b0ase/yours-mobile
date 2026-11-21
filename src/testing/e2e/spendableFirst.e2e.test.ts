@@ -26,7 +26,13 @@ import {
   SNAPSHOT_SYNC_SUFFIX,
   type SnapshotMark,
 } from '../../services/spendableFirst';
-import { installInboundSyncGuard, walletOwnership } from '../../services/inboundSync';
+import {
+  admitPending,
+  installInboundSyncGuard,
+  pendingAdmissions,
+  walletOwnership,
+  walletRecords,
+} from '../../services/inboundSync';
 import { FILL_MARGIN_MS, fillBackup, type FillManager } from '../../services/backupFill';
 import { installFastFakeIdb } from '../fastFakeIdb';
 
@@ -85,7 +91,8 @@ const services = new Proxy(
 ) as never;
 
 /** The chain's word on every coin: unspent. */
-const unspentEverywhere = async (outpoints: string[]) => outpoints.map(() => null);
+const unspentEverywhere = async (outpoints: string[]) =>
+  new Map(outpoints.map((o) => [o, null] as [string, string | null]));
 
 const post = async (path: string, body: unknown) => {
   const r = await fetch(`${CTL}${path}`, { method: 'POST', body: JSON.stringify(body) });
@@ -564,7 +571,8 @@ describe.skipIf(!ON)(`review 4: the first push to our server (${FILL_TXS} coins)
 describe.skipIf(!ON)('1p checks, 21 Nov 2026: unconfirmed at backup, spent after backup', () => {
   /** The chain's word on outpoints: spent by a txid, unspent (null), or no answer (undefined). */
   const chainSpends = new Map<string, string | null>();
-  const spends = async (outpoints: string[]) => outpoints.map((o) => (chainSpends.has(o) ? chainSpends.get(o)! : null));
+  const spends = async (outpoints: string[]) =>
+    new Map(outpoints.map((o) => [o, chainSpends.has(o) ? chainSpends.get(o)! : null] as [string, string | null]));
   const userOf = (ik: string) => `(select "userId" from users where "identityKey"='${ik}')`;
 
   async function scenario() {
@@ -638,6 +646,26 @@ describe.skipIf(!ON)('1p checks, 21 Nov 2026: unconfirmed at backup, spent after
     expect(lo.outputs.reduce((a, o) => a + o.satoshis, 0)).toBe(fast);
     const [goneRow] = await dev.findOutputs({ partial: { txid: s.t2, vout: s.gone.vout } });
     expect(goneRow?.spendable).toBe(false);
+    // One answer stays on this device (re-review F1): held at the server's own time, left to admitPending.
+    const [theirs] = await sql(
+      `select updated_at from outputs where txid='${s.t2}' and vout=${s.gone.vout} and "userId"=${userOf(s.old.kd.identityKey)}`,
+    );
+    expect(goneRow.updated_at.getTime()).toBe(new Date(theirs.updated_at as string).getTime());
+    expect((await pendingAdmissions(dev, s.old.kd.identityKey)).map((e) => `${e.txid}.${e.vout}`)).toEqual([
+      `${s.t2}.${s.gone.vout}`,
+    ]);
+    // admitPending asks the chain itself, and again an hour later: still spent, it marks it spent for the backups.
+    const chain = {
+      owns: walletOwnership(s.root),
+      readRecord: walletRecords(s.root),
+      spent: async (op: string) =>
+        chainSpends.get(op) ? { state: 'spent' as const, by: chainSpends.get(op)! } : { state: 'unspent' as const },
+      txKnown: async () => 'known' as const,
+    };
+    await admitPending(dev, s.old.kd.identityKey, chain);
+    const hourLater = Date.now() + 61 * 60_000;
+    await admitPending(dev, s.old.kd.identityKey, chain, { now: () => hourLater });
+    expect(await pendingAdmissions(dev, s.old.kd.identityKey)).toEqual([]);
     // ...and that state reaches our server with the device's first push to it (as addOurBackup does it).
     const { user } = await c.findOrInsertUser(s.old.kd.identityKey);
     await c.setActive(
