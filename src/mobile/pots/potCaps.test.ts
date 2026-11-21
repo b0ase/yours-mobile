@@ -19,6 +19,8 @@ const mem = new Map<string, string>();
 const { CLAIM_TTL_MS, addSubscription, claimPeriod, getPending, getSub, makePot, moveSub, savePending, saveSub } =
   await import('./pots');
 const { PAY_LOCK, payDue } = await import('./payDue');
+const { plannedReminders } = await import('./notifyPots');
+type Subscription = import('./pots').Subscription;
 const { appendAgentLog, checkAgentSpend, getAgentAccount, getAgentLog, ledgerSpentToday, setAgentDailyCap } =
   await import('../agents/agentAccounts');
 
@@ -352,5 +354,56 @@ describe('row 350: moving a subscription into a pot with no cap gives that pot i
     const s = order('1A', 10);
     moveSub(s.id, '1B', NOW, 50);
     expect(getAgentAccount('1B')?.dailyCapUsd).toBe(7);
+  });
+});
+
+describe('row 268: daily and hourly orders get a reminder too', () => {
+  const at = (iso: string) => Date.parse(iso);
+  const order = (p: Partial<Subscription>): Subscription => ({
+    id: 's1',
+    potId: '1Pot',
+    payee: { name: 'Shop', address: '1Shop' },
+    amount: { value: 1, currency: 'USD' },
+    period: 'day',
+    start: at('2026-03-05T09:00:00Z'),
+    maxCount: null,
+    paidCount: 0,
+    periodIndex: 0,
+    nextDue: 0,
+    status: 'active',
+    mode: 'onOpen',
+    ...p,
+  });
+
+  test('a daily order due in 6 hours is reminded before it is due', () => {
+    const now = at('2026-03-05T03:00:00Z');
+    const r = plannedReminders([order({})], () => 'Rent', now);
+    expect(r).toHaveLength(1);
+    expect(r[0].at).toBeGreaterThan(now);
+    expect(r[0].at).toBeLessThan(at('2026-03-05T09:00:00Z'));
+    expect(r[0].title).not.toContain('tomorrow');
+  });
+
+  test('a daily order opened right after a payment is reminded half a day before the next one', () => {
+    const now = at('2026-03-05T09:30:00Z');
+    const r = plannedReminders([order({ periodIndex: 1 })], () => 'Rent', now);
+    expect(r).toHaveLength(1);
+    expect(r[0].at).toBe(at('2026-03-05T21:00:00Z'));
+    expect(r[0].title).toBe('Shop: $1.00 in 12 hours');
+  });
+
+  test('an hourly order is reminded half an hour before it is due', () => {
+    const now = at('2026-03-05T08:10:00Z');
+    const r = plannedReminders([order({ period: { seconds: 3600 } })], () => 'Rent', now);
+    expect(r).toHaveLength(1);
+    expect(r[0].at).toBe(at('2026-03-05T08:30:00Z'));
+    expect(r[0].title).toBe('Shop: $1.00 in 30 minutes');
+  });
+
+  test('a monthly order is still reminded a day ahead', () => {
+    const now = at('2026-03-01T00:00:00Z');
+    const r = plannedReminders([order({ period: 'month' })], () => 'Rent', now);
+    expect(r[0].at).toBe(at('2026-03-04T09:00:00Z'));
+    expect(r[0].title).toBe('Shop: $1.00 tomorrow');
   });
 });

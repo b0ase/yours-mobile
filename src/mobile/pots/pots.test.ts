@@ -863,7 +863,9 @@ describe('notifications', () => {
     expect(r).toHaveLength(1);
     expect(r[0].at).toBe(T('2026-03-04T09:00:00Z'));
     expect(r[0].id).toBe(reminderId('s1'));
-    expect(plannedReminders([s], () => 'Rent', T('2026-03-04T10:00:00Z'))).toHaveLength(0);
+    // Past the usual time, payment still ahead: reminded 15 minutes before it (b-Aware row 268). Due or past: none.
+    expect(plannedReminders([s], () => 'Rent', T('2026-03-04T10:00:00Z'))[0].at).toBe(T('2026-03-05T08:45:00Z'));
+    expect(plannedReminders([s], () => 'Rent', T('2026-03-05T08:50:00Z'))).toHaveLength(0);
   });
 });
 
