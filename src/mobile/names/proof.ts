@@ -191,6 +191,8 @@ export const trustProofSub = (alias: string, sub: string) => {
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 const liveCache = new Map<string, { at: number; keys: ProviderKey[] }>();
+/** Tests: forget the cached published keys. */
+export const resetProviderKeyCache = () => liveCache.clear();
 /** The provider's published keys, straight from the provider (never through our server); cached 10 minutes. */
 export const liveProviderKeys = async (f: Fetch, provider: ProofProvider): Promise<ProviderKey[]> => {
   const hit = liveCache.get(provider);
