@@ -6,7 +6,18 @@
  */
 import 'fake-indexeddb/auto';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, ProtoWallet, Random, Transaction, Utils } from '@bsv/sdk';
+import {
+  Beef,
+  KeyDeriver,
+  MerklePath,
+  P2PKH,
+  PrivateKey,
+  ProtoWallet,
+  Random,
+  Script,
+  Transaction,
+  Utils,
+} from '@bsv/sdk';
 import { StorageClient, StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import {
   installSnapshotBeef,
@@ -15,7 +26,7 @@ import {
   SNAPSHOT_SYNC_SUFFIX,
   type SnapshotMark,
 } from '../../services/spendableFirst';
-import { walletOwnership } from '../../services/inboundSync';
+import { installInboundSyncGuard, walletOwnership } from '../../services/inboundSync';
 import { FILL_MARGIN_MS, fillBackup, type FillManager } from '../../services/backupFill';
 import { installFastFakeIdb } from '../fastFakeIdb';
 
@@ -32,6 +43,8 @@ let SIK: string;
 
 const headers = new Map<number, string>();
 let bad = false; // second-source headers lie (spend must be refused)
+/** The 1p scenario's broadcaster: accepts while true (a payment that went out, not yet mined); else no network. */
+let acceptPosts = false;
 const tracker = {
   checks: 0,
   isValidRootForHeight: async (root: string, height: number) => {
@@ -56,6 +69,10 @@ const services = new Proxy(
     ],
     nLockTimeIsFinal: async () => true,
     hashOutputScript: (s: string) => s,
+    postBeef: async (_beef: unknown, txids: string[]) => {
+      if (!acceptPosts) throw new Error('no network: services.postBeef');
+      return [{ name: 'fake', status: 'success', txidResults: txids.map((txid) => ({ txid, status: 'success' })) }];
+    },
   } as Record<string, unknown>,
   {
     get: (t, p) =>
@@ -66,6 +83,9 @@ const services = new Proxy(
           },
   },
 ) as never;
+
+/** The chain's word on every coin: unspent. */
+const unspentEverywhere = async (outpoints: string[]) => outpoints.map(() => null);
 
 const post = async (path: string, body: unknown) => {
   const r = await fetch(`${CTL}${path}`, { method: 'POST', body: JSON.stringify(body) });
@@ -246,6 +266,7 @@ describe.skipIf(!ON)('E2E against the real server (Postgres)', () => {
       device: () => devB,
       identityKey: async () => old.kd.identityKey,
       backupDefaultCoins: async () => PAY.length,
+      spends: unspentEverywhere,
       log: () => undefined,
     });
     expect(r).toEqual({ used: true, coins: PAY.length, sats: TOTAL, held: 0 });
@@ -342,6 +363,7 @@ describe.skipIf(!ON)('review findings, fixed (server data altered via SQL: a bug
       client: async () => c,
       device: () => dev as never,
       identityKey: async () => kd.identityKey,
+      spends: unspentEverywhere,
       ...extra,
     });
     return { c, r };
@@ -531,4 +553,173 @@ describe.skipIf(!ON)(`review 4: the first push to our server (${FILL_TXS} coins)
     await b.sm.updateBackups();
     console.log(`[e2e fill ${FILL_TXS} coins] first ordinary push after the fill: ${Date.now() - t2} ms`);
   }, 3_600_000);
+});
+
+/**
+ * The real mainnet 1p checks, 21 Nov 2026 (onep results.jsonl, check 76), reproduced against the real server: a wallet
+ * whose last payment was still unconfirmed at backup time (its broadcast record has no proof and, as the toolbox stores
+ * a change-funded send, an input BEEF with no parents), one of that payment's change coins spent on chain AFTER the
+ * backup (our server never heard), and a transaction the server holds as failed whose coin rows still say spendable.
+ */
+describe.skipIf(!ON)('1p checks, 21 Nov 2026: unconfirmed at backup, spent after backup', () => {
+  /** The chain's word on outpoints: spent by a txid, unspent (null), or no answer (undefined). */
+  const chainSpends = new Map<string, string | null>();
+  const spends = async (outpoints: string[]) => outpoints.map((o) => (chainSpends.has(o) ? chainSpends.get(o)! : null));
+  const userOf = (ik: string) => `(select "userId" from users where "identityKey"='${ik}')`;
+
+  async function scenario() {
+    const root = PrivateKey.fromRandom();
+    const old = await oldDevice(root, [40_000, 50_000, 30_000]);
+    // The last payment (1000 out, the rest of its coin to change), broadcast, not yet mined at backup time.
+    acceptPosts = true;
+    const paid = await old.wallet.createAction({
+      description: 'last payment before the backup',
+      outputs: [
+        {
+          lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+          satoshis: 1000,
+          outputDescription: 'to someone',
+        },
+      ],
+      options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
+    });
+    acceptPosts = false;
+    const t2 = paid.txid!;
+    const [t] = await old.dev.findTransactions({ partial: { txid: t2 } });
+    expect(t.status).toBe('unproven');
+    await old.sm.updateBackups();
+    // As the toolbox stores a change-funded send's record: an input BEEF with no transactions (6 bytes on mainnet).
+    const empty = Utils.toHex(new Beef().toBinary());
+    await sql(`update proven_tx_reqs set "inputBEEF" = decode('${empty}', 'hex') where txid = '${t2}'`);
+    const change = (await old.dev.findOutputs({ partial: { transactionId: t.transactionId } })).filter(
+      (o) => o.spendable && o.change,
+    );
+    expect(change.length).toBeGreaterThan(0);
+    // After the backup: the biggest change coin is spent on chain by a payment our server never hears of.
+    const gone = [...change].sort((a, b) => b.satoshis - a.satoshis)[0];
+    chainSpends.set(`${t2}.${gone.vout}`, Utils.toHex(Random(32)));
+    // A transaction the server holds as failed whose coin row still says spendable (seen on mainnet: 16 coins shown, 8 real).
+    const r3 = old.receipts[2];
+    await sql(
+      `update transactions set status='failed' where txid='${r3.txid}' and "userId"=${userOf(old.kd.identityKey)}`,
+    );
+    await sql(
+      `update outputs set spendable=true, "spentBy"=null where txid='${r3.txid}' and "userId"=${userOf(old.kd.identityKey)}`,
+    );
+    // What the wallet really holds: every coin of a transaction that is real (not the failed one), less the spent one.
+    const real = await sql(
+      `select o.satoshis from outputs o join transactions t on t."transactionId"=o."transactionId" where o."userId"=${userOf(old.kd.identityKey)} and o.spendable and o.change and t.status in ('completed','unproven')`,
+    );
+    const want = real.reduce((a, x) => a + Number(x.satoshis), 0) - gone.satoshis;
+    expect(want).toBeGreaterThan(0);
+    return { root, old, t2, gone, want };
+  }
+
+  test('fast balance never counts a coin spent after the backup; the spend reaches our server; full snapshot does not zero it', async () => {
+    const s = await scenario();
+    const dev = await store('onep76');
+    const w = await walletOn(s.old.kd, dev);
+    const c = await ourClient(s.root);
+    const restoredAt = new Date(Date.now() - 1_000);
+    const r = await restoreSpendableFirst({
+      enabled: async () => true,
+      client: async () => c,
+      device: () => dev as never,
+      identityKey: async () => s.old.kd.identityKey,
+      spends,
+      log: () => undefined,
+    } as never);
+    expect(r.used).toBe(true);
+    const fast = sum(await spendableOf(dev));
+    // 1: the coin the chain calls spent is not in the fast balance, and the restore reports what the device shows (4).
+    expect(fast).toBe(s.want);
+    if (r.used) expect(r.sats).toBe(fast);
+    const lo = await w.wallet.listOutputs({ basket: 'default', limit: 100 });
+    expect(lo.outputs.reduce((a, o) => a + o.satoshis, 0)).toBe(fast);
+    const [goneRow] = await dev.findOutputs({ partial: { txid: s.t2, vout: s.gone.vout } });
+    expect(goneRow?.spendable).toBe(false);
+    // ...and that state reaches our server with the device's first push to it (as addOurBackup does it).
+    const { user } = await c.findOrInsertUser(s.old.kd.identityKey);
+    await c.setActive(
+      { identityKey: s.old.kd.identityKey, userId: user.userId } as never,
+      dev.getSettings().storageIdentityKey,
+    );
+    // The app's push pages carry their rows' parents (inboundSync's guard, as initWallet installs it).
+    const unguard = installInboundSyncGuard(StorageIdb);
+    try {
+      await fillBackup({
+        manager: w.sm as unknown as FillManager,
+        reader: dev as never,
+        writer: c as never,
+        restorePoint: restoredAt,
+      });
+    } finally {
+      unguard();
+    }
+    const onServer = await sql(
+      `select spendable from outputs where txid='${s.t2}' and vout=${s.gone.vout} and "userId"=${userOf(s.old.kd.identityKey)}`,
+    );
+    expect(onServer.map((x) => x.spendable)).toEqual([false]);
+    // 2: the full snapshot verifies the unconfirmed record (not refused) and never zeroes the balance.
+    let mark: SnapshotMark = { stage: 'full', after: 0, at: 0 };
+    const end = await runFullSnapshot({
+      client: c as never,
+      device: dev as never,
+      identityKey: s.old.kd.identityKey,
+      serverSik: SIK,
+      tracker,
+      owns: walletOwnership(s.root),
+      mark,
+      save: async (m) => void (mark = m),
+    });
+    expect(end.stage).toBe('done');
+    expect(sum(await spendableOf(dev))).toBe(s.want);
+    // The device now holds the unconfirmed payment's bytes: its coins pay from the device's own data.
+    const [t2row] = await dev.findTransactions({ partial: { txid: s.t2 } });
+    expect(t2row.rawTx?.length ?? 0).toBeGreaterThan(0);
+    // No transaction in a status internalizeAction refuses came in with the snapshot (#385).
+    for (const t of await dev.findTransactions({ partial: {} })) expect(t.status).not.toBe('failed');
+  }, 120_000);
+
+  test('an unverifiable record holds back only its own coins, never the whole page', async () => {
+    const s = await scenario();
+    // The record's bytes now say another transaction: it can't verify. The proven coins on the same pages still do.
+    const other = new Transaction();
+    other.addInput({
+      sourceTXID: Utils.toHex(Random(32)),
+      sourceOutputIndex: 0,
+      unlockingScript: new Script(),
+      sequence: 1,
+    });
+    other.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 5 });
+    await sql(`update proven_tx_reqs set "rawTx" = decode('${other.toHex()}', 'hex') where txid = '${s.t2}'`);
+    const keep = await sql(
+      `select o.satoshis from outputs o join transactions t on t."transactionId"=o."transactionId" where o."userId"=${userOf(s.old.kd.identityKey)} and o.spendable and o.change and t.status in ('completed','unproven') and t."provenTxId" is not null`,
+    );
+    const dev = await store('onep76b');
+    const c = await ourClient(s.root);
+    const r = await restoreSpendableFirst({
+      enabled: async () => true,
+      client: async () => c,
+      device: () => dev as never,
+      identityKey: async () => s.old.kd.identityKey,
+      spends,
+    } as never);
+    expect(r.used).toBe(true);
+    let mark: SnapshotMark = { stage: 'full', after: 0, at: 0 };
+    const end = await runFullSnapshot({
+      client: c as never,
+      device: dev as never,
+      identityKey: s.old.kd.identityKey,
+      serverSik: SIK,
+      tracker,
+      owns: walletOwnership(s.root),
+      mark,
+      save: async (m) => void (mark = m),
+    });
+    expect(end.stage).toBe('done');
+    // Only the unverifiable payment's coins are held; the proven ones stay.
+    expect(sum(await spendableOf(dev))).toBe(sum(keep.map((x) => ({ satoshis: Number(x.satoshis) }))));
+    for (const o of await dev.findOutputs({ partial: { txid: s.t2 } })) expect(o.spendable).toBe(false);
+  }, 120_000);
 });

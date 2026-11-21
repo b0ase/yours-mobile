@@ -257,14 +257,52 @@ const bearsToken = (o: SnapOutput) => {
 export type PageReport = {
   /** Coins taken in as spendable. */
   coins: string[];
-  /** Coins taken in held back (not spendable): anything but wallet change, tokens, no script, a mismatch. */
+  /**
+   * Coins taken in held back (not spendable): anything but wallet change, tokens, no script, a mismatch, a coin of a
+   * transaction nothing verifies, and (lean) a coin the chain calls spent or gave no answer about.
+   */
   held: number;
   sats: number;
   /** Coins in the default basket, held or not (compared with the 1Sat backup's count). */
   defaultCoins: number;
   /** Rows this device already holds that their verified transaction contradicts: held after the merge. */
   holds?: { outputId: number; updated_at?: Date }[];
+  /** Lean: coins the chain says are spent ("txid.vout"). Marked spent here with a fresh time, so backups hear. */
+  spent?: string[];
+  /** Lean: coins the chain gave no answer about (held, their own time kept). */
+  unchecked?: number;
+  /** Coins left out with their transaction: a status no wallet funds from (failed, nosend, unsigned…). */
+  skipped?: number;
 };
+
+/**
+ * Transaction statuses whose coins a snapshot takes: the ones the toolbox funds from and lists, and internalizeAction
+ * merges into (1p checks, 21 Nov 2026). Our server can hold a failed transaction whose coin rows still say spendable:
+ * the lean page counted 16 coins where the device listed 8, and a failed row on the device makes every later
+ * internalizeAction of that txid fail ("…has invalid status failed", report #385). Any other status is left out of the
+ * page, rows and coins, for the ordinary pull and its checks.
+ */
+const TAKEN_TX = new Set(['completed', 'unproven', 'sending']);
+
+/** Leave out transactions in a status not taken, with their coins, tag maps, proofs and records. */
+function leaveOutUntaken(chunk: SnapChunk): number {
+  const ids = new Set<number>();
+  const txids = new Set<string>();
+  for (const t of chunk.transactions ?? [])
+    if (!TAKEN_TX.has(String(t.status))) {
+      ids.add(t.transactionId!);
+      txids.add(t.txid!.toLowerCase());
+    }
+  if (!ids.size) return 0;
+  const outs = chunk.outputs ?? [];
+  const gone = new Set(outs.filter((o) => ids.has(o.transactionId!)).map((o) => o.outputId));
+  chunk.transactions = (chunk.transactions ?? []).filter((t) => !ids.has(t.transactionId!));
+  chunk.outputs = outs.filter((o) => !ids.has(o.transactionId!));
+  chunk.outputTagMaps = (chunk.outputTagMaps ?? []).filter((m) => !gone.has((m as { outputId?: number }).outputId));
+  chunk.provenTxs = (chunk.provenTxs ?? []).filter((p) => !txids.has(String(p.txid).toLowerCase()));
+  chunk.provenTxReqs = (chunk.provenTxReqs ?? []).filter((q) => !txids.has(String(q.txid).toLowerCase()));
+  return outs.length - chunk.outputs.length;
+}
 
 /**
  * Output rows new to the device: shape, own transaction, spendable, no spend link. Only wallet change (the toolbox's
@@ -322,6 +360,8 @@ const txMap = (chunk: SnapChunk) => {
  */
 export function checkLeanPage(raw: unknown, want: { identityKey: string; after: number }) {
   const { chunk, next } = checkEnvelope(raw, { ...want, lean: true });
+  txMap(chunk);
+  const skipped = leaveOutUntaken(chunk);
   const txById = txMap(chunk);
   for (const t of txById.values()) {
     t.rawTx = undefined;
@@ -329,9 +369,53 @@ export function checkLeanPage(raw: unknown, want: { identityKey: string; after: 
     t.provenTxId = undefined;
     t.updated_at = LEAN_STAMP;
   }
-  const report: PageReport = { coins: [], held: 0, sats: 0, defaultCoins: 0 };
+  const report: PageReport = { coins: [], held: 0, sats: 0, defaultCoins: 0, skipped };
   checkNewOutputs(chunk, chunk.outputs ?? [], report, txById);
   return { chunk, next, report };
+}
+
+/** The chain's word on outpoints, in order: a spending txid, null (unspent), or undefined (no answer). */
+export type SpendsLookup = (outpoints: string[]) => Promise<(string | null | undefined)[]>;
+const SPENDS_BATCH = 100;
+const SPENDS_MS = 8_000;
+
+/**
+ * Lean coins count only once the chain says they are unspent (1p checks, 21 Nov 2026: 85126e91.3, spent on chain after
+ * the backup, was counted, because the backup never heard). One batched question per 100 coins. A coin the chain calls
+ * spent, or gives no clear answer about, arrives held (not spendable); the report lists the spent ones, which the
+ * caller marks spent with a fresh time after the merge so the first push tells our server and 1Sat. Mutates the chunk.
+ */
+export async function checkLeanSpends(chunk: SnapChunk, report: PageReport, spends: SpendsLookup | undefined) {
+  const verdict = new Map<string, 'unspent' | 'spent' | 'unclear'>();
+  for (let i = 0; i < report.coins.length; i += SPENDS_BATCH) {
+    const batch = report.coins.slice(i, i + SPENDS_BATCH);
+    let answers: (string | null | undefined)[] = [];
+    try {
+      if (spends) answers = await withTimeout(spends(batch), SPENDS_MS, 'the chain (spent coins)');
+    } catch {
+      answers = [];
+    }
+    batch.forEach((op, j) => {
+      const a = answers[j];
+      verdict.set(op, a === null ? 'unspent' : typeof a === 'string' && HEX64.test(a) ? 'spent' : 'unclear');
+    });
+  }
+  const spent: string[] = [];
+  let unchecked = 0;
+  for (const o of chunk.outputs ?? []) {
+    if (o.spendable !== true) continue;
+    const op = `${o.txid}.${o.vout}`;
+    const v = verdict.get(op);
+    if (v === undefined || v === 'unspent') continue;
+    o.spendable = false;
+    report.held++;
+    report.sats -= o.satoshis;
+    if (v === 'spent') spent.push(op);
+    else unchecked++;
+  }
+  report.coins = report.coins.filter((op) => verdict.get(op) === 'unspent');
+  report.spent = spent;
+  report.unchecked = unchecked;
 }
 
 export type ChainTrackerLike = { isValidRootForHeight(root: string, height: number): Promise<boolean> };
@@ -394,32 +478,90 @@ export type HeldLookup = {
  * version (stamped old, so the merge only maps their ids), except a lean stub, which takes the real row; new coins as
  * in a lean page.
  */
+/**
+ * The BEEF of a transaction this page names (it and its ancestors back to proven ones), from elsewhere: our server's
+ * getBeefForOutpoints for one of its coins, then the chain's services. Undefined when none has it. Verified by the caller.
+ */
+export type AncestrySource = (txid: string, outpoint: string) => Promise<Bytes | undefined>;
+
+/**
+ * A full page as this device takes it in. Every proof is verified against the headers, and every unproven transaction
+ * whose bytes the page carries (a broadcast record, or a transaction row) as an UNCONFIRMED one: SPV with its input
+ * BEEF, else with the BEEF `ancestry` finds (our server, then the chain), back to proven parents (1p checks, 21 Nov
+ * 2026: a payment unconfirmed at backup time has a record with no proof and, as the toolbox keeps a change-funded send,
+ * an input BEEF with no parents; refusing it refused the page and zeroed the balance). A record that does not verify
+ * holds back only its own coins, never the page: its bytes are dropped and its coins arrive held (or, already here, are
+ * held). New records arrive as 'nosend' (the Monitor never sends one on a page's word), carrying the ancestry that
+ * verified them, so the device builds their coins' BEEF from its own data. Rows the device already holds keep the
+ * device's version (stamped old, so the merge only maps their ids), except a lean stub, which takes the real row.
+ * Transactions in a status no wallet funds from are left out (leaveOutUntaken). Throws SnapshotRefused only for what
+ * no single record explains: the envelope, a row without a txid.
+ */
 export async function checkFullPage(
   raw: unknown,
   want: { identityKey: string; after: number },
   tracker: ChainTrackerLike,
   held: HeldLookup,
   owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>,
+  ancestry?: AncestrySource,
 ) {
   const { chunk, next } = checkEnvelope(raw, { ...want, lean: false });
-  /** Transactions whose bytes this page proves: by proof against the headers, or by SPV with their input BEEF. */
+  txMap(chunk);
+  const skipped = leaveOutUntaken(chunk);
+  /** Transactions whose bytes this page proves: by proof against the headers, or by SPV with their ancestry. */
   const verified = new Map<string, Transaction>();
+  /** Transactions nothing verifies: their bytes are dropped and their coins held. */
+  const bad = new Set<string>();
   for (const p of chunk.provenTxs ?? []) {
-    await verifyProvenRow(p, tracker);
-    verified.set(p.txid.toLowerCase(), Transaction.fromBinary(Array.from(p.rawTx)));
+    if (typeof p?.txid !== 'string' || !HEX64.test(p.txid)) throw new SnapshotRefused('a proof without a txid');
+    try {
+      await verifyProvenRow(p, tracker);
+      verified.set(p.txid.toLowerCase(), Transaction.fromBinary(Array.from(p.rawTx)));
+    } catch (e) {
+      if (!(e instanceof SnapshotRefused)) throw e;
+      bad.add(p.txid.toLowerCase());
+    }
   }
+  /** One coin of each transaction on this page, to ask our server for its BEEF by. */
+  const coinOf = new Map<number, number>();
+  for (const o of chunk.outputs ?? [])
+    if (typeof o.transactionId === 'number' && !coinOf.has(o.transactionId)) coinOf.set(o.transactionId, o.vout);
+  const idOf = new Map<string, number>();
+  for (const t of chunk.transactions ?? []) idOf.set(t.txid!.toLowerCase(), t.transactionId!);
+  /** An unconfirmed transaction's ancestry that verifies against the headers, or undefined. */
+  const unconfirmed = async (txid: string, rawTx: Bytes, inputBEEF: Bytes | null | undefined) => {
+    const own = inputBEEF?.length ? ancestorsOnly(inputBEEF, rawTx) : undefined;
+    if (await spvValid(txid, rawTx, own, tracker)) return own ?? Array.from(new Beef().toBinary());
+    const id = idOf.get(txid);
+    const vout = id === undefined ? undefined : coinOf.get(id);
+    if (!ancestry || vout === undefined) return undefined;
+    const found = await ancestry(txid, `${txid}.${vout}`).catch(() => undefined);
+    if (!found?.length) return undefined;
+    const theirs = ancestorsOnly(found, rawTx);
+    return theirs && (await spvValid(txid, rawTx, theirs, tracker)) ? theirs : undefined;
+  };
   const reqs: SnapReq[] = [];
   for (const q of chunk.provenTxReqs ?? []) {
     const txid = q.txid?.toLowerCase();
-    if (!txid || txidOfRaw(q.rawTx) !== txid)
-      throw new SnapshotRefused('a broadcast record whose bytes are not its txid');
+    if (!txid || !HEX64.test(txid)) throw new SnapshotRefused('a broadcast record without a txid');
     if (await held.hasReq(txid)) continue;
-    if (['failed', 'invalid', 'doubleSpend', 'unfail'].includes(String(q.status)))
-      throw new SnapshotRefused('a spendable coin from a failed transaction');
-    q.inputBEEF = q.inputBEEF?.length ? ancestorsOnly(q.inputBEEF, q.rawTx) : undefined;
-    if (!(await spvValid(txid, q.rawTx!, q.inputBEEF ?? undefined, tracker)))
-      throw new SnapshotRefused('a broadcast record that does not verify against the headers');
-    verified.set(txid, Transaction.fromBinary(Array.from(q.rawTx!)));
+    if (
+      txidOfRaw(q.rawTx) !== txid ||
+      ['failed', 'invalid', 'doubleSpend', 'unfail'].includes(String(q.status)) ||
+      bad.has(txid)
+    ) {
+      bad.add(txid);
+      continue;
+    }
+    if (!verified.has(txid)) {
+      const beef = await unconfirmed(txid, q.rawTx!, q.inputBEEF);
+      if (!beef) {
+        bad.add(txid);
+        continue;
+      }
+      q.inputBEEF = beef;
+      verified.set(txid, Transaction.fromBinary(Array.from(q.rawTx!)));
+    } else q.inputBEEF = q.inputBEEF?.length ? ancestorsOnly(q.inputBEEF, q.rawTx) : undefined;
     q.history = '{}';
     q.batch = undefined;
     if (q.status !== 'completed') {
@@ -431,14 +573,32 @@ export async function checkFullPage(
   chunk.provenTxReqs = reqs;
   const txById = txMap(chunk);
   for (const t of txById.values()) {
-    if (t.rawTx?.length && txidOfRaw(t.rawTx) !== t.txid!.toLowerCase())
-      throw new SnapshotRefused('a transaction row whose bytes are not its txid');
-    t.inputBEEF = t.inputBEEF?.length ? ancestorsOnly(t.inputBEEF, t.rawTx) : undefined;
-    const d = await held.tx(t.txid!.toLowerCase());
+    const txid = t.txid!.toLowerCase();
+    const d = await held.tx(txid);
     const leanStub = d && !d.rawTx?.length && d.provenTxId == null;
-    if (d && !leanStub) t.updated_at = LEAN_STAMP;
+    if (d && !leanStub) {
+      t.inputBEEF = t.inputBEEF?.length ? ancestorsOnly(t.inputBEEF, t.rawTx) : undefined;
+      t.updated_at = LEAN_STAMP;
+      continue;
+    }
+    // Bytes on a transaction row (no proof, no record): verified as an unconfirmed transaction, like a record.
+    if (t.rawTx?.length && !verified.has(txid) && !bad.has(txid)) {
+      const beef = txidOfRaw(t.rawTx) === txid ? await unconfirmed(txid, t.rawTx, t.inputBEEF) : undefined;
+      if (beef) {
+        t.inputBEEF = beef;
+        verified.set(txid, Transaction.fromBinary(Array.from(t.rawTx)));
+      } else bad.add(txid);
+    } else t.inputBEEF = t.inputBEEF?.length ? ancestorsOnly(t.inputBEEF, t.rawTx) : undefined;
+    if (bad.has(txid)) {
+      // Nothing of it lands but the row a coin needs: no bytes, no proof link, stamped old (a lean stub stays one).
+      t.rawTx = undefined;
+      t.inputBEEF = undefined;
+      t.provenTxId = undefined;
+      t.updated_at = LEAN_STAMP;
+    }
   }
-  const report: PageReport = { coins: [], held: 0, sats: 0, defaultCoins: 0, holds: [] };
+  chunk.provenTxs = (chunk.provenTxs ?? []).filter((p) => !bad.has(p.txid.toLowerCase()));
+  const report: PageReport = { coins: [], held: 0, sats: 0, defaultCoins: 0, holds: [], skipped };
   const fresh: SnapOutput[] = [];
   const mismatch = new Set<SnapOutput>();
   /** Does this coin row say what its verified transaction says (amount, script, and it pays this wallet)? */
@@ -456,20 +616,17 @@ export async function checkFullPage(
     const mine = txid ? await held.row(txid, o.vout) : undefined;
     // From here on this device builds the coin's BEEF from its own data and no spend-time check runs again (stage 2),
     // so the coin is checked now against the transaction this page (or the device) has verified (review, 20 Nov 2026).
-    const tx = txid
-      ? (verified.get(txid) ??
-        (t?.rawTx?.length ? Transaction.fromBinary(Array.from(t.rawTx)) : undefined) ??
-        (await held.raw(txid)))
-      : undefined;
+    const tx = txid ? (verified.get(txid) ?? (await held.raw(txid))) : undefined;
+    const unverified = !!txid && bad.has(txid);
     if (mine) {
       // The device's own row stands (a payment may have spent it since): the merge only maps it.
       o.updated_at = LEAN_STAMP;
       o.spentBy = undefined;
-      if (mine.spendable && tx && typeof mine.outputId === 'number' && !(await agrees(mine, tx)))
+      if (mine.spendable && typeof mine.outputId === 'number' && (unverified || (tx && !(await agrees(mine, tx)))))
         report.holds!.push({ outputId: mine.outputId, updated_at: mine.updated_at });
       continue;
     }
-    if (tx && !(await agrees(o, tx))) mismatch.add(o);
+    if (unverified || (tx && !(await agrees(o, tx)))) mismatch.add(o);
     fresh.push(o);
   }
   checkNewOutputs(chunk, fresh, report, txById, mismatch);
@@ -555,6 +712,10 @@ type RunArgs = {
   /** After each merged page: the cursor to resume from (null = done) and what it brought. */
   onPage?: (next: number | null, report: PageReport) => void | Promise<void>;
   pageMs?: number;
+  /** Lean pages: the chain's word on each coin (checkLeanSpends). Absent: no coin counts (all held). */
+  spends?: SpendsLookup;
+  /** Full pages: an unconfirmed transaction's BEEF from the chain's services, when our server has none. */
+  chainBeef?: (txid: string) => Promise<Bytes | undefined>;
 };
 
 /** Pull and merge snapshot pages until the server says there are no more. Throws on any refusal or failure. */
@@ -582,6 +743,22 @@ export async function runSnapshot(a: RunArgs): Promise<PageReport> {
     },
     hasReq: async (txid) => (await a.device.findProvenTxReqs({ partial: { txid } })).length > 0,
   };
+  /** Our server's BEEF for one coin of the transaction (it builds it back to proven parents), else the chain's. */
+  const ancestry: AncestrySource = async (txid, outpoint) => {
+    try {
+      const r = (await withTimeout(
+        a.client.rpcCall('getBeefForOutpoints', [{ outpoints: [outpoint], identityKey: a.identityKey }]),
+        BEEF_MS,
+        'our storage server (coin data)',
+      )) as BeefAnswer;
+      if (r?.version === 1 && r.beef && (r.beef as Bytes).length) return Array.from(r.beef as Bytes);
+    } catch {
+      // the chain's services next
+    }
+    return a.chainBeef ? await withTimeout(a.chainBeef(txid), BEEF_MS, 'the chain (coin data)') : undefined;
+  };
+  /** Coins taken spendable, by outpoint: a coin on two pages counts once. */
+  const taken = new Map<string, number>();
   let after = a.after ?? 0;
   for (let pages = 0; ; pages++) {
     if (pages >= MAX_PAGES) throw new SnapshotRefused('too many pages');
@@ -600,10 +777,12 @@ export async function runSnapshot(a: RunArgs): Promise<PageReport> {
     );
     const want = { identityKey: a.identityKey, after };
     let checked;
-    if (a.lean) checked = checkLeanPage(raw, want);
-    else {
+    if (a.lean) {
+      checked = checkLeanPage(raw, want);
+      await checkLeanSpends(checked.chunk, checked.report, a.spends);
+    } else {
       if (!a.tracker) throw new Error('a full snapshot needs the chain tracker');
-      checked = await checkFullPage(raw, want, a.tracker, held, a.owns);
+      checked = await checkFullPage(raw, want, a.tracker, held, a.owns, ancestry);
     }
     const { chunk, next, report } = checked;
     const rows = ENTITY_KEYS.reduce((n, k) => n + (chunk[k]?.length ?? 0), 0);
@@ -624,11 +803,29 @@ export async function runSnapshot(a: RunArgs): Promise<PageReport> {
           { ...chunk, fromStorageIdentityKey: name, toStorageIdentityKey: deviceSik, userIdentityKey: a.identityKey },
         );
       for (const h of report.holds ?? []) await holdRow(a.device, h);
+      // Spent on chain: not spendable here already; a fresh time so the first push tells our server and 1Sat.
+      for (const op of report.spent ?? []) {
+        const dot = op.lastIndexOf('.');
+        const [row] = await a.device.findOutputs({
+          partial: { userId: user.userId, txid: op.slice(0, dot), vout: Number(op.slice(dot + 1)) },
+          noScript: true,
+        });
+        if (typeof row?.outputId === 'number' && row.spendable !== true)
+          await a.device.updateOutput(row.outputId, { spendable: false, updated_at: new Date() });
+      }
     });
-    total.coins.push(...report.coins);
+    const coins = new Set(report.coins);
+    for (const o of chunk.outputs ?? []) {
+      const op = `${o.txid}.${o.vout}`;
+      if (coins.has(op)) taken.set(op, o.satoshis);
+    }
+    total.coins = [...taken.keys()];
+    total.sats = [...taken.values()].reduce((n, v) => n + v, 0);
     total.held += report.held;
-    total.sats += report.sats;
     total.defaultCoins += report.defaultCoins;
+    total.spent = [...(total.spent ?? []), ...(report.spent ?? [])];
+    total.unchecked = (total.unchecked ?? 0) + (report.unchecked ?? 0);
+    total.skipped = (total.skipped ?? 0) + (report.skipped ?? 0);
     await a.onPage?.(next, report);
     if (next === null) return total;
     after = next;
@@ -888,6 +1085,8 @@ export type SpendableFirstDeps = {
   makeDeviceActive?: () => Promise<void>;
   /** Each page's merge inside the storage manager's locks (runAsSync), so no other merge interleaves. */
   withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /** The chain's word on the coins (checkLeanSpends): none counts until it says unspent. Absent: not used. */
+  spends?: SpendsLookup;
   onPhase?: (phase: 'lean' | null) => void;
   log?: (...a: unknown[]) => void;
 };
@@ -951,11 +1150,14 @@ export async function restoreSpendableFirst(d: SpendableFirstDeps): Promise<Spen
       serverSik,
       lean: true,
       withLock: d.withLock,
+      spends: d.spends,
       onPage: (_next, r) => {
         if (r.coins.length || r.held) merged = true;
       },
     });
     if (!total.coins.length && !total.held) return await fallBack('our server holds no coins for this wallet');
+    // Nothing the chain could vouch for: today's path (which asks it coin by coin), never a zero balance.
+    if (!total.coins.length && total.unchecked) return await fallBack('the chain could not be asked about the coins');
     const theirs = await backupCount;
     if (typeof theirs === 'number' && total.defaultCoins < theirs)
       return await fallBack(`our server is behind the backup (${total.defaultCoins} of ${theirs} coins)`);
@@ -992,6 +1194,8 @@ export async function runFullSnapshot(a: {
   tracker: ChainTrackerLike;
   owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>;
   withLock?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /** An unconfirmed transaction's BEEF from the chain's services, when our server has none (checkFullPage). */
+  chainBeef?: (txid: string) => Promise<Bytes | undefined>;
   mark: SnapshotMark;
   save: (m: SnapshotMark) => Promise<void>;
   log?: (...a: unknown[]) => void;
@@ -999,6 +1203,7 @@ export async function runFullSnapshot(a: {
   let mark = a.mark;
   try {
     await runSnapshot({
+      chainBeef: a.chainBeef,
       client: a.client,
       device: a.device,
       identityKey: a.identityKey,
@@ -1014,6 +1219,14 @@ export async function runFullSnapshot(a: {
           next === null
             ? { stage: 'done', after: 0, at: Date.now(), ...keep }
             : { stage: 'full', after: next, at: Date.now(), ...keep };
+        if (next === null) {
+          // Done: a coin still without verified bytes (its record left out of every page, too big, or one that did
+          // not verify) is held for today's checks, never left spendable on the page's word. Nothing is spendable that
+          // this device can't build a broadcast for from its own data (1p checks: such a send posted nothing).
+          const { user } = await a.device.findOrInsertUser(a.identityKey);
+          const n = await holdUnverified(a.device, user.userId).catch(() => 0);
+          if (n) a.log?.(`[spendable-first] ${n} coin(s) not verified by the snapshot: held for the ordinary checks`);
+        }
         await a.save(mark);
       },
     });

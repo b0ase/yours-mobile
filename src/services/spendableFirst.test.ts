@@ -30,6 +30,7 @@ import {
 } from './spendableFirst';
 
 const BASE_HEIGHT = 900_000;
+const broadcasts = { accept: false };
 /** The chain's headers, as the wallet's tracker knows them: height → Merkle root. */
 const headers = new Map<number, string>();
 const tracker = {
@@ -68,6 +69,11 @@ const services = new Proxy(
     ],
     nLockTimeIsFinal: async () => true,
     hashOutputScript: (s: string) => s,
+    // Only while `broadcasts.accept`: a payment that goes out and is not mined yet. Else no network.
+    postBeef: async (_beef: unknown, txids: string[]) => {
+      if (!broadcasts.accept) throw new Error('no network in this test: services.postBeef');
+      return [{ name: 'fake', status: 'success', txidResults: txids.map((txid) => ({ txid, status: 'success' })) }];
+    },
   } as Record<string, unknown>,
   {
     get: (t, p) =>
@@ -169,6 +175,7 @@ function deps(
     client: async () => client,
     device: () => dev as unknown as SnapshotDevice,
     identityKey: async () => kd.identityKey,
+    spends: async (outpoints) => outpoints.map(() => null), // the chain: every coin unspent
     ...over,
   };
 }
@@ -322,6 +329,7 @@ describe('stage 1: the lean snapshot', () => {
       identityKey: kd.identityKey,
       serverSik: db.getSettings().storageIdentityKey,
       lean: true,
+      spends: async (ops) => ops.map(() => null),
       onPage: async (_n, r) => {
         merged += r.coins.length;
         seen.push({ merged, spendable: (await spendable(dev)).length });
@@ -517,7 +525,7 @@ describe('stage 3: the full snapshot in the background', () => {
     expect(r.client.calls.length).toBe(calls);
   });
 
-  test('a page with a bad proof is refused (not merged), and the unverified coins are held back', async () => {
+  test('a bad proof holds back only its own coins (1p checks, 21 Nov 2026): the rest of the page merges', async () => {
     const r = await restored({
       fullPageMax: 2,
       tamperPage: (p, lean) => {
@@ -525,10 +533,25 @@ describe('stage 3: the full snapshot in the background', () => {
         const proofs = (p.chunk as { provenTxs: { merkleRoot: string; height: number }[] }).provenTxs;
         if (proofs[0]) proofs[0].height += 1;
       },
+      // ...and the server has no good copy of those transactions either.
+      tamperBeef: (b) => void b.txs.splice(0, b.txs.length),
+    });
+    const { end } = await full(r);
+    expect(end.stage).toBe('done');
+    // Three pages, the first proof of each bad: those three coins held, the other two verified and spendable.
+    expect(await r.dev.findProvenTxs({ partial: {} })).toHaveLength(2);
+    expect(await spendable(r.dev)).toHaveLength(2);
+  });
+
+  test('a whole page that can not be trusted (another identity) is refused, and unverified coins held', async () => {
+    const r = await restored({
+      fullPageMax: 2,
+      tamperPage: (p, lean) => {
+        if (!lean) (p.chunk as { userIdentityKey: string }).userIdentityKey = '02' + 'ab'.repeat(32);
+      },
     });
     const { end } = await full(r);
     expect(end.stage).toBe('refused');
-    expect(await r.dev.findProvenTxs({ partial: {} })).toHaveLength(0);
     expect(await spendable(r.dev)).toHaveLength(0);
   });
 
@@ -734,5 +757,185 @@ describe('review 5 (LOW-MED): background pages and the ordinary pull never inter
     expect(txids.length).toBe((await r.db.findTransactions({ partial: {} })).length);
     const proofs = (await r.dev.findProvenTxs({ partial: {} })).map((p) => p.txid);
     expect(new Set(proofs).size).toBe(proofs.length);
+  });
+});
+
+// ── the real mainnet 1p checks, 21 Nov 2026 (check 76): each failure, failing first ──
+
+/** Our server's wallet, whose last payment went out and was not mined at backup time (no proof, no parents in its record). */
+async function serverWithUnconfirmed(root: PrivateKey) {
+  const s = await serverWith(root);
+  const sm = new WalletStorageManager(s.kd.identityKey, s.db);
+  await sm.makeAvailable();
+  sm.setServices(services);
+  const w = new Wallet({ chain: 'main', keyDeriver: s.kd, storage: sm, services } as never);
+  broadcasts.accept = true;
+  let paid;
+  try {
+    paid = await w.createAction({
+      description: 'the last payment before the backup',
+      outputs: [
+        {
+          lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+          satoshis: 1000,
+          outputDescription: 'to someone',
+        },
+      ],
+      options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
+    });
+  } finally {
+    broadcasts.accept = false;
+  }
+  const txid = paid.txid!;
+  const [t] = await s.db.findTransactions({ partial: { txid } });
+  expect(t.status).toBe('unproven');
+  // As the toolbox keeps a change-funded send's record: an input BEEF with no transactions in it.
+  const [q] = await s.db.findProvenTxReqs({ partial: { txid } });
+  await s.db.updateProvenTxReq(q.provenTxReqId, { inputBEEF: new Beef().toBinary() });
+  return { ...s, txid };
+}
+
+describe('1p 4 + #385: only coins of a real transaction are taken; the count is what the device shows', () => {
+  test('a coin the server still calls spendable under a FAILED transaction is not taken, not counted, not merged', async () => {
+    const { kd, db, receipts } = await serverWith(PrivateKey.fromRandom());
+    const [t] = await db.findTransactions({ partial: { txid: receipts[0].txid } });
+    await db.updateTransaction(t.transactionId, { status: 'failed' });
+    const client = fakeSnapshotServer(db);
+    const { dev, wallet } = await device(kd);
+    const r = await restoreSpendableFirst(deps(client, dev, kd));
+    expect(r).toEqual({ used: true, coins: 4, sats: TOTAL - PAYMENTS[0], held: 0 });
+    const lo = await wallet.listOutputs({ basket: 'default', limit: 100 });
+    expect(lo.outputs.reduce((a, o) => a + o.satoshis, 0)).toBe(TOTAL - PAYMENTS[0]);
+    // internalizeAction refuses a failed transaction (#385): none comes in with the snapshot.
+    expect((await dev.findTransactions({ partial: {} })).map((x) => x.status)).not.toContain('failed');
+  });
+
+  test('full pages leave such a transaction out too', async () => {
+    const r = await restored({ fullPageMax: 2 });
+    const [t] = await r.db.findTransactions({ partial: { txid: r.receipts[1].txid } });
+    await r.db.updateTransaction(t.transactionId, { status: 'failed' });
+    const end = await runFullSnapshot({
+      client: r.client,
+      device: r.dev as unknown as SnapshotDevice,
+      identityKey: r.kd.identityKey,
+      serverSik: r.db.getSettings().storageIdentityKey,
+      tracker,
+      mark: { stage: 'full', after: 0, at: 0 },
+      save: async () => undefined,
+    });
+    expect(end.stage).toBe('done');
+    expect((await r.dev.findTransactions({ partial: {} })).map((x) => x.status)).not.toContain('failed');
+    // Its lean coin had no verified bytes when the snapshot ended: held for today's checks.
+    expect(sum(await spendable(r.dev))).toBe(TOTAL - PAYMENTS[1]);
+  });
+});
+
+describe('1p 1: a lean coin counts only once the chain says it is unspent', () => {
+  test('a coin spent after the backup is never counted, and is marked spent with a fresh time (our server hears)', async () => {
+    const { kd, db, receipts } = await serverWith(PrivateKey.fromRandom());
+    const client = fakeSnapshotServer(db);
+    const { dev } = await device(kd);
+    const gone = `${receipts[2].txid}.0`;
+    const asked: string[] = [];
+    const t0 = Date.now();
+    const r = await restoreSpendableFirst(
+      deps(client, dev, kd, {
+        spends: async (ops) => (asked.push(...ops), ops.map((o) => (o === gone ? 'ee'.repeat(32) : null))),
+      }),
+    );
+    expect(r).toEqual({ used: true, coins: 4, sats: TOTAL - PAYMENTS[2], held: 1 });
+    expect(asked.sort()).toEqual(receipts.map((x) => `${x.txid}.0`).sort());
+    expect(sum(await spendable(dev))).toBe(TOTAL - PAYMENTS[2]);
+    const [row] = await dev.findOutputs({ partial: { txid: receipts[2].txid, vout: 0 } });
+    expect(row.spendable).toBe(false);
+    // A fresh time: the first push to our server (and to 1Sat) carries "spent".
+    expect(row.updated_at.getTime()).toBeGreaterThanOrEqual(t0);
+  });
+
+  test('a coin the chain gives no answer about is held (its own time kept), not counted', async () => {
+    const { kd, db, receipts } = await serverWith(PrivateKey.fromRandom());
+    const client = fakeSnapshotServer(db);
+    const { dev } = await device(kd);
+    const unclear = `${receipts[0].txid}.0`;
+    const r = await restoreSpendableFirst(
+      deps(client, dev, kd, { spends: async (ops) => ops.map((o) => (o === unclear ? undefined : null)) }),
+    );
+    expect(r).toEqual({ used: true, coins: 4, sats: TOTAL - PAYMENTS[0], held: 1 });
+    const [row] = await dev.findOutputs({ partial: { txid: receipts[0].txid, vout: 0 } });
+    const [theirs] = await db.findOutputs({ partial: { txid: receipts[0].txid, vout: 0 } });
+    expect(row.spendable).toBe(false);
+    expect(row.updated_at.getTime()).toBe(theirs.updated_at.getTime());
+  });
+
+  test('no chain answer at all (or no chain check): not used, nothing spendable, today’s path runs', async () => {
+    const { kd, db } = await serverWith(PrivateKey.fromRandom());
+    const client = fakeSnapshotServer(db);
+    const a = await device(kd);
+    const r = await restoreSpendableFirst(
+      deps(client, a.dev, kd, { spends: () => Promise.reject(new Error('1sat down')) }),
+    );
+    expect(r.used).toBe(false);
+    if (!r.used) expect(r.reason).toMatch(/chain/);
+    expect(await spendable(a.dev)).toHaveLength(0);
+    const b = await device(kd);
+    expect((await restoreSpendableFirst(deps(client, b.dev, kd, { spends: undefined }))).used).toBe(false);
+    expect(await spendable(b.dev)).toHaveLength(0);
+  });
+});
+
+describe('1p 2: an unconfirmed record is verified as unconfirmed, never refused for lacking a proof', () => {
+  test('its ancestry comes from our server (BEEF back to proven parents): stage 3 done, balance kept, pays offline', async () => {
+    const root = PrivateKey.fromRandom();
+    const s = await serverWithUnconfirmed(root);
+    const client = fakeSnapshotServer(s.db, { fullPageMax: 2 });
+    const d = await device(s.kd);
+    const r = await restoreSpendableFirst(deps(client, d.dev, s.kd));
+    expect(r.used).toBe(true);
+    const fast = sum(await spendable(d.dev));
+    expect(fast).toBe(sum((await spendable(s.db)).filter((o) => o.change))); // the 1000 paid out is not ours
+    const end = await runFullSnapshot({
+      client,
+      device: d.dev as unknown as SnapshotDevice,
+      identityKey: s.kd.identityKey,
+      serverSik: s.db.getSettings().storageIdentityKey,
+      tracker,
+      owns: walletOwnership(root),
+      mark: { stage: 'full', after: 0, at: 0 },
+      save: async () => undefined,
+    });
+    expect(end.stage).toBe('done');
+    expect(sum(await spendable(d.dev))).toBe(fast);
+    const [q] = await d.dev.findProvenTxReqs({ partial: { txid: s.txid } });
+    expect(q.status).toBe('nosend');
+    // Its record now carries the parents, so the device builds the coin's BEEF from its own data, our server gone.
+    const beef = await d.dev.getBeefForTransaction(s.txid, { ignoreServices: true } as never);
+    expect(await beef.findAtomicTransaction(s.txid)!.verify(tracker as never)).toBe(true);
+  });
+
+  test('a record nothing verifies holds back only its own coins', async () => {
+    const root = PrivateKey.fromRandom();
+    const s = await serverWithUnconfirmed(root);
+    const client = fakeSnapshotServer(s.db, {
+      fullPageMax: 2,
+      tamperBeef: (b) => void b.txs.splice(0, b.txs.length),
+    });
+    const d = await device(s.kd);
+    expect((await restoreSpendableFirst(deps(client, d.dev, s.kd))).used).toBe(true);
+    const end = await runFullSnapshot({
+      client,
+      device: d.dev as unknown as SnapshotDevice,
+      identityKey: s.kd.identityKey,
+      serverSik: s.db.getSettings().storageIdentityKey,
+      tracker,
+      owns: walletOwnership(root),
+      mark: { stage: 'full', after: 0, at: 0 },
+      save: async () => undefined,
+    });
+    expect(end.stage).toBe('done');
+    const [t] = await s.db.findTransactions({ partial: { txid: s.txid } });
+    const theirs = (await spendable(s.db)).filter((o) => o.change && o.transactionId !== t.transactionId);
+    expect(sum(await spendable(d.dev))).toBe(sum(theirs));
+    expect(sum(theirs)).toBeGreaterThan(0);
+    for (const o of await d.dev.findOutputs({ partial: { txid: s.txid } })) expect(o.spendable).toBe(false);
   });
 });
