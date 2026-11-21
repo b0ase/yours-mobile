@@ -96,7 +96,7 @@ export const SubscriptionCard = ({
           Pays from
           <select
             value={sub.potId}
-            onChange={(e) => moveSub(sub.id, e.target.value)}
+            onChange={(e) => moveSub(sub.id, e.target.value, Date.now(), rate ?? 0)}
             className="rounded-lg px-2 py-1.5 text-xs font-bold text-white"
             style={{ background: LINE, border: 0 }}
           >

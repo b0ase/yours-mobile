@@ -580,12 +580,18 @@ export const formatAmount = (a: Subscription['amount']) =>
 
 const liveSub = (s: Subscription) => s.status === 'active' || s.status === 'lowFunds';
 
-/** Pays from: move a subscription to another pot. Its schedule and approval stay the same. */
-export const moveSub = (id: string, potId: string, now = Date.now()) => {
+/**
+ * Pays from: move a subscription to another pot. Its schedule and approval stay the same. A pot with no cap yet gets
+ * the default cap from its orders, as when an order is created in it (b-Aware row 350: a pot filled only by moves paid
+ * with no daily cap). `bsvUsd` prices a sats order; a pot whose cap is already set keeps it.
+ */
+export const moveSub = (id: string, potId: string, now = Date.now(), bsvUsd = 0) => {
   const s = getSub(id);
   const to = getPot(potId);
   if (!s || s.potId === potId || !to || !potCurrencyOk(to.unit, s.amount.currency)) return;
   saveSub({ ...s, potId, lastError: undefined });
+  const a = getAgentAccount(potId);
+  if (a && a.dailyCapUsd === null) setAgentDailyCap(potId, defaultDailyCap(listSubs(potId), bsvUsd));
   appendAgentLog(potId, { at: now, action: 'sub-move', detail: `${s.payee.name} now pays from here`, usd: 0 });
 };
 

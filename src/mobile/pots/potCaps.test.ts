@@ -16,10 +16,10 @@ const mem = new Map<string, string>();
   removeItem: (k: string) => void mem.delete(k),
 };
 
-const { CLAIM_TTL_MS, addSubscription, claimPeriod, getPending, getSub, makePot, savePending, saveSub } =
+const { CLAIM_TTL_MS, addSubscription, claimPeriod, getPending, getSub, makePot, moveSub, savePending, saveSub } =
   await import('./pots');
 const { PAY_LOCK, payDue } = await import('./payDue');
-const { appendAgentLog, checkAgentSpend, getAgentLog, ledgerSpentToday, setAgentDailyCap } =
+const { appendAgentLog, checkAgentSpend, getAgentAccount, getAgentLog, ledgerSpentToday, setAgentDailyCap } =
   await import('../agents/agentAccounts');
 
 const NOW = Date.parse('2026-03-10T12:00:00Z');
@@ -305,5 +305,52 @@ describe('row 233: two tabs paying one period at once give one payment', () => {
     expect(await payDue(d, NOW)).toEqual([{ id: s.id, ok: false, reason: 'Being paid in another window' }]);
     expect(network).toEqual([]);
     expect(getPending(s.id)?.txid).toBe('TX-B');
+  });
+});
+
+describe('row 350: moving a subscription into a pot with no cap gives that pot its cap', () => {
+  beforeEach(() => mem.clear());
+  const order = (potId: string, value: number, period: 'day' | { seconds: number } = 'day') =>
+    addSubscription(
+      {
+        potId,
+        payee: { name: 'Shop', address: '1Shop' },
+        amount: { value, currency: 'USD' },
+        period,
+        start: NOW + DAY,
+        maxCount: null,
+      },
+      50,
+      NOW,
+    );
+
+  test('a virgin pot gets the default cap from the moved order, and a big spend is refused', () => {
+    makePot('1A', 'A', undefined, NOW);
+    makePot('1B', 'B', undefined, NOW);
+    const s = order('1A', 10);
+    expect(checkAgentSpend('1A', 10_000, NOW).ok).toBe(false);
+    moveSub(s.id, '1B', NOW, 50);
+    expect(getSub(s.id)?.potId).toBe('1B');
+    expect(getAgentAccount('1B')?.dailyCapUsd).toBe(33);
+    expect(checkAgentSpend('1B', 10_000, NOW).ok).toBe(false);
+  });
+
+  test('an hourly order moved into a virgin pot is capped like one created there', () => {
+    makePot('1C', 'C', undefined, NOW);
+    makePot('1D', 'D', undefined, NOW);
+    const s = order('1C', 100, { seconds: 3600 });
+    moveSub(s.id, '1D', NOW, 50);
+    expect(getAgentAccount('1D')?.dailyCapUsd).toBe(getAgentAccount('1C')?.dailyCapUsd);
+    expect(checkAgentSpend('1D', 2_400, NOW).ok).toBe(false);
+  });
+
+  test('a pot that already has a cap keeps it', () => {
+    makePot('1A', 'A', undefined, NOW);
+    makePot('1B', 'B', undefined, NOW);
+    order('1B', 1);
+    setAgentDailyCap('1B', 7);
+    const s = order('1A', 10);
+    moveSub(s.id, '1B', NOW, 50);
+    expect(getAgentAccount('1B')?.dailyCapUsd).toBe(7);
   });
 });
