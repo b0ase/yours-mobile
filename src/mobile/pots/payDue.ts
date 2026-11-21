@@ -17,7 +17,7 @@ import {
   advanced,
   amountPnee,
   amountSats,
-  amountUsd,
+  amountUsdKnown,
   dueItems,
   formatAmount,
   clearPending,
@@ -224,11 +224,14 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       out.push(fail(s, PNEE_NO_SEND, deps));
       continue;
     }
-    if (!pnee && sats === null) {
-      out.push({ id: s.id, ok: false, reason: 'No price right now' }); // try again next open, no alert
+    // No rate: a dollar order can't be priced in sats, and a sats order can't be priced in dollars for the cap. Both
+    // wait (b-Aware row 267: a sats order was gated, and booked, as $0). Try again next open, no alert.
+    const each = amountUsdKnown(s.amount, deps.bsvUsd);
+    if (!pnee && (sats === null || each === null)) {
+      out.push({ id: s.id, ok: false, reason: 'No price right now' });
       continue;
     }
-    const usd = amountUsd(s.amount, deps.bsvUsd) * count;
+    const usd = (each ?? 0) * count;
     // Pot only, never the main balance: no fallback if the pot is gone or isn't a pot.
     if (!isPayingPot(s.potId)) {
       out.push(fail(s, 'Only a pot can pay. Pick a pot for this subscription.', deps));

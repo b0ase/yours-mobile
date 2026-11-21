@@ -232,12 +232,19 @@ export const potCurrencyOk = (unit: Pot['unit'], currency: Currency) =>
       ? currency === 'PNEE'
       : currency !== 'PNEE';
 
-/** One payment in dollars (for the spend gate and log). */
-export const amountUsd = (amount: Subscription['amount'], bsvUsd: number): number => {
+/**
+ * One payment in dollars for the spend gate and the log. null when it can't be priced: a sats order with no BSV rate.
+ * Never 0 for a real payment, so a cap check can't pass a payment as free (b-Aware row 267, 12 Nov 2026).
+ */
+export const amountUsdKnown = (amount: Subscription['amount'], bsvUsd: number): number | null => {
   if (amount.currency === 'USD') return amount.value;
-  if (amount.currency === 'SAT') return bsvUsd > 0 ? (amount.value / 1e8) * bsvUsd : 0;
+  if (amount.currency === 'SAT') return bsvUsd > 0 ? (amount.value / 1e8) * bsvUsd : null;
   return amount.value / 100; // PNEE: 1 unit = 1¢
 };
+
+/** One payment in dollars for display and the default cap: a sats order with no rate counts 0 here, never in a gate. */
+export const amountUsd = (amount: Subscription['amount'], bsvUsd: number): number =>
+  amountUsdKnown(amount, bsvUsd) ?? 0;
 
 /**
  * How many upcoming payments `balanceSats` covers across a pot's live subscriptions, paying them in due order.
