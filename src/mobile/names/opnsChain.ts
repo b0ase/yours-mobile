@@ -13,7 +13,8 @@ import { fieldPairs, isIdentityKey } from '@1sat/utils';
  *  2. The 1sat-stack name index (api.1sat.app, a different service): the name's registered origin, and the origin
  *     of the inscription at that outpoint (ORDFS), are both the origin the first index gave. Without this a lying
  *     index could point at any unspent coin the attacker holds.
- *  3. The key: only an identity binding on the owner output that its key signed (registerOpns's PushDrop) counts.
+ *  3. The key: the index's opns.idKey is called verified only when the owner output carries an identity binding
+ *     (registerOpns's PushDrop) that key signed. A binding naming another key refuses; a forged one drops the key.
  *
  * Any source that answers and contradicts another refuses ('refused'). Sources that can't be reached, or don't
  * know the name yet, leave it 'index': payable as before, but labelled "From the OpNS index", never "Verified on
@@ -180,15 +181,12 @@ export const checkOpnsOnChain = async (
     confirmed = false;
   } else if (spentRes?.status !== 404) confirmed = false;
 
-  // 3. The key: only a binding its key signed, on this very output.
-  let idKey: string | undefined;
-  if (tx) {
-    const bound = await signedBindingKey(tx, vout);
-    if (bound !== 'none' && bound !== 'bad') {
-      if (a.idKey && a.idKey.toLowerCase() !== bound.toLowerCase()) return refused(opnsMismatch(a.name));
-      idKey = bound;
-    }
-  }
-  // An index-only key stays (payable as before) but is never called verified.
-  return { status: confirmed ? 'chain' : 'index', idKey: idKey ?? a.idKey, keySigned: !!idKey };
+  // 3. The key: the index's opns.idKey is verified only by a binding that key signed on this very output. The chain
+  // check never adds a key the index didn't give (that would make names payable that weren't before), and a binding
+  // whose signature fails drops the index's key (unbound: not paid), so a forger's coin is never shown as "bound".
+  if (!a.idKey) return { status: confirmed ? 'chain' : 'index', keySigned: false };
+  const bound = tx ? await signedBindingKey(tx, vout) : 'none';
+  if (bound === 'bad') return { status: confirmed ? 'chain' : 'index', keySigned: false };
+  if (bound !== 'none' && bound.toLowerCase() !== a.idKey.toLowerCase()) return refused(opnsMismatch(a.name));
+  return { status: confirmed ? 'chain' : 'index', idKey: a.idKey, keySigned: bound !== 'none' };
 };

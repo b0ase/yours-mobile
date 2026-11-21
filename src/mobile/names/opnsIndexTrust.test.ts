@@ -97,13 +97,12 @@ describe('OpNS payee: one index answer is not enough', () => {
     expect(opnsTrustLabel(r)).toEqual({ verified: true, text: expect.stringContaining('Verified on chain') });
   });
 
-  test('a signed binding is found on chain even when the index leaves out opns.idKey', async () => {
+  test('a chain binding never makes a name payable that the index calls unbound', async () => {
     const tx = ownerTx(await boundLock(idPriv, ID_KEY));
-    const pd = PushDrop.decode(tx.outputs[0].lockingScript);
-    const owner = pd.lockingPublicKey.toAddress();
+    const owner = PushDrop.decode(tx.outputs[0].lockingScript).lockingPublicKey.toAddress();
     const r = await resolve(world(tx, owner));
-    expect(r.pubkey).toBe(ID_KEY);
-    expect(opnsTrustLabel(r)?.verified).toBe(true);
+    expect(r.pubkey).toBeUndefined();
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: UNBOUND_NAME });
   });
 
   test('an index-only opns.idKey (no signed binding on chain) shows the weaker label, never "Verified on chain"', async () => {
@@ -159,12 +158,13 @@ describe('OpNS payee: one index answer is not enough', () => {
     await expect(resolve(world(tx, owner, ID_KEY))).rejects.toThrow(/doesn't match/);
   });
 
-  test('a forged binding (identity field not signed by that key) is never "Verified on chain"', async () => {
+  test('a forged binding (identity field not signed by that key) is never shown as bound, and is not paid', async () => {
     const forger = PrivateKey.fromRandom();
     const tx = ownerTx(await boundLock(forger, ID_KEY));
     const owner = PushDrop.decode(tx.outputs[0].lockingScript).lockingPublicKey.toAddress();
     const r = await resolve(world(tx, owner, ID_KEY));
-    expect(opnsTrustLabel(r)?.verified).toBe(false);
+    expect(opnsTrustLabel(r)).toBeUndefined();
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: UNBOUND_NAME });
   });
 
   test('WhatsOnChain unreachable: the weaker label, never "Verified on chain"', async () => {
