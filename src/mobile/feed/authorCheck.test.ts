@@ -101,7 +101,7 @@ describe('checkPostAuthor / checkedPayment', () => {
     expect(await checkPostAuthor(post({ txid: t.txid, address: ATTACKER }), async () => t.hex)).not.toBeNull();
   });
   test('the post cannot be read: refused (never paid unchecked)', async () => {
-    const t = twetchTx();
+    const t = rawSigTx(AUTHOR, 'never read before');
     const why = await checkPostAuthor(post({ txid: t.txid }), async () => {
       throw new Error('offline');
     });
