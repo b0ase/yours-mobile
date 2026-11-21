@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import * as bip39 from 'bip39';
 import { looksLikeSecret } from '../agent/agent';
 import { redactSecrets } from './errorReport';
-import { containsPhrase } from './phraseGuard';
+import { containsPhrase, hidePhrases } from './phraseGuard';
 
 const W12 = 'abandon ability able about above absent absorb abstract absurd abuse access accident'.split(' ');
 const W24 = bip39.generateMnemonic(256).split(' ');
@@ -124,7 +124,10 @@ const leftOverAny = (out: string, words: string[]) => {
   const plain = (w: string) => w.normalize('NFKD').toLowerCase().replace(/\p{M}/gu, '');
   const want = new Set(words.flatMap((w) => [w.normalize('NFKD').toLowerCase(), plain(w)]));
   return Array.from(
-    out.replaceAll('[recovery words hidden]', ' ').normalize('NFKD').matchAll(/[\p{L}\p{M}]+/gu),
+    out
+      .replaceAll('[recovery words hidden]', ' ')
+      .normalize('NFKD')
+      .matchAll(/[\p{L}\p{M}]+/gu),
     (m) => m[0].toLowerCase(),
   ).filter((w) => want.has(w) || want.has(plain(w)));
 };
@@ -136,9 +139,32 @@ const expectBlocked = (text: string, words: string[]) => {
 };
 
 describe('recovery phrases joined by any punctuation (b-Aware 634, row 353)', () => {
-  const SEPS = [':', '=', ' : ', ' = ', '::', '=>', '->', '>', '<', '#', '@', '~', '!', '?', '&', '^', '%', '$', '"', "'", '`', '\t', '   '];
-  for (const sep of SEPS)
-    test(`joined by ${JSON.stringify(sep)}`, () => expectBlocked(W12.join(sep), W12));
+  const SEPS = [
+    ':',
+    '=',
+    ' : ',
+    ' = ',
+    '::',
+    '=>',
+    '->',
+    '>',
+    '<',
+    '#',
+    '@',
+    '~',
+    '!',
+    '?',
+    '&',
+    '^',
+    '%',
+    '$',
+    '"',
+    "'",
+    '`',
+    '\t',
+    '   ',
+  ];
+  for (const sep of SEPS) test(`joined by ${JSON.stringify(sep)}`, () => expectBlocked(W12.join(sep), W12));
   test('each word wrapped in brackets or quotes', () => {
     expectBlocked(W12.map((w) => `(${w})`).join(''), W12);
     expectBlocked(W12.map((w) => `[${w}]`).join(''), W12);
@@ -179,20 +205,28 @@ const OTHER_LISTS = [
 ] as const;
 
 describe('recovery phrases in every BIP39 language (b-Aware 657, row 364)', () => {
-  test("the reporter's Japanese phrase", () => {
+  test("the reporter's Japanese phrase, as the report ran it: looksLikeSecret(jp) and hidePhrases(jp)", () => {
+    // As it arrived by email, two of the twelve words ("しゅうかい", "あわう") are not in the list: a phrase with typos.
     const jp = 'ごうい すもう あこがれる くろう なふだ うすぎ せめる はいち すくう ていど しゅうかい あわう';
-    expectBlocked(jp, jp.split(' '));
+    expect(looksLikeSecret(jp)).toBe(true);
+    expect(hidePhrases(jp)).toBe('[recovery words hidden]');
   });
   for (const lang of OTHER_LISTS) {
     const list = bip39.wordlists[lang];
     for (const bits of [128, 256]) {
-      const words = bip39.generateMnemonic(bits, undefined, list).normalize('NFC').split(/[\s　]+/);
+      const words = bip39.generateMnemonic(bits, undefined, list).normalize('NFC').split(/\s+/); // \s takes in U+3000, the space bip39 puts between Japanese words
       const forms: Array<[string, string]> = [
         ['plain', words.join(' ')],
         ['as bip39 writes it', bip39.entropyToMnemonic(bip39.mnemonicToEntropy(words.join(' '), list), list)],
         ['numbered', words.map((w, i) => `${i + 1}. ${w}`).join(' ')],
         ['one per line', words.join('\n')],
-        ['numbered grid', grid(words.map((w, i) => `${i + 1}. ${w}`), 3)],
+        [
+          'numbered grid',
+          grid(
+            words.map((w, i) => `${i + 1}. ${w}`),
+            3,
+          ),
+        ],
         ['colon-joined', words.join(':')],
         ['equals-joined', words.join('=')],
         ['filler between words', words.join(' zz ')],
@@ -200,7 +234,7 @@ describe('recovery phrases in every BIP39 language (b-Aware 657, row 364)', () =
       if (/^[\p{Script=Latin}]/u.test(words[0]))
         forms.push(['accents dropped', words.map((w) => w.normalize('NFKD').replace(/\p{M}/gu, '')).join(' ')]);
       for (const [name, text] of forms)
-        test(`${lang} ${bits / 32 * 3} words, ${name}`, () => expectBlocked(text, words));
+        test(`${lang} ${(bits / 32) * 3} words, ${name}`, () => expectBlocked(text, words));
     }
   }
 });

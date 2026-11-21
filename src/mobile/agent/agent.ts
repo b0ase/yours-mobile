@@ -50,7 +50,8 @@ export const looksLikeSecret = (text: string): boolean => {
   if (/(?<![1-9A-HJ-NP-Za-km-z])[xt]prv[1-9A-HJ-NP-Za-km-z]{100,}/.test(t)) return true;
   // A labelled password / passphrase / PIN / key ("my password is hunter2", "pin: 4821").
   if (SECRET_LABELLED.test(t)) return true;
-  // Recovery words however written: numbered, one per line, in a grid, capitals, after a label (phraseGuard.ts).
+  // Recovery words however written and in any BIP39 language: numbered, one per line, in a grid, capitals, joined by
+  // any punctuation, with filler words between, after a label (phraseGuard.ts).
   if (containsPhrase(t)) return true;
   // 12 / 15 / 18 / 21 / 24 lowercase words and nothing else: a recovery phrase.
   const words = t.split(/\s+/);
