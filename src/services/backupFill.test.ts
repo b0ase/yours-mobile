@@ -161,6 +161,44 @@ describe('first fill of a new backup', () => {
     expect((await x.backup.findTransactions({ partial: {} })).map((t) => t.txid)).toEqual([fresh]);
   });
 
+  test('1p checks, 21 Nov 2026: the restore-point pass stays inside the real server’s RPC limits', async () => {
+    // storage.bwalletx.com (toolbox StorageServer) refuses any list offset over 1,000,000 ("RPC list offsets must not
+    // exceed 1000000"): the refs-only pass sent MAX_SAFE_INTEGER, so a restored device never filled our server, and
+    // a coin it found spent never reached it.
+    const x = await setup(3);
+    await new Promise((r) => setTimeout(r, 20));
+    const restorePoint = new Date();
+    await new Promise((r) => setTimeout(r, 20));
+    const fresh = await receive(x.wallet, x.kd, 4343);
+    const real = x.backup.processSyncChunk.bind(x.backup);
+    const writer = Object.assign(Object.create(x.backup), {
+      processSyncChunk: async (args: { offsets: { offset: number }[] }, chunk: never) => {
+        if (args.offsets.some((o) => o.offset > 1_000_000)) throw new Error('RPC list offsets must not exceed 1000000');
+        return real(args as never, chunk);
+      },
+    });
+    const r = await fillBackup({ manager: x.manager, reader: x.dev, writer, restorePoint, marginMs: 0 });
+    expect(r.how).toBe('restore-point');
+    expect((await x.backup.findTransactions({ partial: {} })).map((t) => t.txid)).toEqual([fresh]);
+  });
+
+  test('1p checks, 21 Nov 2026: fill pages are push pages, so they carry the rows they are filed under', async () => {
+    // A coin marked spent after an instant restore has a transaction row older than the restore point: the page must
+    // carry that parent (services/pushParents.ts treats only includeNextCheckpoint pages as pushes), or our server
+    // can't file the coin ("Undefined binding(s)… transactionId") and the push never lands.
+    const x = await setup(2);
+    const asked: unknown[] = [];
+    const reader = Object.assign(Object.create(x.dev), {
+      getSyncChunk: (args: { includeNextCheckpoint?: unknown }) => (
+        asked.push(args.includeNextCheckpoint),
+        x.dev.getSyncChunk(args as never)
+      ),
+    });
+    await fillBackup({ manager: x.manager, reader, writer: x.backup, restorePoint: new Date(), marginMs: 0 });
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((a) => a === true)).toBe(true);
+  });
+
   test('nothing new since the restore point: the two-pass fill instead (never a from-the-start push in the locks)', async () => {
     const x = await setup(4);
     const r = await fillBackup({

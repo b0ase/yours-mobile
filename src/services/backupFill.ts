@@ -35,6 +35,9 @@ const ENTITIES: [name: string, key: string][] = [
   ['provenTxReq', 'provenTxReqs'],
 ];
 
+/** The largest list offset any of our server's profiles accepts (the toolbox StorageServer's 'small' limit). */
+const WRITER_MAX_OFFSET = 100_000;
+
 /** Clock skew and in-flight writes: pass 2 starts this long before pass 1 did. */
 export const FILL_MARGIN_MS = 30_000;
 
@@ -112,8 +115,17 @@ export async function fillBackup(d: {
         maxItems: d.maxItems ?? 200,
         includeNextCheckpoint: false,
       };
-      const chunk = await d.reader.getSyncChunk(args);
-      const r = await d.writer.processSyncChunk(args, chunk);
+      // Read as a push page (pushParents.isPushPage): it carries the rows its own are filed under. A coin changed after
+      // an instant restore has a transaction row older than the restore point; without it our server can't file the
+      // coin ("Undefined binding(s)… transactionId") and the fill never lands (1p checks, 21 Nov 2026).
+      const chunk = await d.reader.getSyncChunk({ ...args, includeNextCheckpoint: true });
+      // The writer only checks the offsets against its limits (no requireMatchingCheckpoint): our server refuses any over
+      // its profile's maximum (100,000 to 10,000,000; "RPC list offsets must not exceed 1000000" on storage.bwalletx.com,
+      // 1p checks 21 Nov 2026), and the refs-only pass's "past the end" is MAX_SAFE_INTEGER.
+      const r = await d.writer.processSyncChunk(
+        { ...args, offsets: offsets.map((o) => ({ name: o.name, offset: Math.min(o.offset, WRITER_MAX_OFFSET) })) },
+        chunk,
+      );
       report.pages++;
       for (const [name, key] of ENTITIES) {
         const rows = chunk[key];
