@@ -391,7 +391,7 @@ describe('a new destination must be tied to the key the host serves (backlog ran
           return err as Error;
         }
       })();
-      expect(e?.message).toMatch(/nothing ties .* to its wallet key/);
+      expect(e?.message).toMatch(/nothing ties to its wallet key/);
       // A refusal, not a review: there is nothing for the user to approve.
       expect(e).not.toBeInstanceOf(PayeeReviewError);
     }

@@ -12,7 +12,13 @@
  * Orders saved before address pinning have no pinnedAddress (legacyPin). They are pinned only when the address that
  * resolves now is the one their last payment went to; otherwise they stop and ask once. An approved app subscription
  * to a paymail (pinOnFirstPay) pins what its first payment pays, since nothing has been paid to compare with yet.
+ *
+ * A NEW destination (set-up, a review approval, an app subscription's first payment) must also be one the wallet can
+ * check: a basic-resolution paymail address is taken only when it is the served identity key's own P2PKH address.
+ * Basic paymail has no signed destination, so any other address is one the host alone vouches for and is refused
+ * (backlog 21 Nov 2026, rank 1). Typed addresses, raw keys and OpNS owners are not host-served and pass.
  */
+import { PublicKey } from '@bsv/sdk';
 import { destinationFor, proofRefusal, type Resolved } from '../names/names';
 import { checkPaymentOutputs } from '../../utils/guardedSendBsv';
 import type { Payee, Subscription } from './pots';
@@ -41,6 +47,10 @@ export const PAYEE_ADDRESS_CHANGED =
   'This paymail now gives a different address than the one you approved. Not paying it until you approve the new destination.';
 export const PAYEE_LEGACY_CONFIRM =
   'This subscription was set up before bWalletX remembered the address it pays. Not paying it until you approve where it goes.';
+export const PAYEE_UNVERIFIABLE = (paymail: string) =>
+  `${paymail} gives an address that nothing ties to its wallet key, so later payments can’t be checked. Subscriptions can’t pay it: use a Bitcoin address instead.`;
+export const PAYEE_REVIEW_MOVED =
+  'This paymail now gives a different destination than the one shown. Nothing was approved: check it again.';
 export const P2P_ONLY = (paymail: string) => `${paymail} only takes P2P payments, which subscriptions can’t send yet`;
 
 /** The review card's headline (b-Aware row 73). */
@@ -52,12 +62,36 @@ export const keyFingerprint = (key: string) => (key.length > 16 ? `${key.slice(0
 
 export type PayeeDestination = { address: string; pubkey?: string };
 
+/** The P2PKH address of a served identity key, or undefined when it isn't a valid key. */
+const keyAddress = (key: string): string | undefined => {
+  try {
+    return PublicKey.fromString(key).toAddress();
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * True when `address` came from a paymail host's basic address resolution and is NOT the served key's own address:
+ * nothing but the host says it belongs to the payee, so a standing order can't be set up to it. Pure.
+ */
+export const unverifiableDestination = (r: Pick<Resolved, 'via' | 'pubkey'>, address: string): boolean =>
+  r.via === 'paymail-address' && (!r.pubkey || keyAddress(r.pubkey) !== address);
+
 /**
  * Where to pay a resolved paymail payee, or throw. destinationFor first (unbound / bad binding / BRC-169 key change
  * all refuse); then the pinned key and the pinned address must both match unless `ignorePin` (the user is reviewing
  * a new destination). Bad bindings and pin mismatches throw PayeeReviewError; other refusals throw a plain Error.
  */
-export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: boolean } = {}): PayeeDestination => {
+export const payeeDestination = (
+  p: Payee,
+  r: Resolved,
+  opts: {
+    ignorePin?: boolean;
+    /** A destination about to be pinned for the first time (set-up, review approval): it must be checkable. */
+    fresh?: boolean;
+  } = {},
+): PayeeDestination => {
   const d = destinationFor(r, 'bsv');
   if (!d.ok) {
     if (r.nameBinding === 'bad' || r.nameBinding === 'changed' || proofRefusal(r))
@@ -66,6 +100,9 @@ export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: bool
   }
   if (r.targetKind !== 'address') throw new Error(P2P_ONLY(p.paymail ?? r.input));
   const served = d.to;
+  // A destination pinned now (set-up, review, an app subscription's first payment) must be one the wallet can check.
+  const fresh = opts.fresh || (p.pinOnFirstPay && !p.pinnedAddress);
+  if (fresh && unverifiableDestination(r, served)) throw new Error(PAYEE_UNVERIFIABLE(p.paymail ?? r.input));
   if (p.pinnedKey && !opts.ignorePin) {
     if (!r.pubkey) throw new PayeeReviewError(PAYEE_KEY_MISSING, undefined, served);
     if (r.pubkey !== p.pinnedKey) throw new PayeeReviewError(PAYEE_KEY_CHANGED, r.pubkey, served);
@@ -74,6 +111,23 @@ export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: bool
   if (p.pinnedAddress && !opts.ignorePin && served !== p.pinnedAddress)
     throw new PayeeReviewError(PAYEE_ADDRESS_CHANGED, r.pubkey, served);
   return { address: served, ...(r.pubkey ? { pubkey: r.pubkey } : {}) };
+};
+
+type ResolveFresh = (p: Payee, opts: { ignorePin?: boolean; fresh?: boolean }) => Promise<PayeeDestination>;
+
+/**
+ * The destination a review card's Approve tap may pin, or throw: the payee is looked up again with the set-up checks
+ * (fresh), and when the card showed a destination the answer must be exactly that one. Approve never pins anything
+ * the user wasn't shown, nor an address nothing ties to the payee's key.
+ */
+export const reviewApproval = async (
+  s: Pick<Subscription, 'payee' | 'needsReview'>,
+  resolve: ResolveFresh,
+): Promise<PayeeDestination> => {
+  const d = await resolve(s.payee, { ignorePin: true, fresh: true });
+  const shown = s.needsReview?.servedAddress;
+  if (shown && (d.address !== shown || d.pubkey !== s.needsReview?.servedKey)) throw new Error(PAYEE_REVIEW_MOVED);
+  return d;
 };
 
 /**

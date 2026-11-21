@@ -1,7 +1,7 @@
 import { PNEE_POTS_ENABLED } from '../storeBuild';
 import { useState } from 'react';
 import { resolvePayee } from './potSend';
-import { keyFingerprint, pointsSomewhereNew } from './payeeBinding';
+import { keyFingerprint, pointsSomewhereNew, reviewApproval } from './payeeBinding';
 import {
   amountSats,
   cancelSub,
@@ -178,14 +178,15 @@ const ReviewPayee = ({ sub }: { sub: Subscription }) => {
   const [err, setErr] = useState('');
   const review = sub.needsReview;
   const served = review?.servedAddress;
-  // The destination was refused outright (bad binding, key gone): look it up again and show it before any approval.
-  const check = async () => {
+  // Approve looks the payee up again with the set-up checks: it pins only what this card shows (or, when the
+  // destination itself was refused, what the confirm shows), never an address nothing ties to the payee's key.
+  const approve = async () => {
     setBusy(true);
     setErr('');
     try {
-      const d = await resolvePayee(sub.payee, { ignorePin: true });
+      const d = await reviewApproval(sub, resolvePayee);
       const who = d.pubkey ? `wallet key ${keyFingerprint(d.pubkey)}` : 'no wallet key';
-      if (window.confirm(`Pay ${sub.payee.paymail ?? sub.payee.name} at ${d.address} (${who}) from now on?`))
+      if (served || window.confirm(`Pay ${sub.payee.paymail ?? sub.payee.name} at ${d.address} (${who}) from now on?`))
         confirmPayeeReview(sub.id, d);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -221,17 +222,18 @@ const ReviewPayee = ({ sub }: { sub: Subscription }) => {
       {served ? (
         <button
           type="button"
-          onClick={() => confirmPayeeReview(sub.id, { address: served, pubkey: review?.servedKey })}
+          onClick={() => void approve()}
+          disabled={busy}
           className="rounded-lg px-3 py-2 text-sm font-bold border-0"
           style={{ background: LINE, color: '#fff' }}
           data-testid="sub-review-approve"
         >
-          Approve new destination
+          {busy ? 'Checking…' : 'Approve new destination'}
         </button>
       ) : (
         <button
           type="button"
-          onClick={() => void check()}
+          onClick={() => void approve()}
           disabled={busy}
           className="rounded-lg px-3 py-2 text-sm font-bold border-0"
           style={{ background: LINE, color: '#fff' }}
