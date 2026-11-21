@@ -1,5 +1,5 @@
 import type { Contact } from '../chat/contacts';
-import { CAP, fill, getCapabilities, resolveOpns, type Fetch } from '../names/names';
+import { CAP, fill, getCapabilities, resolveOpns, type Fetch, type Resolved } from '../names/names';
 import { listPaymails, type WalletName } from '../names/paymail';
 
 /**
@@ -186,6 +186,13 @@ export const fetchRoles = async (f: Fetch, handle: string): Promise<BusinessRole
 export type GetJson = (url: string) => Promise<unknown>;
 
 /** Everything public about one contact, in parallel; any source that fails is simply left out. */
+/**
+ * The key an OpNS name proves for a contact card: only a binding its key signed on the owner output, and only when
+ * the coin was also checked to be that name's inscription (opnsChecked 'chain'), never an index's opns.idKey string.
+ */
+export const opnsCardKey = (r: Pick<Resolved, 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>): string | undefined =>
+  r.opnsKeySigned && r.opnsChecked === 'chain' ? r.pubkey : undefined;
+
 export const loadCardInputs = async (c: Contact, f: Fetch, getJson: GetJson): Promise<CardInputs> => {
   const safe = <T>(p: Promise<T>, d: T) => p.catch(() => d);
   const [profile, paymailProfile, businesses] = await Promise.all([
@@ -202,7 +209,7 @@ export const loadCardInputs = async (c: Contact, f: Fetch, getJson: GetJson): Pr
         opnsCandidates(c, paymails).map((name) =>
           safe(
             // Only a binding its key signed on chain counts, never an index's opns.idKey string (b-Aware opns-indexer).
-            resolveOpns(f, name).then((r) => ({ name, pubkey: r.opnsKeySigned ? r.pubkey : undefined })),
+            resolveOpns(f, name).then((r) => ({ name, pubkey: opnsCardKey(r) })),
             { name } as OpnsCheck,
           ),
         ),
