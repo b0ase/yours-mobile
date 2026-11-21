@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { KeyDeriver, P2PKH, PrivateKey, ProtoWallet, Random, Utils } from '@bsv/sdk';
-import { BAD_ORD_PROOF, destinationCheck, destinationFor, resolvePaymail } from '../mobile/names/names';
+import { BAD_ORD_PROOF, destinationFor, resolvePaymail, UNSIGNED_ORD } from '../mobile/names/names';
 import { signOrdProof } from '../mobile/names/paymail';
 import { checkPaymentOutputs, sendBsv } from './guardedSendBsv';
 
@@ -225,10 +225,12 @@ describe('b_feedback 67: paymail scripts re-derived from the payee key before si
     r = await resolvePaymail(f, 'ann@bwallet.space');
     expect(r.ordAddress).toBeUndefined();
     expect(destinationFor(r, 'token')).toEqual({ ok: false, error: BAD_ORD_PROOF });
-    setup([], 'bwallet.space', { address: ord });
+    // b-Aware 102/250: our own host serving an address with no proof at all is refused too (fail closed).
+    const someoneElse = PrivateKey.fromRandom().toAddress();
+    setup([], 'bwallet.space', { address: someoneElse });
     r = await resolvePaymail(f, 'ann@bwallet.space');
-    expect(r.ordAddress).toBe(ord);
-    expect(destinationCheck(r, 'token')).toBe('unverified');
+    expect(r.ordAddress).toBeUndefined();
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: UNSIGNED_ORD });
   });
 });
 

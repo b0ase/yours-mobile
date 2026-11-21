@@ -11,8 +11,10 @@ import {
   externalLabel,
   TOKENS_UNSUPPORTED,
   UNBOUND_NAME,
+  UNSIGNED_ORD,
   type Fetch,
 } from './names';
+import { giftDestination } from './opnsGift';
 
 const ADDR = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
 
@@ -97,19 +99,32 @@ describe('paymail resolution', () => {
     expect(r).toMatchObject({ targetKind: 'address', via: 'paymail-address', target: ADDR });
   });
 
-  test('ordAddress capability enables tokens', async () => {
+  test('b-Aware 102/250: a host-served ord address with no owner signature is never sent tokens', async () => {
+    // The host answers c@ord.ex's ordinal capability with SOMEONE ELSE's address and no ordProof.
     const { f } = mock({
       'https://dns.google.com/': {},
       'https://ord.ex/.well-known/bsvalias': {
         capabilities: {
+          pki: 'https://ord.ex/id/{alias}@{domain.tld}',
           '2a40af698840': 'https://ord.ex/p2p/{alias}@{domain.tld}',
           '5c55a7fdb7bb': 'https://ord.ex/beef/{alias}@{domain.tld}',
           ordAddress: 'https://ord.ex/ord/{alias}@{domain.tld}',
         },
       },
+      'https://ord.ex/id/': { pubkey: '02ab' },
       'https://ord.ex/ord/': { address: ADDR },
     });
     const r = await resolveRecipient(f, parseRecipient('c@ord.ex'));
+    // Tokens, NFTs and names are refused; nothing points at the unproven address.
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: UNSIGNED_ORD });
+    expect(giftDestination(r)).toEqual({ ok: false, error: UNSIGNED_ORD });
+    expect(r.ordAddress).toBeUndefined();
+    // BSV still goes by the paymail's own (P2P) route.
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: 'c@ord.ex' });
+  });
+
+  test('a typed ordinals address is still sent to as-is (nothing a host could swap)', async () => {
+    const r = await resolveRecipient(mock({}).f, parseRecipient(ADDR));
     expect(destinationFor(r, 'token')).toEqual({ ok: true, to: ADDR });
   });
 

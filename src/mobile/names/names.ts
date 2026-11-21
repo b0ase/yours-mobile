@@ -573,6 +573,12 @@ export const TOKENS_UNSUPPORTED = "This name can't receive tokens";
 export const BAD_ORD_PROOF =
   "This name's ordinal address isn't signed by its owner's key, so it may have been swapped. Not sending tokens to it.";
 
+/**
+ * b-Aware 102/250: the host served an ordinal address with NO owner signature. Tokens, NFTs and names are never sent
+ * to it (fail closed): the host alone could have swapped in anyone's address. A typed 1… address still works.
+ */
+export const UNSIGNED_ORD = `This name's ordinals address isn't signed by its owner, so ${APP_NAME} can't be sure it's theirs. Not sending tokens to it. Ask them for their ordinals address (1…) and send to that instead.`;
+
 /** Shown on the pay sheet when bWalletX can't check the destination against the payee's key. */
 export const NOT_VERIFIED_NOTE = `Not verified: this name's host doesn't let ${APP_NAME} check the payment address against the owner's key.`;
 
