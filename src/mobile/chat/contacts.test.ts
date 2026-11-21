@@ -5,9 +5,11 @@ import {
   bDirectOf,
   canCall,
   canMessage,
+  contactLine,
   dmRooms,
   filterContacts,
   handleFromLabel,
+  provenLabel,
   mergeContacts,
   parseDmTarget,
   payTarget,
@@ -32,6 +34,8 @@ describe('mergeContacts', () => {
       [{ id: 'c1', handle: 'Alice', email: null, name: null }],
       [{ key: KEY, name: '$alice', avatar: 'a.png' }],
       [{ bapId: null, address: '1Addr', name: 'Carol' }],
+      null,
+      new Set([provenLabel('$alice', KEY)]),
     );
     expect(list.map((c) => c.name)).toEqual(['$alice', 'Carol']);
     const alice = list[0];
@@ -52,13 +56,69 @@ describe('mergeContacts', () => {
         { id: 'c3', handle: 'me', email: null, name: null },
       ],
       [{ key: KEY, name: 'dan@bwallet.space', avatar: null }],
-      [{ bapId: 'b', address: '1D', name: '$dan' }],
+      [],
       'me',
+      new Set([provenLabel('dan@bwallet.space', KEY)]),
     );
     expect(list).toHaveLength(1);
     expect(list[0].name).toBe('dan@bwallet.space');
-    expect(list[0].sources).toEqual(['bchat', 'friend', 'follow']);
+    expect(list[0].sources).toEqual(['bchat', 'friend']);
     expect(payTarget(list[0])).toBe('dan@bwallet.space');
+  });
+});
+
+/** b-Aware row 351 (baware:unverified-payee limb c): a self-chosen display name is never a $handle. */
+describe('display names are not handles', () => {
+  const ATTACKER = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
+  test('a Feed follow named "$alice" is not $alice and never joins the real $alice', () => {
+    const list = mergeContacts(
+      [{ id: 'c1', handle: 'alice', email: null, name: null }],
+      [],
+      [{ bapId: 'b', address: ATTACKER, name: '$alice' }],
+    );
+    expect(list).toHaveLength(2);
+    const real = list.find((c) => c.handle === 'alice')!;
+    expect(real.address).toBeNull();
+    expect(payTarget(real)).toBeNull();
+    const fake = list.find((c) => c.address === ATTACKER)!;
+    expect(fake.handle).toBeNull();
+    expect(fake.name).toBe('$alice (not verified)');
+    expect(contactLine(fake)).toBe(ATTACKER);
+  });
+  test('a follow named like a paymail is not that paymail', () => {
+    const [c] = mergeContacts([], [], [{ bapId: null, address: ATTACKER, name: 'alice@bwalletx.com' }]);
+    expect(c.handle).toBeNull();
+    expect(c.paymail).toBeNull();
+    expect(c.name).toBe('alice@bwalletx.com (not verified)');
+  });
+  test('a friend whose $name is not proven for its key gets no handle or paymail', () => {
+    const list = mergeContacts(
+      [{ id: 'c1', handle: 'alice', email: null, name: null }],
+      [{ key: KEY, name: '$alice', avatar: null }],
+      [],
+    );
+    expect(list).toHaveLength(2);
+    const friend = list.find((c) => c.identityKey === KEY)!;
+    expect(friend.handle).toBeNull();
+    expect(friend.name).toBe('$alice (not verified)');
+    const [pm] = mergeContacts([], [{ key: KEY, name: 'alice@bwalletx.com', avatar: null }], []);
+    expect(pm.paymail).toBeNull();
+    expect(payTarget(pm)).toBeNull();
+  });
+  test('a proof for another key does not count', () => {
+    const other = '03' + 'b'.repeat(64);
+    const [c] = mergeContacts(
+      [],
+      [{ key: KEY, name: '$alice', avatar: null }],
+      [],
+      null,
+      new Set([provenLabel('$alice', other)]),
+    );
+    expect(c.handle).toBeNull();
+  });
+  test('a plain display name is left as it is', () => {
+    const [c] = mergeContacts([], [], [{ bapId: null, address: ATTACKER, name: 'Carol' }]);
+    expect(c.name).toBe('Carol');
   });
   test('filter by name / handle', () => {
     const list = mergeContacts([{ id: '1', handle: 'zed', email: null, name: 'Zed' }], [], []);
