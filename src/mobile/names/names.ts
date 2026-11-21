@@ -17,6 +17,7 @@ const alsoOurs = (): string[] => [...(LEGACY_PAYMAIL_DOMAINS ?? []), ...(SIBLING
 import { isPlaceholderName } from './handlePrompt';
 import { compressedKey, keyAddress, knownKeyLabel, parsePubKey, shortKey } from './pubkeyRecipient';
 import { APP_NAME, STORE_BUILD } from '../storeBuild';
+import { checkOpnsOnChain } from './opnsChain';
 
 /**
  * "Send to a name": classify what the user typed in a recipient box and resolve it to
@@ -130,6 +131,13 @@ export type Resolved = {
   ordProofBad?: boolean;
   /** A raw public key exactly as typed (via 'pubkey'); `pubkey` holds its compressed form. */
   rawKey?: string;
+  /**
+   * OpNS only (opnsChain.ts): 'chain' = the owner output was checked on WhatsOnChain and against the 1sat name index;
+   * 'index' = only the OpNS index's word (a check source couldn't be reached or doesn't know the name yet).
+   */
+  opnsChecked?: 'chain' | 'index';
+  /** OpNS only: `pubkey` comes from an identity binding its key signed on the owner output, not an index string. */
+  opnsKeySigned?: boolean;
 };
 
 export class ResolveError extends Error {}
@@ -160,7 +168,7 @@ export const SERVICES = {
 type DohResponse = { Answer?: { type: number; data?: unknown }[] };
 type BsvaliasDoc = { capabilities?: Capabilities };
 type Fields = Record<string, unknown>;
-type OpnsRecord = { owner?: unknown; map?: Fields };
+type OpnsRecord = { owner?: unknown; outpoint?: unknown; origin?: unknown; map?: Fields };
 type Outpoint = { outpoint?: unknown };
 type Inscription = {
   owner?: unknown;
@@ -423,28 +431,50 @@ export const resolveOpns = async (f: Fetch, name: string): Promise<Resolved> => 
   const rec = await tryJson<OpnsRecord>(f, `${SERVICES.opnsApi}/${encodeURIComponent(name)}`);
   let owner = str(rec?.owner);
   let pubkey = str(rec?.map?.['opns.idKey']);
+  let outpoint = str(rec?.outpoint);
+  let origin = str(rec?.origin);
   if (!owner) {
     // Fallback: 1sat-stack origin → latest inscription location.
     const o = await tryJson<Outpoint>(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
-    const origin = str(o?.outpoint);
+    origin = str(o?.outpoint);
     if (!origin) throw new ResolveError(`No one has the name "${name}"`);
     const latest = await tryJson<Inscription>(
       f,
       `${SERVICES.inscriptionLatest}/${origin.replace('.', '_')}/latest?script=false`,
     );
     owner = str(latest?.owner);
+    outpoint = str(latest?.outpoint);
     pubkey ??= str(latest?.data?.map?.['opns.idKey']);
     if (!owner) throw new ResolveError(`Couldn't locate the owner of "${name}"`);
   }
+  // One index's answer is not enough (b-Aware opns-indexer): check the coin and the name on other sources.
+  const check = await checkOpnsOnChain(f, { name, owner, outpoint, origin, idKey: pubkey });
+  if (check.status === 'refused') throw new ResolveError(check.reason);
   return {
     input: name,
     target: owner,
     targetKind: 'address',
     via: 'opns-owner',
     displayName: name,
-    pubkey,
+    pubkey: check.idKey,
     ordAddress: owner,
+    opnsChecked: check.status,
+    opnsKeySigned: check.keySigned,
   };
+};
+
+/**
+ * The confirm-card line under a bound OpNS name. "Verified on chain" only when the owner output was checked on
+ * other sources AND the key is a binding its key signed there; anything less is "From the OpNS index".
+ */
+export const opnsTrustLabel = (
+  r: Pick<Resolved, 'via' | 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>,
+): { verified: boolean; text: string } | undefined => {
+  if (opnsBinding(r) !== 'bound') return undefined;
+  const key = shortKey(r.pubkey ?? '');
+  return r.opnsChecked === 'chain' && r.opnsKeySigned
+    ? { verified: true, text: `Verified on chain · bound to ${key}` }
+    : { verified: false, text: `From the OpNS index · bound to ${key} (not verified on chain)` };
 };
 
 /**

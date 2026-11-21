@@ -11,7 +11,7 @@ import { listPaymails, type WalletName } from '../names/paymail';
  *  - paymail public profile   bsvalias f12f968c92d6              → name + avatar
  *  - paymail pki              bsvalias pki                       → identity key (when the contact has none)
  *  - bWalletX paymail lookup  listPaymails(identityKey)          → their other paymails; a `.x` name proves X
- *  - OpNS                     resolveOpns(name)                  → a name counts only when bound to their key
+ *  - OpNS                     resolveOpns(name)                  → a name counts only when its signed binding is their key
  */
 
 export type PaymailPublic = { name?: string; avatar?: string; pubkey?: string };
@@ -201,7 +201,8 @@ export const loadCardInputs = async (c: Contact, f: Fetch, getJson: GetJson): Pr
     ? await Promise.all(
         opnsCandidates(c, paymails).map((name) =>
           safe(
-            resolveOpns(f, name).then((r) => ({ name, pubkey: r.pubkey })),
+            // Only a binding its key signed on chain counts, never an index's opns.idKey string (b-Aware opns-indexer).
+            resolveOpns(f, name).then((r) => ({ name, pubkey: r.opnsKeySigned ? r.pubkey : undefined })),
             { name } as OpnsCheck,
           ),
         ),

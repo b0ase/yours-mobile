@@ -5,6 +5,7 @@ import {
   businessLabel,
   fetchRoles,
   identityKeyOf,
+  loadCardInputs,
   opnsCandidates,
   parseBitsignPublic,
   parseRoles,
@@ -227,5 +228,18 @@ describe('roles and bio', () => {
       profile: { handle: 'alice', displayName: null, avatarUrl: null, bio: '  builder  ' },
     });
     expect(v.bio).toBe('builder');
+  });
+});
+
+describe('contact card: OpNS names (b-Aware opns-indexer)', () => {
+  test("an index-only opns.idKey never puts a name on someone's card: only a binding its key signed", async () => {
+    // The OpNS index claims "alice" is bound to this contact's key; nothing on chain backs it up.
+    const f = (async (url: string) =>
+      url === 'https://ordinals.gorillapool.io/api/opns/alice'
+        ? new Response(JSON.stringify({ owner: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa', map: { 'opns.idKey': KEY } }))
+        : new Response('{}', { status: 404 })) as never;
+    const inputs = await loadCardInputs(contact({ paymail: null }), f, async () => null);
+    expect(inputs.opns?.find((o) => o.name === 'alice')?.pubkey).toBeUndefined();
+    expect(buildCard(inputs).opnsNames).toEqual([]);
   });
 });

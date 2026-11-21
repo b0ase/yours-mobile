@@ -121,7 +121,7 @@ describe('OpNS payee: one index answer is not enough', () => {
     await expect(resolve(world(tx, ATTACKER, ID_KEY))).rejects.toThrow(/doesn't match/);
   });
 
-  test('a lying index pointing at someone else\'s coin (not this name\'s inscription) is refused', async () => {
+  test("a lying index pointing at someone else's coin (not this name's inscription) is refused", async () => {
     const tx = ownerTx(new P2PKH().lock(ATTACKER));
     const txid = tx.id('hex');
     const f = world(tx, ATTACKER, ID_KEY, {
