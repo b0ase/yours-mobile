@@ -16,7 +16,7 @@ import {
 } from './offer';
 import { mergeOffers, parseOffer, type OfferSealed } from './payload';
 import { acceptAndPay, retryPending, type Pending, type PendingStore } from './accept';
-import { verifyCompany, type Company } from './company';
+import { receiptLine, verifyCompany, type Company, type Receipt } from './company';
 import { brc29Script } from '../../utils/paymailDestination';
 
 // Test data only: random keys, a made-up reference and amount.
@@ -373,5 +373,29 @@ describe('verified company', () => {
     expect(verifyCompany({ ...co, directors: [] }, o, ok).verified).toBe(false);
     expect(verifyCompany(co, o, { companySig: false, directorSig: true }).verified).toBe(false);
     expect(verifyCompany(null, o, ok).verified).toBe(false);
+  });
+});
+
+describe('receipt line (b-Aware row 353: no rate at receipt)', () => {
+  const base: Receipt = {
+    status: 'received_shortfall',
+    offerRef: 'ACME-1',
+    offeree: { handle: null, identityKey: '02'.padEnd(66, '1') },
+    payment: { txid: 'ab', usdValue: '50.00', bsv: '1.00000000', rateUsdPerBsv: '50.00', shortfallUsd: '50.00', firstSeen: '' },
+    allotment: null,
+  };
+  test('a short payment says how short', () => {
+    expect(receiptLine(base)).toEqual({ amount: '$50.00', status: 'Received, short of the amount (short $50.00)' });
+  });
+  test('held for no rate: BSV amount, never a USD value or a shortfall', () => {
+    const r: Receipt = {
+      ...base,
+      held: 'rate_unavailable',
+      payment: { ...base.payment, usdValue: '0.00', rateUsdPerBsv: '0.00', shortfallUsd: '0.00' },
+    };
+    expect(receiptLine(r)).toEqual({
+      amount: '1.00000000 BSV',
+      status: 'Received, held: no exchange rate when it arrived, so it is not valued yet',
+    });
   });
 });
