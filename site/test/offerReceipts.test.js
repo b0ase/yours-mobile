@@ -171,6 +171,11 @@ describe('status rules (template §B)', () => {
     expect(offers.pickRate(51, 50)).toEqual({ rate: 51, source: 'payer-build' });
     expect(offers.pickRate(60, 50)).toEqual({ rate: 50, source: 'coingecko' });
   });
+  test("no server rate: the payer's claimed rate is never used (b-Aware 634, row 353)", () => {
+    expect(offers.pickRate(51, null)).toBeNull();
+    expect(offers.pickRate(1_000_000, 0)).toBeNull();
+    expect(offers.pickRate(undefined, null)).toBeNull();
+  });
 });
 
 describe('OP_RETURN', () => {
@@ -271,6 +276,23 @@ describe('receipt on payment', () => {
     expect(rec.status).toBe('received_shortfall');
     expect(rec.payment.shortfallUsd).toBe('50.00');
     expect(rec.allotment).toBeNull();
+  });
+
+  test('rate source down: held as rate_unavailable, never pending allotment, whatever rate the payer claims (row 353)', async () => {
+    const { h, st, notes } = await setup(undefined, null);
+    await h['offer-register']({}, await signed(company, 'offer-register', fields()));
+    // Half the BSV, with a claimed rate twice the real one: it would read as paid in full if the payer's rate counted.
+    const [s, r] = await pay(h, 100_000_000, await meta({ rateUsdPerBsv: '100.00' }));
+    expect(s).toBe(200);
+    const row = st.receipts.get(r.txid);
+    expect(row.status).not.toBe('received_pending_allotment');
+    expect(row.status).toBe('received_shortfall');
+    expect(row.record.held).toBe('rate_unavailable');
+    expect(row.record.payment.rateSource).toBe('rate_unavailable');
+    expect(row.record.payment.usdValue).toBe('0.00');
+    expect(row.record.payment.shortfallUsd).toBe('0.00');
+    expect(row.record.allotment).toBeNull();
+    expect(notes.length).toBe(1);
   });
 
   test('after the expiry: received_after_lapse', async () => {
