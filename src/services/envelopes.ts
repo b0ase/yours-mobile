@@ -725,8 +725,10 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
       return (original as (a: SpendArgs) => Promise<boolean>).call(manager, args);
     const originator = deps.normalize(args.originator);
     // A probe, or the BRC-177 check before the action is built, only looks (rows 322, 326). The action's own spend
-    // check, after it is built, takes the payment.
-    const lookOnly = args.seekPermission === false || (!mine && args.reason === BRC177_PREFLIGHT_REASON);
+    // check, after it is built, takes the payment. The prefunding check is the toolbox's: its literal reason and no
+    // line items. A site's own description can be any text (pModuleSpendGate passes it), but always with line items.
+    const preflight = !mine && args.reason === BRC177_PREFLIGHT_REASON && args.lineItems === undefined;
+    const lookOnly = args.seekPermission === false || preflight;
     // An envelope that can't be used safely (no shared lock, no answer in time) is treated as "doesn't fit": the
     // normal sheet for this payment, never an unlocked spend (review F4).
     let fits = false;
