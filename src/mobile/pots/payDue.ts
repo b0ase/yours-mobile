@@ -20,11 +20,14 @@ import {
   amountUsdKnown,
   dueItems,
   formatAmount,
+  claimPeriod,
   clearPending,
   getPending,
+  holdsClaim,
   getSub,
   isPayingPot,
   listSubs,
+  releaseClaim,
   savePending,
   saveSub,
   servicePayee,
@@ -104,9 +107,25 @@ export type PayOutcome =
 
 let running: Promise<PayOutcome[]> | null = null;
 
-/** Pay everything due. Concurrent calls share one run, so a quick resume can't pay twice. */
+/** A Web Locks API, as navigator.locks offers it (shared by every tab, popup and side panel of one origin). */
+type Locks = { request: <T>(name: string, options: object, cb: () => Promise<T>) => Promise<T> };
+export const PAY_LOCK = 'bwx-pots-pay';
+/**
+ * One pay run at a time on the device, not just in this tab (b-Aware row 233, BL-01): `running` and serialSpend live
+ * in one JS realm, so two tabs (or the popup and a tab) each paid the same period with a different tx. A run that
+ * waited for the lock starts from what is in storage, so it finds the period paid. Without navigator.locks, the
+ * per-period claim in run() is the guard. A lock that can't be taken rejects: nothing is paid (fail closed).
+ */
+const acrossTabs = <T>(fn: () => Promise<T>): Promise<T> => {
+  const locks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
+  return locks && typeof locks.request === 'function' ? locks.request(PAY_LOCK, {}, fn) : fn();
+};
+
+const IN_OTHER_TAB = 'Being paid in another window';
+
+/** Pay everything due. Concurrent calls share one run, and tabs take turns, so a quick resume can't pay twice. */
 export const payDue = (deps: PayDeps, now = Date.now()): Promise<PayOutcome[]> =>
-  (running ??= run(deps, now).finally(() => (running = null)));
+  (running ??= acrossTabs(() => run(deps, now)).finally(() => (running = null)));
 
 /** Still payable right now, by what is in storage (not a snapshot): the user may have paused or cancelled. */
 const live = (id: string): Subscription | null => {
@@ -148,6 +167,8 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
    * refused and pending forever. Nothing more is signed from such a pot in this run; its orders wait for the next.
    */
   const unsure = new Set<string>();
+  /** This run, as the owner of a per-period claim (pots.ts claimPeriod): the cross-tab guard without navigator.locks. */
+  const runId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   // Orders with a waiting payment first, so every unsure pot is known before any new signature (stable order otherwise).
   const ids = listSubs()
     .map((x) => x.id)
@@ -244,10 +265,15 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       out.push(fail(s, 'Only a pot can pay. Pick a pot for this subscription.', deps));
       continue;
     }
+    // The plan (count, usd, due times) is for these periods only: if they were paid while this order waited for its
+    // turn (another tab or run), the step below pays nothing rather than paying the next periods early.
+    const from = s.periodIndex;
     // Cap check, sign and log as one step, queued with agent spends so the two can't both pass the daily cap.
     const r = await serialSpend(async (): Promise<PayOutcome | null> => {
       let s = live(id);
-      if (!s) return null;
+      if (!s || s.periodIndex !== from) return null;
+      // Another tab signed and recorded these periods already: its record is settled on a later run, never re-signed.
+      if (getPending(id)) return { id, ok: false, reason: IN_OTHER_TAB };
       // A payment from this pot is unsure in this run: its coins may be in flight. Left for the next run, no alert.
       if (unsure.has(s.potId))
         return { id: s.id, ok: false, reason: 'Waiting for an earlier payment from this pot to go through' };
@@ -296,37 +322,46 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       const outputs = Array.from({ length: count }, () => ({ address, amount: perPeriod }));
       const refused = scheduledOutputsRefusal(outputs, address, perPeriod, count);
       if (refused) return fail(s, refused, deps);
-      let signed: { rawTx: string; txid: string };
+      // Claim these periods before signing, so a tab that starts now sees them taken (b-Aware row 233).
+      if (!claimPeriod(id, s.periodIndex, runId, now)) return { id, ok: false, reason: IN_OTHER_TAB };
       try {
-        signed = pnee
-          ? await deps.signPnee!(
-              s.potId,
-              outputs.map((o) => ({ address: o.address, units: o.amount })),
-              s.memo,
-            )
-          : await deps.sign(
-              s.potId,
-              outputs.map((o) => ({ address: o.address, sats: o.amount })),
-              s.memo,
-            );
-      } catch (e) {
-        const m = e instanceof Error ? e.message : String(e);
-        return fail(s, m, deps, /not enough|insufficient/i.test(m));
+        let signed: { rawTx: string; txid: string };
+        try {
+          signed = pnee
+            ? await deps.signPnee!(
+                s.potId,
+                outputs.map((o) => ({ address: o.address, units: o.amount })),
+                s.memo,
+              )
+            : await deps.sign(
+                s.potId,
+                outputs.map((o) => ({ address: o.address, sats: o.amount })),
+                s.memo,
+              );
+        } catch (e) {
+          const m = e instanceof Error ? e.message : String(e);
+          return fail(s, m, deps, /not enough|insufficient/i.test(m));
+        }
+        // Signed but not sent: if another tab took these periods meanwhile (claim lost, or its record is there), this tx
+        // is dropped unsent. Nothing was broadcast and pot signing holds no coins, so nothing is lost.
+        if (!holdsClaim(s.id, runId) || getPending(s.id)) return { id: s.id, ok: false, reason: IN_OTHER_TAB };
+        const p: PendingPayment = {
+          subId: s.id,
+          potId: s.potId,
+          periodIndex: s.periodIndex,
+          count,
+          dueTimes: plan.due,
+          ...signed,
+          usd,
+          at: now,
+          to: address,
+          ...(pnee ? { unit: 'PNEE' as const } : { sats: sats! * count }),
+        };
+        savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
+        return await settlePending(s, p, deps, now, unsure, false);
+      } finally {
+        releaseClaim(id, runId);
       }
-      const p: PendingPayment = {
-        subId: s.id,
-        potId: s.potId,
-        periodIndex: s.periodIndex,
-        count,
-        dueTimes: plan.due,
-        ...signed,
-        usd,
-        at: now,
-        to: address,
-        ...(pnee ? { unit: 'PNEE' as const } : { sats: sats! * count }),
-      };
-      savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
-      return settlePending(s, p, deps, now, unsure, false);
     });
     if (r) out.push(r);
   }

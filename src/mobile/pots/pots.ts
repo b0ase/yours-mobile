@@ -392,6 +392,31 @@ export const clearPending = (subId: string) => {
   write(PENDING, all);
 };
 
+/**
+ * Per-period pay claims (b-Aware row 233, BL-01): written before a payment is signed and checked again after, so two tabs
+ * (two JS realms, one localStorage) can't both sign and send the same periods when navigator.locks is missing. A claim
+ * older than CLAIM_TTL_MS (a tab killed mid-sign) no longer blocks: by then its tx was recorded as pending, or never sent.
+ */
+const CLAIMS = 'bwallet.pots.claims';
+export const CLAIM_TTL_MS = 2 * 60_000;
+type PayClaim = { periodIndex: number; by: string; at: number };
+/** Claim `periodIndex` of an order for the run `by`. false: another run holds a live claim on it. */
+export const claimPeriod = (subId: string, periodIndex: number, by: string, now = Date.now()): boolean => {
+  const all = read<Record<string, PayClaim>>(CLAIMS, {});
+  const c = all[subId];
+  if (c && c.by !== by && c.periodIndex === periodIndex && Math.abs(now - c.at) < CLAIM_TTL_MS) return false;
+  write(CLAIMS, { ...all, [subId]: { periodIndex, by, at: now } });
+  return true;
+};
+export const holdsClaim = (subId: string, by: string): boolean =>
+  read<Record<string, PayClaim>>(CLAIMS, {})[subId]?.by === by;
+export const releaseClaim = (subId: string, by: string) => {
+  const all = read<Record<string, PayClaim>>(CLAIMS, {});
+  if (all[subId]?.by !== by) return;
+  delete all[subId];
+  write(CLAIMS, all);
+};
+
 /** Turn a freshly created account into a pot (agent account kind 'pot' + the pot record). */
 export const makePot = (identityAddress: string, name: string, emoji?: string, now = Date.now()): Pot => {
   if (!getAgentAccount(identityAddress)) markAgentAccount(identityAddress, [], now, { kind: 'pot' });

@@ -16,8 +16,9 @@ const mem = new Map<string, string>();
   removeItem: (k: string) => void mem.delete(k),
 };
 
-const { addSubscription, getPending, getSub, makePot, savePending, saveSub } = await import('./pots');
-const { payDue } = await import('./payDue');
+const { CLAIM_TTL_MS, addSubscription, claimPeriod, getPending, getSub, makePot, savePending, saveSub } =
+  await import('./pots');
+const { PAY_LOCK, payDue } = await import('./payDue');
 const { appendAgentLog, checkAgentSpend, getAgentLog, ledgerSpentToday, setAgentDailyCap } =
   await import('../agents/agentAccounts');
 
@@ -169,5 +170,140 @@ describe('row 272: a replayed pot payment is booked once, whichever run settles 
     expect(r[0]).toMatchObject({ ok: true, txid: 'TX0' });
     expect(getAgentLog('1Pot').filter((l) => l.action === 'sub-pay')).toHaveLength(1);
     expect(ledgerSpentToday('1Pot', NOW)).toBe(1);
+  });
+});
+
+describe('row 233: two tabs paying one period at once give one payment', () => {
+  beforeEach(() => mem.clear());
+  type PayDueFn = typeof payDue;
+  // A second tab is a second JS realm: its own copy of payDue (its own one-run-at-a-time singleton), the same storage.
+  const realm2 = async (): Promise<PayDueFn> => {
+    const spec = './payDue?realm=2';
+    return ((await import(spec)) as { payDue: PayDueFn }).payDue;
+  };
+  const setup = () => {
+    makePot('1Pot', 'Rent', undefined, NOW);
+    return addSubscription(
+      {
+        potId: '1Pot',
+        payee: { name: 'Shop', address: '1Shop' },
+        amount: { value: 5, currency: 'USD' },
+        period: 'day',
+        start: NOW - 1000,
+        maxCount: null,
+      },
+      50,
+      NOW,
+    );
+  };
+  const tabDeps = (tag: string, network: string[], signMs = 30) => ({
+    bsvUsd: 50,
+    resolve: async () => '1Shop',
+    sign: async () => {
+      await new Promise((r) => setTimeout(r, signMs));
+      return { rawTx: `RAW-${tag}`, txid: `TX-${tag}` };
+    },
+    broadcast: async (raw: string) => void network.push(raw),
+    spendingPaused: async () => false,
+  });
+  /** navigator.locks as a browser gives it: one exclusive lock per name, shared by every tab of the origin. */
+  const sharedLocks = () => {
+    const tails = new Map<string, Promise<unknown>>();
+    return {
+      request: <T>(name: string, _o: object, cb: () => Promise<T>): Promise<T> => {
+        const run = (tails.get(name) ?? Promise.resolve()).then(cb, cb);
+        tails.set(
+          name,
+          run.catch(() => undefined),
+        );
+        return run;
+      },
+    };
+  };
+  const withLocks = async (locks: unknown, fn: () => Promise<void>) => {
+    const nav = globalThis.navigator as unknown as Record<string, unknown>;
+    if (locks) Object.defineProperty(nav, 'locks', { value: locks, configurable: true });
+    try {
+      await fn();
+    } finally {
+      delete nav.locks;
+    }
+  };
+
+  test("with navigator.locks: the second tab's run starts only after the first one has paid, and pays nothing", async () => {
+    const locks = sharedLocks();
+    const names: string[] = [];
+    await withLocks(
+      { request: (n: string, o: object, cb: () => Promise<unknown>) => (names.push(n), locks.request(n, o, cb)) },
+      async () => {
+        const s = setup();
+        const payDue2 = await realm2();
+        const network: string[] = [];
+        const events: string[] = [];
+        const tab = (tag: string) => ({
+          ...tabDeps(tag, network),
+          // Asked first thing in a run (and again at broadcast): the first ask marks the run's start.
+          spendingPaused: async () => (events.includes(`${tag} starts`) || events.push(`${tag} starts`), false),
+          broadcast: async (raw: string) => void (network.push(raw), events.push(`${tag} sends`)),
+        });
+        await Promise.all([payDue(tab('A'), NOW), payDue2(tab('B'), NOW)]);
+        expect(names).toEqual([PAY_LOCK, PAY_LOCK]);
+        expect(events.slice(0, 2)).toEqual(['A starts', 'A sends']);
+        expect(network).toEqual(['RAW-A']);
+        expect(getSub(s.id)?.periodIndex).toBe(1);
+        expect(getAgentLog('1Pot').filter((l) => l.action === 'sub-pay')).toHaveLength(1);
+        expect(ledgerSpentToday('1Pot', NOW)).toBe(5);
+      },
+    );
+  });
+
+  test('no navigator.locks: a period another tab has claimed is not signed here until that claim lapses', async () => {
+    const s = setup();
+    claimPeriod(s.id, 0, 'other-tab', NOW);
+    const network: string[] = [];
+    let signs = 0;
+    const d = { ...tabDeps('A', network), sign: async () => (signs++, { rawTx: 'RAW-A', txid: 'TX-A' }) };
+    expect(await payDue(d, NOW + 1000)).toEqual([{ id: s.id, ok: false, reason: 'Being paid in another window' }]);
+    expect(signs).toBe(0);
+    expect(network).toEqual([]);
+    // That tab died mid-sign and never recorded anything: after the claim lapses, this tab pays.
+    expect((await payDue(d, NOW + CLAIM_TTL_MS + 1000))[0]).toMatchObject({ ok: true, txid: 'TX-A' });
+    expect(network).toEqual(['RAW-A']);
+  });
+
+  test('no navigator.locks: another tab taking the period while this one signs means this tx is never sent', async () => {
+    const s = setup();
+    const network: string[] = [];
+    const d = {
+      ...tabDeps('A', network),
+      // Tab B, in parallel, overwrites the claim (both read "no claim", B wrote last) while A signs.
+      sign: async () => (claimPeriod(s.id, 0, 'tab-B', NOW - CLAIM_TTL_MS), { rawTx: 'RAW-A', txid: 'TX-A' }),
+    };
+    expect(await payDue(d, NOW)).toEqual([{ id: s.id, ok: false, reason: 'Being paid in another window' }]);
+    expect(network).toEqual([]);
+    expect(getPending(s.id)).toBeNull();
+    expect(getSub(s.id)?.periodIndex).toBe(0);
+  });
+
+  test("no navigator.locks: another tab's recorded payment for the period stops this tab's tx before it is sent", async () => {
+    const s = setup();
+    const network: string[] = [];
+    const theirs = {
+      subId: s.id,
+      potId: '1Pot',
+      periodIndex: 0,
+      count: 1,
+      dueTimes: [s.start],
+      rawTx: 'RAW-B',
+      txid: 'TX-B',
+      usd: 5,
+      at: NOW,
+      to: '1Shop',
+      sats: 10_000_000,
+    };
+    const d = { ...tabDeps('A', network), sign: async () => (savePending(theirs), { rawTx: 'RAW-A', txid: 'TX-A' }) };
+    expect(await payDue(d, NOW)).toEqual([{ id: s.id, ok: false, reason: 'Being paid in another window' }]);
+    expect(network).toEqual([]);
+    expect(getPending(s.id)?.txid).toBe('TX-B');
   });
 });
