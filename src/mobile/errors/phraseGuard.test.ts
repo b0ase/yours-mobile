@@ -462,11 +462,26 @@ const nth = (i: number) => {
   return `${n}${end}`;
 };
 
+/**
+ * Phrases that hold the label words and spelled numbers themselves: "the fifth word is three", "word 4 is word", "word one
+ * is two". The labelled-list tests once skipped every such phrase, which hid a leak of about 1 list in 16 at 12 words
+ * and 1 in 9 at 24 (round-4 review of b-Aware row 353).
+ */
+const HOLDS_LABELS = [
+  phraseWith('word', 3),
+  phraseWith('three', 4),
+  phraseWith('one', 0),
+  phraseWith('two', 0),
+  phraseWith('one', 6),
+  phraseWith('first', 5),
+  phraseWith('second', 1),
+  phraseWith('number', 2),
+  phraseWith('six', 4),
+  phraseWith('twelve', 10),
+  phraseWith('word', 0, 7),
+];
+
 describe('plain-English labelled lists (round-3 review of b-Aware row 353)', () => {
-  // Every word that labels or numbers the list, so the phrase's own words are only phrase words.
-  const LABELS = ['word', 'one', 'number', 'then', ...SPELLED_ORDINALS, ...SPELLED_CARDINALS].flatMap((w) =>
-    w.split('-'),
-  );
   const CASES: Array<[string, (w: string[]) => string]> = [
     ['"my 1st word is X, my 2nd word is Y"', (w) => w.map((x, i) => `my ${nth(i)} word is ${x}`).join(', ')],
     [
@@ -481,8 +496,8 @@ describe('plain-English labelled lists (round-3 review of b-Aware row 353)', () 
   for (const bits of [128, 256] as const)
     for (const [name, make] of CASES)
       test(`blocked, ${bits === 128 ? 12 : 24} words: ${name}`, () => {
-        const phrases = [...fixedPhrases(25, bits, LABELS)];
-        if (bits === 128) phrases.push(phraseWith('ocean', 2, 9));
+        const phrases = [...fixedPhrases(25, bits)];
+        if (bits === 128) phrases.push(phraseWith('ocean', 2, 9), ...HOLDS_LABELS);
         for (const words of phrases) expectBlocked(make(words), words);
       });
   test('ordinary text with spelled numbers is left alone', () => {
@@ -491,6 +506,43 @@ describe('plain-English labelled lists (round-3 review of b-Aware row 353)', () 
       'Step one: open the menu. Step two: choose settings. Step three: pick a theme. Step four: tap save. Step five: close it.',
       'I sent one payment of ten dollars, then two more of twenty, then three of seven, and the twelfth one never arrived at all.',
       'My first word to b was hello, my second word was thanks, and my third word was a question about the price of the token.',
+    ]) {
+      expect(containsPhrase(p)).toBe(false);
+      expect(looksLikeSecret(p)).toBe(false);
+    }
+  });
+});
+
+describe('labelled lists joined with "and" (round-4 review of b-Aware row 353)', () => {
+  // "and", "the" and "is" made three other words in a row between two phrase words, past MAX_GAP: 200 of 200 got
+  // through Ask b, Copy and Report.
+  const CASES: Array<[string, (w: string[]) => string]> = [
+    [
+      '"the first word is X and the second word is Y"',
+      (w) => w.map((x, i) => `the ${SPELLED_ORDINALS[i]} word is ${x}`).join(' and '),
+    ],
+    ['"my 1st word is X and my 2nd word is Y"', (w) => w.map((x, i) => `my ${nth(i)} word is ${x}`).join(' and ')],
+    [
+      '"1st word is X, and the 2nd word is Y"',
+      (w) => w.map((x, i) => `${i === 0 ? '' : 'the '}${nth(i)} word is ${x}`).join(', and '),
+    ],
+    [
+      '"the first one is X and the second one is Y"',
+      (w) => w.map((x, i) => `the ${SPELLED_ORDINALS[i]} one is ${x}`).join(' and '),
+    ],
+  ];
+  for (const bits of [128, 256] as const)
+    for (const [name, make] of CASES)
+      test(`blocked, ${bits === 128 ? 12 : 24} words: ${name}`, () => {
+        const phrases = [...fixedPhrases(25, bits, [], undefined, 'and-')];
+        if (bits === 128) phrases.push(phraseWith('ocean', 2, 9), ...HOLDS_LABELS);
+        for (const words of phrases) expectBlocked(make(words), words);
+      });
+  test('ordinary text joined with "and" is left alone', () => {
+    for (const p of [
+      'The first thing is the price and the second thing is the speed and the third thing is the design of the app.',
+      'My first word was hello and my second word was thanks and my third word was a question about the price.',
+      'The first step is to open the menu and the second step is to pick a theme and the third step is to save it.',
     ]) {
       expect(containsPhrase(p)).toBe(false);
       expect(looksLikeSecret(p)).toBe(false);
