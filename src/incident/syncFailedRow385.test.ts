@@ -28,7 +28,17 @@ import { makeMissingCoinsDeps } from '../services/findMissingCoinsWiring';
 import { recoverPaymentByTxid } from '../services/recoverByTxid';
 import { makeTxidRecoverDeps } from '../services/recoverByTxidWiring';
 import { makeRecoverDeps } from '../services/recoverFailedWiring';
+import * as repairModule from '../services/failedRowRepair';
 import { HeldAsFailedError, isHeldAsFailed, makeUnfailRepair, withFailedRowRepair } from '../services/failedRowRepair';
+
+// What initWallet installs before any wallet opens: every toolbox un-fail checks the coins first (third review, 1).
+// Looked up by name so this file runs (and fails on behaviour) against a build without it.
+const optional = repairModule as unknown as {
+  installUnfailGuard?: () => void;
+  takeFailedNotices?: (s: unknown) => Promise<{ txid: string; kind: string; sentSats: number }[]>;
+  noticeText?: (n: unknown) => { message: string };
+};
+optional.installUnfailGuard?.();
 
 const HEIGHT = 972000;
 const FUND = 1_000_000;
@@ -305,8 +315,9 @@ async function payOut(w: { wallet: Wallet }, satoshis: number): Promise<string> 
   return r.txid!;
 }
 
-/** Payments the repair told the user had not gone through. */
-const toldFailed: string[] = [];
+/** The notices of payments that didn't go through, as stored with the repair (each taken once). */
+const notices = async (dv: { w: { storage: unknown } }) => (await optional.takeFailedNotices?.(dv.w.storage)) ?? [];
+const told = async (dv: { w: { storage: unknown } }) => (await notices(dv)).map((n) => n.txid);
 /** The wallet as the sync sees it in production (initWallet: the admin wallet, wrapped). */
 const syncWallet = (dv: Dev) =>
   withFailedRowRepair(dv.w.wallet, {
@@ -315,7 +326,6 @@ const syncWallet = (dv: Dev) =>
       monitor: dv.w.monitor as never,
       services: dv.services as never,
       chainTracker: async () => trackerFor(dv.chain),
-      onPaymentsFailed: (p) => toldFailed.push(...p.map((x) => x.txid)),
       log: () => undefined,
     }),
     log: () => undefined,
@@ -449,7 +459,6 @@ describe('#385: a failed transaction the network has stops the sync', () => {
 describe('#385 review: a repair never counts a coin twice', () => {
   test('R1: a later payment B re-spent the released coin; A is mined: B fails (its outputs not spendable), balance = what A left us', async () => {
     const dv = await device({ mined: true, respend: true });
-    toldFailed.length = 0;
     const intake = makeCoinIntake({
       wallet: syncWallet(dv) as never,
       keyByHash: dv.keys.keyByHash,
@@ -473,7 +482,7 @@ describe('#385 review: a repair never counts a coin twice', () => {
     // What the wallet really owns now: A's outputs (all ours: the payment to our address and its change).
     expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
     // The user is told B did not go through.
-    expect(toldFailed).toEqual([dv.bTxid!]);
+    expect(await told(dv)).toEqual([dv.bTxid!]);
   }, 30000);
 
   test('a conflicting spend the store holds as completed: held as a conflict, nothing written', async () => {
@@ -505,7 +514,9 @@ describe('#385 review: a repair never counts a coin twice', () => {
     });
     const err = await intake.take(dv.txid, dv.beef).catch((e: unknown) => e);
     expect(isHeldAsFailed(err)).toBe(true);
-    expect((err as HeldAsFailedError).reason).toBe('not-mined');
+    // A rejected proof says "couldn't check", never "not mined" (third review, 4).
+    expect((err as HeldAsFailedError).reason).toBe('unchecked');
+    expect((err as Error).message).not.toMatch(/not mined/);
     expect(await snapshot(dv)).toEqual(before);
     expect(await statusOf(dv, dv.bTxid!)).toBe('unproven');
   }, 30000);
@@ -550,7 +561,6 @@ describe('#385 second review', () => {
       monitor: dv.w.monitor as never,
       services: dv.services as never,
       chainTracker: async () => trackerFor(dv.chain),
-      onPaymentsFailed: (p) => toldFailed.push(...p.map((x) => x.txid)),
       log: () => undefined,
     });
   const intakeWith = (dv: Dev, repair = repairOf(dv)) =>
@@ -585,20 +595,22 @@ describe('#385 second review', () => {
     const racing = {
       isActiveStorageProvider: () => dv.w.storage.isActiveStorageProvider(),
       runAsStorageProvider: async <T>(fn: (sp: never) => Promise<T>) => {
-        if (++calls === 3) sent = await payOut(dv.w, 30_000).catch(() => undefined);
+        // Call 1 reads A's rows; call 2 is the settle: the send starts just before it, spending B's change.
+        if (++calls === 2) sent = await payOut(dv.w, 30_000);
         return dv.w.storage.runAsStorageProvider(fn as never) as Promise<T>;
       },
     };
     await intakeWith(dv, repairOf(dv, racing))
       .take(dv.txid, dv.beef)
       .catch(() => undefined);
-    if (sent) expect(await statusOf(dv, sent)).toBe('failed');
+    expect(sent).toBeDefined();
+    // The send spent B's change, so it is failed with B; nothing of either is counted.
+    expect(await statusOf(dv, sent!)).toBe('failed');
     expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
   }, 30000);
 
   test('3: Settings › Find missing coins on the R1 setup: B fails, the balance is what A left us', async () => {
     const dv = await device({ mined: true, respend: true });
-    toldFailed.length = 0;
     const aChange = (await outputsOf(dv, dv.txid)).filter((o) => o.change);
     const coin: MissingCoin = {
       txid: dv.txid,
@@ -639,7 +651,7 @@ describe('#385 second review', () => {
     expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
     // Find missing coins restores A's change; nothing of B's is counted with it.
     expect(await balanceOf(dv)).toBe(dv.aOutputsSats - PAID);
-    expect(toldFailed).toEqual([dv.bTxid!]);
+    expect(await told(dv)).toEqual([dv.bTxid!]);
     // The payment to our own receive address is the address sync's to take in: then the whole of what A left us.
     expect(await intakeWith(dv).take(dv.txid, dv.beef)).toBe('taken');
     expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
@@ -658,10 +670,24 @@ describe('#385 second review', () => {
 
   test('4: a payment that spent B’s change (paying someone else) is failed too, and the user is told about both', async () => {
     const dv = await device({ mined: true, respend: true, descendant: true });
-    toldFailed.length = 0;
     expect(await intakeWith(dv).take(dv.txid, dv.beef)).toBe('taken');
     expect(await statusOf(dv, dv.cTxid!)).toBe('failed');
-    expect([...toldFailed].sort()).toEqual([dv.bTxid!, dv.cTxid!].sort());
+    const ns = await notices(dv);
+    expect(ns.map((n) => [n.txid, n.kind, n.sentSats]).sort()).toEqual(
+      [
+        [dv.bTxid!, 'respent', 100_000],
+        [dv.cTxid!, 'parent-failed', 30_000],
+      ].sort(),
+    );
+    // Each in its own true words, with what the recipient was to get (not the net including the fee).
+    const words = ns.map((n) => optional.noticeText!(n).message);
+    expect(words.find((m) => m.includes(dv.bTxid!.slice(0, 8)))).toMatch(
+      /^Your payment of 100,000 sats .* another payment from this wallet, now confirmed, used the same coins\. The recipient didn’t get it\.$/,
+    );
+    expect(words.find((m) => m.includes(dv.cTxid!.slice(0, 8)))).toMatch(
+      /^Your payment of 30,000 sats .* it was paid from an earlier payment of yours that never confirmed\. The recipient didn’t get it\.$/,
+    );
+    expect(await notices(dv)).toEqual([]); // shown once
     expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
   }, 30000);
 
@@ -676,9 +702,113 @@ describe('#385 second review', () => {
     expect(isHeldAsFailed(err)).toBe(true);
     expect((err as HeldAsFailedError).reason).toBe('unconfirmed');
     expect((err as Error).message).toMatch(/3 confirmations/);
+    // It names the payment that waits (third review, 4).
+    expect((err as Error).message).toContain(dv.bTxid!.slice(0, 8));
     expect(await snapshot(dv)).toEqual(before);
     dv.chain.tip = HEIGHT + 2;
     expect(await intakeWith(dv, repair).take(dv.txid, dv.beef)).toBe('taken');
     expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
+  }, 30000);
+});
+
+describe('#385 third review: every toolbox un-fail goes through the check', () => {
+  const reqOf = (dv: Dev, txid: string) =>
+    dv.w.storage.runAsStorageProvider(async (sp) => (await sp.findProvenTxReqs({ partial: { txid } }))[0]);
+  const setReq = (dv: Dev, txid: string, status: string) =>
+    dv.w.storage.runAsStorageProvider(async (sp) => {
+      for (const r of await sp.findProvenTxReqs({ partial: { txid } }))
+        await sp.updateProvenTxReq(r.provenTxReqId, { status: status as never });
+    });
+  /** The Monitor's own tasks, as the next open runs them: ReviewDoubleSpends (no minimum age here), then UnFail. */
+  const monitorRun = async (dv: Dev) => {
+    const tasks = (dv.w.monitor as unknown as { _tasks: { name: string; minAgeMinutes?: number }[] })._tasks;
+    const review = tasks.find((t) => t.name === 'ReviewDoubleSpends')!;
+    review.minAgeMinutes = 0;
+    await dv.w.monitor.runTask('ReviewDoubleSpends');
+    await dv.w.monitor.runTask('UnFail');
+  };
+
+  test('1: A refused as a double spend, then mined; B re-spent its coin; the Monitor un-fails A: B is failed first, balance true', async () => {
+    const dv = await device({ mined: true, respend: true });
+    await setReq(dv, dv.txid, 'doubleSpend');
+    // One confirmation: the sync holds A; the Monitor must not hand B's coin to A either.
+    dv.chain.tip = HEIGHT;
+    const held = await makeCoinIntake({
+      wallet: syncWallet(dv) as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    })
+      .take(dv.txid, dv.beef)
+      .catch((e: unknown) => e);
+    expect(isHeldAsFailed(held)).toBe(true);
+    const before = await balanceOf(dv);
+    await monitorRun(dv);
+    expect(await statusOf(dv, dv.txid)).toBe('failed');
+    expect(await statusOf(dv, dv.bTxid!)).toBe('unproven');
+    expect(await balanceOf(dv)).toBe(before); // nothing counted twice
+    expect((await reqOf(dv, dv.txid)).status).toBe('doubleSpend'); // brought back by ReviewDoubleSpends later
+    // Three confirmations: the next Monitor run settles it, B failed through the toolbox, the user told.
+    dv.chain.tip = HEIGHT + 2;
+    await monitorRun(dv);
+    expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
+    expect(await statusOf(dv, dv.txid)).not.toBe('failed');
+    expect((await outputsOf(dv, dv.bTxid!)).filter((o) => o.spendable)).toEqual([]);
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats - PAID); // A's change; its payment to us is the sync's
+    expect(await told(dv)).toEqual([dv.bTxid!]);
+  }, 30000);
+
+  test("1: the sync's repair un-fails only its own request, never another one queued in the store", async () => {
+    const dv = await device({ mined: true });
+    // Another request someone queued for UnFail: not this repair's to un-fail.
+    const fake = 'ee'.repeat(32);
+    await dv.w.storage.runAsStorageProvider(async (sp) => {
+      const r = (await sp.findProvenTxReqs({ partial: { txid: dv.txid } }))[0];
+      await sp.insertProvenTxReq({ ...r, provenTxReqId: 0, txid: fake, status: 'unfail' } as never);
+    });
+    expect(
+      await makeCoinIntake({
+        wallet: syncWallet(dv) as never,
+        keyByHash: dv.keys.keyByHash,
+        processed: memoryProcessed(),
+      }).take(dv.txid, dv.beef),
+    ).toBe('taken');
+    expect((await reqOf(dv, fake)).status).toBe('unfail'); // untouched: still queued, never run by this repair
+  }, 30000);
+
+  test("2: a transaction no longer failed is 'not-failed', and Find by txid writes nothing over a contested coin", async () => {
+    const dv = await device({ mined: true, respend: true });
+    // A was set going again some other way while B still holds its coin.
+    await dv.w.storage.runAsStorageProvider(async (sp) => {
+      const [a] = await sp.findTransactions({ partial: { txid: dv.txid }, noRawTx: true });
+      await sp.updateTransaction(a.transactionId, { status: 'unproven' });
+    });
+    const repair = makeUnfailRepair({
+      storage: dv.w.storage as never,
+      monitor: dv.w.monitor as never,
+      services: dv.services as never,
+      chainTracker: async () => trackerFor(dv.chain),
+      log: () => undefined,
+    });
+    const deps = makeTxidRecoverDeps({
+      storage: dv.w.storage as never,
+      wallet: dv.w.wallet as never,
+      services: dv.services as never,
+      settleContested: repair,
+      log: () => undefined,
+    } as never);
+    const [a] = await dv.w.storage.runAsStorageProvider((sp) =>
+      sp.findTransactions({ partial: { txid: dv.txid }, noRawTx: true }),
+    );
+    const before = await snapshot(dv);
+    await expect(
+      deps.repairRows({
+        txid: dv.txid,
+        rawTx: dv.raws.get(dv.txid)!,
+        merklePath: pathFor(dv.txid),
+        transactionId: a.transactionId,
+        outputIds: [],
+      }),
+    ).rejects.toThrow(/another payment of this wallet spent the same coins/);
+    expect(await snapshot(dv)).toEqual(before);
   }, 30000);
 });
