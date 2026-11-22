@@ -1,4 +1,4 @@
-import { isOurDomain, type Resolved } from '../../names/names';
+import { isOurDomain, trustedKey, type Resolved } from '../../names/names';
 import { keyFingerprint } from '../identityLine';
 
 /**
@@ -131,16 +131,18 @@ export const SELF_PAY_NOTE = 'This is you. Only the network fee will be spent.';
 export const sameKey = (a: string | undefined, b: string | undefined): boolean =>
   !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** What the Send card remembers about a resolved payee for the confirm sheet (notePending → payeeNote). */
+/**
+ * What the Send card remembers about a resolved payee for the confirm sheet (notePending → payeeNote). The key is
+ * trustedKey: an OpNS name's owner writes opns.idKey, so a key only the index vouches for could be the payer's own
+ * ("This is you") or anyone else's fingerprint while the BSV goes to the name's holder.
+ */
 export const sendPayeeMeta = (
   r: Pick<Resolved, 'input' | 'avatar' | 'via' | 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>,
   label: string,
-): { input: string; label: string; avatar?: string; pubkey?: string } => ({
-  input: r.input,
-  label,
-  avatar: r.avatar,
-  pubkey: r.pubkey,
-});
+): { input: string; label: string; avatar?: string; pubkey?: string } => {
+  const pubkey = trustedKey(r);
+  return { input: r.input, label, avatar: r.avatar, ...(pubkey ? { pubkey } : {}) };
+};
 
 export const payeeNote = (
   acct: string,

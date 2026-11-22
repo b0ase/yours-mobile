@@ -1,4 +1,4 @@
-import type { Resolved } from '../names/names';
+import { trustedKey, type Resolved } from '../names/names';
 
 /**
  * Two-step NFT send (owner, 12 Oct 2026: "three clicks could be two"): 1) pick the recipient, 2) one "Send to <name>"
@@ -48,11 +48,16 @@ export const isSelfRecipient = (r: { to?: string; pubkey?: string; ordAddress?: 
   return [r.to, r.ordAddress].some((a) => !!a && mine.has(a));
 };
 
-/** The recipient's keys for isSelfRecipient, from the name box's resolution. */
-export const recipientKeys = (r: Pick<Resolved, 'via' | 'pubkey' | 'ordAddress' | 'opnsChecked' | 'opnsKeySigned'>) => ({
-  pubkey: r.pubkey,
-  ordAddress: r.ordAddress,
-});
+/**
+ * The recipient's keys for isSelfRecipient, from the name box's resolution. The key is trustedKey: an OpNS key only
+ * the index vouches for is never taken as anyone's, this wallet's included.
+ */
+export const recipientKeys = (
+  r: Pick<Resolved, 'via' | 'pubkey' | 'ordAddress' | 'opnsChecked' | 'opnsKeySigned'>,
+): { pubkey?: string; ordAddress?: string } => {
+  const pubkey = trustedKey(r);
+  return { ...(pubkey ? { pubkey } : {}), ordAddress: r.ordAddress };
+};
 
 /** "Use as my bAvatar" only while the image NFT is still ours: not sent, not burned, not still going out. */
 export const canUseAsAvatar = (kind: string, s: { sent: boolean; burned: boolean; pending: boolean }) =>

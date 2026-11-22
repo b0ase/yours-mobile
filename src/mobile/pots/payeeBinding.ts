@@ -61,7 +61,7 @@ export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: bool
   const d = destinationFor(r, 'bsv');
   if (!d.ok) {
     if (r.nameBinding === 'bad' || r.nameBinding === 'changed' || proofRefusal(r))
-      throw new PayeeReviewError(d.error, r.pubkey);
+      throw new PayeeReviewError(d.error, trustedKey(r));
     throw new Error(d.error);
   }
   if (r.targetKind !== 'address') throw new Error(P2P_ONLY(p.paymail ?? r.input));
