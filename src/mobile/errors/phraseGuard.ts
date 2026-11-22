@@ -62,13 +62,23 @@ const LISTS: Wordlist[] = Array.from(new Set(Object.values(bip39.wordlists))).ma
 type Raw = { start: number; end: number; text: string; digits: boolean };
 type Token = { start: number; end: number; kind: 'bip' | 'other' | 'noise'; form: string; word?: string };
 
-const rawTokens = (text: string): Raw[] =>
-  Array.from(text.matchAll(TOKEN), (m) => ({
-    start: m.index ?? 0,
-    end: (m.index ?? 0) + m[0].length,
-    text: m[0],
-    digits: /^\p{N}+$/u.test(m[0]),
-  }));
+/**
+ * An ordinal ending glued to a number is numbering: "1st", "2nd", "3rd", "4th", "1er", "2º". Read as words they were four
+ * different fillers, and "1st word: X," missed the 1 in 30 valid phrases that repeat a word (review of b-Aware row 353).
+ * Named endings only: single letters such as "a" and "e" are also hex digits ("3fa2"), which must stay other words.
+ */
+const ORDINAL = /^(?:st|nd|rd|th|er|re|º|ª)$/iu;
+
+const rawTokens = (text: string): Raw[] => {
+  const out: Raw[] = [];
+  for (const m of text.matchAll(TOKEN)) {
+    const start = m.index ?? 0;
+    const prev = out[out.length - 1];
+    const digits = /^\p{N}+$/u.test(m[0]) || (prev?.digits === true && prev.end === start && ORDINAL.test(m[0]));
+    out.push({ start, end: start + m[0].length, text: m[0], digits });
+  }
+  return out;
+};
 
 const classify = (raw: Raw[], list: Wordlist): Token[] =>
   raw.map((r) => {
