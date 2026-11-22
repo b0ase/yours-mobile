@@ -451,6 +451,79 @@ describe('a new destination must be tied to the key the host serves (backlog ran
     expect(await reviewApproval(getSub(s.id)!, same)).toEqual({ address: BOB_ADDR, pubkey: BOB_KEY });
   });
 
+  test('host moves the destination while the order waits for review → the card shows the new one and Approve works', async () => {
+    const { approveReview } = await import('./payeeBinding');
+    const s = setup({ ...BOB_PAYEE, pinnedKey: KEY_A, pinnedAddress: '1AliceAddr' });
+    await payDue(
+      deps(() => bob(), []),
+      NOW,
+    );
+    expect(getSub(s.id)?.needsReview).toMatchObject({ servedAddress: BOB_ADDR, servedKey: BOB_KEY });
+    // payDue never looks the payee up again while the order waits for review.
+    const CAROL = new PrivateKey(17);
+    const carol = async (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) =>
+      payeeDestination(p, bob({ target: CAROL.toAddress(), pubkey: CAROL.toPublicKey().toString() }), o);
+    const asked: unknown[] = [];
+    const ask = (d: unknown) => (asked.push(d), true);
+    // First tap: nothing approved, but the card now shows what the host serves.
+    await expect(approveReview(getSub(s.id)!, carol, ask)).rejects.toThrow(PAYEE_REVIEW_MOVED);
+    expect(getSub(s.id)?.payee.pinnedAddress).toBe('1AliceAddr');
+    expect(getSub(s.id)?.needsReview).toMatchObject({
+      reason: PAYEE_KEY_CHANGED,
+      servedAddress: CAROL.toAddress(),
+      servedKey: CAROL.toPublicKey().toString(),
+    });
+    // Second tap on what the card shows → pinned, payments go again. No extra confirm: the card showed it.
+    expect(await approveReview(getSub(s.id)!, carol, ask)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(getSub(s.id)?.payee).toMatchObject({
+      pinnedAddress: CAROL.toAddress(),
+      pinnedKey: CAROL.toPublicKey().toString(),
+    });
+    expect(getSub(s.id)?.needsReview).toBeUndefined();
+  });
+
+  test('host moves the destination to an address nothing ties to its key → the card keeps what it showed', async () => {
+    const { approveReview } = await import('./payeeBinding');
+    const s = setup({ ...BOB_PAYEE, pinnedKey: KEY_A, pinnedAddress: '1AliceAddr' });
+    await payDue(
+      deps(() => bob(), []),
+      NOW,
+    );
+    const before = getSub(s.id)?.needsReview;
+    for (const r of [bob({ target: MALLORY_ADDR }), bob({ pubkey: undefined, target: MALLORY_ADDR })]) {
+      await expect(
+        approveReview(getSub(s.id)!, async (p, o) => payeeDestination(p, r, o), () => true),
+      ).rejects.toThrow(/nothing ties/);
+      expect(getSub(s.id)?.needsReview).toEqual(before);
+      expect(getSub(s.id)?.payee.pinnedAddress).toBe('1AliceAddr');
+    }
+  });
+
+  test('a review card that showed no destination asks before pinning, and a No pins nothing', async () => {
+    const { approveReview } = await import('./payeeBinding');
+    const s = setup(
+      { ...BOB_PAYEE, pinnedKey: KEY_A, pinnedAddress: '1AliceAddr' },
+      { needsReview: { reason: BAD_BINDING, at: NOW } },
+    );
+    const same = async (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) => payeeDestination(p, bob(), o);
+    const asked: unknown[] = [];
+    expect(await approveReview(getSub(s.id)!, same, (d) => (asked.push(d), false))).toBe(false);
+    expect(getSub(s.id)?.payee.pinnedAddress).toBe('1AliceAddr');
+    expect(await approveReview(getSub(s.id)!, same, (d) => (asked.push(d), true))).toBe(true);
+    expect(asked).toEqual([
+      { address: BOB_ADDR, pubkey: BOB_KEY },
+      { address: BOB_ADDR, pubkey: BOB_KEY },
+    ]);
+    expect(getSub(s.id)?.payee.pinnedAddress).toBe(BOB_ADDR);
+  });
+
+  test('the review card approves through approveReview', async () => {
+    const src = await Bun.file(new URL('./SubscriptionCard.tsx', import.meta.url)).text();
+    expect(src).toContain('approveReview(sub, resolvePayee');
+    expect(src).not.toContain('reviewApproval(');
+  });
+
   test('approved app subscription to a paymail with an unchecked address → first payment refused, nothing pinned', async () => {
     makePot('1Pot', 'Apps', undefined, NOW);
     const s = addSubscription(
