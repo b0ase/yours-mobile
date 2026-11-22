@@ -20,22 +20,44 @@ import * as bip39 from 'bip39';
  *  3. Whole line: a line, or the whole text, of exactly 12/15/18/21/24 words with at most two outside the list.
  * Passes 1 and 2 run a second time when a list word repeats 3 or more times in a stretch: such a word is filler
  * ("word 1 is abandon. word 2 is ability", "the abandon then the ability", JSON "index"/"value" keys), counted as
- * an other word for that run, but not toward MAX_GAP or the fillers. A match from that run counts only with such a
- * word between every two of its words. With MIN_SPELLED or more spelled numbers ("first", "twelve") in the text, the
- * passes run again with those read as numbering.
+ * an other word for that run, but not toward the gap or the fillers, unless it stands where a phrase word goes (after
+ * "is" or ":"). A match from that run counts only with such a word between every two of its words, and may have up
+ * to LABELLED_GAP other words together ("X and the second word is Y"). With MIN_SPELLED or more spelled numbers that
+ * count a list ("first", "second", "third"…) in the text, the passes run again with those read as numbering; a match
+ * from that reading needs one between its words, and may also have LABELLED_GAP other words together.
+ *
+ * Known limits (CTO, 22 Nov 2026: after round 5, a way of writing a phrase that is not a common English one is
+ * recorded here, not fixed in another round):
+ *  - Chinese or Japanese words written with no space between them, and fragments of 10 words or fewer, are not blocked
+ *    (owner's decision).
+ *  - A phrase split across two or more messages is out of scope (owner's decision).
+ *  - Spelled numbers are read in English only ("primero", "premier" are other words).
+ *  - A phrase word that is also a label repeated 3+ times, in a list with no "is" or ":" before the phrase words
+ *    ("the then then"), is read as a label, so that list is not blocked.
+ *  - In a list numbered in words with no "is" or ":" ("fifth six sixth X"), a phrase word that is the next number
+ *    after its own numbering is read as numbering.
+ *  - Look-alike letters are folded for Cyrillic and Greek only; other scripts' look-alikes (Cherokee, Armenian,
+ *    full-width letters are already folded by NFKD) are not.
  * Long text: lists with fewer than MIN_HITS words in the text are skipped, the checksum is worked out from list
  * positions, and the loops stop as soon as no later word can make a match, so the cost grows with the length of the
  * text, not its square (review of row 353: 20,000 list words took 16s).
  * Audits: '.', '+' and '_' joins (25 Oct 2026); ':' '=' and other punctuation, filler words (b-Aware row 353,
  * 19 Nov 2026); the nine non-English wordlists (b-Aware row 364, 19 Nov 2026); list words as filler, and speed
  * (review of row 353, 22 Nov 2026); labelled plain-English lists, spelled numbers, a repeated word with mixed fillers,
- * invisible characters (round-3 review of row 353, 22 Nov 2026).
+ * invisible characters (round-3 review of row 353, 22 Nov 2026); lists joined with "and", phrases holding a label word
+ * or spelled number, Hangul fillers and look-alike letters (round-4 review of row 353, 22 Nov 2026).
  */
 
 /** 12 words, or 11 when one was mistyped. */
 const MIN_WORDS = 11;
 const MIN_DENSITY = 0.8;
 const MAX_GAP = 2;
+/**
+ * The gap in a labelled or word-numbered list: "the first word is X and the second word is Y" puts "and", "the" and "is"
+ * between two phrase words (round-4 review of b-Aware row 353). Such matches must show a label or a spelled number
+ * between their words, which ordinary text does not.
+ */
+const LABELLED_GAP = 4;
 /** The filler pass needs the whole phrase (no mistyped word): it has no density test to lean on. */
 const FILL_WORDS = 12;
 const FILL_DISTINCT = 2;
@@ -153,7 +175,13 @@ const anyListWord = (w: string): boolean => {
 };
 
 type Raw = { start: number; end: number; text: string; digits: boolean };
-/** `label`: a list word demoted to filler because it repeats ("word" in "my 1st word is X, my 2nd word is Y"). */
+/**
+ * `label`: a list word demoted to filler because it repeats ("word" in "my 1st word is X, my 2nd word is Y").
+ * `slot`: the word stands where a phrase word goes, straight after "is", "was", ":" or "=" and not followed by
+ * numbering, so it is never a label ("word 4 is word"); a spelled number there is never numbering ("the fifth word is
+ * three"). `numbered`: a spelled number read as numbering sits just
+ * before it.
+ */
 type Token = {
   start: number;
   end: number;
@@ -161,6 +189,8 @@ type Token = {
   form: string;
   word?: string;
   label?: boolean;
+  slot?: boolean;
+  numbered?: boolean;
 };
 
 /**
@@ -196,37 +226,97 @@ const rawTokens = (text: string): Raw[] => {
 };
 
 /**
- * Numbers written out, "one" to "twenty", "first" to "twentieth" ("twenty-first" is two of them). Eleven are BIP39 words
- * ("one", "two", "three", "six", "seven", "eight", "ten", "twelve", "twenty", "first", "second"), and in "the first word
- * is X. the second word is Y" each is a different word between the phrase words (round-3 review of b-Aware row 353).
- * A second reading of the text treats them as numbering, like digits; the first reading keeps them, since a phrase can
- * hold "first" or "ten" as one of its own words.
+ * Numbers written out, "one" to "twenty", "first" to "twentieth" ("twenty-first" is two of them), and their values.
+ * Eleven are BIP39 words ("one", "two", "three", "six", "seven", "eight", "ten", "twelve", "twenty", "first", "second"),
+ * and in "the first word is X. the second word is Y" each is a different word between the phrase words (round-3 review
+ * of b-Aware row 353). A second reading of the text treats those that count a list as numbering, like digits; the first
+ * reading keeps them all as words.
  */
-const SPELLED_NUMBERS = new Set(
-  (
-    'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen ' +
-    'eighteen nineteen twenty first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth ' +
-    'thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth twentieth'
-  ).split(' '),
-);
+const SPELLED_VALUE = new Map<string, number>();
+'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty'
+  .split(' ')
+  .forEach((w, i) => SPELLED_VALUE.set(w, i + 1));
+'first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth twentieth'
+  .split(' ')
+  .forEach((w, i) => SPELLED_VALUE.set(w, i + 1));
 /** Spelled numbers needed in the text before the second reading runs: a numbered phrase has 12 or more. */
 const MIN_SPELLED = 3;
 
-/** Spelled numbers read as numbering in all[from..to]. */
-const spelledIn = (all: Token[], from: number, to: number): number => {
-  let n = 0;
-  for (let i = from; i <= to; i++) if (all[i].kind === 'noise' && all[i].form) n++;
-  return n;
+/** Raw tokens that stand where a phrase word goes: straight after "is" or "was", or after ":" or "=". */
+const phraseSlots = (raw: Raw[], text: string): boolean[] =>
+  raw.map(
+    (r, i) =>
+      i > 0 && (/[:=]/.test(text.slice(raw[i - 1].end, r.start)) || ['is', 'was'].includes(fold(raw[i - 1].text))),
+  );
+
+/**
+ * The spelled numbers that count a list: each one that continues the count from the last (first, second, third…), or
+ * that the next one continues (a skipped or mistyped number), and never one in a phrase slot. A phrase that holds a
+ * spelled number keeps it as a word: "the fifth word is three", "word one is two, word two is …". Reading every spelled
+ * number as numbering dropped such a phrase word and the list got through (round-4 review of b-Aware row 353: about 1
+ * list in 16 at 12 words). "twenty-first" and "twenty one" are one number.
+ */
+const countingNumbers = (raw: Raw[], text: string, slots: boolean[]): boolean[] => {
+  const out = new Array<boolean>(raw.length).fill(false);
+  const found: Array<{ from: number; to: number; value: number }> = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i].digits || slots[i]) continue;
+    const form = fold(raw[i].text);
+    const value = SPELLED_VALUE.get(form);
+    if (value === undefined) continue;
+    const unit = i + 1 < raw.length && !raw[i + 1].digits ? SPELLED_VALUE.get(fold(raw[i + 1].text)) : undefined;
+    if (
+      form === 'twenty' &&
+      unit !== undefined &&
+      unit < 10 &&
+      /^[\s-]*$/.test(text.slice(raw[i].end, raw[i + 1].start))
+    ) {
+      found.push({ from: i, to: i + 1, value: 20 + unit });
+      i++;
+    } else found.push({ from: i, to: i, value });
+  }
+  let last = 0;
+  found.forEach(({ from, to, value }, k) => {
+    if (last && value !== last + 1 && found[k + 1]?.value !== value + 1) return;
+    out.fill(true, from, to + 1);
+    last = value;
+  });
+  return out;
 };
 
-const classify = (raw: Raw[], list: Wordlist, spelledAreNumbers: boolean): Token[] =>
-  raw.map((r) => {
+/** One wordlist's reading of the text. `numbers`: the spelled numbers read as numbering, or null for none. */
+const classify = (raw: Raw[], list: Wordlist, slots: boolean[], numbers: boolean[] | null): Token[] => {
+  let numbered = false;
+  return raw.map((r, i) => {
     if (r.digits) return { start: r.start, end: r.end, kind: 'noise', form: '' };
     const form = fold(r.text);
-    if (spelledAreNumbers && SPELLED_NUMBERS.has(form)) return { start: r.start, end: r.end, kind: 'noise', form };
+    if (numbers?.[i]) {
+      numbered = true;
+      return { start: r.start, end: r.end, kind: 'noise', form };
+    }
     const word = list.lookup.get(form) ?? (list.latin && LATIN.test(form) ? list.lookup.get(bare(form)) : undefined);
-    return { start: r.start, end: r.end, kind: word ? 'bip' : 'other', form, word };
+    // A word with numbering straight after it is a label even after ":" ("Restore failed: word one is …").
+    const next = raw[i + 1];
+    const slot = slots[i] && !(next && (next.digits || SPELLED_VALUE.has(fold(next.text))));
+    const t: Token = { start: r.start, end: r.end, kind: word ? 'bip' : 'other', form, word, slot, numbered };
+    numbered = false;
+    return t;
   });
+};
+
+/** Gaps between the list words of tokens[a..b] that hold a spelled number read as numbering. */
+const numberedGaps = (tokens: Token[], [a, b]: [number, number]): number => {
+  let n = 0;
+  let seen = false;
+  for (let i = a + 1; i <= b; i++) {
+    if (tokens[i].numbered) seen = true;
+    if (tokens[i].kind === 'bip') {
+      if (seen) n++;
+      seen = false;
+    }
+  }
+  return n;
+};
 
 /**
  * The BIP39 checksum of a 12–24 word run, from the words' list positions. Same answer as bip39.validateMnemonic, which
@@ -251,7 +341,7 @@ const checksumOk = (idx: number[]): boolean => {
  * demoted repeat) counts as an other word for density, but not toward MAX_GAP or the fillers of 2a: "my 2nd word is X"
  * puts "my", "word" and "is" between two phrase words, and counting "word" broke every such list (round-3 review).
  */
-const passes = (words: Token[], list: Wordlist): Array<[number, number]> => {
+const passes = (words: Token[], list: Wordlist, maxGap: number): Array<[number, number]> => {
   const n = words.length;
   const out: Array<[number, number]> = [];
   // Pass 1 holds at e when bip - 4 * other >= 0 over [s, e], i.e. pre[e + 1] >= pre[s]. ahead[i]: the highest
@@ -263,7 +353,7 @@ const passes = (words: Token[], list: Wordlist): Array<[number, number]> => {
   const gapAt = new Int32Array(n);
   for (let i = 0, g = 0; i < n; i++) gapAt[i] = g = words[i].kind === 'bip' ? 0 : words[i].label ? g : g + 1;
   for (let i = n - 1; i >= 0; i--) {
-    if (gapAt[i] > MAX_GAP) continue; // the loop from any s stops here
+    if (gapAt[i] > maxGap) continue; // the loop from any s stops here
     ahead[i] = Math.max(words[i].kind === 'bip' ? pre[i + 1] : -Infinity, ahead[i + 1]);
   }
   // 1 and 2a: dense stretches, and stretches whose fillers repeat.
@@ -291,7 +381,7 @@ const passes = (words: Token[], list: Wordlist): Array<[number, number]> => {
         other++;
         if (!words[e].label) {
           fillers.add(words[e].form);
-          if (++gap > MAX_GAP) break;
+          if (++gap > maxGap) break;
         }
       }
       // Stop once nothing later can match: 2a never recovers from a third filler or a second repeat, and pass 1
@@ -366,7 +456,7 @@ const passes = (words: Token[], list: Wordlist): Array<[number, number]> => {
     if (words[i].kind === 'bip') {
       idx.push(i);
       gap = 0;
-    } else if (idx.length && !words[i].label && ++gap > MAX_GAP) {
+    } else if (idx.length && !words[i].label && ++gap > maxGap) {
       flush();
       gap = 0;
     }
@@ -377,8 +467,9 @@ const passes = (words: Token[], list: Wordlist): Array<[number, number]> => {
 
 /**
  * A list word seen FILLER_REPEATS or more times in one stretch (gaps of up to MAX_GAP other words) is a label or a
- * key, not a phrase word: "word" in "word 1 is abandon. word 2 is ability", "index" and "value" in JSON. Returns the
- * words with those counted as other words, or null when there are none.
+ * key, not a phrase word: "word" in "word 1 is abandon. word 2 is ability", "index" and "value" in JSON. One in a
+ * phrase slot stays a word: in "word 4 is word" the second "word" is the phrase's (round-4 review of b-Aware row 353).
+ * Returns the words with the labels counted as other words, or null when there are none.
  */
 const demoteRepeats = (words: Token[]): Token[] | null => {
   const out = words.slice();
@@ -394,7 +485,7 @@ const demoteRepeats = (words: Token[]): Token[] | null => {
     for (let i = a; i < b; i++)
       if (words[i].kind === 'bip') count.set(words[i].form, (count.get(words[i].form) ?? 0) + 1);
     for (let i = a; i < b; i++)
-      if (words[i].kind === 'bip' && (count.get(words[i].form) ?? 0) >= FILLER_REPEATS) {
+      if (words[i].kind === 'bip' && !words[i].slot && (count.get(words[i].form) ?? 0) >= FILLER_REPEATS) {
         out[i] = { ...words[i], kind: 'other', word: undefined, label: true };
         changed = true;
       }
@@ -419,12 +510,35 @@ const labelledThroughout = (demoted: Token[], words: Token[], [a, b]: [number, n
   return true;
 };
 
-/** Spans [first word index, last word index] (into `words`, the non-numbering tokens) found in one wordlist. */
-const spansInList = (words: Token[], list: Wordlist): Array<[number, number]> => {
-  const found = passes(words, list);
+/**
+ * Spans [first word index, last word index] (into `words`, the non-numbering tokens) found in one wordlist. Labelled
+ * matches, and in the word-numbered reading (`numbered`) all matches, may have LABELLED_GAP other words together; a
+ * word-numbered match must have a spelled number in all but one of its gaps (an edge word may join it).
+ */
+const spansInList = (words: Token[], list: Wordlist, numbered: boolean): Array<[number, number]> => {
+  const counted = (tokens: Token[], span: [number, number]) =>
+    !numbered || numberedGaps(tokens, span) >= FILL_WORDS - 1;
+  const found = passes(words, list, numbered ? LABELLED_GAP : MAX_GAP)
+    .filter((span) => counted(words, span))
+    .map((span) => withLabel(words, span));
   const demoted = demoteRepeats(words);
-  if (demoted) for (const span of passes(demoted, list)) if (labelledThroughout(demoted, words, span)) found.push(span);
+  if (demoted)
+    for (const span of passes(demoted, list, LABELLED_GAP))
+      if (labelledThroughout(demoted, words, span) && counted(demoted, span)) found.push(withLabel(demoted, span));
   return found;
+};
+
+/**
+ * A labelled or word-numbered match also hides the first item's label: "my 1st word is" before the first phrase word
+ * ("my [recovery words hidden]"). The label can be a phrase word too ("word" in "word 4 is word").
+ */
+const withLabel = (tokens: Token[], [a, b]: [number, number]): [number, number] => {
+  let start = a;
+  for (let j = a - 1, other = 0; j >= 0 && tokens[j].kind !== 'bip'; j--) {
+    if (tokens[j].label || tokens[j].numbered) start = j;
+    else if (++other > LABELLED_GAP) break;
+  }
+  return [start, b];
 };
 
 /**
@@ -455,24 +569,24 @@ export const findPhraseSpans = (text: string): Array<[number, number]> => {
   text = String(text ?? '');
   const raw = rawTokens(text);
   const found: Array<[number, number]> = [];
-  let spelled = 0;
-  for (const r of raw) if (!r.digits && SPELLED_NUMBERS.has(fold(r.text))) spelled++;
-  const readings = spelled >= MIN_SPELLED ? [false, true] : [false];
+  const slots = phraseSlots(raw, text);
+  const counting = countingNumbers(raw, text, slots);
+  const readings = counting.filter(Boolean).length >= MIN_SPELLED ? [null, counting] : [null];
   for (const list of LISTS)
-    for (const spelledAreNumbers of readings) {
-      const all = classify(raw, list, spelledAreNumbers);
+    for (const numbers of readings) {
+      const all = classify(raw, list, slots, numbers);
       let hits = 0;
       for (const t of all) if (t.kind === 'bip') hits++;
       if (hits < MIN_HITS) break; // the second reading has no more list words than the first
       const words = all.map((t, i) => ({ t, i })).filter((x) => x.t.kind !== 'noise');
       const toks = words.map((x) => x.t);
-      for (const [a, b] of [...spansInList(toks, list), ...wholeLineSpans(toks, text)]) {
+      // The second reading only finds lists numbered in words: a spelled number before each word after the first.
+      // Without this it gave ordinary text with a few numbers in it ("one step", "ten years") a second checksum try.
+      const lines = wholeLineSpans(toks, text).filter((span) => !numbers || numberedGaps(toks, span) >= FILL_WORDS - 1);
+      for (const [a, b] of [...spansInList(toks, list, numbers !== null), ...lines]) {
         // Take in the numbering just before the first word ("1." on its own) as well.
         let first = words[a].i;
         while (first > 0 && all[first - 1].kind === 'noise') first--;
-        // The second reading only finds lists numbered in words: a spelled number before each word after the first.
-        // Without this it gave ordinary text with a few numbers in it ("one step", "ten years") a second checksum try.
-        if (spelledAreNumbers && spelledIn(all, words[a].i, words[b].i) < FILL_WORDS - 1) continue;
         found.push([all[first].start, all[words[b].i].end]);
       }
     }
