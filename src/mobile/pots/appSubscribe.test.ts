@@ -82,6 +82,9 @@ const deps = (paid: Outs[], bsvUsd = 50) => ({
   broadcast: async () => undefined,
 });
 
+/** The payee check the real deps run (subscribeAsk.checkAppPayee); these tests' payees all pass it. */
+const checkPayee = async () => undefined;
+
 beforeEach(() => {
   mem.clear();
   resetSubscribeLimits();
@@ -166,7 +169,7 @@ describe('merchant signatures', () => {
   test('replayed: the same signed request is approved once', async () => {
     makePot('1Pot', 'Apps', undefined, NOW);
     const r = req({}, { at: NOW });
-    const d = { approve: async () => '1Pot', bsvUsd: () => 50, now: () => NOW };
+    const d = { approve: async () => '1Pot', bsvUsd: () => 50, checkPayee, now: () => NOW };
     await handleSubscribeCall('subscribe', r, ORIGIN, d);
     expect(() => parseSubscribeArgs(r, ORIGIN, NOW + 1000)).toThrow('already used');
     await expect(handleSubscribeCall('subscribe', r, ORIGIN, { ...d, now: () => NOW + 1000 })).rejects.toThrow(
@@ -198,7 +201,13 @@ describe('subscribe, status, cancel', () => {
   test('approve stores it; decline stores nothing', async () => {
     makePot('1Pot', 'Apps', undefined, NOW);
     let kicked = 0;
-    const d = { approve: async () => '1Pot', bsvUsd: () => 50, chargeSoon: () => void kicked++, now: () => NOW };
+    const d = {
+      approve: async () => '1Pot',
+      bsvUsd: () => 50,
+      checkPayee,
+      chargeSoon: () => void kicked++,
+      now: () => NOW,
+    };
     const st = (await handleSubscribeCall('subscribe', req({}, { at: NOW }), ORIGIN, d)) as {
       id: string;
       status: string;
@@ -215,7 +224,7 @@ describe('subscribe, status, cancel', () => {
   test('an app only sees and cancels its own', async () => {
     makePot('1Pot', 'Apps', undefined, NOW);
     const s = createAppSub(parseSubscribeArgs(req({}, { at: NOW }), ORIGIN, NOW), '1Pot', 50, NOW);
-    const d = { approve: async () => null, bsvUsd: () => 50 };
+    const d = { approve: async () => null, bsvUsd: () => 50, checkPayee };
     await expect(handleSubscribeCall('status', { id: s.id }, 'https://other.example', d)).rejects.toThrow('Unknown');
     await expect(handleSubscribeCall('cancel', { id: s.id }, 'https://other.example', d)).rejects.toThrow('Unknown');
     expect(await handleSubscribeCall('list', {}, 'https://other.example', d)).toEqual([]);
@@ -277,7 +286,7 @@ describe('charger', () => {
 describe('pot only, never the main balance', () => {
   const NOW = T('2026-10-18T12:00:00Z');
   test('approving with an id that is not a pot (e.g. the main account) stores nothing', async () => {
-    const d = { approve: async () => '1MainAccount', bsvUsd: () => 50, now: () => NOW };
+    const d = { approve: async () => '1MainAccount', bsvUsd: () => 50, checkPayee, now: () => NOW };
     await expect(handleSubscribeCall('subscribe', req({}, { at: NOW }), ORIGIN, d)).rejects.toThrow('Only a pot');
     expect(await handleSubscribeCall('list', {}, ORIGIN, d)).toEqual([]);
   });
@@ -301,6 +310,7 @@ describe('merchant identity and request limits', () => {
       return potId;
     },
     bsvUsd: () => 50,
+    checkPayee,
     now: () => NOW,
   });
 
@@ -376,6 +386,7 @@ describe('merchant identity and request limits', () => {
     const slow = {
       approve: () => new Promise<string | null>((res) => (release = res)),
       bsvUsd: () => 50,
+      checkPayee,
       now: () => NOW,
     };
     const first = handleSubscribeCall('subscribe', req({ appOrigin: OTHER }, { at: NOW, signFor: OTHER }), OTHER, slow);
@@ -411,5 +422,55 @@ describe('merchant identity and request limits', () => {
       status: string;
     };
     expect(ok2.status).toBe('active');
+  });
+});
+
+describe('the payee is checked before the sheet (backlog rank 1)', () => {
+  const NOW = T('2026-11-22T12:00:00Z');
+  const UNCHECKED = 'pay@example.com gives an address that nothing ties to its wallet key';
+
+  test('a paymail the wallet can’t check is refused before the sheet: no sheet, nothing stored, nonce unused', async () => {
+    makePot('1Pot', 'Apps', undefined, NOW);
+    const checked: unknown[] = [];
+    let asked = 0;
+    const r = req({}, { at: NOW });
+    const d = {
+      approve: async () => {
+        asked++;
+        return '1Pot';
+      },
+      bsvUsd: () => 50,
+      checkPayee: async (p: unknown) => {
+        checked.push(p);
+        throw new Error(UNCHECKED);
+      },
+      now: () => NOW,
+    };
+    const reply = await answerSubscribe({ id: 1, call: 'subscribe', args: r }, ORIGIN, d);
+    expect(reply).toMatchObject({ status: 'error', description: expect.stringContaining(UNCHECKED) });
+    expect(asked).toBe(0);
+    expect(await handleSubscribeCall('list', {}, ORIGIN, d)).toEqual([]);
+    // It checks the payee the subscription would save: the paymail, pinned on its first payment.
+    expect(checked).toEqual([expect.objectContaining({ paymail: 'pay@example.com', pinOnFirstPay: true })]);
+    // Nothing was approved, so the same signed request still works once the payee checks out.
+    const ok = (await handleSubscribeCall('subscribe', r, ORIGIN, { ...d, checkPayee })) as { status: string };
+    expect(ok.status).toBe('active');
+    expect(asked).toBe(1);
+  });
+
+  test('a Bitcoin address payee has nothing to look up', async () => {
+    makePot('1Pot', 'Apps', undefined, NOW);
+    let looked = 0;
+    const d = {
+      approve: async () => '1Pot',
+      bsvUsd: () => 50,
+      checkPayee: async () => void looked++,
+      now: () => NOW,
+    };
+    const st = (await handleSubscribeCall('subscribe', req({ payTo: ADDR }, { at: NOW }), ORIGIN, d)) as {
+      status: string;
+    };
+    expect(st.status).toBe('active');
+    expect(looked).toBe(0);
   });
 });

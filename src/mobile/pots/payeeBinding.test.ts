@@ -481,6 +481,39 @@ describe('a new destination must be tied to the key the host serves (backlog ran
     expect(paid).toEqual([BOB_ADDR]);
     expect(getSub(s.id)?.payee.pinnedAddress).toBe(BOB_ADDR);
   });
+
+  test('an app asking to subscribe to a paymail with an unchecked address is refused before the sheet', async () => {
+    const { checkAppPayee, subscribeDeps } = await import('./subscribeAsk');
+    // The real deps run this check.
+    expect(subscribeDeps().checkPayee).toBe(checkAppPayee);
+    const payee = newAppSub(
+      {
+        merchantName: 'Shop',
+        payTo: 'bob@example.com',
+        usdPerMonth: 5,
+        description: '',
+        appOrigin: 'https://shop.example',
+        merchantKey: KEY_A,
+        keyTrust: 'new',
+      },
+      '1Pot',
+      NOW,
+    ).payee;
+    const seen: unknown[] = [];
+    const via = (r: Resolved) => async (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) => {
+      seen.push(o);
+      return payeeDestination(p, r, o);
+    };
+    await expect(checkAppPayee(payee, via(bob({ target: MALLORY_ADDR })))).rejects.toThrow(
+      'nothing ties to its wallet key',
+    );
+    await expect(checkAppPayee(payee, via(bob({ pubkey: undefined })))).rejects.toThrow(
+      'nothing ties to its wallet key',
+    );
+    // The key's own address → fine; checked with the set-up rules, not the (absent) pins.
+    expect(await checkAppPayee(payee, via(bob()))).toEqual({ address: BOB_ADDR, pubkey: BOB_KEY });
+    expect(seen.every((o) => JSON.stringify(o) === JSON.stringify({ ignorePin: true, fresh: true }))).toBe(true);
+  });
 });
 
 /** The pins the create sheet takes from a checked destination. */
