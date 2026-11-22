@@ -23,8 +23,9 @@ import * as bip39 from 'bip39';
  * an other word for that run, but not toward the gap or the fillers, unless it stands where a phrase word goes (after
  * "is" or ":"). A match from that run counts only with such a word between every two of its words, and may have up
  * to LABELLED_GAP other words together ("X and the second word is Y"). With MIN_SPELLED or more spelled numbers that
- * count a list ("first", "second", "third"…) in the text, the passes run again with those read as numbering; a match
- * from that reading needs one between its words, and may also have LABELLED_GAP other words together.
+ * count a list ("first", "second", "third"…) in the text, the passes run again with those read as numbering: once for
+ * numbers before the phrase words ("the first word is X"), once for numbers after "is" or ":" ("X is first"). A match
+ * from those readings needs one between its words, and may also have LABELLED_GAP other words together.
  *
  * Known limits (CTO, 22 Nov 2026: after round 5, a way of writing a phrase that is not a common English one is
  * recorded here, not fixed in another round):
@@ -45,7 +46,8 @@ import * as bip39 from 'bip39';
  * 19 Nov 2026); the nine non-English wordlists (b-Aware row 364, 19 Nov 2026); list words as filler, and speed
  * (review of row 353, 22 Nov 2026); labelled plain-English lists, spelled numbers, a repeated word with mixed fillers,
  * invisible characters (round-3 review of row 353, 22 Nov 2026); lists joined with "and", phrases holding a label word
- * or spelled number, Hangul fillers and look-alike letters (round-4 review of row 353, 22 Nov 2026).
+ * or spelled number, Hangul fillers and look-alike letters (round-4 review of row 353, 22 Nov 2026); "X is first" and
+ * "word one of twelve is X" (round-5 review of row 353, 22 Nov 2026).
  */
 
 /** 12 words, or 11 when one was mistyped. */
@@ -251,36 +253,50 @@ const phraseSlots = (raw: Raw[], text: string): boolean[] =>
 
 /**
  * The spelled numbers that count a list: each one that continues the count from the last (first, second, third…), or
- * that the next one continues (a skipped or mistyped number), and never one in a phrase slot. A phrase that holds a
- * spelled number keeps it as a word: "the fifth word is three", "word one is two, word two is …". Reading every spelled
- * number as numbering dropped such a phrase word and the list got through (round-4 review of b-Aware row 353: about 1
- * list in 16 at 12 words). "twenty-first" and "twenty one" are one number.
+ * that the next one continues (a skipped or mistyped number). Two readings, by where the numbering sits:
+ *  - `inSlot` false, numbers outside phrase slots only: a phrase that holds a spelled number keeps it as a word, "the
+ *    fifth word is three", "word one is two, word two is …". Reading every spelled number as numbering dropped such a
+ *    phrase word and the list got through (round-4 review of b-Aware row 353: about 1 list in 16 at 12 words).
+ *  - `inSlot` true, numbers in phrase slots only: "X is first, Y is second" puts the numbering after "is", and with
+ *    only the first reading 88% of such 12-word lists got through (round-5 review). A phrase word there is never in a
+ *    slot, so "seven is seventh" keeps its "seven".
+ * A spelled number straight after "of" is a count, not a position ("word eleven of twelve is X"): it is numbering but
+ * does not move the count, which made "word twelve" look out of order (round-5 review: 47% of 12-word lists got through).
+ * "twenty-first" and "twenty one" are one number. Null when fewer than MIN_SPELLED numbers count.
  */
-const countingNumbers = (raw: Raw[], text: string, slots: boolean[]): boolean[] => {
+const countingNumbers = (raw: Raw[], text: string, slots: boolean[], inSlot: boolean): boolean[] | null => {
   const out = new Array<boolean>(raw.length).fill(false);
   const found: Array<{ from: number; to: number; value: number }> = [];
+  const totals: Array<{ from: number; to: number }> = [];
   for (let i = 0; i < raw.length; i++) {
-    if (raw[i].digits || slots[i]) continue;
+    if (raw[i].digits || slots[i] !== inSlot) continue;
     const form = fold(raw[i].text);
     const value = SPELLED_VALUE.get(form);
     if (value === undefined) continue;
     const unit = i + 1 < raw.length && !raw[i + 1].digits ? SPELLED_VALUE.get(fold(raw[i + 1].text)) : undefined;
-    if (
-      form === 'twenty' &&
-      unit !== undefined &&
-      unit < 10 &&
-      /^[\s-]*$/.test(text.slice(raw[i].end, raw[i + 1].start))
-    ) {
-      found.push({ from: i, to: i + 1, value: 20 + unit });
-      i++;
-    } else found.push({ from: i, to: i, value });
+    const compound =
+      form === 'twenty' && unit !== undefined && unit < 10 && /^[\s-]*$/.test(text.slice(raw[i].end, raw[i + 1].start));
+    const n = { from: i, to: compound ? i + 1 : i, value: compound ? 20 + (unit as number) : value };
+    if (i > 0 && !raw[i - 1].digits && fold(raw[i - 1].text) === 'of') totals.push(n);
+    else found.push(n);
+    i = n.to;
   }
   let last = 0;
+  let counted = 0;
   found.forEach(({ from, to, value }, k) => {
-    if (last && value !== last + 1 && found[k + 1]?.value !== value + 1) return;
+    // The first number must be continued by the next, or by the one after when it is the same number straight after
+    // it ("the first one is X and the second one is Y"): "eight is first, view is second" starts at "first", and taking
+    // "eight" (a phrase word) as the start dropped it (round-5 review layout, after "Restore failed:").
+    const next = found[k + 1];
+    const continued = next?.value === value + 1;
+    const starts = continued || (next?.value === value && next.from === to + 1 && found[k + 2]?.value === value + 1);
+    if (last ? value !== last + 1 && !continued : !starts) return;
     out.fill(true, from, to + 1);
     last = value;
+    counted++;
   });
+  if (counted < MIN_SPELLED) return null;
+  for (const { from, to } of totals) out.fill(true, from, to + 1);
   return out;
 };
 
@@ -570,14 +586,20 @@ export const findPhraseSpans = (text: string): Array<[number, number]> => {
   const raw = rawTokens(text);
   const found: Array<[number, number]> = [];
   const slots = phraseSlots(raw, text);
-  const counting = countingNumbers(raw, text, slots);
-  const readings = counting.filter(Boolean).length >= MIN_SPELLED ? [null, counting] : [null];
+  const readings: Array<boolean[] | null> = [null];
+  for (const inSlot of [false, true]) {
+    const numbers = countingNumbers(raw, text, slots, inSlot);
+    if (numbers) readings.push(numbers);
+  }
   for (const list of LISTS)
     for (const numbers of readings) {
       const all = classify(raw, list, slots, numbers);
       let hits = 0;
       for (const t of all) if (t.kind === 'bip') hits++;
-      if (hits < MIN_HITS) break; // the second reading has no more list words than the first
+      if (hits < MIN_HITS) {
+        if (numbers === null) break; // the numbered readings have no more list words than the first
+        continue;
+      }
       const words = all.map((t, i) => ({ t, i })).filter((x) => x.t.kind !== 'noise');
       const toks = words.map((x) => x.t);
       // The second reading only finds lists numbered in words: a spelled number before each word after the first.
@@ -587,7 +609,13 @@ export const findPhraseSpans = (text: string): Array<[number, number]> => {
         // Take in the numbering just before the first word ("1." on its own) as well.
         let first = words[a].i;
         while (first > 0 && all[first - 1].kind === 'noise') first--;
-        found.push([all[first].start, all[words[b].i].end]);
+        // And, in a word-numbered list, the numbering just after the last word ("X is twenty-fourth"): its "twenty" is
+        // also a list word.
+        let last = words[b].i;
+        if (numbers)
+          for (let j = last + 1; j < all.length && j <= words[b].i + LABELLED_GAP + 1 && all[j].kind !== 'bip'; j++)
+            if (all[j].kind === 'noise' && numbers[j]) last = j;
+        found.push([all[first].start, all[last].end]);
       }
     }
   // Lists can find overlapping stretches (words common to two lists): merge them.
