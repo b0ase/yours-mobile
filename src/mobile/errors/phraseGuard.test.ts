@@ -684,3 +684,37 @@ describe('a 24-word phrase that repeats two words (round-3 review of b-Aware row
       expectBlocked(words.map((w, i) => `${w} q${String.fromCharCode(97 + i)}x`).join(' '), words);
     });
 });
+
+describe('the phrase word first, then its number (round-5 review of b-Aware row 353)', () => {
+  // A spelled number straight after "is" was always read as a phrase word, so "X is first, Y is second" lost its
+  // numbering and got through Ask b and Copy 88% of the time at 12 words and 23% at 24. And "word eleven of twelve"
+  // read "of twelve" as the next number, so "word twelve" no longer counted (47% at 12 words).
+  const REVIEWER = 'unfold asset lady year swing super level primary regret toe pull turn'.split(' ');
+  const CASES: Array<[string, (w: string[]) => string]> = [
+    ['"X is first, Y is second"', (w) => w.map((x, i) => `${x} is ${SPELLED_ORDINALS[i]}`).join(', ')],
+    [
+      '"word one of twelve is X, word two of twelve is Y"',
+      (w) => w.map((x, i) => `word ${SPELLED_CARDINALS[i]} of ${SPELLED_CARDINALS[w.length - 1]} is ${x}`).join(', '),
+    ],
+  ];
+  test("the reviewer's list: unfold is first, asset is second, … turn is twelfth", () => {
+    expect(bip39.validateMnemonic(REVIEWER.join(' '))).toBe(true);
+    expectBlocked(CASES[0][1](REVIEWER), REVIEWER);
+  });
+  for (const bits of [128, 256] as const)
+    for (const [name, make] of CASES)
+      test(`blocked, ${bits === 128 ? 12 : 24} words, 200 phrases: ${name}`, () => {
+        const phrases = [...fixedPhrases(200, bits, [], undefined, 'number-after-')];
+        if (bits === 128) phrases.push(REVIEWER, phraseWith('ocean', 2, 9), ...HOLDS_LABELS);
+        for (const words of phrases) expectBlocked(make(words), words);
+      });
+  test('ordinary text with "is first" and "of twelve" is left alone', () => {
+    for (const p of [
+      'Speed is first, price is second, design is third, and the rest of the list is a matter of taste for most people.',
+      'Item one of twelve is done, item two of twelve is close, and the others of the twelve are waiting on the design.',
+    ]) {
+      expect(containsPhrase(p)).toBe(false);
+      expect(looksLikeSecret(p)).toBe(false);
+    }
+  });
+});
