@@ -54,6 +54,8 @@ export const FILL_MARGIN_MS = 30_000;
 const REFS = ['outputBasket', 'outputTag', 'txLabel'];
 /** A refs-only pass's offset for every other entity: past any real list. Never added to (see the file comment). */
 const PAST_END = Number.MAX_SAFE_INTEGER;
+/** The bulk pass's pause between pages: about 2.5 a second, well inside our server's 300 requests a minute. */
+export const FILL_PAGE_GAP_MS = 400;
 /** A pass that reads more pages than 2 per row the device holds, plus this, is not getting anywhere. */
 const ROUNDS_SLACK = 20;
 /** The cap when the device can't count its rows. */
@@ -96,8 +98,12 @@ export type FillReport = {
  * page's offsets. Only acknowledged pages count; the page that failed goes again.
  *  - refs: the refs-only pass before a restore-point pass; restore: that pass (`since`);
  *  - bulk: pass 1 (`finalSince`: where pass 2 will start); final: pass 2 (`since`).
+ *  - restart: the fill is unfinished and starts again from the beginning (a stall).
+ * Only a bulk pass goes on from its offsets. A pass with a `since` counts its offsets among the rows changed since: a
+ * row behind the offset that changes between tries moves into the set ahead of it and would never be sent (review of
+ * 30a4fbcd, 1), so a restore or final pass starts again from its since.
  */
-export type FillStage = 'refs' | 'restore' | 'bulk' | 'final';
+export type FillStage = 'refs' | 'restore' | 'bulk' | 'final' | 'restart';
 export type FillProgress = { stage: FillStage; since?: number; finalSince?: number; offsets: Offsets };
 
 /**
@@ -208,6 +214,14 @@ export async function fillBackup(d: {
   resume?: FillProgress | null;
   /** After every acknowledged page (and each pass's start): the progress to keep. Null once the fill is done. */
   onProgress?: (p: FillProgress | null) => Promise<void> | void;
+  /** A fill is known unfinished (kept state, even without progress): never "not-needed" on the backup's cursor. */
+  unfinished?: boolean;
+  /** The wallet closed: the fill ends before its next page. */
+  stopped?: () => boolean;
+  /** The bulk pass's pause between pages (default FILL_PAGE_GAP_MS). */
+  pageGapMs?: number;
+  /** Tests: how a pause is taken. */
+  sleep?: (ms: number) => Promise<void>;
 }): Promise<FillReport> {
   try {
     return await fill(d);
@@ -224,20 +238,59 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
   const auth = await d.manager.getAuth();
   const load = () => d.manager.loadSyncRequest(auth, d.writer, readerSettings, writerSettings.storageIdentityKey);
   const base = await load();
-  const resume = d.resume ?? undefined;
-  // The backup has a cursor for this device: ordinary pushes from there. Not when our own fill is unfinished: a done
-  // refs-only pass gives the backup a cursor long before the fill is.
-  if (base.since != null && !resume) return report;
+  const sleep = d.sleep ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  const margin = d.marginMs ?? FILL_MARGIN_MS;
+  // A final pass needs the bulk pass's rows on the backup: a backup with no cursor lost them, so the fill starts again.
+  const kept = d.resume ?? undefined;
+  const resume = !kept || kept.stage === 'restart' || (kept.stage === 'final' && base.since == null) ? undefined : kept;
   /**
-   * Where a pass of `stage` starts: an unfinished fill's offsets when the backup's checkpoint holds exactly those rows
-   * (it counts every row it acknowledged; a page it took whose answer was lost shows as a difference), else the start.
-   * A refs-only pass always starts again: it is a page or two.
+   * The backup has a cursor for this device: ordinary pushes from there. Not when our own fill is unfinished: a done
+   * refs-only or bulk pass gives the backup a cursor long before the fill is (review of 30a4fbcd, 2). Nor, after an
+   * instant restore, when that cursor is older than the restore point (a fill an older version left unfinished).
+   */
+  const sinceMs = base.since == null ? undefined : new Date(base.since).getTime();
+  const restoredSince = d.restorePoint ? d.restorePoint.getTime() - margin : undefined;
+  if (sinceMs !== undefined && !kept && !d.unfinished && (restoredSince === undefined || sinceMs >= restoredSince))
+    return report;
+  /**
+   * Where a pass of `stage` starts. Only a bulk pass goes on from an unfinished fill's offsets, and only when the
+   * backup's checkpoint holds exactly those rows (it counts every row it acknowledged; a page it took whose answer was
+   * lost shows as a difference). A pass with a `since` always starts again from its since (see FillProgress).
    */
   const startOf = (stage: FillStage): Offsets =>
-    resume?.stage === stage && stage !== 'refs' && sameOffsets(base.offsets, resume.offsets)
+    resume?.stage === stage && stage === 'bulk' && sameOffsets(base.offsets, resume.offsets)
       ? resume.offsets.map((o) => ({ ...o }))
       : zeros();
   const save = async (p: FillProgress | null) => void (await d.onProgress?.(p));
+
+  /**
+   * A refs-only page: baskets, tags and labels read straight from the device, every other entity empty. Through
+   * getSyncChunk its "past the end" offsets walked every other table, raw transactions included, inside the locks
+   * (review of 30a4fbcd, 6). Undefined when the reader can't (getSyncChunk then, with those offsets).
+   */
+  const refsPage = async (offsets: Offsets, maxItems: number): Promise<Record<string, unknown> | undefined> => {
+    const r = d.reader as unknown as Record<string, unknown>;
+    const finds: [name: string, key: string, fn: string][] = [
+      ['outputBasket', 'outputBaskets', 'findOutputBaskets'],
+      ['outputTag', 'outputTags', 'findOutputTags'],
+      ['txLabel', 'txLabels', 'findTxLabels'],
+    ];
+    if (auth.userId === undefined || !finds.every(([, , fn]) => typeof r[fn] === 'function')) return undefined;
+    const page: Record<string, unknown> = {
+      fromStorageIdentityKey: readerSettings.storageIdentityKey,
+      toStorageIdentityKey: writerSettings.storageIdentityKey,
+      userIdentityKey: auth.identityKey,
+    };
+    for (const [, key] of ENTITIES) page[key] = [];
+    for (const [name, key, fn] of finds) {
+      const offset = offsets.find((o) => o.name === name)?.offset ?? 0;
+      page[key] = await (r[fn] as (a: unknown) => Promise<unknown[]>).call(d.reader, {
+        partial: { userId: auth.userId },
+        paged: { limit: maxItems, offset },
+      });
+    }
+    return page;
+  };
 
   let total: number | undefined;
   /**
@@ -256,6 +309,7 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
     let cap: number | undefined;
     let last = '';
     for (;;) {
+      if (d.stopped?.()) throw new FillIncompleteError('failed', 'the wallet closed: backup fill stopped');
       const args: Args = {
         ...base,
         since,
@@ -270,7 +324,9 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
       // push's. Read as a push, its first page (offsets not all 0, no record of the pass) was taken for a lost record
       // and every transaction and coin was read again from 0; MAX_SAFE_INTEGER plus those rows then lost precision,
       // the offsets stopped moving and the same page went until our server refused it (mainnet 1p test, 22 Nov 2026).
-      const chunk = await d.reader.getSyncChunk({ ...args, includeNextCheckpoint: !refsOnly });
+      const chunk = refsOnly
+        ? ((await refsPage(offsets, args.maxItems as number)) ?? (await d.reader.getSyncChunk(args)))
+        : await d.reader.getSyncChunk({ ...args, includeNextCheckpoint: true });
       // The writer only checks the offsets against its limits (no requireMatchingCheckpoint): our server refuses any over
       // its profile's maximum (100,000 to 10,000,000; "RPC list offsets must not exceed 1000000" on storage.bwalletx.com,
       // 1p checks 21 Nov 2026), and the refs-only pass's "past the end" is MAX_SAFE_INTEGER.
@@ -309,8 +365,10 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
       if (stage === 'bulk') {
         report.unlockedPages++;
         await d.afterPage?.();
-        while (d.yieldWhile?.()) await new Promise((res) => setTimeout(res, 200));
-        await new Promise((res) => setTimeout(res, 0)); // let reads and payments in
+        while (d.yieldWhile?.()) await sleep(200);
+        // Paced: reads and payments get in, and a big wallet never bursts into our server's per-IP limit (300 a
+        // minute), which the wallet's own snapshot and send calls share (review of 30a4fbcd, 4).
+        await sleep(d.pageGapMs ?? FILL_PAGE_GAP_MS);
       }
     }
   };
@@ -324,7 +382,6 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
     return { ...report, how };
   };
 
-  const margin = d.marginMs ?? FILL_MARGIN_MS;
   const restoreFrom =
     resume?.stage === 'refs' || resume?.stage === 'restore'
       ? resume.since
@@ -333,9 +390,7 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
         : undefined;
   if (restoreFrom !== undefined) {
     await locked(async () => {
-      // A restore pass under way went after its refs-only pass: that one is done.
-      if (resume?.stage !== 'restore' || !sameOffsets(base.offsets, resume.offsets))
-        await pass('refs', zeros(), { since: restoreFrom });
+      await pass('refs', zeros(), { since: restoreFrom });
       await pass('restore', startOf('restore'), { since: restoreFrom });
     });
     // The cursor must now sit at or past the restore point; one older (only old baskets went) would make the ordinary
