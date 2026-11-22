@@ -250,7 +250,7 @@ describe('OpNS payee: one index answer is not enough', () => {
     await expect(resolve(f)).rejects.toThrow(/Not paying/);
   });
 
-  test('WhatsOnChain says the coin\'s transaction does not exist: refused, even if ORDFS is down', async () => {
+  test("WhatsOnChain says the coin's transaction does not exist: refused, even if ORDFS is down", async () => {
     const tx = ownerTx(await boundLock(idPriv, ID_KEY));
     const owner = PushDrop.decode(tx.outputs[0].lockingScript).lockingPublicKey.toAddress();
     const txid = tx.id('hex');
