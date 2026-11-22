@@ -335,15 +335,20 @@ describe('the guard is fast on long word-heavy text (review of b-Aware row 353)'
   test('a phrase cut in two where the scan stops is still hidden when hiding shrank the text before it', () => {
     // Recovery words are looked for in the first 20,000 characters first. Here they hide down to one placeholder,
     // and the next phrase straddles character 20,000: its first words alone would be too few to find.
-    const block = W24.map((w, i) => `${i + 1}. ${w}`).join('\n');
+    // A fixed 24-word phrase with no word of W12, not the random W24: about 1 run in 85, W24 held "accident" (W12's
+    // last word), indexOf found it in the prefix and the straddle check failed (flaky in folder runs, 22 Nov 2026).
+    const block = fixedPhrases(1, 256, W12)[0]
+      .map((w, i) => `${i + 1}. ${w}`)
+      .join('\n');
     let prefix = '';
     while (prefix.length + block.length + 1 < 19900) prefix += `${block}\n`;
     const text = `${prefix.padEnd(19950, ' ')}qqq rrr sss ${W12.join(' ')} done`;
-    expect(text.indexOf(W12[0])).toBeLessThan(20000);
-    expect(text.indexOf(W12[11])).toBeGreaterThan(20000);
+    const at = text.indexOf(`sss ${W12[0]}`) + 4;
+    expect(at).toBeLessThan(20000);
+    expect(text.indexOf(W12[11], at)).toBeGreaterThan(20000);
     const out = redactSecrets(text).toLowerCase();
     expect(leftOver(out, W12)).toEqual([]);
-    expect(out).toContain('done');
+    expect(out).toContain('sss [recovery words hidden] done');
   });
 });
 
