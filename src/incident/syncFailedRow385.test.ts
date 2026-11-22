@@ -22,6 +22,7 @@ import { deriveSyncKeys, makeCoinIntake } from '../services/prioritySyncRun';
 import { fixUtxoStatus } from '../services/utxoStatus';
 import { guardIntake } from '../services/guardIntake';
 import { createInternalizeBackoff } from '../services/internalizeBackoff';
+import { accountedVia, type HeldStore } from '../services/heldOutpoints';
 import { HeldAsFailedError, isHeldAsFailed, makeUnfailRepair, withFailedRowRepair } from '../services/failedRowRepair';
 
 const HEIGHT = 972000;
@@ -29,7 +30,16 @@ const FUND = 1_000_000;
 const PAID = 50_000;
 const REFUSED = /target transaction of internalizeAction has invalid status failed/;
 
-type Chain = { post: 'success' | 'invalid'; mined: Set<string>; spent: Map<string, string>; proofAsks: number };
+type Chain = {
+  post: 'success' | 'invalid';
+  mined: Set<string>;
+  spent: Map<string, string>;
+  proofAsks: number;
+  /** Merkle roots the chain tracker refuses (a forged or wrong-chain proof). */
+  rejectRoots: Set<string>;
+  /** Proof answers left per txid (absent: unlimited); then the proof service has none. */
+  proofsLeft: Map<string, number>;
+};
 
 const proofFor = (txid: string) => ({
   name: 'mock',
@@ -46,8 +56,13 @@ const proofFor = (txid: string) => ({
   },
 });
 
+const trackerFor = (chain: Chain) => ({
+  isValidRootForHeight: async (root: string) => !chain.rejectRoots.has(root),
+  currentHeight: async () => HEIGHT + 1,
+});
+
 function makeServices(chain: Chain, raws: Map<string, number[]>) {
-  const chainTracker = { isValidRootForHeight: async () => true, currentHeight: async () => HEIGHT + 1 };
+  const chainTracker = trackerFor(chain);
   const svc: Record<string, unknown> = {
     chain: 'main',
     txo: {
@@ -71,7 +86,9 @@ function makeServices(chain: Chain, raws: Map<string, number[]>) {
     getRawTx: async (txid: string) => ({ txid, name: 'mock', rawTx: raws.get(txid) }),
     getMerklePath: async (txid: string) => {
       chain.proofAsks++;
-      return chain.mined.has(txid) ? proofFor(txid) : { name: 'mock', notes: [] };
+      const left = chain.proofsLeft.get(txid);
+      if (left !== undefined) chain.proofsLeft.set(txid, left - 1);
+      return chain.mined.has(txid) && (left === undefined || left > 0) ? proofFor(txid) : { name: 'mock', notes: [] };
     },
     postBeef: async (_beef: Beef, txids: string[]) => [
       {
@@ -97,7 +114,7 @@ function makeServices(chain: Chain, raws: Map<string, number[]>) {
 }
 
 let dbn = 0;
-async function openWallet(services: unknown) {
+async function openWallet(services: unknown, chain: Chain) {
   const kd = new KeyDeriver(PrivateKey.fromRandom());
   const o = StorageProvider.createStorageBaseOptions('main');
   const s = new StorageIdb(o);
@@ -113,7 +130,7 @@ async function openWallet(services: unknown) {
     chain: 'main',
     services: services as never,
     storage,
-    chaintracks: { isValidRootForHeight: async () => true, currentHeight: async () => HEIGHT + 1 } as never,
+    chaintracks: trackerFor(chain) as never,
     msecsWaitPerMerkleProofServiceReq: 0,
     taskRunWaitMsecs: 0,
     abandonedMsecs: 300000,
@@ -127,14 +144,24 @@ async function openWallet(services: unknown) {
 }
 
 /**
- * The device as on the owner's phone: funded by one mined coin, then a payment of 50,000 sats to its own first receive
+ * The device as on the owner's phone: funded by one mined coin, then a payment A of 50,000 sats to its own first receive
  * address that the broadcaster refused (so storage holds it 'failed', its input released) but the network has.
+ *  - respend: a later payment B of 100,000 sats to someone else re-spent the released coin; the broadcaster took it,
+ *    so B is 'unproven' here, but A is what the network mined (review of fix/385, R1).
+ *  - beefProof: the BEEF the sync downloads carries A's proof (default: when mined).
  */
-async function device(opts: { mined: boolean }) {
-  const chain: Chain = { post: 'success', mined: new Set(), spent: new Map(), proofAsks: 0 };
+async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boolean }) {
+  const chain: Chain = {
+    post: 'success',
+    mined: new Set(),
+    spent: new Map(),
+    proofAsks: 0,
+    rejectRoots: new Set(),
+    proofsLeft: new Map(),
+  };
   const raws = new Map<string, number[]>();
   const services = makeServices(chain, raws);
-  const w = await openWallet(services);
+  const w = await openWallet(services, chain);
 
   // 1. Funding: a mined wallet payment of 1,000,000 sats (BRC-29, from ourselves).
   const d = { derivationPrefix: 'ZnVuZA==', derivationSuffix: 'b25l', senderIdentityKey: w.kd.identityKey };
@@ -187,23 +214,61 @@ async function device(opts: { mined: boolean }) {
   const rawTx = Array.from(row!.rawTx ?? req!.rawTx);
   raws.set(txid, rawTx);
 
-  // 3. The network has it anyway (mined), or not.
+  // 3. Optionally B: the released coin paid out again, accepted by the broadcaster.
+  let bTxid: string | undefined;
+  if (opts.respend) {
+    const r = await w.wallet.createAction({
+      description: 'pay someone else',
+      outputs: [
+        {
+          lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+          satoshis: 100_000,
+          outputDescription: 'to someone else',
+        },
+      ],
+      options: { acceptDelayedBroadcast: false },
+    });
+    bTxid = r.txid!;
+    expect(
+      await w.storage.runAsStorageProvider(
+        async (sp) => (await sp.findTransactions({ partial: { txid: bTxid } }))[0].status,
+      ),
+    ).toBe('unproven');
+  }
+
+  // 4. The network has A anyway (mined), or not.
   const tx = Transaction.fromBinary(rawTx);
   if (opts.mined) {
     chain.mined.add(txid);
     chain.spent.set(`${fundTxid}.0`, txid);
-    tx.merklePath = new MerklePath(HEIGHT, [[{ offset: 0, hash: txid, txid: true }]]);
-  } else {
-    tx.inputs[0].sourceTransaction = parent;
   }
+  if (opts.beefProof ?? opts.mined) tx.merklePath = new MerklePath(HEIGHT, [[{ offset: 0, hash: txid, txid: true }]]);
+  else tx.inputs[0].sourceTransaction = parent;
   const beef = new Beef();
   beef.mergeTransaction(tx);
   const paidScript = new P2PKH().lock(keys.addresses[0]).toHex();
-  return { chain, services, w, keys, txid, fundTxid, paidScript, beef: Array.from(beef.toBinary()), raws };
+  const paidVout = tx.outputs.findIndex((o) => o.lockingScript.toHex() === paidScript);
+  const aOutputsSats = tx.outputs.reduce((n, o) => n + (o.satoshis ?? 0), 0);
+  return {
+    chain,
+    services,
+    w,
+    keys,
+    txid,
+    fundTxid,
+    bTxid,
+    paidScript,
+    paidVout,
+    aOutputsSats,
+    beef: Array.from(beef.toBinary()),
+    raws,
+  };
 }
 
 type Dev = Awaited<ReturnType<typeof device>>;
 
+/** Payments the repair told the user had not gone through. */
+const toldFailed: string[] = [];
 /** The wallet as the sync sees it in production (initWallet: the admin wallet, wrapped). */
 const syncWallet = (dv: Dev) =>
   withFailedRowRepair(dv.w.wallet, {
@@ -211,9 +276,24 @@ const syncWallet = (dv: Dev) =>
       storage: dv.w.storage,
       monitor: dv.w.monitor as never,
       services: dv.services as never,
+      chainTracker: async () => trackerFor(dv.chain),
+      onPaymentsFailed: (p) => toldFailed.push(...p.map((x) => x.txid)),
       log: () => undefined,
     }),
     log: () => undefined,
+  });
+
+/** What the wallet counts as spendable: spendable outputs in a basket, of a transaction the balance reads. */
+const COUNTED = new Set(['completed', 'unproven', 'sending', 'nosend', 'unprocessed']);
+const balanceOf = (dv: Dev) =>
+  dv.w.storage.runAsStorageProvider(async (sp) => {
+    let n = 0;
+    for (const o of await sp.findOutputs({ partial: {} })) {
+      if (!o.spendable || o.basketId == null) continue;
+      const [t] = await sp.findTransactions({ partial: { transactionId: o.transactionId }, noRawTx: true });
+      if (COUNTED.has(t.status)) n += o.satoshis;
+    }
+    return n;
   });
 
 const memoryProcessed = () => {
@@ -232,7 +312,8 @@ const snapshot = (dv: Dev) =>
   dv.w.storage.runAsStorageProvider(async (sp) => ({
     txs: (await sp.findTransactions({ partial: {}, noRawTx: true })).map((t) => [t.txid, t.status]),
     outs: (await sp.findOutputs({ partial: {} })).map((o) => [o.txid, o.vout, o.spendable, o.spentBy ?? null]),
-    reqs: (await sp.findProvenTxReqs({ partial: {} })).map((r) => [r.txid, r.status]),
+    // With their history: a repair attempt (UnFail) leaves notes even when it changes no status.
+    reqs: (await sp.findProvenTxReqs({ partial: {} })).map((r) => [r.txid, r.status, r.history]),
   }));
 
 describe('#385: a failed transaction the network has stops the sync', () => {
@@ -325,4 +406,101 @@ describe('#385: a failed transaction the network has stops the sync', () => {
     expect(r.outcome).toBe('held-failed');
     expect(backoff.due(txid)).toBe(false);
   });
+});
+
+describe('#385 review: a repair never counts a coin twice', () => {
+  test('R1: a later payment B re-spent the released coin; A is mined: B fails (its outputs not spendable), balance = what A left us', async () => {
+    const dv = await device({ mined: true, respend: true });
+    toldFailed.length = 0;
+    const intake = makeCoinIntake({
+      wallet: syncWallet(dv) as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    });
+    expect(await intake.take(dv.txid, dv.beef)).toBe('taken');
+    // B can never confirm: the toolbox's failed path, its outputs not spendable, its request a double spend.
+    expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
+    expect((await outputsOf(dv, dv.bTxid!)).filter((o) => o.spendable)).toEqual([]);
+    const bReq = await dv.w.storage.runAsStorageProvider(
+      async (sp) => (await sp.findProvenTxReqs({ partial: { txid: dv.bTxid! } }))[0],
+    );
+    expect(bReq.status).toBe('doubleSpend');
+    // The coin is A's.
+    const [aRow] = await dv.w.storage.runAsStorageProvider((sp) =>
+      sp.findTransactions({ partial: { txid: dv.txid }, noRawTx: true }),
+    );
+    const fund = await outputOf(dv, dv.fundTxid, 0);
+    expect(fund?.spendable).toBe(false);
+    expect(fund?.spentBy).toBe(aRow.transactionId);
+    // What the wallet really owns now: A's outputs (all ours: the payment to our address and its change).
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
+    // The user is told B did not go through.
+    expect(toldFailed).toEqual([dv.bTxid!]);
+  }, 30000);
+
+  test('a conflicting spend the store holds as completed: held as a conflict, nothing written', async () => {
+    const dv = await device({ mined: true, respend: true });
+    await dv.w.storage.runAsStorageProvider(async (sp) => {
+      const [b] = await sp.findTransactions({ partial: { txid: dv.bTxid! }, noRawTx: true });
+      await sp.updateTransaction(b.transactionId, { status: 'completed' });
+    });
+    const before = await snapshot(dv);
+    const intake = makeCoinIntake({
+      wallet: syncWallet(dv) as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    });
+    const err = await intake.take(dv.txid, dv.beef).catch((e: unknown) => e);
+    expect(isHeldAsFailed(err)).toBe(true);
+    expect((err as HeldAsFailedError).reason).toBe('conflict');
+    expect(await snapshot(dv)).toEqual(before);
+  }, 30000);
+
+  test('a proof the chain tracker rejects: nothing written, B untouched', async () => {
+    const dv = await device({ mined: true, respend: true, beefProof: false });
+    dv.chain.rejectRoots.add(dv.txid); // a one-leaf proof's root is the txid
+    const before = await snapshot(dv);
+    const intake = makeCoinIntake({
+      wallet: syncWallet(dv) as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    });
+    const err = await intake.take(dv.txid, dv.beef).catch((e: unknown) => e);
+    expect(isHeldAsFailed(err)).toBe(true);
+    expect((err as HeldAsFailedError).reason).toBe('not-mined');
+    expect(await snapshot(dv)).toEqual(before);
+    expect(await statusOf(dv, dv.bTxid!)).toBe('unproven');
+  }, 30000);
+
+  test("UnFail's own proof fetch fails: a 'doubleSpend' marker on A's request is kept", async () => {
+    const dv = await device({ mined: true, beefProof: false });
+    await dv.w.storage.runAsStorageProvider(async (sp) => {
+      for (const r of await sp.findProvenTxReqs({ partial: { txid: dv.txid } }))
+        await sp.updateProvenTxReq(r.provenTxReqId, { status: 'doubleSpend' });
+    });
+    dv.chain.proofsLeft.set(dv.txid, 1); // our check gets the proof; UnFail's second fetch gets none
+    const intake = makeCoinIntake({
+      wallet: syncWallet(dv) as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    });
+    const err = await intake.take(dv.txid, dv.beef).catch((e: unknown) => e);
+    expect(isHeldAsFailed(err)).toBe(true);
+    expect(await statusOf(dv, dv.txid)).toBe('failed');
+    const reqs = await dv.w.storage.runAsStorageProvider((sp) => sp.findProvenTxReqs({ partial: { txid: dv.txid } }));
+    expect(reqs.map((r) => r.status)).toEqual(['doubleSpend']);
+  }, 30000);
+
+  test('A not mined: its inputs count again, so its output at our address is not also "arriving"', async () => {
+    const dv = await device({ mined: false });
+    const reads = async () => ({
+      store: dv.w.storage.getActive() as unknown as HeldStore,
+      userId: (await dv.w.storage.getAuth()).userId!,
+    });
+    const onChain = [`${dv.txid}.${dv.paidVout}`];
+    const accounted = await accountedVia(reads)(onChain);
+    const arriving = onChain.filter((o) => !accounted.includes(o)).length * PAID;
+    // The headline: what storage counts plus what is arriving equals what the wallet really owns (A not mined).
+    expect((await balanceOf(dv)) + arriving).toBe(FUND);
+  }, 30000);
 });
