@@ -12,7 +12,7 @@
  * Same fake WebSocket as staleConnect.test.ts.
  */
 import { afterAll, describe, expect, mock, test } from 'bun:test';
-import { PrivateKey, ProtoWallet, PublicKey, Signature, Utils } from '@bsv/sdk';
+import { BSM, PrivateKey, ProtoWallet, PublicKey, Signature, Utils } from '@bsv/sdk';
 import { PAIR_VERSION, Sealer, deriveSession, isSealed, pairUrl, signPairProofV2, type PairLink } from '../../pair/protocol';
 import { keepGlobals, stubGlobals } from '../../testing/stubGlobals';
 
@@ -192,7 +192,7 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(r?.wk).toBe(c.hello.k);
     const href = returnHref(back!, 'ios', r ?? undefined);
     const u = new URL(href);
-    expect(u.origin + u.pathname).toBe(`${HOST}/rooms/lounge`); // proven (s2): the site's own signed ret
+    expect(u.origin + u.pathname).toBe(`${HOST}/`); // review 3: always the root of the relay-seen origin
     const q = new URLSearchParams(u.hash.slice(1));
     expect(q.get('bwx')).toBe('ok');
     expect(q.get('wk')).toBe(c.hello.k);
@@ -268,15 +268,38 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(sessions.pairedSites().some((s) => s.c === c.link.c)).toBe(false);
   });
 
-  test('review 2 (1): an UNPROVEN origin never gets the one-tap sign-in; the site asks on the separate sheet', async () => {
+  test('review 3 (1): the wallet ignores origin proofs: a valid s2 never drops the "claims to be" warning', async () => {
+    const c = await card(loginFields(), true, true);
+    expect(c.p.proven).toBe(false);
+    expect(c.p.returnPlan?.ret).toBe(`${HOST}/`);
+  });
+
+  test('review 3 (1): the one-tap sign-in needs only a return (no proof); the signature still goes only there', async () => {
     const c = await card(loginFields());
     expect(c.p.proven).toBe(false);
-    expect(c.p.signIn).toBe(false);
-    await c.p.confirm();
+    expect(c.p.signIn).toBe(true);
+    const r = await c.p.confirm();
     await settle();
     const msgs = await sealedFrom(c.ws, c.siteSealer);
-    expect((msgs.find((m) => m?.t === 'ready') as { login?: unknown })?.login).toBeUndefined();
-    expect(c.p.returnPlan?.ret).toBe(`${HOST}/`); // still returns, to the root
+    expect(msgs.some((m) => JSON.stringify(m).includes('"sig"'))).toBe(false);
+    expect(r?.frame).toBeTruthy();
+  });
+
+  test('review 3 (2): a one-tap sign-in never arms the silent chat-key (BSM) follow-up over the relay', async () => {
+    const lf = loginFields();
+    const c = await card(lf);
+    await c.p.confirm();
+    await settle();
+    const { loginMessage, takeBsmFollowUp } = await import('./pairLogin');
+    const { MESSAGE_SIGNING_PROTOCOL } = await import('@1sat/types');
+    const hash = BSM.magicHash(Utils.toArray(loginMessage(HOST, lf.ln, lf.lx), 'utf8'));
+    const follow = takeBsmFollowUp(c.link.c, 'createSignature', {
+      protocolID: MESSAGE_SIGNING_PROTOCOL,
+      keyID: 'identity',
+      counterparty: 'self',
+      hashToDirectlySign: hash,
+    });
+    expect(follow).toBe(false); // it gets a sheet like any other signature
   });
 
   test('review 2 (6): the card signs with the account it opened under; another account open now refuses', async () => {

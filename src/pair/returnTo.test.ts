@@ -81,7 +81,8 @@ describe('v2 proof + plan', () => {
     expect([l.ret, l.rid, l.b]).toEqual([`${O}/terrornode?x=1`, RID, 'chrome']);
     const p = await verifyPairProofs(l, wellKnown);
     expect(p).toEqual({ v1: true, v2: true });
-    expect(planReturn(l, O, p.v2)).toEqual({ ret: `${O}/terrornode?x=1`, rid: RID, b: 'chrome' });
+    // Review 3 (22 Nov 2026): proofs are ignored; the return is always the relay-seen origin's ROOT.
+    expect(planReturn(l, O)).toEqual({ ret: `${O}/`, rid: RID, b: 'chrome' });
   });
   test('cd=8 is bound into v2: proven when kept, and stripping it (a downgrade to 4 digits) breaks v2', async () => {
     const l = parsePairUrl(pairUrl(v2({ cd: 8 })));
@@ -99,7 +100,7 @@ describe('v2 proof + plan', () => {
     expect(parsed.ret).toBeUndefined();
     const p = await verifyPairProofs(parsed, wellKnown);
     expect(p).toEqual({ v1: true, v2: false });
-    expect(planReturn(parsed, O, p.v2)).toBeNull();
+    expect(planReturn(parsed, O)).toBeNull();
   });
   test('ATTACK: ret, rid or b swapped on a real link breaks the v2 proof: no return', async () => {
     for (const over of [
@@ -111,20 +112,21 @@ describe('v2 proof + plan', () => {
       const l = { ...v2(), ...over };
       const p = await verifyPairProofs(l, wellKnown);
       expect(p.v2).toBe(false);
-      expect(planReturn(l, O, p.v2)).toBeNull();
+      // Proofs no longer matter: an off-origin ret never returns; anything else returns to the root only.
+      expect(planReturn(l, O)).toEqual(over.ret === 'https://evil.example/' ? null : { ret: `${O}/`, rid: l.rid, b: l.b });
     }
   });
   test('ATTACK: a forger signing their own v2 proof is not proven: no return', async () => {
     const l = v2({}, PrivateKey.fromRandom());
     const p = await verifyPairProofs(l, wellKnown);
     expect(p).toEqual({ v1: false, v2: false });
-    expect(planReturn(l, O, p.v2)).toBeNull();
+    expect(planReturn(l, O)?.ret).toBe(`${O}/`); // a forged proof changes nothing: the root of the relay's origin
   });
   test('ATTACK: a proven link whose ret is off-origin, or whose relay origin differs, gets no return', async () => {
     const off = v2({ ret: 'https://evil.example/' });
     expect((await verifyPairProofs(off, wellKnown)).v2).toBe(true); // the site signed it, but…
-    expect(planReturn(off, O, true)).toBeNull(); // …it is not on the proven origin
-    expect(planReturn(v2(), 'https://other.example', true)).toBeNull();
+    expect(planReturn(off, O)).toBeNull(); // …it is not on the origin
+    expect(planReturn(v2(), 'https://other.example')).toBeNull();
   });
   test('malformed return fields are dropped, the link still parses', () => {
     const l = parsePairUrl(pairUrl({ ...base(), ret: 'x'.repeat(600), rid: 'short', b: 'netscape' as never }));
