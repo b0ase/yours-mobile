@@ -85,12 +85,13 @@ export const parseEnvelopeState = (raw: unknown): EnvelopeState => {
     if (!e || typeof e.originator !== 'string' || e.originator !== key || balance === undefined) continue;
     const balanceSats = Math.min(balance, MAX_ENVELOPE_SATS);
     const filledSats = wholeSats(e.filledSats) ?? 0;
-    // An envelope stored before the limit existed: a tenth of what was put in (or of its balance, if more).
+    // An envelope stored before the limit existed: a tenth of what is in it now (review 2: not of the total ever put
+    // in, which after ten $1 fills and $9 spent let one payment take the whole $1 left).
     const perSpend = wholeSats(e.perSpendSats);
     out.envelopes[key] = {
       originator: key,
       balanceSats,
-      perSpendSats: perSpend && perSpend > 0 ? perSpend : envelopePerSpendLimit(Math.max(filledSats, balanceSats)),
+      perSpendSats: perSpend && perSpend > 0 ? perSpend : envelopePerSpendLimit(balanceSats),
       createdAt: wholeSats(e.createdAt) ?? 0,
       updatedAt: wholeSats(e.updatedAt) ?? 0,
       filledSats,
