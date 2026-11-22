@@ -427,6 +427,23 @@ describe('a new destination must be tied to the key the host serves (backlog ran
     expect(unverifiableDestination(bob({ via: 'opns-owner', target: MALLORY_ADDR }), MALLORY_ADDR)).toBe(false);
   });
 
+  test('⚠ a fresh OpNS destination (set-up, review approval) never pins a key only the index vouches for', async () => {
+    const opns = (signed: boolean) =>
+      bob({ input: 'satchmo', via: 'opns-owner', opnsChecked: 'chain', opnsKeySigned: signed });
+    // The owner address is not host-served, so the set-up check passes; the index-only key is dropped all the same.
+    expect(payeeDestination(BOB_PAYEE, opns(false), { ignorePin: true, fresh: true })).toEqual({ address: BOB_ADDR });
+    expect(payeeDestination(BOB_PAYEE, opns(true), { ignorePin: true, fresh: true })).toEqual({
+      address: BOB_ADDR,
+      pubkey: BOB_KEY,
+    });
+    // Review approval runs the same fresh lookup: an index-only key never reaches the pin.
+    const s = { payee: BOB_PAYEE, needsReview: undefined } as Pick<Subscription, 'payee' | 'needsReview'>;
+    const via = (signed: boolean) => async (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) =>
+      payeeDestination(p, opns(signed), o);
+    expect(await reviewApproval(s, via(false))).toEqual({ address: BOB_ADDR });
+    expect(await reviewApproval(s, via(true))).toEqual({ address: BOB_ADDR, pubkey: BOB_KEY });
+  });
+
   test('acceptance: host swaps the address but keeps the key → no payment, order shows payee changed, review', async () => {
     const pinned = { ...BOB_PAYEE, ...payeeDestinationPins(bob()) };
     const s = setup(pinned);
