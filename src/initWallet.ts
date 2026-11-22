@@ -137,7 +137,12 @@ import { ownPayments } from './services/ownPayments';
 import { retryOnceOnIdbAbort } from './services/idbAbortRetry';
 import { createInFlight, makeBackupPush, type InFlight } from './services/pushView';
 import { isPhone, onWifi } from './services/networkKind';
-import { chromeEnvelopeBackend, EnvelopeStore, guardEnvelopes } from './services/envelopes';
+import {
+  chromeEnvelopeBackend,
+  EnvelopeStore,
+  guardEnvelopes,
+  scheduleEnvelopeHoldRecovery,
+} from './services/envelopes';
 import { ENVELOPES_ENABLED, SITE_MARKET_ACTIONS_ENABLED, THEME_STORE_PAID_ENABLED } from './mobile/storeBuild';
 import { guardStoreMarketActions, storedInputScript, walletAssetOutpoints } from './services/storeMarketGate';
 import { guardCrossSiteSigning } from './services/crossSiteSignGuard';
@@ -1506,6 +1511,10 @@ export const initWallet = async (
           rawTx: localRawTx,
         }),
       });
+  // Envelope payments held for actions a stopped background worker never saw signed or aborted are given back now:
+  // each is aborted on the base wallet first, so it can never be signed after (services/envelopes.ts, review 3).
+  if (ENVELOPES_ENABLED && !ALLOWANCES_ENABLED)
+    scheduleEnvelopeHoldRecovery(envelopes, (reference) => baseWallet.abortAction({ reference }));
   // Upgrade migration (C1): grants a site already holds for a reserved protocol are removed. Idempotent.
   await revokeReservedProtocolGrants(permissionStore, ADMIN_ORIGINATOR)
     .then((n) => n && console.warn(`[initWallet] revoked ${n} app grant(s) for wallet-internal protocols`))

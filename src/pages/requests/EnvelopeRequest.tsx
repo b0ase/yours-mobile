@@ -4,7 +4,12 @@ import { ApprovalCard, Check, Chip } from '../../components/approval/ApprovalCar
 import { PayHero } from '../../components/approval/ApprovalHeroes';
 import { CARD } from '../../components/approval/cardTheme';
 import { EnvelopePresets } from '../../components/approval/EnvelopePresets';
-import { DEFAULT_ENVELOPE_USD, ENVELOPE_PRESETS_USD, envelopeUsdText } from '../../services/envelopes';
+import {
+  DEFAULT_ENVELOPE_USD,
+  ENVELOPE_PRESETS_USD,
+  envelopePerSpendLimit,
+  envelopeUsdText,
+} from '../../services/envelopes';
 import { siteName } from '../../services/approvalKind';
 import { usdToSats } from '../../services/streamGrants';
 import { dollarsFirst, priceFrom } from '../../utils/dollarsFirst';
@@ -30,6 +35,8 @@ export const EnvelopeRequestPage = ({
   const price = priceFrom(rate, true);
   const amount = dollarsFirst(sats, price);
   const name = siteName(request.originator);
+  // One payment without asking takes at most a tenth of the envelope after this fill (services/envelopes.ts).
+  const perPayment = dollarsFirst(envelopePerSpendLimit(balance + sats), price).main;
 
   const respond = (allow: boolean) => {
     if (busy) return;
@@ -81,9 +88,15 @@ export const EnvelopeRequestPage = ({
             Coin return any time
           </Chip>
         </div>
+        {sats > 0 && (
+          <span style={{ fontSize: 14, fontWeight: 600, color: CARD.ink }} data-testid="envelope-limit">
+            Up to {perPayment} a payment without asking
+          </span>
+        )}
         <span style={{ fontSize: 13, color: CARD.soft }}>
-          Small payments from {request.originator} come out of the envelope without asking. When it is empty, it asks
-          you again. Settings › Envelopes shows what is left.
+          Payments from {request.originator} of up to a tenth of the envelope come out of it without asking. A bigger
+          one asks you first, and when it is empty it asks you again. Settings › Envelopes shows each payment and where
+          it went.
         </span>
       </div>
     </ApprovalCard>
