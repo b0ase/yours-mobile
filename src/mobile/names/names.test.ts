@@ -19,7 +19,11 @@ const ADDR = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
 /** Where the OpNS index says a name is held (it always gives one; an answer without one is refused). */
 const AT = `${'f'.repeat(64)}_0`;
 
-/** Route table mock: url prefix → JSON body (or status number). */
+/**
+ * Route table mock: url prefix → JSON body (or status number). Unlisted urls answer 404, except the OpNS check
+ * sources (opnsChain.ts), which answer 503: these tests are about resolution, and a 404 there means "no such coin".
+ */
+const CHECK_SOURCES = ['https://api.whatsonchain.com/', 'https://api.1sat.app/1sat/ordfs/'];
 const mock = (routes: Record<string, unknown>): { f: Fetch; calls: string[] } => {
   const calls: string[] = [];
   const f: Fetch = async (url) => {
@@ -27,7 +31,8 @@ const mock = (routes: Record<string, unknown>): { f: Fetch; calls: string[] } =>
     const hit = Object.keys(routes)
       .sort((a, b) => b.length - a.length)
       .find((k) => url.startsWith(k));
-    const body = hit === undefined ? 404 : routes[hit];
+    const unlisted = CHECK_SOURCES.some((s) => url.startsWith(s)) ? 503 : 404;
+    const body = hit === undefined ? unlisted : routes[hit];
     if (typeof body === 'number') return new Response('{}', { status: body });
     return new Response(JSON.stringify(body), { status: 200 });
   };

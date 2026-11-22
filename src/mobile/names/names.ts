@@ -316,8 +316,12 @@ export const forwardTarget = (alias: string, fw: unknown): string | undefined =>
  * Remember the paid key for the typed name and, for a followed forward, who signed it (only that key may forward the
  * name next time). Used by NameInput's confirm() and by its "I've checked with them: trust the new wallet" override.
  */
-export const trustResolvedKey = (r: Pick<Resolved, 'input' | 'pubkey' | 'forwardsTo' | 'forwardSigner'>) => {
+export const trustResolvedKey = (
+  r: Pick<Resolved, 'input' | 'pubkey' | 'forwardsTo' | 'forwardSigner' | 'via' | 'opnsChecked' | 'opnsKeySigned'>,
+) => {
   if (!r.pubkey) return;
+  // An OpNS key is remembered only when checked on chain and signed by that key, never on the index's word alone.
+  if (r.via === 'opns-owner' && !(r.opnsChecked === 'chain' && r.opnsKeySigned)) return;
   const typed = r.input.replace(/^\$/, '').split('@')[0];
   trustCurrentKey(typed, r.pubkey);
   if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);

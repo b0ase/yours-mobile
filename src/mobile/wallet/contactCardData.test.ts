@@ -244,7 +244,10 @@ describe('contact card: OpNS names (b-Aware opns-indexer)', () => {
               map: { 'opns.idKey': KEY },
             }),
           )
-        : new Response('{}', { status: 404 })) as never;
+        : // The OpNS check sources can't be reached: only the index's word is left (not "no such coin", a 404).
+          new Response('{}', {
+            status: /^https:\/\/api\.(whatsonchain\.com|1sat\.app\/1sat\/ordfs)\//.test(url) ? 503 : 404,
+          })) as never;
     const inputs = await loadCardInputs(contact({ paymail: null }), f, async () => null);
     expect(inputs.opns?.find((o) => o.name === 'alice')?.pubkey).toBeUndefined();
     expect(buildCard(inputs).opnsNames).toEqual([]);

@@ -21,6 +21,10 @@ import { fieldPairs, isIdentityKey } from '@1sat/utils';
  * know the name yet, leave it 'index': payable as before, but labelled "From the OpNS index", never "Verified on
  * chain". Only when all of 1 and 2 agree is it 'chain'; `idKey` is set only when 3 holds. An answer with no
  * readable outpoint can't be checked at all, so it refuses rather than being paid on the index's word.
+ *
+ * "Not found" is an answer, not silence: a coin that ORDFS or WhatsOnChain says doesn't exist (ORDFS 404, WoC tx
+ * hex 404, WoC spent 400; live answers for a made-up txid, 22 Nov 2026) refuses. WoC serves mempool transactions,
+ * so an honest unconfirmed move is still found. Only network errors, 5xx and 429 count as "can't reach".
  */
 
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -44,6 +48,8 @@ export const opnsMoved = (name: string) =>
 
 export const opnsNoCoin = (name: string) =>
   `The name index didn't say which coin holds "${name}", so it can't be checked. Not paying it. Try again in a few minutes.`;
+export const opnsUnknownCoin = (name: string) =>
+  `The coin the name index gave for "${name}" can't be found on chain, so the answer may be wrong or tampered with. Not paying it. Try again in a few minutes.`;
 
 const HEX64 = /^[0-9a-f]{64}$/i;
 const OPNS_TYPE = 'application/op-ns';
@@ -149,12 +155,16 @@ export const checkOpnsOnChain = async (
   const at = splitOutpoint(a.outpoint);
   if (!at) return refused(opnsNoCoin(a.name));
   const [txid, vout] = at;
-  const [hexRes, spentRes, nameOrigin, held] = await Promise.all([
+  const [hexRes, spentRes, nameOrigin, heldRes] = await Promise.all([
     get(f, `${s.woc}/tx/${txid}/hex`),
     get(f, `${s.woc}/tx/${txid}/${vout}/spent`),
     get(f, `${s.opnsOrigin}/${encodeURIComponent(a.name)}`).then(json),
-    get(f, `${s.ordfsMetadata}/${txid}_${vout}:-2`).then(json),
+    get(f, `${s.ordfsMetadata}/${txid}_${vout}:-2`),
   ]);
+  // 0. A source that says the coin doesn't exist contradicts the index: refuse (a lying index's made-up outpoint).
+  if (heldRes?.status === 404 || hexRes?.status === 404 || spentRes?.status === 400)
+    return refused(opnsUnknownCoin(a.name));
+  const held = await json(heldRes);
 
   // 2. Which inscription is this, and is it the name? Contradictions refuse; silence leaves it 'index'.
   const registered = typeof nameOrigin?.outpoint === 'string' ? nameOrigin.outpoint : undefined;

@@ -5,7 +5,7 @@ import { resolveCallee, verifyCaller } from './peer';
 const ALICE = '02' + 'a'.repeat(64);
 const MALLORY = '03' + 'c'.repeat(64);
 const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200 });
-/** OpNS "alice" is owned by ALICE's identity key. */
+/** OpNS "alice" is owned by ALICE's identity key. The OpNS check sources can't be reached (503, not "no such coin"). */
 const f: Fetch = async (url) =>
   url === `${SERVICES.opnsApi}/alice`
     ? json({
@@ -13,7 +13,9 @@ const f: Fetch = async (url) =>
         owner: '1AliceOwnerAddressxxxxxxxxxxxxxxx',
         map: { 'opns.idKey': ALICE },
       })
-    : new Response('', { status: 404 });
+    : new Response('', {
+        status: /^https:\/\/api\.(whatsonchain\.com|1sat\.app\/1sat\/ordfs)\//.test(url) ? 503 : 404,
+      });
 
 describe('call a name', () => {
   test('an OpNS name resolves to its identity key', async () => {
