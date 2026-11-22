@@ -109,17 +109,24 @@ export type PayOutcome =
 let running: Promise<PayOutcome[]> | null = null;
 
 /** A Web Locks API, as navigator.locks offers it (shared by every tab, popup and side panel of one origin). */
-type Locks = { request: <T>(name: string, options: object, cb: () => Promise<T>) => Promise<T> };
+type Locks = {
+  request: <T>(name: string, options: { ifAvailable?: boolean }, cb: (lock: unknown) => Promise<T>) => Promise<T>;
+};
 export const PAY_LOCK = 'bwx-pots-pay';
 /**
  * One pay run at a time on the device, not just in this tab (b-Aware row 233, BL-01): `running` and serialSpend live
- * in one JS realm, so two tabs (or the popup and a tab) each paid the same period with a different tx. A run that
- * waited for the lock starts from what is in storage, so it finds the period paid. Without navigator.locks, the
- * per-period claim in run() is the guard. A lock that can't be taken rejects: nothing is paid (fail closed).
+ * in one JS realm, so two tabs (or the popup and a tab) each paid the same period with a different tx. The lock is
+ * only taken if free (ifAvailable): a run in another window pays every order from the same storage, so this one pays
+ * nothing and the next open tries again. Waiting for it instead held this window's run, and its low-funds checks and
+ * reminders, for as long as the other window's catch-up question stayed open (review of row 233). Without
+ * navigator.locks, the per-period claim in run() is the guard. A lock that can't be taken rejects: nothing is paid
+ * (fail closed).
  */
-const acrossTabs = <T>(fn: () => Promise<T>): Promise<T> => {
+const acrossTabs = (fn: () => Promise<PayOutcome[]>): Promise<PayOutcome[]> => {
   const locks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
-  return locks && typeof locks.request === 'function' ? locks.request(PAY_LOCK, {}, fn) : fn();
+  return locks && typeof locks.request === 'function'
+    ? locks.request(PAY_LOCK, { ifAvailable: true }, (lock) => (lock ? fn() : Promise.resolve([])))
+    : fn();
 };
 
 const IN_OTHER_TAB = 'Being paid in another window';

@@ -208,12 +208,19 @@ describe('row 233: two tabs paying one period at once give one payment', () => {
     broadcast: async (raw: string) => void network.push(raw),
     spendingPaused: async () => false,
   });
-  /** navigator.locks as a browser gives it: one exclusive lock per name, shared by every tab of the origin. */
+  /**
+   * navigator.locks as a browser gives it: one exclusive lock per name, shared by every tab of the origin. With
+   * ifAvailable, a lock that is held or already asked for is not waited for: the callback gets null at once.
+   */
   const sharedLocks = () => {
     const tails = new Map<string, Promise<unknown>>();
+    const asked = new Map<string, number>();
     return {
-      request: <T>(name: string, _o: object, cb: () => Promise<T>): Promise<T> => {
-        const run = (tails.get(name) ?? Promise.resolve()).then(cb, cb);
+      request: <T>(name: string, o: { ifAvailable?: boolean }, cb: (lock: object | null) => Promise<T>): Promise<T> => {
+        if (o.ifAvailable && (asked.get(name) ?? 0) > 0) return Promise.resolve().then(() => cb(null));
+        asked.set(name, (asked.get(name) ?? 0) + 1);
+        const hold = () => cb({ name }).finally(() => asked.set(name, (asked.get(name) ?? 1) - 1));
+        const run = (tails.get(name) ?? Promise.resolve()).then(hold, hold);
         tails.set(
           name,
           run.catch(() => undefined),
@@ -232,7 +239,45 @@ describe('row 233: two tabs paying one period at once give one payment', () => {
     }
   };
 
-  test("with navigator.locks: the second tab's run starts only after the first one has paid, and pays nothing", async () => {
+  test('with navigator.locks: a tab whose run waits on the user does not hold up the other tab', async () => {
+    // Review fix: the lock was held while window.confirm waited, so the other tab's payDue (and its tick: low-funds
+    // checks, reminders) waited with it, for as long as the question stayed open.
+    await withLocks(sharedLocks(), async () => {
+      makePot('1Pot', 'Rent', undefined, NOW);
+      const s = addSubscription(
+        {
+          potId: '1Pot',
+          payee: { name: 'Shop', address: '1Shop' },
+          amount: { value: 1, currency: 'USD' },
+          period: 'day',
+          start: NOW - 10 * DAY - 1000,
+          maxCount: null,
+        },
+        50,
+        NOW,
+      );
+      const payDue2 = await realm2();
+      const network: string[] = [];
+      let answer: (yes: boolean) => void = () => undefined;
+      const asking = new Promise<boolean>((r) => (answer = r));
+      const a = payDue({ ...tabDeps('A', network), confirm: () => asking }, NOW);
+      await new Promise((r) => setTimeout(r, 20)); // A is now waiting on the user
+      let b: unknown;
+      try {
+        b = await Promise.race([
+          payDue2(tabDeps('B', network), NOW),
+          new Promise<'stuck'>((r) => setTimeout(() => r('stuck'), 200)),
+        ]);
+      } finally {
+        answer(false); // never leave tab A's run hanging for the tests after this one
+      }
+      expect(b).toEqual([]); // another window is paying: nothing here, try again next open
+      expect((await a)[0]).toMatchObject({ id: s.id, ok: true, txid: 'TX-A' });
+      expect(network).toEqual(['RAW-A']); // and B sent nothing
+    });
+  });
+
+  test("with navigator.locks: a second tab that asks while the first one pays doesn't pay again", async () => {
     const locks = sharedLocks();
     const names: string[] = [];
     await withLocks(
@@ -354,6 +399,78 @@ describe('row 350: moving a subscription into a pot with no cap gives that pot i
     const s = order('1A', 10);
     moveSub(s.id, '1B', NOW, 50);
     expect(getAgentAccount('1B')?.dailyCapUsd).toBe(7);
+  });
+
+  // Review fix: a sats order moved (or created) while no BSV price is loaded can't be priced, so no default cap could
+  // be set then. The cap is set at pay time, once a price is known, before the gate.
+  const satsOrder = (potId: string, bsvUsd: number) =>
+    addSubscription(
+      {
+        potId,
+        payee: { name: 'Shop', address: '1Shop' },
+        amount: { value: 3_000_000, currency: 'SAT' },
+        period: 'day',
+        start: NOW - 1000,
+        maxCount: null,
+      },
+      bsvUsd,
+      NOW,
+    );
+  const payWith = (bsvUsd: number, signed: Outs[] = []) =>
+    payDue(
+      {
+        bsvUsd,
+        resolve: async () => '1Shop',
+        sign: async (_p, outs) => (signed.push(outs), { rawTx: 'RAW', txid: 'TX' }),
+        broadcast: async () => undefined,
+        spendingPaused: async () => false,
+      },
+      NOW,
+    );
+
+  test('a sats order moved with no price: the pot is capped at pay time, once a price is known', async () => {
+    makePot('1A', 'A', undefined, NOW);
+    makePot('1B', 'B', undefined, NOW);
+    const s = satsOrder('1A', 50);
+    moveSub(s.id, '1B', NOW, 0);
+    expect(getAgentAccount('1B')?.dailyCapUsd).toBeNull(); // no price yet: nothing to size the cap from
+    const r = await payWith(50);
+    expect(r[0]).toMatchObject({ id: s.id, ok: true });
+    const cap = getAgentAccount('1B')?.dailyCapUsd;
+    expect(cap).not.toBeNull();
+    expect(cap).toBe(getAgentAccount('1A')?.dailyCapUsd);
+    expect(checkAgentSpend('1B', 10_000, NOW).ok).toBe(false);
+  });
+
+  test('a sats order created with no price: the pot is capped at pay time too', async () => {
+    makePot('1C', 'C', undefined, NOW);
+    satsOrder('1C', 0);
+    expect(getAgentAccount('1C')?.dailyCapUsd).toBeNull();
+    await payWith(50);
+    expect(getAgentAccount('1C')?.dailyCapUsd).not.toBeNull();
+    expect(checkAgentSpend('1C', 10_000, NOW).ok).toBe(false);
+  });
+
+  test('still no price at pay time: nothing is paid and the cap still waits for one', async () => {
+    makePot('1A', 'A', undefined, NOW);
+    makePot('1B', 'B', undefined, NOW);
+    const s = satsOrder('1A', 50);
+    moveSub(s.id, '1B', NOW, 0);
+    const signed: Outs[] = [];
+    expect(await payWith(0, signed)).toEqual([{ id: s.id, ok: false, reason: 'No price right now' }]);
+    expect(signed).toEqual([]);
+    await payWith(50);
+    expect(getAgentAccount('1B')?.dailyCapUsd).not.toBeNull();
+  });
+
+  test('a cap the user set (or cleared) afterwards is left alone at pay time', async () => {
+    makePot('1A', 'A', undefined, NOW);
+    makePot('1B', 'B', undefined, NOW);
+    const s = satsOrder('1A', 50);
+    moveSub(s.id, '1B', NOW, 0);
+    setAgentDailyCap('1B', null); // the user's own choice, after the move
+    await payWith(50);
+    expect(getAgentAccount('1B')?.dailyCapUsd).toBeNull();
   });
 });
 
