@@ -254,7 +254,7 @@ export const handleSubscribeCall = async (
         const { req: r, proof } = parseSigned(args, origin, now);
         // A paymail payee the wallet can't check would be approved and then fail every month: refuse it now, before
         // the sheet, so the user is never asked. The first payment checks again (payeeBinding.ts pinOnFirstPay).
-        const { payee } = newAppSub(r, '', now);
+        const payee: Payee = newAppSub(r, '', now).payee;
         if (payee.paymail)
           await deps.checkPayee(payee).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
         const potId = await deps.approve(r);
