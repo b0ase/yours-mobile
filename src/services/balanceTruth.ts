@@ -120,6 +120,11 @@ export type BalanceTruth = {
   ourBackupIncomplete?: boolean;
   /** Our server held out for its one-time repair: rows its whole fill has sent so far (the line shows progress). */
   ourBackupRebuildingRows?: number;
+  /**
+   * Our server's fill failed OUR_BACKUP_GIVE_UP_FAILURES times in a row (review of b936a98c, 5): when it tries next.
+   * The line then says plainly that the backup couldn't be rebuilt (or completed), and when it retries.
+   */
+  ourBackupFailedRetryAt?: number;
 };
 
 /** The one line the balance card shows while an instant restore brings the rest in. */
@@ -140,6 +145,15 @@ export const ourBackupRebuildingLine = (rows: number) =>
   rows > 0
     ? `Backup incomplete: rebuilding it, ${Math.floor(rows).toLocaleString('en-GB')} rows so far`
     : 'Backup incomplete: rebuilding it';
+
+/** When a retry runs, as the lines say it: "shortly" within half a minute (or past), else the clock time (HH:MM). */
+export const retryWhen = (retryAt: number, now: number) =>
+  retryAt <= now + 30_000
+    ? 'shortly'
+    : `at ${new Date(retryAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+/** After repeated failed fills: the backup couldn't be rebuilt (held out for its repair) or completed, and when next. */
+export const ourBackupFailedLine = (retryAt: number, now: number, rebuilding: boolean) =>
+  `Backup couldn't be ${rebuilding ? 'rebuilt' : 'completed'}, will try again ${retryWhen(retryAt, now)}`;
 
 /** "1 payment's change not backed up yet": a payment whose change is still only on this device. Null when none. */
 export function backupLine(t: Pick<BalanceTruth, 'changeUnbacked'>): TruthLine | null {
@@ -231,9 +245,11 @@ export function truthLines(
     lines.push({
       kind: 'server-backup',
       text:
-        typeof t.ourBackupRebuildingRows === 'number'
-          ? ourBackupRebuildingLine(t.ourBackupRebuildingRows)
-          : OUR_BACKUP_INCOMPLETE_LINE,
+        typeof t.ourBackupFailedRetryAt === 'number'
+          ? ourBackupFailedLine(t.ourBackupFailedRetryAt, now, typeof t.ourBackupRebuildingRows === 'number')
+          : typeof t.ourBackupRebuildingRows === 'number'
+            ? ourBackupRebuildingLine(t.ourBackupRebuildingRows)
+            : OUR_BACKUP_INCOMPLETE_LINE,
       warn: true,
     });
   return lines;

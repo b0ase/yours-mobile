@@ -21,6 +21,7 @@ import { withTimeout } from './restoreProgress';
 import { buildsTransaction, LocalStoreNeededError } from './localFirst';
 import { isInsufficientFunds } from './fundingPrep';
 import { FillIncompleteError, fillError, type FillProgress, type FillReport } from './backupFill';
+import { retryWhen } from './balanceTruth';
 
 const CONNECT_MS = 8_000;
 const COUNT_MS = 8_000;
@@ -30,6 +31,14 @@ export const SEND_WAIT_MS = 15_000;
 export const OUR_BACKUP_RETRY_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
 /** A Store payment while our server is held out for its repair and the session has no other backup. */
 export const OUR_BACKUP_REBUILDING_REFUSAL = 'Your backup is being rebuilt. Try again in a few minutes.';
+/**
+ * After this many failed fills in a row (review of b936a98c, 5) the refusal and the card's line say plainly that the
+ * backup couldn't be rebuilt and when it tries next, and the failure goes to b once (report-to-b, no secrets).
+ */
+export const OUR_BACKUP_GIVE_UP_FAILURES = 3;
+/** The Store payment's refusal once the repair has failed OUR_BACKUP_GIVE_UP_FAILURES times. */
+export const ourBackupFailedRefusal = (retryAt: number, now: number) =>
+  `Your backup couldn't be rebuilt. It will try again ${retryWhen(retryAt, now)}.`;
 /** A fill that stopped making progress is tried again from the start, no sooner than this. */
 export const OUR_BACKUP_STALL_RETRY_MS = 15 * 60_000;
 
@@ -314,6 +323,13 @@ export type SpendableFirstWiringDeps = {
   deferred?: boolean;
   /** Our server joined this session (addRemote went through): the session's backup list now counts it. */
   onAttached?: () => void;
+  /**
+   * Once our server has joined: push what payments made during the repair left flagged "not backed up yet" (the
+   * write-ahead's urgent retry, changeWriteAhead retryNow), so the flags clear now, not on the retry's back-off.
+   */
+  flushUnbacked?: () => Promise<unknown>;
+  /** Hand a report to b (services/reportSink.ts). Text only, no keys or secrets. */
+  report?: (text: string) => void;
   /** Tests: how the check waits (between our server's reads, and before its one re-read). */
   sleep?: (ms: number) => Promise<void>;
   /** A payment of this wallet's own is waiting or going (ownPayments.waiting): no check runs beside it. */
@@ -376,6 +392,12 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   };
   /** Our server was added as a backup in this session, or is in the account's saved backups. */
   let added = false;
+  /** Our server joined this session: counted, and what payments left unbacked meanwhile pushed to it now (4b). */
+  const joined = () => {
+    added = true;
+    d.onAttached?.();
+    void d.flushUnbacked?.().catch((e) => log('[spendable-first] the unbacked payments did not push yet:', e));
+  };
   const registered = () => added || (d.registered?.() ?? false);
   let client: OurServerClient | undefined;
   let connecting: Promise<OurServerClient> | undefined;
@@ -565,8 +587,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
         `[spendable-first] our server filled (${r.how}): ${r.pages} page(s), ${r.unlockedMs} ms unlocked, locked ${r.lockedMs.join('+') || 0} ms`,
       );
       await d.addRemote(SNAPSHOT_SERVER_URL);
-      added = true;
-      d.onAttached?.();
+      joined();
       // A whole fill (a repair, or a first fill by this build) records it with the registration: the next init lets
       // our server join at once, never re-checked or refilled (review of 8ee88600, 2). Only how === 'full' writes it
       // (review of b936a98c, 1). Not recorded (the store failed): the next init repeats the whole fill (idempotent).
@@ -596,6 +617,16 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       const next: FillProgress | null =
         err.kind === 'stalled' ? { stage: 'restart', offsets: [], ...(full ? { full: true } : {}) } : progress;
       await saveFill(keep(next, incomplete));
+      if (failures === OUR_BACKUP_GIVE_UP_FAILURES)
+        try {
+          d.report?.(
+            `bWalletX: our storage server's backup of this device could not be ${d.deferred ? 'rebuilt' : 'completed'} ` +
+              `after ${failures} tries (last: ${err.kind}: ${err.message.slice(0, 200)}). It keeps retrying on its own; ` +
+              `next try ${new Date(incomplete.retryAt).toISOString()}.`,
+          );
+        } catch {
+          // a report is never what stops the wallet
+        }
       log(
         `[spendable-first] our server's backup incomplete (${err.kind}), will retry in ${Math.ceil((incomplete.retryAt - at) / 1000)} s:`,
         e,
@@ -605,7 +636,15 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   };
 
   /** Our server's backup didn't finish: "Backup incomplete, will retry", and when the next try may run. */
-  const ourBackup = (): { incomplete: boolean; retryAt?: number; rebuilding?: { rows: number } } => {
+  const ourBackup = (): {
+    incomplete: boolean;
+    retryAt?: number;
+    rebuilding?: { rows: number };
+    /** Failed OUR_BACKUP_GIVE_UP_FAILURES times or more in a row: the lines say so plainly (review of b936a98c, 5). */
+    failing?: true;
+  } => {
+    const failing =
+      (fillState?.incomplete?.failures ?? 0) >= OUR_BACKUP_GIVE_UP_FAILURES ? ({ failing: true } as const) : {};
     if (heldOut()) {
       const rows = (fillState?.progress?.offsets ?? [])
         .filter((o) => o.offset < Number.MAX_SAFE_INTEGER)
@@ -614,10 +653,20 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
         incomplete: true,
         retryAt: fillState?.incomplete?.retryAt ?? heldUntil ?? now(),
         rebuilding: { rows },
+        ...failing,
       };
     }
     const inc = d.on && !registered() ? fillState?.incomplete : undefined;
-    return inc ? { incomplete: true, retryAt: inc.retryAt } : { incomplete: false };
+    return inc ? { incomplete: true, retryAt: inc.retryAt, ...failing } : { incomplete: false };
+  };
+  /**
+   * A Store payment's refusal while our server is held out and no other backup is connected in this session (undefined:
+   * go on). After repeated failed fills it says the backup couldn't be rebuilt and when it tries next.
+   */
+  const heldOutRefusal = (otherBackupConnected: boolean): string | undefined => {
+    if (!heldOut() || otherBackupConnected) return undefined;
+    const b = ourBackup();
+    return b.failing ? ourBackupFailedRefusal(b.retryAt ?? now(), now()) : OUR_BACKUP_REBUILDING_REFUSAL;
   };
   /** Our server is saved as a backup but held out of this session until its repair has run (and isn't in yet). */
   const heldOut = () => d.on && d.deferred === true && !added;
@@ -659,8 +708,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     if (mine?.check === 'repaired') {
       // Another session of this process finished it: our server joins as it did there.
       await d.addRemote(SNAPSHOT_SERVER_URL);
-      added = true;
-      d.onAttached?.();
+      joined();
       return true;
     }
     if (lean || mark?.stage === 'full') return notNow('the snapshot is still coming in');
@@ -751,6 +799,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     ensureOurBackup,
     /** Our server is held out of this session until its repair has run: a Store payment with no other backup waits. */
     heldOut,
+    heldOutRefusal,
     ourBackup,
     /** Every send waits for (or is refused while) the snapshot is still coming in: holdSendsForSnapshot. */
     guardSends: (wallet: unknown) =>

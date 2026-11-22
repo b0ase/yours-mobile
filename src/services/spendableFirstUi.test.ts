@@ -5,7 +5,13 @@
  * initWallet wiring is inert with the flag off: nothing connects, nothing is added.
  */
 import { describe, expect, test } from 'bun:test';
-import { OUR_BACKUP_INCOMPLETE_LINE, SNAPSHOT_LOADING_LINE, truthLines, type BalanceTruth } from './balanceTruth';
+import {
+  OUR_BACKUP_INCOMPLETE_LINE,
+  SNAPSHOT_LOADING_LINE,
+  retryWhen,
+  truthLines,
+  type BalanceTruth,
+} from './balanceTruth';
 import { FillIncompleteError, type FillProgress } from './backupFill';
 import { moveNoticeShows } from '../components/moveToDevice';
 import {
@@ -264,6 +270,31 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
     expect(kv['mark:ourBackupCheck']).toMatchObject({ check: 'repaired', deviceSik: 'device-sik' });
   });
 
+  test("review of b936a98c, 5: three failed fills running: the line says it couldn't be completed and when next; b hears once", async () => {
+    const kv = repaired();
+    const clock = { t: NOW };
+    const failed = () => new Error('WalletStorageClient rpcCall: network error 503');
+    const reports: string[] = [];
+    const { w } = make(true, kv, clock, [failed, failed, failed, failed, () => undefined], {
+      report: (t) => void reports.push(t),
+    });
+    for (let i = 1; i <= 4; i++) {
+      expect(await w.addOurBackup()).toBe(false);
+      expect(w.ourBackup().failing).toBe(i >= 3 ? true : undefined);
+      if (i === 3) {
+        const at = w.ourBackup().retryAt!;
+        const line = truthLines({ ourBackupIncomplete: true, ourBackupFailedRetryAt: at } as never, String, clock.t);
+        expect(line.at(-1)?.text).toBe(`Backup couldn't be completed, will try again ${retryWhen(at, clock.t)}`);
+        expect(line.at(-1)?.text).toMatch(/at \d\d:\d\d$/);
+      }
+      clock.t = w.ourBackup().retryAt!;
+    }
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain('could not be completed after 3 tries');
+    expect(await w.addOurBackup()).toBe(true);
+    expect(w.ourBackup()).toEqual({ incomplete: false });
+  });
+
   test('review 2: a progress write that fails ends the fill as unfinished (never silently swallowed)', async () => {
     const kv: Record<string, unknown> = {};
     const lines: string[] = [];
@@ -361,6 +392,7 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
       async () => ((retryAt = undefined), true),
     ];
     let tries = 0;
+    // eslint-disable-next-line prefer-const -- assigned once the timer that calls it exists
     let attempt!: () => Promise<boolean>;
     const timer = ourBackupRetryTimer({
       retryAt: () => retryAt,

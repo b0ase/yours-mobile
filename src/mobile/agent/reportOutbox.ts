@@ -9,6 +9,7 @@
 import { redactSecrets } from '../errors/errorReport';
 import { reportToB, type ReportResult } from './paid';
 import { isNetworkError, OFFLINE_TEXT } from '../../utils/offline';
+import { setReportSink } from '../../services/reportSink';
 
 export type OutboxReason = 'offline' | 'signin' | 'error';
 
@@ -203,3 +204,7 @@ export const flushOutbox = (
   });
   return flushing;
 };
+
+// Wallet-core reports (services/reportSink.ts, e.g. our server's backup failing again and again) join this outbox:
+// sent with its retries and listed in "Your reports".
+setReportSink((account, text) => void enqueueReport(account, text, 'error'));

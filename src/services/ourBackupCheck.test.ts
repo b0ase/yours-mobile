@@ -15,9 +15,12 @@ import {
   ourBackupCheckKey,
   ourBackupInitPlan,
   OUR_BACKUP_REBUILDING_REFUSAL,
+  ourBackupFailedRefusal,
   type OurServerClient,
 } from './spendableFirstWiring';
 import { backupBeforeSend } from './deviceSync';
+import { createChangeWriteAhead } from './changeWriteAhead';
+import { createInFlight } from './pushView';
 import { repairSyncRemote, SNAPSHOT_SERVER_URL } from './spendableFirst';
 
 const services = {
@@ -155,6 +158,9 @@ function init(
     deferred?: boolean;
     kvGet?: (k: string) => Promise<Record<string, unknown>>;
     busy?: () => boolean;
+    flushUnbacked?: () => Promise<unknown>;
+    now?: () => number;
+    report?: (text: string) => void;
   } = {},
 ) {
   const log = { fills: [] as { full?: boolean; unfinished?: boolean }[], attached: 0 };
@@ -195,6 +201,9 @@ function init(
     registered: () => log.attached > 0,
     deferred: o.deferred ?? true,
     busy: o.busy,
+    flushUnbacked: o.flushUnbacked,
+    now: o.now,
+    report: o.report,
     sleep: async () => undefined,
     kv: { get: o.kvGet ?? (async (k) => ({ [k]: kv[k] })), set: async (i) => void Object.assign(kv, i) },
     markKey: 'mark',
@@ -202,6 +211,24 @@ function init(
   return { w, log };
 }
 const KEY = ourBackupCheckKey('mark');
+/** A payment of this wallet's own (signed, its broadcast left to the Monitor): spent coins, change, transaction rows. */
+async function send(x: Setup) {
+  const r = await x.wallet.createAction({
+    description: 'a send during the fill',
+    outputs: [
+      {
+        lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+        satoshis: 500,
+        outputDescription: 'to someone',
+      },
+    ],
+    options: { acceptDelayedBroadcast: true },
+  });
+  return r.txid!;
+}
+const until = async (ok: () => boolean) => {
+  for (let i = 0; i < 200 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
+};
 const serverIn = (x: Setup) => x.sm.getBackupStores().includes(x.server.getSettings().storageIdentityKey);
 
 /** The device moves on while our server hears nothing: a token basket, a coin spent, a certificate. */
@@ -323,8 +350,7 @@ describe('our server’s one-time repair: held out of the session until the whol
       backupBeforeSend({
         deviceActive: () => true,
         backupConfigured: () => configured.length > 0,
-        heldOut: () =>
-          w.heldOut() && !session.some((u) => u !== SNAPSHOT_SERVER_URL) ? OUR_BACKUP_REBUILDING_REFUSAL : undefined,
+        heldOut: () => w.heldOutRefusal(session.some((u) => u !== SNAPSHOT_SERVER_URL)),
         pushNow: async () => (pushes++, { ok: true, pulled: false, pushed: true }),
         log: () => undefined,
       });
@@ -417,6 +443,97 @@ describe('our server’s one-time repair: held out of the session until the whol
     expect([ra, rb]).toEqual([true, true]);
     expect(a.log.fills.length + b.log.fills.length).toBe(1);
     expect(a.log.attached + b.log.attached).toBe(2);
+  });
+
+  test('(4a) a send during the bulk pass is on our server after the fill: the final pass takes it', async () => {
+    const x = await setup(3);
+    await halfFill(x);
+    let sent: string | undefined;
+    let pages = 0;
+    const { w } = init(
+      x,
+      {},
+      {
+        client: (c) =>
+          new Proxy(c, {
+            get(t, p) {
+              const v = Reflect.get(t, p, t) as unknown;
+              if (p !== 'processSyncChunk') return typeof v === 'function' ? v.bind(t) : v;
+              return async (...a: unknown[]) => {
+                // The first page is the bulk pass's (no locks held): a payment goes out beside it.
+                if (pages++ === 0) sent = await send(x);
+                return (v as (...b: unknown[]) => unknown).apply(t, a);
+              };
+            },
+          }),
+      },
+    );
+    expect(await w.ensureOurBackup()).toBe(true);
+    expect(sent).toBeDefined();
+    expect((await x.server.findTransactions({ partial: { txid: sent } })).length).toBe(1);
+    expect(await rows(x.server)).toEqual(await rows(x.dev));
+  });
+
+  test('(4b) a payment flagged "not backed up yet" while our server was held out: the flag clears once it joins', async () => {
+    const x = await setup(2);
+    await halfFill(x);
+    const managed = x.sm as unknown as { _backups?: { storage: unknown }[] };
+    const wa = createChangeWriteAhead({
+      applies: () => true,
+      backups: () => managed._backups ?? [],
+      storage: x.sm as never,
+      inFlightFor: () => createInFlight(),
+      // As the device sync's push: nothing in the session, nothing pushed.
+      pushNow: async () => {
+        const n = x.sm.getBackupStores().length;
+        if (n) await x.sm.updateBackups();
+        return { ok: true, pulled: false, pushed: n > 0 };
+      },
+      retryTimer: { set: () => 0, clear: () => undefined },
+      log: () => undefined,
+    });
+    const txid = 'ab'.repeat(32);
+    const done = wa.arm([txid]);
+    expect((await wa.beforeBroadcast([txid])).how).toBe('unbacked');
+    done();
+    expect(wa.count()).toBe(1);
+    expect(await wa.retryNow()).toBe(false); // still held out: stays flagged
+    const { w } = init(x, {}, { flushUnbacked: () => wa.retryNow() });
+    expect(await w.ensureOurBackup()).toBe(true);
+    await until(() => wa.count() === 0);
+    expect(wa.count()).toBe(0);
+  });
+
+  test("(5) the repair fails three times running: the refusal says it couldn't be rebuilt and when next; b hears once", async () => {
+    const x = await setup(2);
+    const clock = { t: Date.now() };
+    const reports: string[] = [];
+    const { w } = init(
+      x,
+      {},
+      {
+        fill: async () => Promise.reject(new Error('WalletStorageClient rpcCall: network error 503')),
+        now: () => clock.t,
+        report: (t) => void reports.push(t),
+      },
+    );
+    for (let i = 1; i <= 4; i++) {
+      expect(w.heldOutRefusal(false)).toBe(
+        i <= 3 ? OUR_BACKUP_REBUILDING_REFUSAL : ourBackupFailedRefusal(w.ourBackup().retryAt!, clock.t),
+      );
+      expect(await w.ensureOurBackup()).toBe(false);
+      clock.t = w.ourBackup().retryAt! - 60_000; // a minute before the next try: the refusal names it
+      if (i === 3) {
+        expect(w.heldOutRefusal(false)).toMatch(/^Your backup couldn't be rebuilt\. It will try again at \d\d:\d\d\.$/);
+        // Another backup connected in this session: the payment goes on.
+        expect(w.heldOutRefusal(true)).toBeUndefined();
+      }
+      clock.t = w.ourBackup().retryAt!;
+    }
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain('could not be rebuilt after 3 tries');
+    expect(reports[0]).toContain('WalletStorageClient rpcCall: network error 503');
+    expect(serverIn(x)).toBe(false);
   });
 
   test('flag off: nothing to do, nothing filled, nothing joined', async () => {

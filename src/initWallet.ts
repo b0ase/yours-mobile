@@ -252,10 +252,10 @@ import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } 
 import {
   createSpendableFirst,
   oneSatSnapshotLookups,
-  OUR_BACKUP_REBUILDING_REFUSAL,
   ourBackupInitPlan,
   type OurServerClient,
 } from './services/spendableFirstWiring';
+import { reportFromWallet } from './services/reportSink';
 import { fillBackup } from './services/backupFill';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
@@ -589,16 +589,22 @@ const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdenti
 
 /**
  * Our server is saved as this account's backup but its one-time repair hasn't run on this device yet
- * (spendableFirstWiring ourBackupInitPlan): every opening of the account's stores leaves it out until then.
+ * (spendableFirstWiring ourBackupInitPlan): every opening of the account's stores leaves it out until then, whatever
+ * the active store (review of b936a98c, 3): a remote-active account that moves to this device in the same session
+ * never finds it attached unrepaired; it joins after its whole fill (ensureOurBackup, once this device is active).
+ * Our server AS the active store is never held out: it is the account's store, not a backup, and holding it out
+ * would strand the account. The move to this device copies it into the device store (the toolbox's setActive), so it
+ * stays in that session as a whole backup; it has no 'repaired' record on this device, so the next open holds it out
+ * and runs the one whole fill (idempotent). Exported for tests.
  */
-async function ourServerHeldOut(
+export async function ourServerHeldOut(
   account: { addresses?: { identityAddress?: string } } | undefined,
   activeRemote: string | undefined,
   configured: string[] | undefined,
   storageIdentityKey: string,
 ): Promise<boolean> {
   const id = account?.addresses?.identityAddress;
-  if (activeRemote || !id || !configured?.includes(SNAPSHOT_SERVER_URL)) return false;
+  if (activeRemote === SNAPSHOT_SERVER_URL || !id || !configured?.includes(SNAPSHOT_SERVER_URL)) return false;
   return (
     (await ourBackupInitPlan(chrome.storage.local as never, SNAPSHOT_MARK_KEY(id), storageIdentityKey)) === 'defer'
   );
@@ -1165,6 +1171,10 @@ export const initWallet = async (
     onAttached: () => {
       if (!(backups ?? []).includes(SNAPSHOT_SERVER_URL)) backups = [...(backups ?? []), SNAPSHOT_SERVER_URL];
     },
+    // Payments made during the repair went out flagged "not backed up yet" (review of b936a98c, 4): pushed now.
+    flushUnbacked: () => writeAhead?.retryNow() ?? Promise.resolve(true),
+    // Repeated failed fills: b hears once, through the report outbox where the app has one (services/reportSink.ts).
+    report: (text) => void reportFromWallet(keys.identityAddress, text),
     // The once-per-device check of our server's backup (checkOurBackup): this device's own count, never beside a payment.
     busy: () => ownPayments.waiting(),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
@@ -2563,6 +2573,10 @@ export const initWallet = async (
         ...(spendableFirst.ourBackup().rebuilding
           ? { ourBackupRebuildingRows: spendableFirst.ourBackup().rebuilding!.rows }
           : {}),
+        // Failed again and again: the line says it couldn't be rebuilt (or completed) and when it tries next.
+        ...(spendableFirst.ourBackup().failing
+          ? { ourBackupFailedRetryAt: spendableFirst.ourBackup().retryAt ?? Date.now() }
+          : {}),
       };
     },
     receiveWatch: {
@@ -2604,10 +2618,9 @@ export const initWallet = async (
         // Fail closed (review of 8ee88600, 1): configured, not this session's. Our server held out for its repair with
         // no other backup in the session: the payment waits, with an honest line, never "no backup".
         backupConfigured: () => (configuredBackups?.length ?? 0) > 0,
-        heldOut: () =>
-          spendableFirst.heldOut() && !(backups ?? []).some((u) => u !== SNAPSHOT_SERVER_URL)
-            ? OUR_BACKUP_REBUILDING_REFUSAL
-            : undefined,
+        // Another backup counts only when it is connected now (review of b936a98c, 6): a saved one that failed to
+        // connect at open (skipped, or the fallback above that opens without backups) can't take the push either.
+        heldOut: () => spendableFirst.heldOutRefusal((managed._backups?.length ?? 0) > 0),
         pushNow: () => deviceSync.pushNow(),
       }),
     recoverFailed: () =>
