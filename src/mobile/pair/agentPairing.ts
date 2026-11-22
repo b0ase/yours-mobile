@@ -15,8 +15,10 @@ import { APP_NAME, STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 import {
   checkMintBudget,
   MintLimitError,
-  recordMint,
+  releaseMint,
   remaining,
+  reserveMint,
+  settleMint,
   UPLOAD_CHUNK_BYTES,
   UploadStore,
   type MintLimits,
@@ -380,18 +382,40 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
   await assertSpendJob(grant, 'mint', deps);
   assertAgentCap(grant, cost.usd ?? 0);
 
-  const r = await (deps.mintMedia ?? mintMedia)(deps.ctx, {
-    base64Content,
-    contentType,
-    ...form,
-    feeSats: cost.feeSats,
-  });
+  // Hold the budget before signing, saved with the pairing: an app killed after the broadcast but before the record
+  // below still has this mint counted (b-Aware row 245). Settled on the actual cost after; given back only when
+  // nothing was sent.
+  const hold = { id: `hold-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now() };
+  const held: AgentGrant = {
+    ...grant,
+    mint: reserveMint(grant.mint!, { ...hold, name: form.title.trim(), usd: cost.usd ?? 0 }),
+  };
+  grant.mint = held.mint;
+  deps.saveGrant?.(held);
+  const watch = watchSends(deps.ctx);
+  let r: Awaited<ReturnType<typeof mintMedia>>;
+  try {
+    r = await (deps.mintMedia ?? mintMedia)(watch.ctx, {
+      base64Content,
+      contentType,
+      ...form,
+      feeSats: cost.feeSats,
+    });
+  } catch (e) {
+    // A tx that may be out (a new collection minted before the item failed) keeps its hold on the budget.
+    if (!watch.sent()) {
+      const back: AgentGrant = { ...grant, mint: releaseMint(grant.mint!, hold.id) };
+      grant.mint = back.mint;
+      deps.saveGrant?.(back);
+    }
+    throw e;
+  }
   const spentSats = r.networkSats === null ? cost.totalSats : r.networkSats + cost.feeSats;
   const usd = rate > 0 ? (spentSats / 1e8) * rate : (cost.usd ?? 0);
   // The grant may have been replaced while minting; record on the latest copy.
   const next: AgentGrant = {
     ...grant,
-    mint: recordMint(grant.mint!, {
+    mint: settleMint(grant.mint!, hold.id, {
       at: Date.now(),
       name: form.title.trim(),
       txid: r.txid,
@@ -422,6 +446,41 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
     mint: remainingOf(next.mint!),
   };
 }
+
+/**
+ * The wallet context a mint runs on, watched: sent() is true once a tx may be on the network. That is as soon as
+ * signAction is called (the @1sat/actions path: createAction with signAndProcess:false only builds, signAction signs
+ * and broadcasts, and can throw after broadcasting), or a createAction that signs and processes itself is called (it
+ * too can broadcast and then throw), or any createAction comes back with a tx. A createAction with
+ * signAndProcess:false that throws or returns only a signableTransaction has sent nothing. A context with no wallet
+ * (tests with a stub mint) is passed as it is.
+ */
+const watchSends = (ctx: OneSatContext) => {
+  let sent = false;
+  const w = (ctx as { wallet?: object }).wallet;
+  if (!w) return { ctx, sent: () => sent };
+  const wallet = new Proxy(w, {
+    get(target, prop, recv) {
+      const v = Reflect.get(target, prop, recv) as unknown;
+      if ((prop !== 'createAction' && prop !== 'signAction') || typeof v !== 'function')
+        return typeof v === 'function' ? v.bind(target) : v;
+      return async (...args: unknown[]) => {
+        if (prop === 'signAction') sent = true;
+        else {
+          const opts = (args[0] as { options?: { signAndProcess?: boolean } } | undefined)?.options;
+          if (opts?.signAndProcess !== false) sent = true;
+        }
+        const res = (await (v as (...a: unknown[]) => Promise<unknown>).apply(target, args)) as {
+          txid?: string;
+          tx?: unknown;
+        } | null;
+        if (res?.txid || res?.tx) sent = true;
+        return res;
+      };
+    },
+  });
+  return { ctx: { ...ctx, wallet } as OneSatContext, sent: () => sent };
+};
 
 const wrapLimitAsync = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {

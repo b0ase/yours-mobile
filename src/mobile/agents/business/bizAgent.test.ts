@@ -245,3 +245,33 @@ describe('agent account', () => {
     expect(getBizAgent('shop', store)?.dailyCapUsd).toBe(10);
   });
 });
+
+describe('row 212: the daily cap survives the log filling up', () => {
+  const wallet = new ProtoWallet(new PrivateKey(42));
+  test("a flood of refusals pushes today's payment out of the log, but not off the cap", async () => {
+    const store = memStore();
+    const sent: string[] = [];
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    const src = new Transaction();
+    src.addOutput({ lockingScript: new P2PKH().lock(a.address), satoshis: 100_000_000 });
+    const coins: BizCoin[] = [{ txid: src.id('hex') as string, vout: 0, sats: 100_000_000, sourceTx: src }];
+    const deps = {
+      wallet,
+      findCoins: async () => coins,
+      broadcast: async (raw: string) => void sent.push(raw),
+      usdPerBsv: RATE,
+      stopAll: () => false,
+      store,
+      now: () => DAY,
+    };
+    // $8 of a $10 day.
+    expect((await bizAgentPay({ ticker: 'SHOP', address: TO, sats: 16_000_000, detail: 'R1' }, deps)).ok).toBe(true);
+    // 400 refused calls (bad address): each is logged.
+    for (let i = 0; i < 400; i++)
+      await bizAgentPay({ ticker: 'SHOP', address: 'nope', sats: 1, detail: `spam ${i}` }, deps);
+    // The $8 is still on today's cap: another $8 is refused, nothing more is sent.
+    const r = await bizAgentPay({ ticker: 'SHOP', address: TO, sats: 16_000_000, detail: 'R2' }, deps);
+    expect(r.ok).toBe(false);
+    expect(sent).toHaveLength(1);
+  });
+});

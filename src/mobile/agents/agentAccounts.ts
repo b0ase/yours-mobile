@@ -19,6 +19,12 @@ export type AgentAccount = {
   ghostColor?: string;
   /** 'pot' = a savings pot that pays standing orders (pots/pots.ts). Pots are hidden from the agents list. */
   kind?: 'agent' | 'pot';
+  /**
+   * A pot whose default cap couldn't be sized when an order was added or moved in (a sats order with no BSV price):
+   * payDue sets it once a price is known, before the cap check (pots.ts settleAwaitedCap). Any cap the user sets or
+   * clears clears this.
+   */
+  capAwaitsPrice?: true;
 };
 
 /**
@@ -169,7 +175,14 @@ export const setAgentDailyCap = (id: string, usd: number | null) => {
   const a = getAgentAccount(id);
   if (!a) return;
   const cap = usd === null || !Number.isFinite(usd) || usd <= 0 ? null : Math.round(usd * 100) / 100;
-  save({ ...a, dailyCapUsd: cap });
+  const { capAwaitsPrice: _awaits, ...rest } = a;
+  save({ ...rest, dailyCapUsd: cap });
+};
+
+/** Mark an uncapped pot as waiting for a price to size its default cap (pots.ts applyDefaultCap). */
+export const markCapAwaitsPrice = (id: string) => {
+  const a = getAgentAccount(id);
+  if (a && a.dailyCapUsd === null && !a.capAwaitsPrice) save({ ...a, capAwaitsPrice: true });
 };
 
 /** "Stop all agents": every agent account refuses agent actions until turned off. */

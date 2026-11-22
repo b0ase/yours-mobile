@@ -61,19 +61,27 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
                 Minted {s.agent.mint.items} of {s.agent.mint.maxItems} · spent {usd2(s.agent.mint.spentUsd)} of{' '}
                 {usd2(s.agent.mint.maxUsd)}
               </div>
-              {s.agent.mint.recent.slice(0, 10).map((m) => (
-                <a
-                  key={m.txid}
-                  href={`https://whatsonchain.com/tx/${m.txid}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 flex justify-between gap-2 no-underline"
-                  style={{ color: MUTED }}
-                >
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap text-white">{m.name}</span>
-                  <span>{usd2(m.usd)}</span>
-                </a>
-              ))}
+              {s.agent.mint.recent.slice(0, 10).map((m) =>
+                m.pending ? (
+                  // Held on the budget before signing, never settled (the app closed mid-mint): counted, no tx link.
+                  <div key={m.id ?? m.at} className="mt-1 flex justify-between gap-2" style={{ color: MUTED }}>
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap text-white">{m.name}</span>
+                    <span>about {usd2(m.usd)}, not confirmed</span>
+                  </div>
+                ) : (
+                  <a
+                    key={m.txid}
+                    href={`https://whatsonchain.com/tx/${m.txid}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 flex justify-between gap-2 no-underline"
+                    style={{ color: MUTED }}
+                  >
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap text-white">{m.name}</span>
+                    <span>{usd2(m.usd)}</span>
+                  </a>
+                ),
+              )}
             </div>
           )}
         </div>

@@ -8,7 +8,7 @@
  * then the sub is advanced and the pending record cleared. A run that finds a pending record rebroadcasts that
  * same raw tx (idempotent: one txid) and marks its periods paid; it never signs a fresh tx for them.
  */
-import { appendAgentLog, checkAgentSpend } from '../agents/agentAccounts';
+import { appendAgentLog, checkAgentSpend, getAgentLog } from '../agents/agentAccounts';
 import { serialSpend } from '../agents/spendQueue';
 import { SUBSCRIPTIONS_ENABLED, PNEE_POTS_ENABLED } from '../storeBuild';
 import { isPaused } from '../config/killSwitch';
@@ -17,17 +17,21 @@ import {
   advanced,
   amountPnee,
   amountSats,
-  amountUsd,
+  amountUsdKnown,
   dueItems,
   formatAmount,
+  claimPeriod,
   clearPending,
   getPending,
+  holdsClaim,
   getSub,
   isPayingPot,
   listSubs,
+  releaseClaim,
   savePending,
   saveSub,
   servicePayee,
+  settleAwaitedCap,
   type Payee,
   type PendingPayment,
   type Subscription,
@@ -104,9 +108,32 @@ export type PayOutcome =
 
 let running: Promise<PayOutcome[]> | null = null;
 
-/** Pay everything due. Concurrent calls share one run, so a quick resume can't pay twice. */
+/** A Web Locks API, as navigator.locks offers it (shared by every tab, popup and side panel of one origin). */
+type Locks = {
+  request: <T>(name: string, options: { ifAvailable?: boolean }, cb: (lock: unknown) => Promise<T>) => Promise<T>;
+};
+export const PAY_LOCK = 'bwx-pots-pay';
+/**
+ * One pay run at a time on the device, not just in this tab (b-Aware row 233, BL-01): `running` and serialSpend live
+ * in one JS realm, so two tabs (or the popup and a tab) each paid the same period with a different tx. The lock is
+ * only taken if free (ifAvailable): a run in another window pays every order from the same storage, so this one pays
+ * nothing and the next open tries again. Waiting for it instead held this window's run, and its low-funds checks and
+ * reminders, for as long as the other window's catch-up question stayed open (review of row 233). Without
+ * navigator.locks, the per-period claim in run() is the guard. A lock that can't be taken rejects: nothing is paid
+ * (fail closed).
+ */
+const acrossTabs = (fn: () => Promise<PayOutcome[]>): Promise<PayOutcome[]> => {
+  const locks = (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks;
+  return locks && typeof locks.request === 'function'
+    ? locks.request(PAY_LOCK, { ifAvailable: true }, (lock) => (lock ? fn() : Promise.resolve([])))
+    : fn();
+};
+
+const IN_OTHER_TAB = 'Being paid in another window';
+
+/** Pay everything due. Concurrent calls share one run, and tabs take turns, so a quick resume can't pay twice. */
 export const payDue = (deps: PayDeps, now = Date.now()): Promise<PayOutcome[]> =>
-  (running ??= run(deps, now).finally(() => (running = null)));
+  (running ??= acrossTabs(() => run(deps, now)).finally(() => (running = null)));
 
 /** Still payable right now, by what is in storage (not a snapshot): the user may have paused or cancelled. */
 const live = (id: string): Subscription | null => {
@@ -130,6 +157,10 @@ const fail = (s: Subscription, reason: string, deps: PayDeps, lowFunds = false):
   return { id: s.id, ok: false, reason };
 };
 
+/** This payment is on the pot's log (and so on its day ledger) already. */
+const booked = (potId: string, txid: string) =>
+  getAgentLog(potId).some((e) => e.action === 'sub-pay' && e.txid === txid);
+
 const paused = (deps: PayDeps) => (deps.spendingPaused ?? (() => isPaused('spending')))().catch(() => true);
 
 async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
@@ -144,6 +175,8 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
    * refused and pending forever. Nothing more is signed from such a pot in this run; its orders wait for the next.
    */
   const unsure = new Set<string>();
+  /** This run, as the owner of a per-period claim (pots.ts claimPeriod): the cross-tab guard without navigator.locks. */
+  const runId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   // Orders with a waiting payment first, so every unsure pot is known before any new signature (stable order otherwise).
   const ids = listSubs()
     .map((x) => x.id)
@@ -159,8 +192,12 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       // only after the broadcast, so a spend running beside this one could otherwise pass the same daily cap.
       const r = await serialSpend(async (): Promise<PayOutcome> => {
         const cur = live(id);
-        // Gated against the pot the signed tx spends (pending.potId), not the order's current pot (moveSub).
-        const gate = cur ? checkAgentSpend(pending.potId, pending.usd, now) : null;
+        // Gated against the pot the signed tx spends (pending.potId), not the order's current pot (moveSub). Already
+        // booked (a kill after the log, before the record was cleared): its dollars are on the cap already, so only
+        // Stop and Stop all are checked again.
+        const usd = booked(pending.potId, pending.txid) ? 0 : pending.usd;
+        settleAwaitedCap(pending.potId, deps.bsvUsd);
+        const gate = cur ? checkAgentSpend(pending.potId, usd, now) : null;
         if (!cur || !gate?.ok) {
           return {
             id,
@@ -224,23 +261,33 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       out.push(fail(s, PNEE_NO_SEND, deps));
       continue;
     }
-    if (!pnee && sats === null) {
-      out.push({ id: s.id, ok: false, reason: 'No price right now' }); // try again next open, no alert
+    // No rate: a dollar order can't be priced in sats, and a sats order can't be priced in dollars for the cap. Both
+    // wait (b-Aware row 267: a sats order was gated, and booked, as $0). Try again next open, no alert.
+    const each = amountUsdKnown(s.amount, deps.bsvUsd);
+    if (!pnee && (sats === null || each === null)) {
+      out.push({ id: s.id, ok: false, reason: 'No price right now' });
       continue;
     }
-    const usd = amountUsd(s.amount, deps.bsvUsd) * count;
+    const usd = (each ?? 0) * count;
     // Pot only, never the main balance: no fallback if the pot is gone or isn't a pot.
     if (!isPayingPot(s.potId)) {
       out.push(fail(s, 'Only a pot can pay. Pick a pot for this subscription.', deps));
       continue;
     }
+    // The plan (count, usd, due times) is for these periods only: if they were paid while this order waited for its
+    // turn (another tab or run), the step below pays nothing rather than paying the next periods early.
+    const from = s.periodIndex;
     // Cap check, sign and log as one step, queued with agent spends so the two can't both pass the daily cap.
     const r = await serialSpend(async (): Promise<PayOutcome | null> => {
       let s = live(id);
-      if (!s) return null;
+      if (!s || s.periodIndex !== from) return null;
+      // Another tab signed and recorded these periods already: its record is settled on a later run, never re-signed.
+      if (getPending(id)) return { id, ok: false, reason: IN_OTHER_TAB };
       // A payment from this pot is unsure in this run: its coins may be in flight. Left for the next run, no alert.
       if (unsure.has(s.potId))
         return { id: s.id, ok: false, reason: 'Waiting for an earlier payment from this pot to go through' };
+      // A pot filled while no price was loaded gets its default cap now, before the check (b-Aware row 350).
+      settleAwaitedCap(s.potId, deps.bsvUsd);
       const gate = checkAgentSpend(s.potId, usd, now);
       if (!gate.ok) {
         return fail(s, gate.reason, deps);
@@ -286,37 +333,46 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       const outputs = Array.from({ length: count }, () => ({ address, amount: perPeriod }));
       const refused = scheduledOutputsRefusal(outputs, address, perPeriod, count);
       if (refused) return fail(s, refused, deps);
-      let signed: { rawTx: string; txid: string };
+      // Claim these periods before signing, so a tab that starts now sees them taken (b-Aware row 233).
+      if (!claimPeriod(id, s.periodIndex, runId, now)) return { id, ok: false, reason: IN_OTHER_TAB };
       try {
-        signed = pnee
-          ? await deps.signPnee!(
-              s.potId,
-              outputs.map((o) => ({ address: o.address, units: o.amount })),
-              s.memo,
-            )
-          : await deps.sign(
-              s.potId,
-              outputs.map((o) => ({ address: o.address, sats: o.amount })),
-              s.memo,
-            );
-      } catch (e) {
-        const m = e instanceof Error ? e.message : String(e);
-        return fail(s, m, deps, /not enough|insufficient/i.test(m));
+        let signed: { rawTx: string; txid: string };
+        try {
+          signed = pnee
+            ? await deps.signPnee!(
+                s.potId,
+                outputs.map((o) => ({ address: o.address, units: o.amount })),
+                s.memo,
+              )
+            : await deps.sign(
+                s.potId,
+                outputs.map((o) => ({ address: o.address, sats: o.amount })),
+                s.memo,
+              );
+        } catch (e) {
+          const m = e instanceof Error ? e.message : String(e);
+          return fail(s, m, deps, /not enough|insufficient/i.test(m));
+        }
+        // Signed but not sent: if another tab took these periods meanwhile (claim lost, or its record is there), this tx
+        // is dropped unsent. Nothing was broadcast and pot signing holds no coins, so nothing is lost.
+        if (!holdsClaim(s.id, runId) || getPending(s.id)) return { id: s.id, ok: false, reason: IN_OTHER_TAB };
+        const p: PendingPayment = {
+          subId: s.id,
+          potId: s.potId,
+          periodIndex: s.periodIndex,
+          count,
+          dueTimes: plan.due,
+          ...signed,
+          usd,
+          at: now,
+          to: address,
+          ...(pnee ? { unit: 'PNEE' as const } : { sats: sats! * count }),
+        };
+        savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
+        return await settlePending(s, p, deps, now, unsure, false);
+      } finally {
+        releaseClaim(id, runId);
       }
-      const p: PendingPayment = {
-        subId: s.id,
-        potId: s.potId,
-        periodIndex: s.periodIndex,
-        count,
-        dueTimes: plan.due,
-        ...signed,
-        usd,
-        at: now,
-        to: address,
-        ...(pnee ? { unit: 'PNEE' as const } : { sats: sats! * count }),
-      };
-      savePending(p); // before the broadcast: from here on these periods are only ever paid by this tx
-      return settlePending(s, p, deps, now, unsure, false);
     });
     if (r) out.push(r);
   }
@@ -365,6 +421,16 @@ async function settlePending(
       deps.notify?.(`Payment to ${s.payee.name} is waiting to go through`, m);
       return { id: s.id, ok: false, reason: m };
     }
+  // Booked once per txid, whichever run settles it, before the order advances: a run killed after the advance but
+  // before the log left the payment off the cap for good, so its cap space was spent twice (b-Aware row 272).
+  if (!booked(p.potId, p.txid))
+    appendAgentLog(p.potId, {
+      at: now,
+      action: 'sub-pay',
+      detail: `Paid ${s.payee.name} ${formatAmount(s.amount)}${p.count > 1 ? ` × ${p.count}` : ''}`,
+      usd: p.usd,
+      txid: p.txid,
+    });
   // Already advanced past these periods (crash after saveSub, before clearPending)? Then only clear.
   const cur = getSub(s.id) ?? s;
   if (cur.periodIndex === p.periodIndex) {
@@ -374,13 +440,6 @@ async function settlePending(
       ...next,
       status: cur.status === 'paused' || cur.status === 'cancelled' ? cur.status : next.status,
       lastReceipt: { at: now, txid: p.txid, usd: p.usd, sats: p.sats ?? 0, ...(p.to ? { to: p.to } : {}) },
-    });
-    appendAgentLog(p.potId, {
-      at: now,
-      action: 'sub-pay',
-      detail: `Paid ${s.payee.name} ${formatAmount(s.amount)}${p.count > 1 ? ` × ${p.count}` : ''}`,
-      usd: p.usd,
-      txid: p.txid,
     });
   }
   clearPending(s.id);
