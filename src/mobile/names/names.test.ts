@@ -8,6 +8,8 @@ import {
   parseRecipient,
   resolveRecipient,
   trustResolvedKey,
+  trustedKey,
+  opnsKeyUnverified,
   scriptToAddress,
   externalLabel,
   TOKENS_UNSUPPORTED,
@@ -358,4 +360,26 @@ describe('remembered keys: never an OpNS key only the index vouches for (b-Aware
       trustResolvedKey({ input: '$cafe', via: 'p2p-paymail', pubkey: '02aa' });
       expect(seen()).toEqual({ satchmo: '03ff', cafe: '02aa' });
     }));
+});
+
+describe('trustedKey: an OpNS key is used only when checked on chain and signed by that key', () => {
+  const opns = { via: 'opns-owner' as const, pubkey: '03ff' };
+  test('index-only or unsigned OpNS key → no key, and flagged unverified', () => {
+    for (const r of [
+      { ...opns, opnsChecked: 'index' as const, opnsKeySigned: true },
+      { ...opns, opnsChecked: 'chain' as const, opnsKeySigned: false },
+      { ...opns },
+    ]) {
+      expect(trustedKey(r)).toBeUndefined();
+      expect(opnsKeyUnverified(r)).toBe(true);
+    }
+  });
+  test('chain-checked and key-signed OpNS key, a paymail key, and no key at all pass through', () => {
+    const ok = { ...opns, opnsChecked: 'chain' as const, opnsKeySigned: true };
+    expect(trustedKey(ok)).toBe('03ff');
+    expect(opnsKeyUnverified(ok)).toBe(false);
+    expect(trustedKey({ via: 'p2p-paymail', pubkey: '02aa' })).toBe('02aa');
+    expect(opnsKeyUnverified({ via: 'opns-owner' })).toBe(false);
+    expect(trustedKey({ via: 'opns-owner' })).toBeUndefined();
+  });
 });

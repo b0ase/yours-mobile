@@ -3,6 +3,7 @@ import { P2PKH, PrivateKey, ProtoWallet, PushDrop, Transaction, UnlockingScript,
 import { IDENTITY_FIELD, P1SAT_PROTOCOL, PROFILE_FIELD, opnsRegisterKeyId } from '@1sat/types';
 import { encodeProfile } from '@1sat/utils';
 import { destinationFor, opnsTrustLabel, parseRecipient, resolveRecipient, UNBOUND_NAME, type Fetch } from './names';
+import { resolveCallee, verifyCaller } from '../calls/peer';
 
 /**
  * b-Aware cluster opns-indexer (rows 213, 71, 77, 251, 313, 336, 367, 388): an OpNS name's payee came from ONE
@@ -305,5 +306,25 @@ describe('OpNS payee: one index answer is not enough', () => {
     const tx = ownerTx(new P2PKH().lock(OWNER));
     const r = await resolve(world(tx, OWNER));
     expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: UNBOUND_NAME });
+  });
+});
+
+describe('OpNS key used to act (call, verify a caller): only a binding checked on chain and signed by its key', () => {
+  test('a chain-checked, key-signed binding can be called and verifies the caller', async () => {
+    const lock = await boundLock(idPriv, ID_KEY);
+    const tx = ownerTx(lock);
+    const owner = PushDrop.decode(lock).lockingPublicKey.toAddress();
+    const f = world(tx, owner, ID_KEY);
+    expect(await resolveCallee(f, NAME)).toEqual({ key: ID_KEY.toLowerCase(), label: NAME, verified: true });
+    expect(await verifyCaller(f, ID_KEY.toLowerCase(), NAME)).toMatchObject({ label: NAME, verified: true });
+  });
+
+  test('⚠ every source agrees on the coin but the idKey is only the index string: no call, caller not verified', async () => {
+    const attacker = PrivateKey.fromRandom().toPublicKey().toString();
+    const tx = ownerTx(new P2PKH().lock(OWNER));
+    const f = world(tx, OWNER, attacker);
+    expect((await resolve(f)).opnsChecked).toBe('chain');
+    await expect(resolveCallee(f, NAME)).rejects.toThrow(/not signed on chain/);
+    expect((await verifyCaller(f, attacker, NAME)).verified).toBe(false);
   });
 });
