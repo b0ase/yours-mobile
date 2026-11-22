@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  BAD_ORD_PROOF,
   bareName,
+  destinationCheck,
   bwalletPaymails,
   isOurDomain,
   checkOpnsAvailability,
@@ -99,8 +101,35 @@ describe('paymail resolution', () => {
     expect(r).toMatchObject({ targetKind: 'address', via: 'paymail-address', target: ADDR });
   });
 
-  test('b-Aware 102/250: a host-served ord address with no owner signature is never sent tokens', async () => {
-    // The host answers c@ord.ex's ordinal capability with SOMEONE ELSE's address and no ordProof.
+  test('b-Aware 102/250: our host serving an ord address with no owner signature is never sent tokens', async () => {
+    // Our own host answers c@bwallet.space's ordinal capability with SOMEONE ELSE's address and no ordProof.
+    const { f } = mock({
+      'https://dns.google.com/': { Answer: [{ type: 33, data: '0 10 443 pay.bwallet.space.' }] },
+      'https://pay.bwallet.space/.well-known/bsvalias': {
+        capabilities: {
+          pki: 'https://pay.bwallet.space/api/paymail/id/{alias}@{domain.tld}',
+          '2a40af698840': 'https://pay.bwallet.space/api/paymail/p2p-destination/{alias}@{domain.tld}',
+          '5c55a7fdb7bb': 'https://pay.bwallet.space/api/paymail/receive-beef/{alias}@{domain.tld}',
+          ordAddress: 'https://pay.bwallet.space/api/paymail/ord/{alias}@{domain.tld}',
+        },
+      },
+      'https://pay.bwallet.space/api/paymail/id/': { pubkey: '02ab' },
+      'https://pay.bwallet.space/api/paymail/ord/': { address: ADDR },
+    });
+    const r = await resolveRecipient(f, parseRecipient('c@bwallet.space'));
+    expect(r.external).toBeUndefined();
+    // Tokens, NFTs and names are refused; nothing points at the unproven address.
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: UNSIGNED_ORD });
+    expect(giftDestination(r)).toEqual({ ok: false, error: UNSIGNED_ORD });
+    expect(r.ordAddress).toBeUndefined();
+    // BSV still goes by the paymail's own (P2P) route.
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: 'c@bwallet.space' });
+  });
+
+  test('an outside host (1Sat, Yours…) has no ordProof: its ord address is used, marked not verified', async () => {
+    // The outside host also serves the key a proof would be checked against, so a proof proves nothing there and
+    // no outside host serves one. Refusing would only stop every outside name receiving tokens; the pay sheet says
+    // "Not verified" instead, the same as a BSV payment to that host.
     const { f } = mock({
       'https://dns.google.com/': {},
       'https://ord.ex/.well-known/bsvalias': {
@@ -115,12 +144,29 @@ describe('paymail resolution', () => {
       'https://ord.ex/ord/': { address: ADDR },
     });
     const r = await resolveRecipient(f, parseRecipient('c@ord.ex'));
-    // Tokens, NFTs and names are refused; nothing points at the unproven address.
-    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: UNSIGNED_ORD });
-    expect(giftDestination(r)).toEqual({ ok: false, error: UNSIGNED_ORD });
+    expect(r.external).toBe('ord.ex');
+    expect(destinationFor(r, 'token')).toEqual({ ok: true, to: ADDR });
+    expect(giftDestination(r)).toEqual({ ok: true, to: ADDR });
+    expect(destinationCheck(r, 'token')).toBe('unverified');
+  });
+
+  test('an outside host whose ord proof does not verify is still refused', async () => {
+    const { f } = mock({
+      'https://dns.google.com/': {},
+      'https://ord.ex/.well-known/bsvalias': {
+        capabilities: {
+          pki: 'https://ord.ex/id/{alias}@{domain.tld}',
+          '2a40af698840': 'https://ord.ex/p2p/{alias}@{domain.tld}',
+          '5c55a7fdb7bb': 'https://ord.ex/beef/{alias}@{domain.tld}',
+          ordAddress: 'https://ord.ex/ord/{alias}@{domain.tld}',
+        },
+      },
+      'https://ord.ex/id/': { pubkey: '02ab' },
+      'https://ord.ex/ord/': { address: ADDR, ordProof: { timestamp: 1, signature: '00' } },
+    });
+    const r = await resolveRecipient(f, parseRecipient('c@ord.ex'));
     expect(r.ordAddress).toBeUndefined();
-    // BSV still goes by the paymail's own (P2P) route.
-    expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: 'c@ord.ex' });
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: BAD_ORD_PROOF });
   });
 
   test('a typed ordinals address is still sent to as-is (nothing a host could swap)', async () => {

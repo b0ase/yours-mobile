@@ -53,7 +53,7 @@ describe('gift recipient → ordinals destination', () => {
     expect(giftRecipientLabel(r, ORD)).toBe('$alice');
   });
 
-  test('b-Aware 102/250: a paymail whose ordinals address is unsigned → refused, never the P2P target', async () => {
+  test('outside paymail with the ordinals capability (no ordProof) → its ordAddress, never the P2P target', async () => {
     const f = mock({
       'https://dns.google.com/': {},
       'https://ord.ex/.well-known/bsvalias': {
@@ -63,6 +63,24 @@ describe('gift recipient → ordinals destination', () => {
     });
     const r = await resolveRecipient(f, parseRecipient('bob@ord.ex'));
     expect(r.targetKind).toBe('paymail');
+    expect(giftDestination(r)).toEqual({ ok: true, to: ORD });
+    expect(giftRecipientLabel(r, ORD)).toBe('bob@ord.ex');
+  });
+
+  test('b-Aware 102/250: a bWalletX $handle whose ord_address is unsigned → refused', async () => {
+    const f = mock({
+      'https://dns.google.com/': { Status: 3 },
+      'https://bwalletx.com/.well-known/bsvalias': {
+        capabilities: {
+          ...P2P,
+          pki: 'https://pay.bwallet.space/api/paymail/id/{alias}@{domain.tld}',
+          ordAddress: 'https://pay.bwallet.space/api/paymail/ord/{alias}@{domain.tld}',
+        },
+      },
+      'https://pay.bwallet.space/api/paymail/id/': { pubkey: KEY },
+      'https://pay.bwallet.space/api/paymail/ord/alice@bwalletx.com': { address: ORD },
+    });
+    const r = await resolveRecipient(f, parseRecipient('$alice'), 'bwalletx.com');
     expect(giftDestination(r)).toEqual({ ok: false, error: UNSIGNED_ORD });
   });
 
