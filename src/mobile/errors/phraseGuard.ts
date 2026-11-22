@@ -37,6 +37,8 @@ import * as bip39 from 'bip39';
  *    ("the then then"), is read as a label, so that list is not blocked.
  *  - In a list numbered in words with no "is" or ":" ("fifth six sixth X"), a phrase word that is the next number
  *    after its own numbering is read as numbering.
+ *  - "X is first, Y second, Z third" (only the first item has "is" or ":"): about 2% of 12-word phrases still get
+ *    through, those whose own words are spelled numbers (round-6 review).
  *  - Look-alike letters are folded for Cyrillic and Greek only (NFKD already folds full-width and styled letters);
  *    look-alikes from other scripts, such as Cherokee or Armenian, are not.
  * Long text: lists with fewer than MIN_HITS words in the text are skipped, the checksum is worked out from list
@@ -269,7 +271,8 @@ const countingNumbers = (raw: Raw[], text: string, slots: boolean[], inSlot: boo
   const found: Array<{ from: number; to: number; value: number }> = [];
   const totals: Array<{ from: number; to: number }> = [];
   for (let i = 0; i < raw.length; i++) {
-    if (raw[i].digits || slots[i] !== inSlot) continue;
+    // A slot number may START the reading that skips slot numbers ("unfold is first, asset second, …": round-6 review).
+    if (raw[i].digits || (slots[i] !== inSlot && (inSlot || found.length > 0))) continue;
     const form = fold(raw[i].text);
     const value = SPELLED_VALUE.get(form);
     if (value === undefined) continue;

@@ -708,6 +708,26 @@ describe('the phrase word first, then its number (round-5 review of b-Aware row 
         if (bits === 128) phrases.push(REVIEWER, phraseWith('ocean', 2, 9), ...HOLDS_LABELS);
         for (const words of phrases) expectBlocked(make(words), words);
       });
+  // Round-6 review: only the first item has "is" (or ":"), the rest are bare ("asset second, lady third"). Round 6 let
+  // 157 of 200 through; with the slot-start rule about 2% still leak (phrases whose own words are spelled numbers), a
+  // known limit (see the header), so this holds the rate down rather than demanding zero.
+  const FIRST_ONLY: Array<[string, (w: string[]) => string]> = [
+    [
+      '"X is first, Y second, Z third"',
+      (w) => w.map((x, i) => (i ? `${x} ${SPELLED_ORDINALS[i]}` : `${x} is ${SPELLED_ORDINALS[i]}`)).join(', '),
+    ],
+    [
+      '"X: first, Y second, Z third"',
+      (w) => w.map((x, i) => (i ? `${x} ${SPELLED_ORDINALS[i]}` : `${x}: ${SPELLED_ORDINALS[i]}`)).join(', '),
+    ],
+  ];
+  for (const [name, make] of FIRST_ONLY)
+    test(`at most 3% leak, 12 words, 200 phrases: ${name}`, () => {
+      const phrases = [...fixedPhrases(200, 128, [], undefined, 'number-after-')];
+      const leaked = phrases.filter((w) => !looksLikeSecret(make(w))).length;
+      expect(leaked).toBeLessThanOrEqual(6);
+      expectBlocked(make(REVIEWER), REVIEWER);
+    });
   test('ordinary text with "is first" and "of twelve" is left alone', () => {
     for (const p of [
       'Speed is first, price is second, design is third, and the rest of the list is a matter of taste for most people.',
