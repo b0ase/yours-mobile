@@ -63,6 +63,8 @@ export const REPAIR_NEEDED_MESSAGE = 'This pairing has ended. Scan the QR code o
 /** The relay refused the join: someone else already joined with this QR, or it expired. */
 export const PAIR_CODE_USED_MESSAGE = 'This code has expired or was already used.';
 export const PAIR_CODE_EXPIRED_MESSAGE = 'This code has expired. Ask the site for a new one.';
+export const PAIR_ACCOUNT_CHANGED_MESSAGE =
+  'You switched accounts, so nothing was connected. Open the link on the site again to connect this account.';
 export const PAIR_UNREACHABLE_MESSAGE = 'Could not reach the pairing service. Check your connection and try again.';
 /** The site sent a sealed close before Connect: on the site, the user said the codes didn't match. */
 export const SITE_SAID_NO_MESSAGE =
@@ -944,8 +946,14 @@ function connectPairing(
       const proven = proofs.v1 || proofs.v2;
       const returnPlan = f.verifiedOrigin === CLI_ORIGIN ? null : planReturn(link, f.verifiedOrigin, proofs.v2);
       let returnTaken = false;
-      // The site's sign-in, folded into Connect (never for the CLI, whose confirm screen is its own).
-      const loginReq = f.verifiedOrigin === CLI_ORIGIN ? null : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
+      // The site's sign-in, folded into Connect: only for a PROVEN origin (a valid s2; review 2, 22 Nov 2026). The
+      // relay's origin is a header any non-browser client can set, so an unproven "site" could be relaying a real
+      // site's challenge; its sign-in goes on the separate sheet, which names the claimed host with the warning. Never
+      // for the CLI, whose confirm screen is its own.
+      const loginReq =
+        f.verifiedOrigin === CLI_ORIGIN || !proofs.v2 ? null : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
+      // The account this card opened under: Connect signs with it, or not at all (review 2, 22 Nov 2026).
+      const cardAccount = agentDeps.currentId;
       // A new pairing starts with nothing. Its key names its own channel, so it never shares another pairing's grants
       // (b-Aware 24 Oct 2026); still withdraw anything left under that key unless this channel is being resumed.
       // Bounded: right after launch the wallet may still be loading, and the revoke waited for it, so the sheet sat on
@@ -989,6 +997,10 @@ function connectPairing(
           if (gone) return null;
           if (Date.now() > link.e * 1000) {
             supersede(PAIR_CODE_EXPIRED_MESSAGE);
+            return null;
+          }
+          if (agentDeps.currentId !== cardAccount) {
+            supersede(PAIR_ACCOUNT_CHANGED_MESSAGE);
             return null;
           }
           end();

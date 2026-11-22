@@ -52,9 +52,11 @@ channel, the site's pairing key and the rid, so anyone holding the link can seal
 sign-in) and build this fragment. A page uses it only once the relay's wallet says hello with the same `wk` (the relay
 binds one wallet to the channel). Then it saves a tab that slept through the relay (iOS freezes it while the user is
 in bWallet, often swallowing hello and ready with its frozen socket), or a NEW tab, from waiting on frames already
-spent. With `ln`/`lx` (the site's sign-in nonce and ISO expiry) on the link, Connect also signs the standard sign-in
+spent. With `ln`/`lx` (the site's sign-in nonce and ISO expiry) on a PROVEN link (a valid `s2`; review 2, 22 Nov 2026), Connect also signs the standard sign-in
 text for the relay-verified origin and the `ready` carries `login: { k, sig }`, so the user is sent to the wallet once,
-not twice. Without a valid `s2` the wallet returns to the origin's ROOT only (the relay's origin is the WebSocket
+not twice. An unproven link never gets that: its sign-in comes as the usual separate request and sheet ("a site that
+claims to be <host>"), because an unproven "site" may be a script relaying a real site's challenge. Without a valid
+`s2` the wallet returns to the origin's ROOT only (the relay's origin is the WebSocket
 `Origin` header: honest from a browser, but any other client can set it), so an unproven link can't pick a path.
 `@bwalletx/connect` 0.9.0 does all of this (`resumeReturnedPairing`, which hands back the starting page).
 

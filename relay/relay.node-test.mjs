@@ -728,6 +728,8 @@ test('x-real-ip is believed only from a trusted proxy', () => {
 
 test('review 22 Nov: frames queued for the site by a wallet that lost the role are dropped when a new wallet takes it', async () => {
   const { base, done } = await boot({ legacyUntil: Date.now() + 60_000 });
+  const socks = [];
+  try {
   const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
   site.ws.close(); // the site's tab is asleep
   await new Promise((r) => setTimeout(r, 50));
@@ -742,8 +744,10 @@ test('review 22 Nov: frames queued for the site by a wallet that lost the role a
   await new Promise((r) => setTimeout(r, 50));
   const back = await open(`${base}/v1/c/${C}?role=site&claim=${SITE}`, 'https://a.lol');
   await until(() => back.inbox.some((f) => f.t === 'hello'));
+  socks.push(phone, back, squat, site);
   assert.equal(back.inbox.some((f) => f.d === 'from-the-squatter'), false);
-  phone.ws.close();
-  back.ws.close();
-  await done();
+  } finally {
+    for (const x of socks) x.ws.close();
+    await done();
+  }
 });
