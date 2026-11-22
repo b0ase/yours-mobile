@@ -87,7 +87,7 @@ export const useAccountNames = (identityAddress?: string, accountName = '', prof
     run();
     const t = setInterval(run, 150_000);
     return () => clearInterval(t);
-  }, [apiContext, identityAddress, sync]);
+  }, [apiContext, chromeStorageService, identityAddress, sync]);
   // Paymail payments arrive on our server, not on chain addresses: check that inbox every 15 s while
   // visible and at once on return to the app, instead of only inside the 150 s name sync above.
   useEffect(() => {
