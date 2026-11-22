@@ -495,7 +495,7 @@ const claimTry = new Map<string, number>();
  * That is how a v1 session upgrades (review 13 Nov 2026): the relay never lets a v1 claim bind on its own, because
  * whoever saw the QR holds the same claim. Older sites ignore both fields.
  */
-const readyFor = (l: Live): PairMessage =>
+const readyFor = (l: Live): Extract<PairMessage, { t: 'ready' }> =>
   l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session) } : { t: 'ready' };
 
 /**
