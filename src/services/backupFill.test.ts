@@ -204,7 +204,13 @@ describe('first fill of a new backup', () => {
         x.dev.getSyncChunk(args as never)
       ),
     });
-    await fillBackup({ manager: x.manager, reader, writer: x.backup, restorePoint: new Date(), marginMs: 0 });
+    // The app's push pages carry their parents (inboundSync's guard): a row a late wallet task touched after the
+    // restore point then files under its transaction (the gates under load caught it without one, 22 Nov 2026).
+    await new Promise((r) => setTimeout(r, 20));
+    const unguard = installInboundSyncGuard(StorageIdb);
+    await fillBackup({ manager: x.manager, reader, writer: x.backup, restorePoint: new Date(), marginMs: 0 }).finally(
+      unguard,
+    );
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.every((a) => a.push === true && !a.pastEnd)).toBe(true);
     // The baskets still reached the backup (the restore pass files rows under them).
