@@ -591,6 +591,66 @@ describe('a new destination must be tied to the key the host serves (backlog ran
     expect(await checkAppPayee(payee, via(bob()))).toEqual({ address: BOB_ADDR, pubkey: BOB_KEY });
     expect(seen.every((o) => JSON.stringify(o) === JSON.stringify({ ignorePin: true, fresh: true }))).toBe(true);
   });
+
+  describe('a refreshed review card says why for the destination it now shows', () => {
+    const CAROL = new PrivateKey(17);
+    const CAROL_KEY = CAROL.toPublicKey().toString();
+    const serve = (r: Resolved) => async (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) =>
+      payeeDestination(p, r, o);
+    const raise = async (payee: Payee, r: Resolved) => {
+      const s = setup(payee);
+      await payDue(
+        deps(() => r, []),
+        NOW,
+      );
+      return s.id;
+    };
+    const tapMoved = async (id: string, r: Resolved) => {
+      const { approveReview } = await import('./payeeBinding');
+      await expect(approveReview(getSub(id)!, serve(r), () => true)).rejects.toThrow(PAYEE_REVIEW_MOVED);
+      return getSub(id)?.needsReview;
+    };
+
+    test('raised for a swapped address, moved to a new key → says the key changed', async () => {
+      const id = await raise({ ...BOB_PAYEE, pinnedKey: BOB_KEY, pinnedAddress: '1OldBobAddr' }, bob());
+      expect(getSub(id)?.needsReview?.reason).toBe(PAYEE_ADDRESS_CHANGED);
+      const review = await tapMoved(id, bob({ target: CAROL.toAddress(), pubkey: CAROL_KEY }));
+      expect(review).toMatchObject({ reason: PAYEE_KEY_CHANGED, servedKey: CAROL_KEY });
+    });
+
+    test('raised for a new key, moved to the pinned key’s own address → says the address changed', async () => {
+      const id = await raise(
+        { ...BOB_PAYEE, pinnedKey: BOB_KEY, pinnedAddress: '1OldBobAddr' },
+        bob({ target: CAROL.toAddress(), pubkey: CAROL_KEY }),
+      );
+      expect(getSub(id)?.needsReview?.reason).toBe(PAYEE_KEY_CHANGED);
+      const review = await tapMoved(id, bob());
+      expect(review).toMatchObject({ reason: PAYEE_ADDRESS_CHANGED, servedAddress: BOB_ADDR, servedKey: BOB_KEY });
+    });
+
+    test('moved back to the approved destination → says so, not that it changed', async () => {
+      const { PAYEE_BACK_TO_APPROVED } = await import('./payeeBinding');
+      const id = await raise(
+        { ...BOB_PAYEE, pinnedKey: BOB_KEY, pinnedAddress: BOB_ADDR },
+        bob({ target: CAROL.toAddress(), pubkey: CAROL_KEY }),
+      );
+      const review = await tapMoved(id, bob());
+      expect(PAYEE_BACK_TO_APPROVED).toBeString();
+      expect(review?.reason).toBe(PAYEE_BACK_TO_APPROVED);
+    });
+
+    test('reviewReason: key gone, legacy order, and a legacy order’s last paid address', async () => {
+      const { reviewReason, PAYEE_KEY_MISSING, PAYEE_BACK_TO_APPROVED } = await import('./payeeBinding');
+      expect(reviewReason).toBeFunction();
+      const pinned = { payee: { ...BOB_PAYEE, pinnedKey: BOB_KEY, pinnedAddress: BOB_ADDR } };
+      expect(reviewReason(pinned, { address: CAROL.toAddress() })).toBe(PAYEE_KEY_MISSING);
+      const legacy = { payee: BOB_PAYEE, needsReview: { reason: PAYEE_LEGACY_CONFIRM, at: NOW, legacy: true } };
+      expect(reviewReason(legacy, { address: BOB_ADDR, pubkey: BOB_KEY })).toBe(PAYEE_LEGACY_CONFIRM);
+      const lastPaid = { payee: BOB_PAYEE, lastReceipt: { at: NOW, txid: 't', usd: 1, sats: 1, to: BOB_ADDR } };
+      expect(reviewReason(lastPaid, { address: BOB_ADDR, pubkey: BOB_KEY })).toBe(PAYEE_BACK_TO_APPROVED);
+      expect(reviewReason(lastPaid, { address: CAROL.toAddress(), pubkey: CAROL_KEY })).toBe(PAYEE_ADDRESS_CHANGED);
+    });
+  });
 });
 
 /** The pins the create sheet takes from a checked destination. */
