@@ -406,3 +406,28 @@ describe('receipt line (b-Aware row 353: no rate at receipt)', () => {
     });
   });
 });
+
+describe('receipt line: held for no rate and after the offer lapsed (review of b-Aware row 353)', () => {
+  test('shows the BSV amount and says it lapsed and is not valued, never "$0.00"', () => {
+    const r: Receipt = {
+      status: 'received_after_lapse',
+      held: 'rate_unavailable',
+      offerRef: 'ACME-2',
+      offeree: { handle: null, identityKey: '02'.padEnd(66, '1') },
+      payment: {
+        txid: 'cd',
+        usdValue: '0.00',
+        bsv: '2.50000000',
+        rateUsdPerBsv: '0.00',
+        shortfallUsd: '0.00',
+        firstSeen: '',
+      },
+      allotment: null,
+    };
+    const line = receiptLine(r);
+    expect(line.amount).toBe('2.50000000 BSV');
+    expect(line.amount).not.toContain('$');
+    expect(line.status).toContain('lapsed');
+    expect(line.status).toContain('not valued yet');
+  });
+});
