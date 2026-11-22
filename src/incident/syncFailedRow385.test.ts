@@ -164,7 +164,13 @@ async function device(opts: { mined: boolean }) {
   await w.wallet
     .createAction({
       description: 'pay my receive address',
-      outputs: [{ lockingScript: new P2PKH().lock(keys.addresses[0]).toHex(), satoshis: PAID, outputDescription: 'to my receive address' }],
+      outputs: [
+        {
+          lockingScript: new P2PKH().lock(keys.addresses[0]).toHex(),
+          satoshis: PAID,
+          outputDescription: 'to my receive address',
+        },
+      ],
       options: { acceptDelayedBroadcast: false },
     })
     .catch((e: unknown) => {
@@ -192,7 +198,8 @@ async function device(opts: { mined: boolean }) {
   }
   const beef = new Beef();
   beef.mergeTransaction(tx);
-  return { chain, services, w, keys, txid, fundTxid, beef: Array.from(beef.toBinary()), raws };
+  const paidScript = new P2PKH().lock(keys.addresses[0]).toHex();
+  return { chain, services, w, keys, txid, fundTxid, paidScript, beef: Array.from(beef.toBinary()), raws };
 }
 
 type Dev = Awaited<ReturnType<typeof device>>;
@@ -200,7 +207,12 @@ type Dev = Awaited<ReturnType<typeof device>>;
 /** The wallet as the sync sees it in production (initWallet: the admin wallet, wrapped). */
 const syncWallet = (dv: Dev) =>
   withFailedRowRepair(dv.w.wallet, {
-    repair: makeUnfailRepair({ storage: dv.w.storage, monitor: dv.w.monitor as never, services: dv.services as never }),
+    repair: makeUnfailRepair({
+      storage: dv.w.storage,
+      monitor: dv.w.monitor as never,
+      services: dv.services as never,
+      log: () => undefined,
+    }),
     log: () => undefined,
   });
 
@@ -211,6 +223,9 @@ const memoryProcessed = () => {
 
 const statusOf = (dv: Dev, txid: string) =>
   dv.w.storage.runAsStorageProvider(async (sp) => (await sp.findTransactions({ partial: { txid } }))[0]?.status);
+const toHex = (b: number[]) => Buffer.from(b).toString('hex');
+const outputsOf = (dv: Dev, txid: string) =>
+  dv.w.storage.runAsStorageProvider(async (sp) => sp.findOutputs({ partial: { txid } }));
 const outputOf = (dv: Dev, txid: string, vout: number) =>
   dv.w.storage.runAsStorageProvider(async (sp) => (await sp.findOutputs({ partial: { txid, vout } }))[0]);
 const snapshot = (dv: Dev) =>
@@ -223,7 +238,11 @@ const snapshot = (dv: Dev) =>
 describe('#385: a failed transaction the network has stops the sync', () => {
   test('reproduced: the coin intake (address sync, receive watcher) gets the toolbox refusal', async () => {
     const dv = await device({ mined: true });
-    const intake = makeCoinIntake({ wallet: dv.w.wallet as never, keyByHash: dv.keys.keyByHash, processed: memoryProcessed() });
+    const intake = makeCoinIntake({
+      wallet: dv.w.wallet as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    });
     await expect(intake.take(dv.txid, dv.beef)).rejects.toThrow(REFUSED);
     // The refused payment's input is back to spendable, though the chain has it spent.
     expect((await outputOf(dv, dv.fundTxid, 0))?.spendable).toBe(true);
@@ -231,7 +250,11 @@ describe('#385: a failed transaction the network has stops the sync', () => {
 
   test('fixed, mined: the intake repairs the row (proof-checked UnFail) and takes the coin in', async () => {
     const dv = await device({ mined: true });
-    const intake = makeCoinIntake({ wallet: syncWallet(dv) as never, keyByHash: dv.keys.keyByHash, processed: memoryProcessed() });
+    const intake = makeCoinIntake({
+      wallet: syncWallet(dv) as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    });
     expect(await intake.take(dv.txid, dv.beef)).toBe('taken');
     expect(await statusOf(dv, dv.txid)).not.toBe('failed');
     // The coin the mined payment spent is spent here too: never spendable again.
@@ -239,7 +262,9 @@ describe('#385: a failed transaction the network has stops the sync', () => {
     expect(fund?.spendable).toBe(false);
     expect(fund?.spentBy).toBeDefined();
     // The payment to our receive address now counts: listed and spendable.
-    const paid = await outputOf(dv, dv.txid, 0);
+    const paid = (await outputsOf(dv, dv.txid)).find(
+      (o) => o.lockingScript && toHex(o.lockingScript) === dv.paidScript,
+    );
     expect(paid?.spendable).toBe(true);
     expect(paid?.satoshis).toBe(PAID);
   }, 30000);
@@ -270,7 +295,11 @@ describe('#385: a failed transaction the network has stops the sync', () => {
   test('not mined: nothing is written, a typed "held as failed" refusal, the proof asked once per window', async () => {
     const dv = await device({ mined: false });
     const before = await snapshot(dv);
-    const intake = makeCoinIntake({ wallet: syncWallet(dv) as never, keyByHash: dv.keys.keyByHash, processed: memoryProcessed() });
+    const intake = makeCoinIntake({
+      wallet: syncWallet(dv) as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    });
     const err = await intake.take(dv.txid, dv.beef).catch((e: unknown) => e);
     expect(isHeldAsFailed(err)).toBe(true);
     expect((err as HeldAsFailedError).txid).toBe(dv.txid);

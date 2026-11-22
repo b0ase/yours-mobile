@@ -256,6 +256,7 @@ import {
   type OurServerClient,
 } from './services/spendableFirstWiring';
 import { reportFromWallet } from './services/reportSink';
+import { makeUnfailRepair, withFailedRowRepair } from './services/failedRowRepair';
 import { fillBackup } from './services/backupFill';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
@@ -1555,7 +1556,18 @@ export const initWallet = async (
   // consistently with dApp-initiated writes. Without this wrap, sync would
   // bypass the manager entirely and produce plaintext customInstructions —
   // creating mixed-encoding rows that break later reads.
-  const adminWallet = withOriginator(wallet, ADMIN_ORIGINATOR);
+  //
+  // Report #385 (owner's iPhone, 21 Nov 2026): a transaction this device holds as failed that the network has made
+  // every intake fail with "…invalid status failed" on every run. The sync's internalizeAction repairs a mined one
+  // with the toolbox's proof-checked UnFail and takes it in; one not mined is left out with its reason
+  // (services/failedRowRepair.ts).
+  const adminWallet = withFailedRowRepair(withOriginator(wallet, ADMIN_ORIGINATOR), {
+    repair: makeUnfailRepair({
+      storage: storage as never,
+      monitor: walletMonitor,
+      services: toolboxServices as never,
+    }),
+  });
 
   mark('permissions + sync context ready');
 
@@ -2008,6 +2020,9 @@ export const initWallet = async (
         console.warn(
           `[receiveGuard] ${r.txid}: held in storage but not counted (waiting on admission?); not rewritten`,
         );
+      else if (r.outcome === 'held-failed')
+        // Not a sync failure (report #385): held as failed here and not mined yet; its value still shows as arriving.
+        console.warn(`[receiveGuard] ${r.txid}: ${r.error instanceof Error ? r.error.message : String(r.error)}`);
       else if (r.outcome === 'failed') {
         const err = r.error;
         console.error(`[receiveGuard] internalize ${r.txid} failed:`, err);
