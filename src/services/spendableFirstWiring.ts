@@ -23,6 +23,7 @@ import { buildsTransaction, LocalStoreNeededError } from './localFirst';
 import { isInsufficientFunds } from './fundingPrep';
 import { FillIncompleteError, fillError, type FillProgress, type FillReport } from './backupFill';
 import { retryWhen } from './balanceTruth';
+import { APP_NAME } from '../mobile/storeBuild';
 
 const CONNECT_MS = 8_000;
 const COUNT_MS = 8_000;
@@ -649,7 +650,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       if (failures === OUR_BACKUP_GIVE_UP_FAILURES)
         try {
           d.report?.(
-            `bWalletX: our storage server's backup of this device could not be ${d.deferred ? 'rebuilt' : 'completed'} ` +
+            `${APP_NAME}: our storage server's backup of this device could not be ${d.deferred ? 'rebuilt' : 'completed'} ` +
               `after ${failures} tries (last: ${err.kind}: ${err.message.slice(0, 200)}). It keeps retrying on its own; ` +
               `next try ${new Date(incomplete.retryAt).toISOString()}.`,
           );

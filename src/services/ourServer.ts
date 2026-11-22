@@ -3,6 +3,8 @@
  * (services/localFirst.ts) can use them too. Re-exported by services/spendableFirst.ts.
  */
 
+import { APP_NAME } from '../mobile/storeBuild';
+
 /** Our storage server (bwalletx-storage), a BACKUP beside 1Sat when the flag is on. */
 export const SNAPSHOT_SERVER_URL = 'https://storage.bwalletx.com';
 
@@ -76,8 +78,7 @@ export function repairSyncRemote(
 }
 
 /** Settings › Storage: our server is never added by hand (it joins only through its fill and hold-out). */
-export const OUR_SERVER_ADD_REFUSAL =
-  'This server is added by bWalletX itself once your backup to it is complete, so it cannot be added here.';
+export const OUR_SERVER_ADD_REFUSAL = `This server is added by ${APP_NAME} itself once your backup to it is complete, so it cannot be added here.`;
 /** Settings › Storage's add: the refusal for our server's URL in any spelling (review of f42df01f, 3), else undefined. */
 export function addRemoteRefusal(url: string): string | undefined {
   return isOurServer(url) ? OUR_SERVER_ADD_REFUSAL : undefined;

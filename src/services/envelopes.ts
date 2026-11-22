@@ -701,7 +701,7 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
     // the payment stays taken: never more spending than the user allowed.
     await deps.envelopes
       .refundHold(h.originator, reference)
-      .catch((e: unknown) => log(`[envelopes] could not give back a payment to ${h.originator}: ${String(e)}`));
+      .catch((e: unknown) => log(`[envelopes] could not return a payment to ${h.originator}: ${String(e)}`));
   };
   const armTimer = (reference: string) => {
     const h = holds.get(reference);

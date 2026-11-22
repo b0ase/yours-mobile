@@ -112,7 +112,7 @@ describe('OpNS payee: one index answer is not enough', () => {
     expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: OWNER });
     const label = opnsTrustLabel(r);
     expect(label?.verified).toBe(false);
-    expect(label?.text).toContain('From the OpNS index');
+    expect(label?.text).toContain('From the OpNS name list');
     expect(label?.text).not.toContain('Verified on chain');
   });
 
@@ -175,7 +175,7 @@ describe('OpNS payee: one index answer is not enough', () => {
     const txid = tx.id('hex');
     const f = world(tx, owner, ID_KEY, { [`${WOC}/tx/${txid}/hex`]: 'down', [`${WOC}/tx/${txid}/0/spent`]: 500 });
     const r = await resolve(f);
-    expect(opnsTrustLabel(r)).toEqual({ verified: false, text: expect.stringContaining('From the OpNS index') });
+    expect(opnsTrustLabel(r)).toEqual({ verified: false, text: expect.stringContaining('From the OpNS name list') });
   });
 
   test('the 1sat name index unreachable: the weaker label', async () => {

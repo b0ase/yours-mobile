@@ -528,7 +528,7 @@ export const resolveOpns = async (f: Fetch, name: string): Promise<Resolved> => 
 
 /**
  * The confirm-card line under a bound OpNS name. "Verified on chain" only when the owner output was checked on
- * other sources AND the key is a binding its key signed there; anything less is "From the OpNS index".
+ * other sources AND the key is a binding its key signed there; anything less is "From the OpNS name list".
  */
 export const opnsTrustLabel = (
   r: Pick<Resolved, 'via' | 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>,
@@ -537,7 +537,7 @@ export const opnsTrustLabel = (
   const key = shortKey(r.pubkey ?? '');
   return r.opnsChecked === 'chain' && r.opnsKeySigned
     ? { verified: true, text: `Verified on chain · bound to ${key}` }
-    : { verified: false, text: `From the OpNS index · bound to ${key} (not verified on chain)` };
+    : { verified: false, text: `From the OpNS name list · bound to ${key} (not checked on chain)` };
 };
 
 /**

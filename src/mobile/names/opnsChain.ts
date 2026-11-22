@@ -18,7 +18,7 @@ import { fieldPairs, isIdentityKey } from '@1sat/utils';
  *     (registerOpns's PushDrop) that key signed. A binding naming another key refuses; a forged one drops the key.
  *
  * Any source that answers and contradicts another refuses ('refused'). Sources that can't be reached, or don't
- * know the name yet, leave it 'index': payable as before, but labelled "From the OpNS index", never "Verified on
+ * know the name yet, leave it 'index': payable as before, but labelled "From the OpNS name list", never "Verified on
  * chain". Only when all of 1 and 2 agree is it 'chain'; `idKey` is set only when 3 holds. An answer with no
  * readable outpoint can't be checked at all, so it refuses rather than being paid on the index's word.
  *

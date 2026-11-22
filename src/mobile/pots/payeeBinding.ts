@@ -22,6 +22,7 @@ import { PublicKey } from '@bsv/sdk';
 import { destinationFor, proofRefusal, trustedKey, type Resolved } from '../names/names';
 import { checkPaymentOutputs } from '../../utils/guardedSendBsv';
 import { confirmPayeeReview, refreshPayeeReview, type Payee, type Subscription } from './pots';
+import { APP_NAME } from '../storeBuild';
 
 /** The destination could not be verified: don't pay, ask the user to confirm it again. */
 export class PayeeReviewError extends Error {
@@ -45,8 +46,7 @@ export const PAYEE_KEY_MISSING =
   'This paymail no longer shows the wallet key it had when you set up this subscription. Not paying it until you confirm.';
 export const PAYEE_ADDRESS_CHANGED =
   'This paymail now gives a different address than the one you approved. Not paying it until you approve the new destination.';
-export const PAYEE_LEGACY_CONFIRM =
-  'This subscription was set up before bWalletX remembered the address it pays. Not paying it until you approve where it goes.';
+export const PAYEE_LEGACY_CONFIRM = `This subscription was set up before ${APP_NAME} remembered the address it pays. Not paying it until you approve where it goes.`;
 export const PAYEE_UNVERIFIABLE = (paymail: string) =>
   `${paymail} gives an address that nothing ties to its wallet key, so later payments can’t be checked. Subscriptions can’t pay it: use a Bitcoin address instead.`;
 export const PAYEE_REVIEW_MOVED =
