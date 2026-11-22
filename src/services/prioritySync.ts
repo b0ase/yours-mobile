@@ -108,6 +108,8 @@ export type PrioritySyncResult = {
   failed: number;
   coins: { found: number; failed: number };
   names: { total: number; failed: number; deferred?: number };
+  /** Transactions kept aside as held as failed this run (not failures; review of fix/385, 4). */
+  held?: number;
   lastScore: number;
   addresses: string[];
 };
@@ -324,6 +326,7 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
     failed,
     coins: { found: coinsFound, failed: coinsFailed },
     names: { total: namesTotal, failed: namesFailed, ...(deferred ? { deferred } : {}) },
+    ...(held ? { held } : {}),
     lastScore: maxSafeScore,
     addresses,
   };
