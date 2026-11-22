@@ -149,7 +149,7 @@ export async function verifyNameProof(
     /** ms; defaults to now. */
     now?: number;
   },
-): Promise<{ ok: true; sub: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; sub: string; iat: number } | { ok: false; reason: string }> {
   const cfg = PROOF_PROVIDERS[o.provider];
   const parts = String(token || '').split('.');
   if (parts.length !== 3) return { ok: false, reason: 'not an ID token' };
@@ -206,7 +206,7 @@ export async function verifyNameProof(
   // LinkedIn names carry no name in the token: the account (sub) continuity check below is what binds them.
   if (o.provider !== 'linkedin' && aliasForClaims(o.provider, c) !== o.alias.toLowerCase())
     return { ok: false, reason: 'proves a different name' };
-  return { ok: true, sub: c.sub };
+  return { ok: true, sub: c.sub, iat: iatS };
 }
 
 // The provider account (sub) each provable name had when this wallet last paid it: a new sub stops the payment.
@@ -228,12 +228,16 @@ export const trustProofSub = (alias: string, sub: string) => {
 };
 
 // The wallet key each provable name was last proven for (or that the payer deliberately accepted for it), lowercase,
-// with the version (seq) of the signed binding it was served with. A proof this wallet can't check (unknown provider
-// key) is payable only for this key (second review, finding 1), and the key never moves back to an older binding
-// version (third review, finding 2: a server replaying a superseded key with its old token).
+// with the version (seq) of the signed binding it was served with, and `at`: the newest time the PROVIDER itself put
+// on a proof this wallet accepted for the name (the ID token's iat, or the gist's created_at at GitHub), in seconds.
+// A proof this wallet can't check (unknown provider key) is payable only for this key (second review, finding 1), and
+// the key never moves back to an older proof (third review, finding 2: a server replaying a superseded key with its
+// old token). The seq alone can't order them: the served key signs its own binding, so a holder of a superseded key
+// can sign one at any seq (fourth review, finding 1). `at` can't be forged that way; seq stays as a second check.
 const PROOF_KEY = 'bwallet.names.proofKeys';
-type KeptKey = { key: string; seq?: number };
+type KeptKey = { key: string; seq?: number; at?: number };
 const isSeq = (n: unknown): n is number => Number.isInteger(n);
+const isTime = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const readProofKeys = (): Record<string, KeptKey | string> => {
   try {
     const v = JSON.parse(localStorage.getItem(PROOF_KEY) ?? '{}') as unknown;
@@ -242,12 +246,12 @@ const readProofKeys = (): Record<string, KeptKey | string> => {
     return {};
   }
 };
-/** The wallet key (and its binding seq) this name's proof is accepted for; undefined if none kept. */
+/** The wallet key (and its binding seq and provider time) this name's proof is accepted for; undefined if none kept. */
 export const provenKeyFor = (alias: string): KeptKey | undefined => {
   const v = readProofKeys()[alias.toLowerCase()];
   if (typeof v === 'string') return { key: v };
   if (!v || typeof v.key !== 'string') return undefined;
-  return isSeq(v.seq) ? { key: v.key, seq: v.seq } : { key: v.key };
+  return { key: v.key, ...(isSeq(v.seq) ? { seq: v.seq } : {}), ...(isTime(v.at) ? { at: v.at } : {}) };
 };
 /**
  * A key other than the kept one, at a binding version not newer than the kept one's (or with no signed binding at
@@ -259,19 +263,37 @@ export const olderThanKept = (alias: string, identityKey: string, seq?: number):
   return !(isSeq(seq) && seq > kept.seq);
 };
 /**
- * Remember the wallet key this name's proof is accepted for: on every proven check, a verified handover from the kept
- * key, or the payer's override. Never replaces the kept key with one at an older (or equal) binding version.
+ * A proof for a key other than the kept one that the provider made at or before the kept one's (`at`, seconds; or
+ * with no provider time): a replayed superseded proof, never accepted as proven, whatever seq its binding claims. A
+ * key kept before this update has no `at` yet: until its next successful proof records one, only the seq rule applies.
  */
-export const trustProofKey = (alias: string, identityKey: string, seq?: number) => {
+export const staleProof = (alias: string, identityKey: string, at?: number): boolean => {
+  const kept = provenKeyFor(alias);
+  if (!kept || kept.key === identityKey.toLowerCase() || !isTime(kept.at)) return false;
+  return !(isTime(at) && at > kept.at);
+};
+/**
+ * Remember the wallet key this name's proof is accepted for: on every proven check (with the provider's time, `at`),
+ * a verified handover from the kept key, or the payer's override (no `at`: the newest provider time already kept
+ * stays as the floor). Never replaces the kept key with one at an older (or equal) binding version or provider time.
+ */
+export const trustProofKey = (alias: string, identityKey: string, seq?: number, at?: number) => {
   const a = alias.toLowerCase();
   const k = identityKey.toLowerCase();
   if (olderThanKept(a, k, seq)) return;
+  if (isTime(at) && staleProof(a, k, at)) return;
   const kept = provenKeyFor(a);
   // The same key served at an older version keeps the newer version this wallet saw.
   const keepSeq = kept?.key === k && isSeq(kept.seq) && !(isSeq(seq) && seq > kept.seq) ? kept.seq : seq;
-  if (kept?.key === k && kept.seq === keepSeq) return;
+  // The provider time only moves forward, whichever key is kept.
+  const keepAt = isTime(kept?.at) ? (isTime(at) ? Math.max(kept.at, at) : kept.at) : isTime(at) ? at : undefined;
+  if (kept?.key === k && kept.seq === keepSeq && kept.at === keepAt) return;
   try {
-    const next: KeptKey = isSeq(keepSeq) ? { key: k, seq: keepSeq } : { key: k };
+    const next: KeptKey = {
+      key: k,
+      ...(isSeq(keepSeq) ? { seq: keepSeq } : {}),
+      ...(isTime(keepAt) ? { at: keepAt } : {}),
+    };
     localStorage.setItem(PROOF_KEY, JSON.stringify({ ...readProofKeys(), [a]: next }));
   } catch {
     /* private mode: nothing remembered */
@@ -412,13 +434,15 @@ async function checkProviderProof(
     return { status: 'unchecked', provider, reason: v.reason, overridable: true };
   }
   if (!v.ok) return { status: 'bad', provider, reason: v.reason };
-  // A genuine but superseded proof (an old key with its old token) never counts: the kept key only moves forward.
-  if (olderThanKept(alias, identityKey, b.seq)) return { status: 'bad', provider, reason: OLDER_KEY };
+  // A genuine but superseded proof (an old key with its old token) never counts: the kept key only moves forward, by
+  // the token's own issue time (signed by the provider) and by the binding version.
+  if (staleProof(alias, identityKey, v.iat) || olderThanKept(alias, identityKey, b.seq))
+    return { status: 'bad', provider, reason: OLDER_KEY };
   if (seen && seen !== v.sub) return { status: 'sub-changed', provider, sub: v.sub };
   // First proof this wallet sees for the name: remember its account, so a later missing or swapped proof stops.
   if (!seen) trustProofSub(alias, v.sub);
   // ...and the wallet key it proves, the only one a later proof this wallet can't check may pay.
-  trustProofKey(alias, identityKey, b.seq);
+  trustProofKey(alias, identityKey, b.seq, v.iat);
   return { status: 'proven', provider, sub: v.sub };
 }
 
@@ -469,7 +493,11 @@ export async function checkGistProof(
   if (!p?.gist) return { status: seen ? 'missing' : 'unproven', provider };
   if (p.provider !== 'github' || !/^[0-9a-f]{20,40}$/.test(p.gist))
     return { status: 'bad', provider, reason: 'not a gist proof' };
-  let g: { owner?: { login?: string; id?: number }; files?: Record<string, { content?: string; truncated?: boolean }> };
+  let g: {
+    owner?: { login?: string; id?: number };
+    created_at?: string;
+    files?: Record<string, { content?: string; truncated?: boolean }>;
+  };
   try {
     const r = await f(`https://api.github.com/gists/${p.gist}`, { headers: { Accept: 'application/vnd.github+json' } });
     if (!r.ok) return { status: seen ? 'unchecked' : 'unproven', provider };
@@ -483,11 +511,15 @@ export async function checkGistProof(
   for (const file of Object.values(g.files ?? {}))
     if (file && !file.truncated && (await verifyGistText(String(file.content ?? ''), alias, identityKey))) ok = true;
   if (!ok) return { status: 'bad', provider, reason: 'gist does not prove this wallet' };
-  // An old gist for a superseded key stays on GitHub: the same never-backwards rule as provider tokens.
-  if (olderThanKept(alias, identityKey, b.seq)) return { status: 'bad', provider, reason: OLDER_KEY };
+  // An old gist for a superseded key stays on GitHub: the same never-backwards rule as provider tokens, by the time
+  // GitHub says the gist was created (never its updated_at: an old gist edited to add the new key would pass).
+  const created = Date.parse(String(g.created_at ?? ''));
+  const at = Number.isFinite(created) ? Math.floor(created / 1000) : undefined;
+  if (staleProof(alias, identityKey, at) || olderThanKept(alias, identityKey, b.seq))
+    return { status: 'bad', provider, reason: OLDER_KEY };
   const sub = String(g.owner?.id ?? '');
   if (seen && seen !== sub) return { status: 'sub-changed', provider, sub };
   if (!seen && sub) trustProofSub(alias, sub);
-  trustProofKey(alias, identityKey, b.seq);
+  trustProofKey(alias, identityKey, b.seq, at);
   return { status: 'proven', provider, sub };
 }

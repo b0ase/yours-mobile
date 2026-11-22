@@ -61,7 +61,7 @@ const opts = (o: Partial<Parameters<typeof verifyNameProof>[1]> = {}) => ({
 
 describe('provable names: verifyNameProof', () => {
   test('a good token proves the name for its key', async () => {
-    expect(await verifyNameProof(await sign(k1, claims), opts())).toEqual({ ok: true, sub: '1234567890' });
+    expect(await verifyNameProof(await sign(k1, claims), opts())).toEqual({ ok: true, sub: '1234567890', iat });
   });
   test('wrong nonce (token binds another wallet) is refused', async () => {
     const t = await sign(k1, claims);
@@ -90,7 +90,7 @@ describe('provable names: verifyNameProof', () => {
     // `archived` is only what this wallet fetched from the provider itself (checkNameProof never passes the
     // server's keys, b-Aware 357), so when it first saw the key doesn't matter: the key is the provider's.
     const late = { ...k2.pub, firstSeen: new Date((iat + 30 * 86_400) * 1000).toISOString() };
-    expect(await verifyNameProof(t, opts({ archived: [late] }))).toEqual({ ok: true, sub: '1234567890' });
+    expect(await verifyNameProof(t, opts({ archived: [late] }))).toEqual({ ok: true, sub: '1234567890', iat });
     // An archive entry under the right kid but the wrong key material fails the signature.
     const swapped = { ...k1.pub, kid: 'kid-2' };
     expect(await verifyNameProof(t, opts({ archived: [swapped] }))).toEqual({ ok: false, reason: 'bad signature' });

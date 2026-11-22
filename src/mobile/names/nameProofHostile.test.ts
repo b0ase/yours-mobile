@@ -402,6 +402,7 @@ describe('provider token validity (row 391)', () => {
     expect(await verifyNameProof(await signJwt(google, await claimsFor(k)), await opts(k))).toEqual({
       ok: true,
       sub: '1111',
+      iat,
     });
   });
 });
