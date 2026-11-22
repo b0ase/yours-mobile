@@ -253,4 +253,58 @@ describe('row 245: the mint budget is held before signing, not recorded after br
     expect(saved.at(-1)!.mint!.items).toBe(1);
     expect(saved.at(-1)!.mint!.recent[0].pending).toBe(true);
   });
+
+  // The real @1sat/actions path: createAction with signAndProcess:false returns a signableTransaction (no txid), and
+  // signAction is what broadcasts.
+  const twoStep = (sign: () => Promise<unknown>) => ({
+    createAction: async (args?: { options?: { signAndProcess?: boolean } }) =>
+      args?.options?.signAndProcess === false
+        ? { signableTransaction: { reference: 'ref', tx: undefined } }
+        : { txid: 'd'.repeat(64) },
+    signAction: sign,
+  });
+  type TwoStep = ReturnType<typeof twoStep>;
+  const runTwoStep = async (wallet: TwoStep, steps: (w: TwoStep) => Promise<void>) => {
+    const g = makeGrant('1Main', 'b0asex', ['mint'], 7, Date.now(), makeMintLimits(1, 3));
+    const { d, saved } = deps(async (ctx) => {
+      await steps((ctx as unknown as { wallet: TwoStep }).wallet);
+      throw new Error('Mint failed');
+    });
+    d.ctx = { wallet } as unknown as AgentDeps['ctx'];
+    expect(await codeOf(() => handleAgentCall(g, 'mint', mp3, d))).not.toBe('OK');
+    return saved.at(-1)!.mint!;
+  };
+
+  test('two-step signing: a collection broadcast by signAction, then a failed item, keeps the hold', async () => {
+    const wallet = twoStep(async () => ({ txid: 'e'.repeat(64) }));
+    const last = await runTwoStep(wallet, async (w) => {
+      await w.createAction({ options: { signAndProcess: false } });
+      await w.signAction();
+    });
+    expect(last.items).toBe(1);
+    expect(last.recent[0].pending).toBe(true);
+  });
+
+  test('two-step signing: signAction that throws after it may have broadcast keeps the hold', async () => {
+    const wallet = twoStep(async () => {
+      throw new Error('broadcast status unknown');
+    });
+    const last = await runTwoStep(wallet, async (w) => {
+      await w.createAction({ options: { signAndProcess: false } });
+      await w.signAction();
+    });
+    expect(last.items).toBe(1);
+  });
+
+  test('two-step signing: failing at createAction (nothing signed) gives the hold back', async () => {
+    const wallet = twoStep(async () => ({ txid: 'e'.repeat(64) }));
+    wallet.createAction = async () => {
+      throw new Error('Insufficient funds');
+    };
+    const last = await runTwoStep(wallet, async (w) => {
+      await w.createAction({ options: { signAndProcess: false } });
+    });
+    expect(last.items).toBe(0);
+    expect(last.recent).toEqual([]);
+  });
 });

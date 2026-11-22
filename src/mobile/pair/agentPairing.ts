@@ -448,8 +448,12 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
 }
 
 /**
- * The wallet context a mint runs on, watched: sent() is true once any createAction came back with a tx (it may be on
- * the network). A context with no wallet (tests with a stub mint) is passed as it is.
+ * The wallet context a mint runs on, watched: sent() is true once a tx may be on the network. That is as soon as
+ * signAction is called (the @1sat/actions path: createAction with signAndProcess:false only builds, signAction signs
+ * and broadcasts, and can throw after broadcasting), or a createAction that signs and processes itself is called (it
+ * too can broadcast and then throw), or any createAction comes back with a tx. A createAction with
+ * signAndProcess:false that throws or returns only a signableTransaction has sent nothing. A context with no wallet
+ * (tests with a stub mint) is passed as it is.
  */
 const watchSends = (ctx: OneSatContext) => {
   let sent = false;
@@ -458,8 +462,14 @@ const watchSends = (ctx: OneSatContext) => {
   const wallet = new Proxy(w, {
     get(target, prop, recv) {
       const v = Reflect.get(target, prop, recv) as unknown;
-      if (prop !== 'createAction' || typeof v !== 'function') return typeof v === 'function' ? v.bind(target) : v;
+      if ((prop !== 'createAction' && prop !== 'signAction') || typeof v !== 'function')
+        return typeof v === 'function' ? v.bind(target) : v;
       return async (...args: unknown[]) => {
+        if (prop === 'signAction') sent = true;
+        else {
+          const opts = (args[0] as { options?: { signAndProcess?: boolean } } | undefined)?.options;
+          if (opts?.signAndProcess !== false) sent = true;
+        }
         const res = (await (v as (...a: unknown[]) => Promise<unknown>).apply(target, args)) as {
           txid?: string;
           tx?: unknown;
