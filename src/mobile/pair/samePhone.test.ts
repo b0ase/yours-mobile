@@ -72,10 +72,11 @@ const { returnHref } = await import('./openReturn');
 const settle = () => new Promise<void>((r) => setTimeout(r, 25));
 const HOST = 'https://pairtest.example';
 const root = PrivateKey.fromRandom();
+const ROOT_ACCOUNT = root.toPublicKey().toAddress();
 sessions.setPairRevoker(async () => true);
 sessions.setAgentPairDeps({
   ctx: { wallet: new ProtoWallet(root) } as never,
-  currentId: '1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  currentId: ROOT_ACCOUNT,
   accountCount: 1,
 });
 
@@ -244,10 +245,10 @@ describe('same phone: sign in with Connect, and go back', () => {
   });
 
   test('the sign-in card names the account that will sign in (review 22 Nov, 5)', async () => {
-    mem.set('bwallet.name.1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA', 'b0asex');
+    mem.set(`bwallet.name.${ROOT_ACCOUNT}`, 'b0asex');
     const c = await card(loginFields(), true, true);
     expect(c.p.signInAs).toBe('$b0asex');
-    mem.delete('bwallet.name.1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA');
+    mem.delete(`bwallet.name.${ROOT_ACCOUNT}`);
   });
 
   test('a challenge that expires while the card is up is not signed (review 22 Nov, 3)', async () => {
@@ -309,7 +310,29 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(r).toBeNull();
     expect(c.gone()).toBe(1);
     expect(sessions.pairedSites().some((s) => s.c === c.link.c)).toBe(false);
-    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: '1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA', accountCount: 1 });
+    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: ROOT_ACCOUNT, accountCount: 1 });
+  });
+
+  test('review 4 (L3): a return through a custom scheme or named Android package (b=chrome/firefox/…) never carries the sign-in', async () => {
+    for (const b of ['chrome', 'firefox', 'samsung', 'edge', 'brave'] as const) {
+      const c = await card({ ...loginFields(), b });
+      expect(c.p.returnPlan).not.toBeNull(); // it still returns…
+      expect(c.p.signIn).toBe(false); // …but the sign-in goes on the separate sheet
+    }
+    const plain = await card({ ...loginFields(), b: 'other' });
+    expect(plain.p.signIn).toBe(true);
+  });
+
+  test('review 4 (L6): the signing wallet must be the card account; another identity refuses with a plain line', async () => {
+    const c = await card(loginFields());
+    let message: string | undefined;
+    c.p.onGone((m) => (message = m));
+    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(PrivateKey.fromRandom()) } as never, currentId: ROOT_ACCOUNT, accountCount: 1 });
+    const r = await c.p.confirm();
+    expect(r).toBeNull();
+    expect(message).toBe(sessions.PAIR_ACCOUNT_CHANGED_MESSAGE);
+    expect(sessions.pairedSites().some((s) => s.c === c.link.c)).toBe(false);
+    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: ROOT_ACCOUNT, accountCount: 1 });
   });
 
   afterAll(() => {
