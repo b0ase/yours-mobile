@@ -67,6 +67,7 @@ import {
   markOf,
   onDemandAllowed,
   overlapped,
+  overlappedNext,
   passFromStart,
   rewind,
   rewindDeep,
@@ -2304,7 +2305,7 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
     // cursor per pass.
     const next =
       merged.nextCheckpoint && deviceStores.has(deviceSik)
-        ? { ...merged.nextCheckpoint, since: overlapped(merged.nextCheckpoint.since) }
+        ? { ...merged.nextCheckpoint, since: overlappedNext(merged.nextCheckpoint.since, args?.since) }
         : undefined;
     const out = next ? { ...merged, nextCheckpoint: next } : merged;
     if (afterPage(deviceSik) === 'yield') {

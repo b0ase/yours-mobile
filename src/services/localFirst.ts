@@ -19,11 +19,17 @@
  *     refused with a plain message, and nothing is signed.
  */
 import type { SwitchResult } from './restoreFromRemote';
+import { normalizeStoreConfig, repairSyncRemote } from './ourServer';
 
 export type StoreConfigLike = { activeRemote?: string; remotes?: string[]; localFirst?: boolean } | undefined;
 
-/** The remote this account backs up to (the active one first). */
-export const remoteUrlOf = (c: StoreConfigLike): string | undefined => c?.activeRemote || c?.remotes?.[0] || undefined;
+/**
+ * The remote this account backs up to (the active one first). Never our storage server unless it is the active store
+ * (review of a95a1ff0, 1): unknown here whether its whole fill ran on this device. The background passes its own pick
+ * (EnsureLocalDeps.pickRemote), which knows the flag and the hold-out.
+ */
+export const remoteUrlOf = (c: StoreConfigLike): string | undefined =>
+  repairSyncRemote(normalizeStoreConfig(c), true, false) || undefined;
 
 /** Is this account's active store this device's own? (No storage config at all is a device-only account.) */
 export const isOnDeviceStore = (c: StoreConfigLike): boolean => !c?.activeRemote;
@@ -89,6 +95,8 @@ export type EnsureLocalDeps = {
   /** This device's store is the active one right now. */
   isLocalActive: () => boolean;
   switchVerified: (remoteUrl: string) => Promise<SwitchResult>;
+  /** The remote to read from (the background's: flag and hold-out known). Default: remoteUrlOf. */
+  pickRemote?: (c: StoreConfigLike) => Promise<string | undefined>;
   /** The device's store, while active, holds nothing (the 14 Oct "empty after restore" state). */
   localIsEmpty: () => Promise<boolean>;
   /**
@@ -123,7 +131,7 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
     const a = d.account();
     if (!a) return d.isLocalActive() ? { ok: true, how: 'already-local' } : { ok: false, how: 'no-account' };
     const config = a.config;
-    const remoteUrl = remoteUrlOf(config);
+    const remoteUrl = d.pickRemote ? await d.pickRemote(config) : remoteUrlOf(config);
     if (!config || !remoteUrl)
       return d.isLocalActive() ? { ok: true, how: 'no-remote' } : { ok: false, how: 'no-account' };
     if (d.failedThisSession(a.id))

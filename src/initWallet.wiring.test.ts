@@ -462,9 +462,9 @@ describe('the real initWallet wiring', () => {
     expect(ask).toContain('Checking your whole wallet over mobile data, about ${mb} MB');
     const bg = readFileSync(new URL('./background.ts', import.meta.url), 'utf8');
     expect(bg).toMatch(/notice: \(message\) =>[\s\S]*status: 'progress'[\s\S]*message/);
-    // A restore's merges run whole (re-check N2).
+    // A restore's merges run whole (re-check N2), and its switch never makes our server active unrepaired (a95a1ff0, 1).
     expect(bg).toMatch(
-      /setActiveStorage: \(target\) =>\s*asRestore\(async \(\) => \{[\s\S]*?await ctx\.setActiveStorage\(target\);/,
+      /setActiveStorage: \(target\) =>\s*asRestore\(async \(\) => \{[\s\S]*?await ourControls\.guardSetActive\(\(t\) => ctx\.setActiveStorage\(t\)\)\(target\);/,
     );
     expect(bg).toMatch(/asRestore\(\(\) => ctx\.storage\.syncFromReader\(identityKey, store as never\)\)/);
   });
@@ -535,49 +535,66 @@ describe('the real initWallet wiring', () => {
  * running touches this file's stubs or another file's, whatever the order or load; and with every fetch and DNS lookup
  * refused there, so it provably makes no network call.
  */
+/** The child's time limit; the test's own is a little longer, so the kill comes first. */
+const CHILD_MS = 90_000;
 describe('initWallet: our server held out for its repair (own process)', () => {
-  test('held out with no repaired record, honest Store refusal, one stable key corrected once, no network', async () => {
-    const child = Bun.spawn(
-      [process.execPath, new URL('./testing/initWalletHeldOut.child.ts', import.meta.url).pathname],
-      {
-        cwd: new URL('..', import.meta.url).pathname,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      },
-    );
-    const [out, err, code] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-    const line = out.split('\n').find((l) => l.startsWith('RESULT '));
-    if (!line || code !== 0) console.error(out.slice(-4000), err.slice(-4000));
-    const r = JSON.parse(line!.slice('RESULT '.length)) as Record<string, unknown>;
-    expect(r.error).toBeUndefined();
-    expect(code).toBe(0);
-    // No 'repaired' record: our server held out, never connected; the unreachable backup was skipped.
-    expect(r.heldOut).toBe(true);
-    expect(r.connectedBackups).toBe(0);
-    // Configured backups count (fail closed): the Store payment gets the honest line, without a push or a reconnect.
-    expect(r.backupConfigured).toBe(true);
-    expect(r.storePayment).toEqual({ ok: false, error: OUR_BACKUP_REBUILDING_REFUSAL });
-    expect(r.fetchedDuringPayment).toEqual([]);
-    // One stable key, the device store's own: a stale top-level key is corrected at open and read back through the
-    // account object, where the repair's record (written with the device store's key) is found.
-    expect([r.deviceKey, r.keyCorrected, r.keyRead]).toEqual([true, true, true]);
-    expect([r.heldOutNoRecord, r.heldOutRepaired]).toEqual([true, false]);
-    // Whatever the active store; never when our server IS it; any spelling of our server.
-    expect([r.heldOutRemoteActive, r.heldOutOursActive, r.heldOutSpelled, r.heldOutRemoteActiveRepaired]).toEqual([
-      true,
-      false,
-      true,
-      false,
-    ]);
-    // No network: nothing reached our server; the backup's connect went through the refused fetch (so the storage
-    // transport uses the replaced fetch, not a real one), and no DNS lookup was made at all.
-    const fetched = r.fetched as string[];
-    expect(fetched.some((u) => u.includes('storage.bwalletx.com'))).toBe(false);
-    expect(fetched.some((u) => u.startsWith('https://backup.invalid/'))).toBe(true);
-    expect(r.lookedUp).toEqual([]);
-  }, 120_000);
+  test(
+    'held out with no repaired record, honest Store refusal, one stable key corrected once, no network',
+    async () => {
+      // Killed if it runs past its time (review of a95a1ff0, 3): a hung child never outlives this test.
+      const child = Bun.spawn(
+        [process.execPath, new URL('./testing/initWalletHeldOut.child.ts', import.meta.url).pathname],
+        {
+          cwd: new URL('..', import.meta.url).pathname,
+          stdout: 'pipe',
+          stderr: 'pipe',
+          timeout: CHILD_MS,
+          killSignal: 'SIGKILL',
+        },
+      );
+      let out = '';
+      let err = '';
+      let code: number | null = null;
+      try {
+        [out, err, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ]);
+      } finally {
+        if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+      }
+      expect(child.signalCode).toBeNull(); // not killed by the timeout
+      const line = out.split('\n').find((l) => l.startsWith('RESULT '));
+      if (!line || code !== 0) console.error(out.slice(-4000), err.slice(-4000));
+      const r = JSON.parse(line!.slice('RESULT '.length)) as Record<string, unknown>;
+      expect(r.error).toBeUndefined();
+      expect(code).toBe(0);
+      // No 'repaired' record: our server held out, never connected; the unreachable backup was skipped.
+      expect(r.heldOut).toBe(true);
+      expect(r.connectedBackups).toBe(0);
+      // Configured backups count (fail closed): the Store payment gets the honest line, without a push or a reconnect.
+      expect(r.backupConfigured).toBe(true);
+      expect(r.storePayment).toEqual({ ok: false, error: OUR_BACKUP_REBUILDING_REFUSAL });
+      expect(r.fetchedDuringPayment).toEqual([]);
+      // One stable key, the device store's own: a stale top-level key is corrected at open and read back through the
+      // account object, where the repair's record (written with the device store's key) is found.
+      expect([r.deviceKey, r.keyCorrected, r.keyRead]).toEqual([true, true, true]);
+      expect([r.heldOutNoRecord, r.heldOutRepaired]).toEqual([true, false]);
+      // Whatever the active store; never when our server IS it; any spelling of our server.
+      expect([r.heldOutRemoteActive, r.heldOutOursActive, r.heldOutSpelled, r.heldOutRemoteActiveRepaired]).toEqual([
+        true,
+        false,
+        true,
+        false,
+      ]);
+      // No network: nothing reached our server; the backup's connect went through the refused fetch (so the storage
+      // transport uses the replaced fetch, not a real one), and no DNS lookup was made at all.
+      const fetched = r.fetched as string[];
+      expect(fetched.some((u) => u.includes('storage.bwalletx.com'))).toBe(false);
+      expect(fetched.some((u) => u.startsWith('https://backup.invalid/'))).toBe(true);
+      expect(r.lookedUp).toEqual([]);
+    },
+    CHILD_MS + 10_000,
+  );
 });

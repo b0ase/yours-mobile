@@ -144,17 +144,15 @@ import {
   type EnsureLocalResult,
 } from './services/localFirst';
 import {
-  SNAPSHOT_MARK_KEY,
   SNAPSHOT_SEND_WAIT,
   addRemoteRefusal,
-  forgetDeviceStoreRecords,
   isOurServer,
   normalizeStoreConfig,
-  repairSyncRemote,
   spendableFirstOn,
   withSnapshotRemote,
 } from './services/spendableFirst';
-import { makeActiveRefusal, ourBackupAttempt, ourBackupRetryTimer } from './services/spendableFirstWiring';
+import { ourBackupAttempt, ourBackupRetryTimer } from './services/spendableFirstWiring';
+import { ourServerControls, signOutStores } from './services/ourServerControls';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
@@ -390,6 +388,13 @@ const isInServiceWorker = self?.document === undefined;
 
 // Account context - null if locked or not initialized
 let accountContext: AccountContext | null = null;
+/** Our storage server's rules for store switches, remote picks, Settings › Storage and sign-out. */
+const ourControls = ourServerControls({
+  flagOn: () => spendableFirstOn(chrome.storage?.local as never),
+  kv: { get: (k) => chrome.storage.local.get(k) as Promise<Record<string, unknown>> },
+  identityAddress: () => chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
+  ctx: () => accountContext,
+});
 
 /** chrome.storage.local, where the automatic coin check keeps its throttle and cleared list (autoCoinResync.ts). */
 const autoResyncKV = {
@@ -1082,6 +1087,8 @@ const settleLocalStore = async (ctx: NonNullable<typeof accountContext>): Promis
     failedThisSession: (id) => moveInBackoff(id),
     backupInFlight: () => masterBackupInFlight,
     isLocalActive: () => ctx.storage.isActiveStorageProvider(),
+    // Never our server unless the flag, the hold-out and the active store allow it (review of a95a1ff0, 1).
+    pickRemote: (c) => ourControls.pickRemote(c as StorageConfig | undefined),
     switchVerified: (remoteUrl) => {
       console.log('[background] storage: switching active to this device after a verified copy of the backup');
       return switchToLocalVerified(restoreDeps(ctx, remoteUrl)).then((r) => {
@@ -1283,7 +1290,8 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
             ? boundCopyRequests(remote as never, { onRows: (n) => noteRestoreProgress((getRestoreView()?.done ?? 0) + n) })
             : () => undefined;
         try {
-          await ctx.setActiveStorage(target);
+          // Never our server unless its whole fill ran here (review of a95a1ff0, 1): a failed restore would leave it active.
+          await ourControls.guardSetActive((t) => ctx.setActiveStorage(t))(target);
         } finally {
           unbound();
         }
@@ -2721,16 +2729,15 @@ if (isInServiceWorker) {
     console.log('All IndexedDB databases deleted.');
   };
 
-  const signOut = async () => {
-    dropWalletContext('signOut');
-    await chromeStorageService.clearPassKey();
-    await deleteAllIDBDatabases();
-    // The stores are gone: so are the install's key and the repair records made for them (review of 6888544a, 3).
-    await forgetDeviceStoreRecords(chrome.storage.local as never).catch((e) =>
-      console.warn('[background] signOut: could not forget the store records:', e),
-    );
-    if (chromeStorageService.storage) delete chromeStorageService.storage.storageIdentityKey;
-  };
+  const signOut = async () =>
+    // The stores are deleted: so are the install's key and the repair records made for them (review of 6888544a, 3).
+    signOutStores({
+      dropWallet: () => dropWalletContext('signOut'),
+      clearPassKey: () => chromeStorageService.clearPassKey(),
+      deleteDatabases: deleteAllIDBDatabases,
+      area: chrome.storage.local as never,
+      cache: () => chromeStorageService.storage,
+    });
 
   const switchAccount = async () => {
     console.log('[background] switchAccount: starting');
@@ -4484,7 +4491,6 @@ if (!(
       return;
     }
     const { storage, remoteStorage } = accountContext;
-    const ctxNow = accountContext;
     (async () => {
       try {
         const stores = storage.getStores();
@@ -4498,11 +4504,7 @@ if (!(
           remotes: [],
         };
         // Remotes whose "Make active" is refused (our server not whole on this device): the row shows why instead.
-        const refusedActive: Record<string, string> = {};
-        for (const url of storageConfig.remotes ?? []) {
-          const why = await makeActiveRefusalFor(ctxNow, url);
-          if (why) refusedActive[url] = why;
-        }
+        const refusedActive = await ourControls.refusedActive(storageConfig);
 
         let outputCount = 0;
         let transactionCount = 0;
@@ -4760,7 +4762,7 @@ if (!(
       if (report.skipped) {
         const { account } = chromeStorageService.getCurrentAccountObject();
         const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
-        const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+        const remoteUrl = await ourControls.pickRemote(config);
         if (account && config && remoteUrl) {
           say('Copying your backup to this device…');
           const r = await timedStep(
@@ -4826,7 +4828,7 @@ if (!(
       if (!ctx) throw new Error('Wallet not initialized');
       const { account } = chromeStorageService.getCurrentAccountObject();
       const config = account?.storageConfig;
-      const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+      const remoteUrl = await ourControls.pickRemote(config);
       const parts: string[] = [];
       let ok = true;
       if (remoteUrl) {
@@ -4883,11 +4885,7 @@ if (!(
       const { account } = chromeStorageService.getCurrentAccountObject();
       const config: StorageConfig = normalizeStoreConfig(account?.storageConfig) ?? { remotes: [] };
       // Never our server while it is held out of the session for its one-time repair.
-      const remoteUrl = repairSyncRemote(
-        config,
-        accountContext.ourBackupHeldOut(),
-        await spendableFirstOn(chrome.storage?.local as never),
-      );
+      const remoteUrl = await ourControls.pickRemote(config);
       // After the reconcile (or alone, with no remote): token outputs on chain
       // that no store recorded, searched over the wider window too. Then a final
       // pass relinquishes token outputs the overlay or chain reports spent: the
@@ -5038,21 +5036,10 @@ if (!(
 
   /** Make `target` the active store (toolbox merge-then-flip) and persist it in the account's storageConfig. */
   /** Settings › Storage "Make active" for `url`: why it can't be (our server not whole here), else undefined. */
-  const makeActiveRefusalFor = async (ctx: AccountContext, url: string): Promise<string | undefined> => {
-    const id = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
-    return makeActiveRefusal(url, {
-      flagOn: await spendableFirstOn(chrome.storage?.local as never),
-      kv: chrome.storage.local as never,
-      markKey: SNAPSHOT_MARK_KEY(id ?? ''),
-      deviceSik: id ? ctx.deviceStoreKey() : undefined,
-    });
-  };
   const switchActiveStorage = async (ctx: AccountContext, target: 'local' | string): Promise<StorageConfig> => {
     // Never our server unless its whole fill ran on this device (review of 6888544a, 1): the toolbox's switch copies
     // only from the last sync point, so a half-filled server would become the account's store.
-    const refused = await makeActiveRefusalFor(ctx, target);
-    if (refused) throw new Error(refused);
-    await ctx.setActiveStorage(target);
+    await ourControls.guardSetActive((t) => ctx.setActiveStorage(t))(target);
     return updateStorageConfig((current) => {
       if (target === 'local') {
         return { ...current, activeRemote: undefined, remotes: current.remotes ?? [] };

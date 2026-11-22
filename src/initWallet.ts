@@ -253,6 +253,7 @@ import {
   backupsFor,
   isOurServer,
   normalizeStoreConfig,
+  repairSyncRemote,
   SNAPSHOT_MARK_KEY,
   SNAPSHOT_SERVER_URL,
   spendableFirstOn,
@@ -747,7 +748,8 @@ export const initWallet = async (
   const resolved = resolveStorageConfig(account?.storageConfig);
   const { activeRemote } = resolved;
   // Our storage server only with the instant-restore flag on (services/spendableFirst.ts): off, never connected.
-  const configuredBackups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
+  const flagOn = await spendableFirstOn(chrome.storage?.local as never);
+  const configuredBackups = backupsFor(resolved.backups, flagOn);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   /**
    * Our server joins this session at init only once this device's check found it whole (spendableFirstWiring
@@ -1691,8 +1693,8 @@ export const initWallet = async (
   // Settings > Troubleshooting, where the user can retry. Only a run the
   // worker never finished (no stamp) is tried again on the next open.
   if (dataVersion === 1) {
-    const config = account?.storageConfig;
-    const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+    // Never our server while it is held out, or with the flag off (review of a95a1ff0, 1).
+    const remoteUrl = repairSyncRemote(normalizeStoreConfig(account?.storageConfig), ourServerDeferred, flagOn);
     if (remoteUrl) {
       mark('storage reconcile migration start');
       await reconcileStorage(storage, syncContext.services, remoteUrl, 'migration').catch((err) =>
@@ -1707,8 +1709,8 @@ export const initWallet = async (
   // on the next open, even if its notice was dismissed, up to MAX_RECONCILE_RESUMES times.
   // The repair overlay shows its progress while it runs.
   if (dataVersion >= 1) {
-    const config = account?.storageConfig;
-    const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+    // Never our server while it is held out, or with the flag off (review of a95a1ff0, 1).
+    const remoteUrl = repairSyncRemote(normalizeStoreConfig(account?.storageConfig), ourServerDeferred, flagOn);
     const previous = remoteUrl ? await readReconcileRecord().catch(() => undefined) : undefined;
     if (remoteUrl && previous && shouldResumeReconcile(previous)) {
       mark('storage reconcile resume start');
