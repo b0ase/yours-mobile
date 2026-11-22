@@ -15,6 +15,7 @@ import {
   isOurDomain,
   opnsBinding,
   parseRecipient,
+  proofKeyOverride,
   resolveRecipient,
   trustResolvedKey,
   VIA_LABEL,
@@ -337,6 +338,20 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       }}
                     >
                       I've checked with them: trust the new wallet
+                    </button>
+                  )}
+                  {proofKeyOverride(r) && (
+                    // A proof signed by a provider key this wallet never saw: same deliberate override.
+                    <button
+                      type="button"
+                      className="self-start bg-transparent border-0 p-0 text-xs font-semibold underline cursor-pointer"
+                      style={{ color: fg }}
+                      onClick={() => {
+                        trustResolvedKey(r);
+                        onType(text);
+                      }}
+                    >
+                      I've checked with them: pay this wallet
                     </button>
                   )}
                   {r.nameProof?.status === 'sub-changed' && r.nameProof.sub && (

@@ -665,6 +665,21 @@ export const proofRefusal = (r: Pick<Resolved, 'nameProof'>): string | undefined
   return `This name's proof from ${who} doesn't check out, so it may have been moved without its owner. Not paying it.`;
 };
 
+/**
+ * A name this wallet saw proven before whose proof is now signed by a provider key it never saw published (e.g. one
+ * rotated out before this wallet kept its own copy): Send stops, and like a key change (BRC-169 4.4) the payer may
+ * deliberately get through after checking with the person. The override trusts the served key (trustResolvedKey),
+ * after which the name is payable as unproven, with no badge. Not offered for any other stop.
+ */
+export const proofKeyOverride = (r: Pick<Resolved, 'pubkey' | 'nameBinding' | 'nameProof'>): boolean =>
+  !!r.pubkey &&
+  r.nameProof?.status === 'unchecked' &&
+  r.nameProof.reason === UNKNOWN_KEY &&
+  r.nameBinding !== 'bad' &&
+  r.nameBinding !== 'mismatch' &&
+  // A key change has its own override, which trusts the same key.
+  r.nameBinding !== 'changed';
+
 export const destinationFor = (
   r: Resolved,
   asset: 'bsv' | 'token',
