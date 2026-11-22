@@ -273,15 +273,26 @@ export const staleProof = (alias: string, identityKey: string, at?: number): boo
   return !(isTime(at) && at > kept.at);
 };
 /**
- * Remember the wallet key this name's proof is accepted for: on every proven check (with the provider's time, `at`),
- * a verified handover from the kept key, or the payer's override (no `at`: the newest provider time already kept
- * stays as the floor). Never replaces the kept key with one at an older (or equal) binding version or provider time.
+ * Remember the wallet key this name's proof is accepted for, on every proven check, with the provider's own time
+ * (`at`). A proof with no provider time keeps the newest one already kept as the floor. Never replaces the kept key
+ * with one at an older (or equal) binding version or provider time.
  */
 export const trustProofKey = (alias: string, identityKey: string, seq?: number, at?: number) => {
+  if (isTime(at) && staleProof(alias, identityKey, at)) return;
+  keepProofKey(alias, identityKey, seq, at);
+};
+/**
+ * Accept a key this wallet could not check against the provider: a verified handover from the kept key, or the
+ * payer's override. The floor becomes this wallet's own clock when it accepted the key (never earlier than a
+ * provider time already kept), so no token for another key issued before the handover or override can take the
+ * name back (fifth review).
+ */
+export const followProofKey = (alias: string, identityKey: string, seq?: number) =>
+  keepProofKey(alias, identityKey, seq, Math.floor(Date.now() / 1000));
+const keepProofKey = (alias: string, identityKey: string, seq?: number, at?: number) => {
   const a = alias.toLowerCase();
   const k = identityKey.toLowerCase();
   if (olderThanKept(a, k, seq)) return;
-  if (isTime(at) && staleProof(a, k, at)) return;
   const kept = provenKeyFor(a);
   // The same key served at an older version keeps the newer version this wallet saw.
   const keepSeq = kept?.key === k && isSeq(kept.seq) && !(isSeq(seq) && seq > kept.seq) ? kept.seq : seq;
@@ -422,9 +433,10 @@ async function checkProviderProof(
     if (kept) {
       if (kept.key === key) return { status: 'unproven', provider, reason: v.reason };
       // The kept key itself signed the name over to this one at a newer binding version (checkBinding verified the
-      // release): the owner moved, so it pays (no badge) and the kept key follows the handover (third review, 1).
+      // release): the owner moved, so it pays (no badge) and the kept key follows the handover (third review, 1), with
+      // now as its time floor, so a token for the old key from before the handover can't move it back (fifth review).
       if (b.handoverFrom === kept.key && (!isSeq(kept.seq) || (isSeq(b.seq) && b.seq > kept.seq))) {
-        trustProofKey(alias, key, b.seq);
+        followProofKey(alias, key, b.seq);
         return { status: 'unproven', provider, reason: v.reason };
       }
       return { status: 'unchecked', provider, reason: v.reason };

@@ -6,7 +6,7 @@ import {
   trustForwardSigner,
   type BindingStatus,
 } from './binding';
-import { checkNameProof, PROOF_PROVIDERS, trustProofKey, trustProofSub, UNKNOWN_KEY, type ProofCheck } from './proof';
+import { checkNameProof, followProofKey, PROOF_PROVIDERS, trustProofSub, UNKNOWN_KEY, type ProofCheck } from './proof';
 import { ProtoWallet, Utils } from '@bsv/sdk';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage } from './paymail';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
@@ -319,7 +319,8 @@ export const trustResolvedKey = (
   if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
   // proofKeyOverride's stop: accept this key for the name the proof was checked for (a forward's target).
   const p = r.nameProof;
-  if (p?.status === 'unchecked' && p.overridable && p.alias) trustProofKey(p.alias, r.pubkey, p.seq);
+  // Its time floor is now: an older token for another key can't take the name back (fifth review).
+  if (p?.status === 'unchecked' && p.overridable && p.alias) followProofKey(p.alias, r.pubkey, p.seq);
 };
 
 /**
