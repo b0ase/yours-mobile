@@ -84,7 +84,10 @@ describe('payeeDestination', () => {
     const opns = resolved({ input: 'satchmo', via: 'opns-owner', nameBinding: undefined, opnsChecked: 'chain' });
     expect(payeeDestination(ALICE, { ...opns, opnsKeySigned: false })).toEqual({ address: '1AliceAddr' });
     expect(() => payeeDestination(PINNED, { ...opns, opnsKeySigned: false })).toThrow(PAYEE_KEY_MISSING);
-    expect(payeeDestination(PINNED, { ...opns, opnsKeySigned: true })).toEqual({ address: '1AliceAddr', pubkey: KEY_A });
+    expect(payeeDestination(PINNED, { ...opns, opnsKeySigned: true })).toEqual({
+      address: '1AliceAddr',
+      pubkey: KEY_A,
+    });
   });
   test('same pinned key and address → destination', () => {
     expect(payeeDestination(PINNED, resolved())).toEqual({ address: '1AliceAddr', pubkey: KEY_A });

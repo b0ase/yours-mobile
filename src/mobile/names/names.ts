@@ -312,6 +312,26 @@ export const forwardTarget = (alias: string, fw: unknown): string | undefined =>
   return to;
 };
 
+type KeyFields = Pick<Resolved, 'via' | 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>;
+
+/**
+ * An OpNS name whose `pubkey` is only the index's opns.idKey string: not an identity binding its key signed on the
+ * owner output that was checked on chain. Such a key is shown (opnsTrustLabel) but never acted on (b-Aware
+ * opns-indexer: the spec wants opns.idKey bound by a signature the wallet checks).
+ */
+export const opnsKeyUnverified = (r: KeyFields): boolean =>
+  r.via === 'opns-owner' && !!r.pubkey && !(r.opnsChecked === 'chain' && r.opnsKeySigned);
+
+/**
+ * The identity key a resolved name may be acted on with (call it, verify a caller, save it as a friend, hand it a
+ * name, pin it): `pubkey`, except an OpNS key that only the index vouches for (opnsKeyUnverified), which gives none.
+ */
+export const trustedKey = (r: KeyFields): string | undefined => (opnsKeyUnverified(r) ? undefined : r.pubkey);
+
+/** Why an OpNS key that only the index vouches for can't be used to call, save or hand a name to. */
+export const OPNS_KEY_UNVERIFIED = (name: string) =>
+  `${name}'s wallet key comes only from the OpNS index and is not signed on chain, so it can't be used here yet.`;
+
 /**
  * Remember the paid key for the typed name and, for a followed forward, who signed it (only that key may forward the
  * name next time). Used by NameInput's confirm() and by its "I've checked with them: trust the new wallet" override.
@@ -319,9 +339,8 @@ export const forwardTarget = (alias: string, fw: unknown): string | undefined =>
 export const trustResolvedKey = (
   r: Pick<Resolved, 'input' | 'pubkey' | 'forwardsTo' | 'forwardSigner' | 'via' | 'opnsChecked' | 'opnsKeySigned'>,
 ) => {
-  if (!r.pubkey) return;
   // An OpNS key is remembered only when checked on chain and signed by that key, never on the index's word alone.
-  if (r.via === 'opns-owner' && !(r.opnsChecked === 'chain' && r.opnsKeySigned)) return;
+  if (!trustedKey(r)) return;
   const typed = r.input.replace(/^\$/, '').split('@')[0];
   trustCurrentKey(typed, r.pubkey);
   if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
