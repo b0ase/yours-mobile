@@ -7,6 +7,7 @@ import {
   parseRecipient,
   proofKeyOverride,
   resolveRecipient,
+  trustProvenAccount,
   trustResolvedKey,
   type Fetch,
 } from './names';
@@ -227,7 +228,13 @@ describe('a proof key this wallet never saw, for a name it saw proven before (re
     expect(proofKeyOverride(r)).toBe(false);
     const unchecked = {
       ...r,
-      nameProof: { status: 'unchecked' as const, provider: 'google' as const, reason: 'unknown signing key' },
+      nameProof: {
+        status: 'unchecked' as const,
+        provider: 'google' as const,
+        reason: 'unknown signing key',
+        alias: 'victim.gmail',
+        overridable: true,
+      },
     };
     expect(proofKeyOverride(unchecked)).toBe(true);
     expect(proofKeyOverride({ ...unchecked, nameBinding: 'bad' })).toBe(false);
@@ -236,6 +243,125 @@ describe('a proof key this wallet never saw, for a name it saw proven before (re
     expect(proofKeyOverride({ ...unchecked, pubkey: undefined })).toBe(false);
     // "This version can't check proofs" (no client id) is not a key we could re-trust.
     expect(proofKeyOverride({ ...unchecked, nameProof: { status: 'unchecked', provider: 'google' } })).toBe(false);
+    // A name this wallet already holds a proven wallet key for: no override (second review, finding 1).
+    expect(proofKeyOverride({ ...unchecked, nameProof: { ...unchecked.nameProof, overridable: undefined } })).toBe(
+      false,
+    );
+  });
+});
+
+describe('second review: a hostile server can not turn a proven name into a tap-through (finding 1)', () => {
+  const genuine = async (owner: ReturnType<typeof wallet>) => ({
+    handle: 'victim.gmail@bwalletx.com',
+    pubkey: owner.key,
+    binding: await bindingFrom(owner, 'victim.gmail', 1),
+    proof: { provider: 'google', idToken: await signJwt(google, await claimsFor(owner.key)), keys: [] },
+  });
+  // The attacker's wallet and binding, with a token under a kid Google never published.
+  const hostile = async (evil: ReturnType<typeof wallet>) => ({
+    handle: 'victim.gmail@bwalletx.com',
+    pubkey: evil.key,
+    binding: await bindingFrom(evil, 'victim.gmail', 1),
+    proof: { provider: 'google', idToken: await signJwt(attacker, await claimsFor(evil.key)), keys: [] },
+  });
+  const pr = () => parseRecipient('victim.gmail@bwallet.space');
+
+  test('seen proven, never paid: the attacker key under an unknown kid stops Send with no override', async () => {
+    const owner = wallet(951);
+    expect((await resolveRecipient(host(await genuine(owner), [google.pub]), pr())).nameProof?.status).toBe('proven');
+    resetProviderKeyCache();
+    const r = await resolveRecipient(host(await hostile(wallet(952)), [google.pub]), pr());
+    expect(r.nameProof?.status).toBe('unchecked');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    expect(proofKeyOverride(r)).toBe(false);
+  });
+
+  test('seen proven and paid: the key-change override does not also wave the proof stop through', async () => {
+    const owner = wallet(953);
+    const r0 = await resolveRecipient(host(await genuine(owner), [google.pub]), pr());
+    expect(r0.nameProof?.status).toBe('proven');
+    trustResolvedKey(r0); // the payer paid the genuine owner
+    resetProviderKeyCache();
+    const answer = await hostile(wallet(954));
+    let r = await resolveRecipient(host(answer, [google.pub]), pr());
+    expect(r.nameBinding).toBe('changed');
+    expect(r.nameProof?.status).toBe('unchecked');
+    trustResolvedKey(r); // "I've checked with them: trust the new wallet"
+    resetProviderKeyCache();
+    r = await resolveRecipient(host(answer, [google.pub]), pr());
+    expect(r.nameProof?.status).toBe('unchecked');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    expect(proofKeyOverride(r)).toBe(false);
+  });
+
+  test('seen proven, never paid: the SAME wallet key with a token this wallet cannot check pays as unproven', async () => {
+    const owner = wallet(955);
+    expect((await resolveRecipient(host(await genuine(owner), [google.pub]), pr())).nameProof?.status).toBe('proven');
+    resetProviderKeyCache();
+    const unknownKid = await makeKey('g-never-seen');
+    const answer = {
+      ...(await genuine(owner)),
+      proof: { provider: 'google', idToken: await signJwt(unknownKid, await claimsFor(owner.key)), keys: [] },
+    };
+    const r = await resolveRecipient(host(answer, [google.pub]), pr());
+    expect(r.nameProof?.status).toBe('unproven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
+    expect(proofKeyOverride(r)).toBe(false);
+  });
+});
+
+describe('second review: the override works for a forwarded name (finding 2)', () => {
+  const signedForward = async (w: ReturnType<typeof wallet>, from: string, to: string) => {
+    const r = await signRequest(w, 'forward', { from, to, expiresAt: '' });
+    return {
+      from: `${from}@bwalletx.com`,
+      to: `${to}@bwalletx.com`,
+      expiresAt: null,
+      identityKey: r.identityKey,
+      timestamp: String(r.timestamp),
+      signature: r.signature,
+      fromBinding: await bindingFrom(w, from, 1),
+    };
+  };
+
+  test('boase@ forwards to victim.gmail@ (proof key unknown, name seen proven before the update): one tap gets through', async () => {
+    trustProofSub('victim.gmail', '1111'); // seen proven before this update: no wallet key kept for it
+    const owner = wallet(961);
+    const answer = {
+      handle: 'victim.gmail@bwalletx.com',
+      pubkey: owner.key,
+      binding: await bindingFrom(owner, 'victim.gmail', 1),
+      forward: await signedForward(owner, 'boase', 'victim.gmail'),
+      proof: { provider: 'google', idToken: await signJwt(rotated, await claimsFor(owner.key)), keys: [] },
+    };
+    let r = await resolveRecipient(host(answer, [google.pub]), parseRecipient('boase@bwallet.space'));
+    expect(r.forwardsTo).toBe('victim.gmail');
+    expect(r.nameProof?.status).toBe('unchecked');
+    expect(proofKeyOverride(r)).toBe(true);
+    trustResolvedKey(r); // what the override button does
+    resetProviderKeyCache();
+    r = await resolveRecipient(host(answer, [google.pub]), parseRecipient('boase@bwallet.space'));
+    expect(r.nameProof?.status).toBe('unproven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
+  });
+
+  test('a forwarded name proven by a new account: "trust the new account" is kept for the proven name', async () => {
+    trustProofSub('victim.gmail', '0000'); // an older account
+    const owner = wallet(962);
+    const answer = {
+      handle: 'victim.gmail@bwalletx.com',
+      pubkey: owner.key,
+      binding: await bindingFrom(owner, 'victim.gmail', 1),
+      forward: await signedForward(owner, 'boase', 'victim.gmail'),
+      proof: { provider: 'google', idToken: await signJwt(google, await claimsFor(owner.key)), keys: [] },
+    };
+    let r = await resolveRecipient(host(answer, [google.pub]), parseRecipient('boase@bwallet.space'));
+    expect(r.nameProof?.status).toBe('sub-changed');
+    trustProvenAccount(r); // what "I've checked with them: trust the new account" does
+    resetProviderKeyCache();
+    r = await resolveRecipient(host(answer, [google.pub]), parseRecipient('boase@bwallet.space'));
+    expect(r.nameProof?.status).toBe('proven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
   });
 });
 
