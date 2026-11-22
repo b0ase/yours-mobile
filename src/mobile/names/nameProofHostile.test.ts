@@ -12,7 +12,14 @@ import {
   type Fetch,
 } from './names';
 import { signRequest } from './paymail';
-import { proofNonce, resetProviderKeyCache, trustProofSub, verifyNameProof, type ProviderKey } from './proof';
+import {
+  proofNonce,
+  provenKeyFor,
+  resetProviderKeyCache,
+  trustProofSub,
+  verifyNameProof,
+  type ProviderKey,
+} from './proof';
 
 /**
  * b-Aware backlog rank 4 (rows 357, 391, 136; Makino 650, Ahmad Said 695, mahetagaurang22): a hostile paymail
@@ -89,15 +96,15 @@ let google: Signer; // a real Google key, published now
 let rotated: Signer; // a real Google key this wallet saw before Google rotated it out
 let attacker: Signer; // the paymail server's own RSA key
 const iat = 1_761_600_000;
-const claimsFor = async (identityKey: string, email = 'victim@gmail.com') => ({
+const claimsFor = async (identityKey: string, email = 'victim@gmail.com', at = iat) => ({
   iss: 'https://accounts.google.com',
   aud: AUD,
   sub: '1111',
   email,
   email_verified: true,
   nonce: await proofNonce(identityKey),
-  iat,
-  exp: iat + 3600,
+  iat: at,
+  exp: at + 3600,
 });
 
 beforeAll(async () => {
@@ -487,20 +494,20 @@ describe('third review: a signed handover from the kept key (finding 1)', () => 
 
 describe('third review: the kept proven key never moves backwards (finding 2, replayed superseded key)', () => {
   const pr = () => parseRecipient('victim.gmail@bwallet.space');
-  const answerFor = async (w: ReturnType<typeof wallet>, binding: unknown, signer: Signer = google) => ({
+  const answerFor = async (w: ReturnType<typeof wallet>, binding: unknown, signer: Signer = google, at = iat) => ({
     handle: 'victim.gmail@bwalletx.com',
     pubkey: w.key,
     binding,
-    proof: { provider: 'google', idToken: await signJwt(signer, await claimsFor(w.key)), keys: [] },
+    proof: { provider: 'google', idToken: await signJwt(signer, await claimsFor(w.key, undefined, at)), keys: [] },
   });
-  /** K0 proven at seq 1, then K1 proven at seq 2: the server keeps K0's old binding and token. */
+  /** K0 proven at seq 1, then K1 proven at seq 2 (a newer token): the server keeps K0's old binding and token. */
   const history = async (n: number) => {
     const k0 = wallet(n);
     const k1 = wallet(n + 1);
     const old = await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1));
     expect((await resolveRecipient(host(old, [google.pub]), pr())).nameProof?.status).toBe('proven');
     resetProviderKeyCache();
-    const now = await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 2));
+    const now = await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 2), google, iat + 3600);
     expect((await resolveRecipient(host(now, [google.pub]), pr())).nameProof?.status).toBe('proven');
     resetProviderKeyCache();
     return { k0, k1, old, now };
@@ -546,7 +553,107 @@ describe('third review: the kept proven key never moves backwards (finding 2, re
     expect(r.nameProof?.status).toBe('proven');
     resetProviderKeyCache();
     const k2 = wallet(989);
-    r = await resolveRecipient(host(await answerFor(k2, await bindingFrom(k2, 'victim.gmail', 3)), [google.pub]), pr());
+    r = await resolveRecipient(
+      host(await answerFor(k2, await bindingFrom(k2, 'victim.gmail', 3), google, iat + 7200), [google.pub]),
+      pr(),
+    );
     expect(r.nameProof?.status).toBe('proven');
+  });
+});
+
+describe('fourth review: the kept key is ordered by the provider\'s own time, not only the self-signed seq', () => {
+  const pr = () => parseRecipient('victim.gmail@bwallet.space');
+  const answerFor = async (w: ReturnType<typeof wallet>, binding: unknown, at: number, signer: Signer = google) => ({
+    handle: 'victim.gmail@bwalletx.com',
+    pubkey: w.key,
+    binding,
+    proof: { provider: 'google', idToken: await signJwt(signer, await claimsFor(w.key, undefined, at)), keys: [] },
+  });
+  const resolve = async (answer: unknown) => {
+    resetProviderKeyCache();
+    return resolveRecipient(host(answer, [google.pub]), pr());
+  };
+  /** The kept key is still K1: K1 served with a token this wallet can't check pays (unproven), anything else stops. */
+  const keptIsK1 = async (k1: ReturnType<typeof wallet>, seq?: number) => {
+    const gone = await makeKey(`g-gone-${k1.key.slice(2, 10)}`);
+    const binding = seq === undefined ? undefined : await bindingFrom(k1, 'victim.gmail', seq);
+    const r = await resolve(await answerFor(k1, binding, iat + 3600, gone));
+    expect(r.nameProof?.status).toBe('unproven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
+  };
+
+  test("finding 1: compromised K0 re-signs its own binding at seq 3 with its old token: not proven, Send stops", async () => {
+    const k0 = wallet(1001);
+    const k1 = wallet(1002);
+    expect((await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1), iat))).nameProof?.status).toBe(
+      'proven',
+    );
+    const r1 = await resolve(await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 2), iat + 3600));
+    expect(r1.nameProof?.status).toBe('proven');
+    // K0's holder signs a fresh binding at seq = kept + 1 and the server serves it with K0's old Google token.
+    const r = await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 3), iat));
+    expect(r.nameBinding).toBe('signed');
+    expect(r.nameProof?.status).toBe('bad');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    // ...and the kept key did not move back to K0.
+    expect(provenKeyFor('victim.gmail')?.key).toBe(k1.key.toLowerCase());
+    await keptIsK1(k1, 2);
+  });
+
+  test('an honest newer proof still passes: K1 with a newer token, then back to K0 with a fresh token', async () => {
+    const k0 = wallet(1011);
+    const k1 = wallet(1012);
+    expect((await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1), iat))).nameProof?.status).toBe(
+      'proven',
+    );
+    let r = await resolve(await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 2), iat + 3600));
+    expect(r.nameProof?.status).toBe('proven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
+    r = await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 3), iat + 7200));
+    expect(r.nameProof?.status).toBe('proven');
+    expect(provenKeyFor('victim.gmail')).toEqual({ key: k0.key.toLowerCase(), seq: 3, at: iat + 7200 });
+  });
+
+  test('finding 2: names proven with no signed binding (no seq) still refuse the superseded key', async () => {
+    const k0 = wallet(1021);
+    const k1 = wallet(1022);
+    expect((await resolve(await answerFor(k0, undefined, iat))).nameProof?.status).toBe('proven');
+    expect((await resolve(await answerFor(k1, undefined, iat + 3600))).nameProof?.status).toBe('proven');
+    let r = await resolve(await answerFor(k0, undefined, iat));
+    expect(r.nameProof?.status).toBe('bad');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    r = await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 5), iat));
+    expect(r.nameProof?.status).toBe('bad');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    await keptIsK1(k1);
+  });
+
+  test('finding 2: a key kept before this update gets its token time on the next proof, then refuses the replay', async () => {
+    const k0 = wallet(1031);
+    const k1 = wallet(1032);
+    // What an earlier build kept: K1 at seq 2, no token time; and the Google account.
+    mem.set('bwallet.names.proofKeys', JSON.stringify({ 'victim.gmail': { key: k1.key.toLowerCase(), seq: 2 } }));
+    trustProofSub('victim.gmail', '1111');
+    const r1 = await resolve(await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 2), iat + 3600));
+    expect(r1.nameProof?.status).toBe('proven');
+    expect(provenKeyFor('victim.gmail')?.at).toBe(iat + 3600);
+    const r = await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 3), iat));
+    expect(r.nameProof?.status).toBe('bad');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+  });
+
+  test('a signed handover keeps the token-time floor: K0 replayed after K0 -> K1 still stops', async () => {
+    const k0 = wallet(1041);
+    const k1 = wallet(1042);
+    expect((await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1), iat))).nameProof?.status).toBe(
+      'proven',
+    );
+    // The owner hands over to K1; K1's token is under a kid this wallet never saw, so it pays unproven.
+    const gone = await makeKey('g-gone-1041');
+    const moved = await resolve(await answerFor(k1, await handedOver(k0, k1, 'victim.gmail', 2), iat + 3600, gone));
+    expect(moved.nameProof?.status).toBe('unproven');
+    const r = await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 3), iat));
+    expect(r.nameProof?.status).toBe('bad');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
   });
 });
