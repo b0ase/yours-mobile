@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -9,6 +9,7 @@ import { currentFx } from '../../utils/displayCurrency';
 import { fmtSats, hasRate, money, satsNote, useBsvUsd } from '../money/money';
 import { runTip } from './flow';
 import { sendTip } from './send';
+import { previewPayee, tipName, type TipPayee } from './payee';
 import {
   TIP_NOTE_MAX,
   TIP_PRESETS,
@@ -44,21 +45,40 @@ export const TipSheet = ({ to, context, onClose }: { to: TipRecipient; context: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const route = tipRoute(to);
+  // Where the money goes, resolved once when the sheet opens and shown above Send (b-Aware rows 84, 348, 351).
+  const [payee, setPayee] = useState<{ s: 'loading' } | { s: 'ok'; p: TipPayee } | { s: 'error'; msg: string }>({
+    s: 'loading',
+  });
+  const routeKey = route ? `${route.kind}:${route.to}` : '';
+  useEffect(() => {
+    if (!route) return;
+    let live = true;
+    setPayee({ s: 'loading' });
+    void previewPayee(route).then((out) => {
+      if (live) setPayee(out.ok ? { s: 'ok', p: out.payee } : { s: 'error', msg: out.error });
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeKey]);
+  const shown = payee.s === 'ok' ? payee.p : null;
+  const name = shown ? tipName(to, shown) : to.name;
   const customAmount = parseFiatInput(custom);
   const sats = custom ? (customAmount === null ? null : fiatToTipSats(customAmount, fx, rate)) : presets[pick];
   const bad = tipAmountError(sats);
 
   const send = async () => {
-    if (!route || bad || sats === null || busy) return;
+    if (!route || !shown || bad || sats === null || busy) return;
     setBusy(true);
     setError('');
     const out = await runTip({
       route,
       sats,
-      name: to.name,
+      name,
       label: money(sats, rate),
       context,
-      send: (r, n) => sendTip(apiContext, r, n, to.name, note),
+      send: (r, n) => sendTip(apiContext, r, n, name, note, shown),
     });
     setBusy(false);
     if (!out.ok) return setError(out.error);
@@ -78,7 +98,7 @@ export const TipSheet = ({ to, context, onClose }: { to: TipRecipient; context: 
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`Tip ${to.name}`}
+        aria-label={`Tip ${name}`}
         className="w-full max-w-md rounded-t-3xl px-5 pt-5 flex flex-col gap-3"
         style={{
           background: '#0b0c0e',
@@ -88,10 +108,31 @@ export const TipSheet = ({ to, context, onClose }: { to: TipRecipient; context: 
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-white">Send a tip to {to.name}</h3>
+          <h3 className="text-base font-bold text-white break-all">Send a tip to {name}</h3>
           <button onClick={onClose} aria-label="Close" className="p-1">
             <X size={18} color={MUTED} />
           </button>
+        </div>
+        <div
+          data-testid="tip-payee"
+          className="rounded-xl px-3 py-2 text-[11px] flex flex-col gap-0.5"
+          style={{ background: PANEL, border: `1px solid ${LINE}` }}
+        >
+          {payee.s === 'loading' && <span style={{ color: MUTED }}>Checking where this goes…</span>}
+          {payee.s === 'error' && <span style={{ color: RED }}>{payee.msg}</span>}
+          {shown && (
+            <>
+              <span className="text-sm font-semibold text-white break-all">To {shown.shown}</span>
+              <span className="break-all" style={{ color: MUTED }}>
+                {shown.detail}
+              </span>
+              {shown.notes.map((n) => (
+                <span key={n} style={{ color: '#FEC84B' }}>
+                  {n}
+                </span>
+              ))}
+            </>
+          )}
         </div>
         <div className="grid grid-cols-4 gap-2">
           {TIP_PRESETS.map((p, i) => (
@@ -138,7 +179,7 @@ export const TipSheet = ({ to, context, onClose }: { to: TipRecipient; context: 
           aria-label="Note"
         />
         <p className="text-[11px]" style={{ color: MUTED }}>
-          {sats !== null && satsNote(sats, rate)} All of it goes to {to.name}.
+          {sats !== null && satsNote(sats, rate)} All of it goes to {name}.
         </p>
         {error && (
           <p className="text-xs" style={{ color: RED }}>
@@ -148,7 +189,7 @@ export const TipSheet = ({ to, context, onClose }: { to: TipRecipient; context: 
         <button
           type="button"
           onClick={() => void send()}
-          disabled={busy || !!bad || !route}
+          disabled={busy || !!bad || !route || !shown}
           className="w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
           style={{ background: GOLD, color: '#1a1300' }}
         >

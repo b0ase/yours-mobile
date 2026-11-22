@@ -133,13 +133,13 @@ import { loadPrefs, initialFeed, savePrefs } from '../settings/prefs';
 import {
   homeShareFor,
   payDestination,
-  planPayment,
   TIP_MIN_SATS,
   TIP_PRESETS_SATS,
   TIP_PRESETS_USD,
   validateAmount,
   type PayKind,
 } from './tip';
+import { checkedPayment } from './authorCheck';
 import { oneClick } from '../settings/oneClick';
 import { isMe, rankPeople, rankPosts, TIMEFRAMES, cutoff, type LeaderboardData, type Timeframe } from './leaderboard';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
@@ -1199,7 +1199,8 @@ type ApiCtx = ReturnType<typeof useServiceContext>['apiContext'];
 /**
  * Tip or paid like (BCHAT-PROTOCOL-v2 §5): MAP `type tip` / `type like … paid 1`, signed by the
  * posting identity, and the payment to the author in the SAME transaction. planPayment refuses
- * Treechat (shared relay signer) and anything without a payable author address.
+ * Treechat (shared relay signer) and anything without a payable author address; checkedPayment
+ * also refuses an address the post's own AIP signature doesn't prove (b-Aware row 111).
  */
 const sendPayment = async (
   apiContext: ApiCtx,
@@ -1207,7 +1208,7 @@ const sendPayment = async (
   sats: number,
   kind: PayKind = 'tip',
 ): Promise<string> => {
-  const plan = planPayment(kind, post, sats);
+  const plan = await checkedPayment(kind, post, sats);
   return publish(
     apiContext,
     plan.script,

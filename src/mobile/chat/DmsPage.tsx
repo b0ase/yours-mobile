@@ -28,6 +28,7 @@ import { arrange, isMarked, isMuted, isPinned, roomKeyOf, setMarked, settle, use
 import { Avatar, ContactRow, SourceBadges } from './ContactViews';
 import { SOURCES_NOTE } from './contactSources';
 import { LIST_TYPES, useLive } from './live';
+import { useProvenLabels } from './useContacts';
 import {
   canMessage,
   contactLine,
@@ -251,9 +252,10 @@ export const DmsPage = ({
       void client.markRead(r.ticker).catch(() => {});
     },
   };
+  const proven = useProvenLabels(friends);
   const contacts = useMemo(
-    () => mergeContacts(bchatContacts, friends, sheet ? loadFollows() : [], handle),
-    [bchatContacts, friends, sheet, handle],
+    () => mergeContacts(bchatContacts, friends, sheet ? loadFollows() : [], handle, proven),
+    [bchatContacts, friends, sheet, handle, proven],
   );
 
   const message = async (target: string) => {
