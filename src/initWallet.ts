@@ -1563,31 +1563,30 @@ export const initWallet = async (
   // (services/failedRowRepair.ts).
   // A payment of ours that a mined one made impossible (the same coins) is failed by that repair: the user is told
   // plainly the recipient did not get it (review of fix/385, R1).
-  const adminWallet = withFailedRowRepair(withOriginator(wallet, ADMIN_ORIGINATOR), {
-    repair: makeUnfailRepair({
-      storage: storage as never,
-      monitor: walletMonitor as never,
-      services: toolboxServices as never,
-      onPaymentsFailed: (payments) => {
-        for (const p of payments) {
-          const sats = Math.abs(p.satoshis ?? 0);
-          const message = `Your payment${sats ? ` of ${sats.toLocaleString('en-GB')} sats` : ''} (${p.txid.slice(0, 8)}…) didn’t go through: another payment from this wallet, now confirmed, used the same coins. The recipient didn’t get it.`;
-          console.warn(`[failedRow] payment ${p.txid} failed: ${message}`);
-          try {
-            chrome.notifications?.create({
-              type: 'basic',
-              iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-              title: 'A payment didn’t go through',
-              message,
-              priority: 2,
-            });
-          } catch (err) {
-            console.warn('[failedRow] notification failed:', err);
-          }
+  const unfailRepair = makeUnfailRepair({
+    storage: storage as never,
+    monitor: walletMonitor as never,
+    services: toolboxServices as never,
+    onPaymentsFailed: (payments) => {
+      for (const p of payments) {
+        const sats = Math.abs(p.satoshis ?? 0);
+        const message = `Your payment${sats ? ` of ${sats.toLocaleString('en-GB')} sats` : ''} (${p.txid.slice(0, 8)}…) didn’t go through: another payment from this wallet, now confirmed, used the same coins. The recipient didn’t get it.`;
+        console.warn(`[failedRow] payment ${p.txid} failed: ${message}`);
+        try {
+          chrome.notifications?.create({
+            type: 'basic',
+            iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+            title: 'A payment didn’t go through',
+            message,
+            priority: 2,
+          });
+        } catch (err) {
+          console.warn('[failedRow] notification failed:', err);
         }
-      },
-    }),
+      }
+    },
   });
+  const adminWallet = withFailedRowRepair(withOriginator(wallet, ADMIN_ORIGINATOR), { repair: unfailRepair });
 
   mark('permissions + sync context ready');
 
@@ -2463,6 +2462,8 @@ export const initWallet = async (
         storage,
         wallet: baseWallet as never,
         services: toolboxServices as never,
+        // A payment whose coins another live payment of this wallet spent: settled by the sync's repair (#385 review).
+        settleContested: unfailRepair,
         legacyAddresses: (() => {
           const a = chromeStorageService.getCurrentAccountObject().account?.addresses;
           return a
@@ -2527,7 +2528,8 @@ export const initWallet = async (
               services: toolboxServices,
               monitor: walletMonitor,
             });
-            const n = await d.queueUnfail(txids);
+            const q = await d.queueUnfail(txids);
+            const n = typeof q === 'number' ? q : q.queued;
             if (n) console.log(`[bwx-recover] ${(await d.runUnFail()).trim() || 'UnFail done'}`);
             return n;
           }

@@ -131,8 +131,9 @@ type TxRow = {
   provenTxId?: number | null;
   satoshis?: number;
   description?: string;
+  isOutgoing?: boolean;
 };
-type OutRow = { outputId: number; transactionId: number; spentBy?: number | null };
+type OutRow = { outputId: number; transactionId: number; spentBy?: number | null; spendable?: boolean };
 type ReqRow = { provenTxReqId: number; status: string; rawTx?: number[] | null };
 type Trx = unknown;
 
@@ -152,6 +153,7 @@ export type RepairStore = {
   findProvenTxReqs(args: { partial: { txid?: string }; trx?: Trx }): Promise<ReqRow[]>;
   updateProvenTxReq(id: number, update: Record<string, unknown>, trx?: Trx): Promise<unknown>;
   insertProvenTxReq(req: unknown, trx?: Trx): Promise<number>;
+  updateOutput(id: number, update: Record<string, unknown>, trx?: Trx): Promise<unknown>;
   updateTransactionStatus(
     status: 'failed',
     transactionId: number,
@@ -189,22 +191,32 @@ const asMerklePath = (v: unknown): MerklePath | undefined => {
   return undefined;
 };
 
-/** True only when a proof for `txid` verifies against the chain tracker. Any doubt is false. */
-async function verifiedMined(txid: string, beef: Beef, w: UnfailWiring): Promise<boolean> {
+/**
+ * The confirmations of `txid` when a proof for it verifies against the chain tracker, else 0. Any doubt is 0.
+ */
+async function verifiedConfirmations(txid: string, beef: Beef, w: UnfailWiring): Promise<number> {
   const tracker = (await w.chainTracker?.()) ?? w.monitor?.chaintracks;
-  if (!tracker) return false;
+  if (!tracker) return 0;
   const tryPath = async (mp: MerklePath | undefined) => {
-    if (!mp) return false;
+    if (!mp) return 0;
     try {
-      return await mp.verify(txid, tracker);
+      if (!(await mp.verify(txid, tracker))) return 0;
+      return Math.max(1, (await tracker.currentHeight()) - mp.blockHeight + 1);
     } catch {
-      return false;
+      return 0;
     }
   };
-  if (await tryPath(beef.findBump(txid))) return true;
+  const fromBeef = await tryPath(beef.findBump(txid));
+  if (fromBeef) return fromBeef;
   const r = await w.services.getMerklePath(txid).catch(() => undefined);
   return tryPath(asMerklePath(r?.merklePath));
 }
+
+/**
+ * Confirmations A needs before a payment that spent the same coins is failed (CTO, 22 Nov 2026: one block can be
+ * reorganised away; three settle it). Until then A is held and the next check finishes it.
+ */
+export const SETTLE_CONFIRMATIONS = 3;
 
 type Conflicts = { conflict?: string; victims: { row: TxRow; direct: boolean }[] };
 
@@ -212,7 +224,7 @@ type Conflicts = { conflict?: string; victims: { row: TxRow; direct: boolean }[]
  * Other payments of this wallet that spend a coin `rawTx` spends, and everything spending their outputs (deepest
  * last). A completed or proven one is a conflict: the store says it confirmed, so nothing is decided here.
  */
-async function findConflicts(sp: RepairStore, ownIds: Set<number>, rawTx: number[]): Promise<Conflicts> {
+async function findConflicts(sp: RepairStore, ownIds: Set<number>, rawTx: number[], trx?: Trx): Promise<Conflicts> {
   const tx = Transaction.fromBinary(rawTx);
   const out: Conflicts = { victims: [] };
   const seen = new Set<number>(ownIds);
@@ -222,6 +234,7 @@ async function findConflicts(sp: RepairStore, ownIds: Set<number>, rawTx: number
     for (const o of await sp.findOutputs({
       partial: { txid: input.sourceTXID, vout: input.sourceOutputIndex },
       noScript: true,
+      trx,
     }))
       if (o.spentBy != null && !seen.has(o.spentBy)) {
         seen.add(o.spentBy);
@@ -230,14 +243,14 @@ async function findConflicts(sp: RepairStore, ownIds: Set<number>, rawTx: number
   }
   while (queue.length) {
     const { id, direct } = queue.shift()!;
-    const [row] = await sp.findTransactions({ partial: { transactionId: id }, noRawTx: true });
+    const [row] = await sp.findTransactions({ partial: { transactionId: id }, noRawTx: true, trx });
     if (!row || row.status === 'failed') continue;
     if (row.status === 'completed' || row.provenTxId != null) {
       out.conflict = `${row.txid ?? `transaction ${id}`} (${row.status})`;
       return out;
     }
     out.victims.push({ row, direct });
-    for (const o of await sp.findOutputs({ partial: { transactionId: id }, noScript: true }))
+    for (const o of await sp.findOutputs({ partial: { transactionId: id }, noScript: true, trx }))
       if (o.spentBy != null && !seen.has(o.spentBy)) {
         seen.add(o.spentBy);
         queue.push({ id: o.spentBy, direct: false });
@@ -246,23 +259,48 @@ async function findConflicts(sp: RepairStore, ownIds: Set<number>, rawTx: number
   return out;
 }
 
+type Settled = { held?: 'conflict' | 'unconfirmed'; detail?: string; victims: Conflicts['victims'] };
+
 /**
- * The toolbox's double-spend path for each victim, children first: its proven-tx requests 'doubleSpend' (a payment
- * that spent a coin the mined transaction spent) or 'invalid' (one that spent such a payment's outputs), with a history
- * note, then updateTransactionStatus('failed'), which releases its inputs and makes its outputs unspendable.
+ * One storage transaction, so no payment can start in between (second review, 2): find what else spends A's coins;
+ * a completed or proven one holds A ('conflict'); any at all with A under SETTLE_CONFIRMATIONS holds it too
+ * ('unconfirmed'). Otherwise each, children first, goes through the toolbox's double-spend path: its proven-tx requests
+ * 'doubleSpend' (it spent a coin A spent) or 'invalid' (it spent such a payment's outputs), with a history note, then
+ * updateTransactionStatus('failed'), which releases its inputs and makes its outputs unspendable. Last, the coins A
+ * spent that this wallet holds are marked spent (second review, 1): failing a payment releases its inputs, and they
+ * must not read as spendable if UnFail can't finish. Their spentBy is left empty, as the toolbox does for a spend it
+ * did not witness: pointing it at A, still failed, would let the Monitor's status review release them again.
  */
-async function failVictims(sp: RepairStore, victims: Conflicts['victims'], minedTxid: string) {
-  await sp.transaction(async (trx) => {
-    for (const { row, direct } of [...victims].reverse()) {
+async function settleInputs(
+  sp: RepairStore,
+  a: { ownIds: Set<number>; rawTx: number[]; minedTxid: string; confirmations: number },
+): Promise<Settled> {
+  return sp.transaction(async (trx) => {
+    const found = await findConflicts(sp, a.ownIds, a.rawTx, trx);
+    if (found.conflict) return { held: 'conflict', detail: found.conflict, victims: [] };
+    if (found.victims.length && a.confirmations < SETTLE_CONFIRMATIONS)
+      return { held: 'unconfirmed', victims: found.victims };
+    for (const { row, direct } of [...found.victims].reverse()) {
       if (row.txid)
         for (const api of await sp.findProvenTxReqs({ partial: { txid: row.txid }, trx })) {
           const req = new EntityProvenTxReq(api as never);
           req.status = direct ? 'doubleSpend' : 'invalid';
-          req.addHistoryNote({ what: 'bwxSpentByMined', minedTxid } as never);
+          req.addHistoryNote({ what: 'bwxSpentByMined', minedTxid: a.minedTxid } as never);
           await req.updateStorageDynamicProperties(sp as never, trx as never);
         }
       await sp.updateTransactionStatus('failed', row.transactionId, undefined, undefined, trx);
     }
+    for (const input of Transaction.fromBinary(a.rawTx).inputs) {
+      if (!input.sourceTXID) continue;
+      for (const o of await sp.findOutputs({
+        partial: { txid: input.sourceTXID, vout: input.sourceOutputIndex },
+        noScript: true,
+        trx,
+      }))
+        if (o.spendable || o.spentBy != null)
+          await sp.updateOutput(o.outputId, { spendable: false, spentBy: undefined }, trx);
+    }
+    return { victims: found.victims };
   });
 }
 
@@ -281,20 +319,33 @@ export function makeUnfailRepair(w: UnfailWiring): FailedRowDeps['repair'] {
     if (!rows.some((t) => REFUSED.has(t.status))) return 'repaired'; // repaired meanwhile: internalize again
     const rawTx = beef.findTxid(txid)?.tx?.toBinary();
     if (!rawTx) return 'unavailable';
-    if (!(await verifiedMined(txid, beef, w))) return 'not-mined';
+    const confirmations = await verifiedConfirmations(txid, beef, w);
+    if (!confirmations) return 'not-mined';
 
     const ownIds = new Set(rows.map((t) => t.transactionId));
-    const found = await w.storage.runAsStorageProvider((sp) => findConflicts(sp, ownIds, rawTx));
-    if (found.conflict) {
-      log(`[failedRow] ${txid}: mined, but ${found.conflict} spends the same coins; held, nothing changed`);
+    const settled = await w.storage.runAsStorageProvider((sp) =>
+      settleInputs(sp, { ownIds, rawTx, minedTxid: txid, confirmations }),
+    );
+    if (settled.held === 'conflict') {
+      log(`[failedRow] ${txid}: mined, but ${settled.detail} spends the same coins; held, nothing changed`);
       return 'conflict';
     }
-    if (found.victims.length) {
-      await w.storage.runAsStorageProvider((sp) => failVictims(sp, found.victims, txid));
+    if (settled.held === 'unconfirmed') {
+      log(
+        `[failedRow] ${txid}: mined (${confirmations} confirmation(s)); ${settled.victims.map((v) => v.row.txid).join(', ')} spent the same coins and is settled at ${SETTLE_CONFIRMATIONS}; held, nothing changed`,
+      );
+      return 'unconfirmed';
+    }
+    const found = settled;
+    if (found.victims.length)
       log(
         `[failedRow] ${txid}: mined; failed what spent the same coins: ${found.victims.map((v) => v.row.txid).join(', ')}`,
       );
-    }
+    // The user hears about every payment out that failed (the ones that spent A's coins and any spending them).
+    const failed = found.victims
+      .filter((v) => v.row.txid && (v.row.isOutgoing || (v.row.satoshis ?? 0) < 0))
+      .map((v) => ({ txid: v.row.txid!, satoshis: v.row.satoshis, description: v.row.description }));
+    if (failed.length) w.onPaymentsFailed?.(failed);
 
     // Queue A for UnFail, remembering each request's status so a 'doubleSpend' marker is never lost.
     const before = new Map<number, string>();
@@ -321,12 +372,8 @@ export function makeUnfailRepair(w: UnfailWiring): FailedRowDeps['repair'] {
       return txs;
     });
     const repaired = after.length > 0 && after.every((t) => ACCEPTED.has(t.status));
-    // B failed either way (A's proof verified): the user hears about it.
-    const failed = found.victims
-      .filter((v) => v.direct && v.row.txid)
-      .map((v) => ({ txid: v.row.txid!, satoshis: v.row.satoshis, description: v.row.description }));
-    if (failed.length) w.onPaymentsFailed?.(failed);
-    return repaired ? 'repaired' : 'not-mined';
+    // Our check of the proof passed but UnFail's own fetch or check didn't: never "not mined".
+    return repaired ? 'repaired' : 'proof-pending';
   };
 }
 
@@ -340,4 +387,13 @@ export async function spendsContested(sp: RepairStore, txid: string, rawTx: numb
   const rows = await sp.findTransactions({ partial: { txid }, noRawTx: true });
   const found = await findConflicts(sp, new Set(rows.map((t) => t.transactionId)), rawTx);
   return !!found.conflict || found.victims.length > 0;
+}
+
+/** AtomicBEEF bytes of a mined transaction with its proof, for the repair (Find missing coins, recoverByTxid). */
+export function beefWithProof(rawTx: number[], merklePath: MerklePath): Beef {
+  const tx = Transaction.fromBinary(rawTx);
+  tx.merklePath = merklePath;
+  const beef = new Beef();
+  beef.mergeTransaction(tx);
+  return beef;
 }

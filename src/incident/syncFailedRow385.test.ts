@@ -637,8 +637,12 @@ describe('#385 second review', () => {
     });
     await restoreMissingCoins([coin], deps.restore);
     expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
-    expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
+    // Find missing coins restores A's change; nothing of B's is counted with it.
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats - PAID);
     expect(toldFailed).toEqual([dv.bTxid!]);
+    // The payment to our own receive address is the address sync's to take in: then the whole of what A left us.
+    expect(await intakeWith(dv).take(dv.txid, dv.beef)).toBe('taken');
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
   }, 30000);
 
   test("4: the hold after a checked proof never says 'not mined'", async () => {

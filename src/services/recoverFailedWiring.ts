@@ -112,12 +112,14 @@ export function makeRecoverDeps(w: RecoverWiring): RecoverDeps {
     queueUnfail: (txids) =>
       storage.runAsStorageProvider(async (sp) => {
         let n = 0;
+        const contested: string[] = [];
         for (const txid of txids) {
           const reqs = await sp.findProvenTxReqs({ partial: { txid } });
           if (await spendsContested(sp as never, txid, reqs.find((r) => r.rawTx?.length)?.rawTx)) {
             console.warn(
               `[recover] ${txid}: another payment of this wallet spends its coins; left for the sync's repair`,
             );
+            contested.push(txid);
             continue;
           }
           for (const req of reqs) {
@@ -125,7 +127,7 @@ export function makeRecoverDeps(w: RecoverWiring): RecoverDeps {
             n++;
           }
         }
-        return n;
+        return { queued: n, contested };
       }),
     // A merkle proof, nothing less: mempool or "unknown" leaves the action as it is.
     isMined: async (txid) => !!(await w.services.getMerklePath(txid))?.merklePath,

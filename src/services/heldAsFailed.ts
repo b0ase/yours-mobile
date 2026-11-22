@@ -2,13 +2,16 @@
  * The sync's "held as failed" refusal (services/failedRowRepair.ts, report #385), in a module of its own so the address
  * sync and the back-off can recognise it without loading the wallet toolbox.
  */
-export type HeldReason = 'not-mined' | 'unavailable' | 'unrepaired' | 'conflict';
+export type HeldReason = 'not-mined' | 'unavailable' | 'unrepaired' | 'conflict' | 'unconfirmed' | 'proof-pending';
 
 const WHY: Record<HeldReason, string> = {
   'not-mined': 'not mined yet, so it stays out until it is',
   unavailable: 'this device’s store can’t be repaired directly right now',
   unrepaired: 'the repair left it held',
   conflict: 'a confirmed payment of this wallet spent the same coins',
+  unconfirmed:
+    'it is in a block, and a payment of this wallet that spent the same coins is settled once it has 3 confirmations',
+  'proof-pending': 'its block proof checked out, but the wallet couldn’t confirm the proof yet; it tries again',
 };
 
 /** The wording every held refusal carries (internalizeBackoff matches it). */
