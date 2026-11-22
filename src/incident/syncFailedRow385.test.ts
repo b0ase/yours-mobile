@@ -109,6 +109,7 @@ function makeServices(chain: Chain, raws: Map<string, number[]>) {
     getHeaderForHeight: async () => new Array(80).fill(0),
     hashOutputScript: (s: string) => s,
     getStatusForTxids: async (txids: string[]) => ({
+      status: 'success',
       results: txids.map((txid) => ({ txid, status: chain.mined.has(txid) ? 'mined' : 'unknown', depth: 1 })),
     }),
     getRawTx: async (txid: string) => ({ txid, name: 'mock', rawTx: raws.get(txid) }),
