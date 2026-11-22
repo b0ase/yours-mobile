@@ -658,3 +658,71 @@ describe("fourth review: the kept key is ordered by the provider's own time, not
     expect(destinationFor(r, 'bsv').ok).toBe(false);
   });
 });
+
+describe('fifth review: a handover or override sets the time floor to when this wallet accepted it', () => {
+  const pr = () => parseRecipient('victim.gmail@bwallet.space');
+  const answerFor = async (w: ReturnType<typeof wallet>, binding: unknown, at: number, signer: Signer = google) => ({
+    handle: 'victim.gmail@bwalletx.com',
+    pubkey: w.key,
+    binding,
+    proof: { provider: 'google', idToken: await signJwt(signer, await claimsFor(w.key, undefined, at)), keys: [] },
+  });
+  const resolve = async (answer: unknown) => {
+    resetProviderKeyCache();
+    return resolveRecipient(host(answer, [google.pub]), pr());
+  };
+
+  test('K0 kept, handover to K1 under an unknown kid, compromised K0 signs seq 3 with a later real K0 token: stops', async () => {
+    const k0 = wallet(1051);
+    const k1 = wallet(1052);
+    // The server serves K0 with its oldest token (at = iat).
+    expect((await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1), iat))).nameProof?.status).toBe(
+      'proven',
+    );
+    // Then the owner's real K0 -> K1 handover, with a token under a kid the server made itself: pays unproven.
+    const evil = await makeKey('evil-1051');
+    const moved = await resolve(await answerFor(k1, await handedOver(k0, k1, 'victim.gmail', 2), iat + 3600, evil));
+    expect(moved.nameProof?.status).toBe('unproven');
+    expect(provenKeyFor('victim.gmail')?.key).toBe(k1.key.toLowerCase());
+    // Compromised K0 signs seq 3; the server serves a later real K0 token (a proof refresh before the handover).
+    const r = await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 3), iat + 1800));
+    expect(r.nameProof?.status).not.toBe('proven');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    expect(provenKeyFor('victim.gmail')?.key).toBe(k1.key.toLowerCase());
+  });
+
+  test('the handover floor is when this wallet followed it, never earlier than a provider time it kept', async () => {
+    const k0 = wallet(1061);
+    const k1 = wallet(1062);
+    await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1), iat));
+    const evil = await makeKey('evil-1061');
+    const before = Math.floor(Date.now() / 1000);
+    await resolve(await answerFor(k1, await handedOver(k0, k1, 'victim.gmail', 2), iat + 3600, evil));
+    expect(provenKeyFor('victim.gmail')?.at ?? 0).toBeGreaterThanOrEqual(before);
+    // K1's own token, issued before the wallet followed the handover, still proves K1 (same key, no floor applies).
+    const r = await resolve(await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 2), iat + 3600));
+    expect(r.nameProof?.status).toBe('proven');
+    expect(provenKeyFor('victim.gmail')?.at ?? 0).toBeGreaterThanOrEqual(before);
+    // A genuinely newer proof for another key (issued after the handover) still passes.
+    const k2 = wallet(1063);
+    const later = Math.floor(Date.now() / 1000) + 60;
+    const r2 = await resolve(await answerFor(k2, await bindingFrom(k2, 'victim.gmail', 3), later));
+    expect(r2.nameProof?.status).toBe('proven');
+  });
+
+  test("the payer's override sets the floor too: an older real token for another key can't take the name back", async () => {
+    trustProofSub('victim.gmail', '1111');
+    const x = wallet(1071);
+    const y = wallet(1072);
+    // Seen proven before, no kept key; X's token is under a kid this wallet never saw: the payer overrides.
+    let r = await resolve(await answerFor(x, await bindingFrom(x, 'victim.gmail', 1), iat, rotated));
+    expect(proofKeyOverride(r)).toBe(true);
+    trustResolvedKey(r);
+    expect(provenKeyFor('victim.gmail')?.key).toBe(x.key.toLowerCase());
+    // The server then replays a real token for Y issued before the override, at a higher seq.
+    r = await resolve(await answerFor(y, await bindingFrom(y, 'victim.gmail', 5), iat + 7200));
+    expect(r.nameProof?.status).not.toBe('proven');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    expect(provenKeyFor('victim.gmail')?.key).toBe(x.key.toLowerCase());
+  });
+});
