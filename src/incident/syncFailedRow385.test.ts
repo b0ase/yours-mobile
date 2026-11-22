@@ -23,6 +23,11 @@ import { fixUtxoStatus } from '../services/utxoStatus';
 import { guardIntake } from '../services/guardIntake';
 import { createInternalizeBackoff } from '../services/internalizeBackoff';
 import { accountedVia, type HeldStore } from '../services/heldOutpoints';
+import { restoreMissingCoins, type MissingCoin } from '../services/findMissingCoins';
+import { makeMissingCoinsDeps } from '../services/findMissingCoinsWiring';
+import { recoverPaymentByTxid } from '../services/recoverByTxid';
+import { makeTxidRecoverDeps } from '../services/recoverByTxidWiring';
+import { makeRecoverDeps } from '../services/recoverFailedWiring';
 import { HeldAsFailedError, isHeldAsFailed, makeUnfailRepair, withFailedRowRepair } from '../services/failedRowRepair';
 
 const HEIGHT = 972000;
@@ -39,6 +44,8 @@ type Chain = {
   rejectRoots: Set<string>;
   /** Proof answers left per txid (absent: unlimited); then the proof service has none. */
   proofsLeft: Map<string, number>;
+  /** The chain tip: A (in block HEIGHT) has tip - HEIGHT + 1 confirmations. */
+  tip: number;
 };
 
 /**
@@ -69,7 +76,7 @@ const proofFor = (txid: string) => ({
 
 const trackerFor = (chain: Chain) => ({
   isValidRootForHeight: async (root: string) => !chain.rejectRoots.has(root),
-  currentHeight: async () => HEIGHT + 1,
+  currentHeight: async () => chain.tip,
 });
 
 function makeServices(chain: Chain, raws: Map<string, number[]>) {
@@ -161,7 +168,7 @@ async function openWallet(services: unknown, chain: Chain) {
  *    so B is 'unproven' here, but A is what the network mined (review of fix/385, R1).
  *  - beefProof: the BEEF the sync downloads carries A's proof (default: when mined).
  */
-async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boolean }) {
+async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boolean; descendant?: boolean }) {
   const chain: Chain = {
     post: 'success',
     mined: new Set(),
@@ -169,6 +176,7 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
     proofAsks: 0,
     rejectRoots: new Set(),
     proofsLeft: new Map(),
+    tip: HEIGHT + 2, // three confirmations
   };
   const raws = new Map<string, number[]>();
   const services = makeServices(chain, raws);
@@ -227,6 +235,7 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
 
   // 3. Optionally B: the released coin paid out again, accepted by the broadcaster.
   let bTxid: string | undefined;
+  let cTxid: string | undefined;
   if (opts.respend) {
     const r = await w.wallet.createAction({
       description: 'pay someone else',
@@ -240,6 +249,7 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
       options: { acceptDelayedBroadcast: false },
     });
     bTxid = r.txid!;
+    if (opts.descendant) cTxid = await payOut(w, 30_000);
     expect(
       await w.storage.runAsStorageProvider(
         async (sp) => (await sp.findTransactions({ partial: { txid: bTxid } }))[0].status,
@@ -268,6 +278,7 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
     txid,
     fundTxid,
     bTxid,
+    cTxid,
     paidScript,
     paidVout,
     aOutputsSats,
@@ -277,6 +288,22 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
 }
 
 type Dev = Awaited<ReturnType<typeof device>>;
+
+/** A payment to someone else, broadcast at once and accepted: 'unproven' here. */
+async function payOut(w: { wallet: Wallet }, satoshis: number): Promise<string> {
+  const r = await w.wallet.createAction({
+    description: 'pay someone else',
+    outputs: [
+      {
+        lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+        satoshis,
+        outputDescription: 'to someone else',
+      },
+    ],
+    options: { acceptDelayedBroadcast: false },
+  });
+  return r.txid!;
+}
 
 /** Payments the repair told the user had not gone through. */
 const toldFailed: string[] = [];
@@ -513,5 +540,141 @@ describe('#385 review: a repair never counts a coin twice', () => {
     const arriving = onChain.filter((o) => !accounted.includes(o)).length * PAID;
     // The headline: what storage counts plus what is arriving equals what the wallet really owns (A not mined).
     expect((await balanceOf(dv)) + arriving).toBe(FUND);
+  }, 30000);
+});
+
+describe('#385 second review', () => {
+  const repairOf = (dv: Dev, storage: unknown = dv.w.storage) =>
+    makeUnfailRepair({
+      storage: storage as never,
+      monitor: dv.w.monitor as never,
+      services: dv.services as never,
+      chainTracker: async () => trackerFor(dv.chain),
+      onPaymentsFailed: (p) => toldFailed.push(...p.map((x) => x.txid)),
+      log: () => undefined,
+    });
+  const intakeWith = (dv: Dev, repair = repairOf(dv)) =>
+    makeCoinIntake({
+      wallet: withFailedRowRepair(dv.w.wallet, { repair, log: () => undefined }) as never,
+      keyByHash: dv.keys.keyByHash,
+      processed: memoryProcessed(),
+    });
+
+  test("1: B failed but UnFail's own proof fetch is empty: the coin A spent stays unspendable, even after the toolbox's status review", async () => {
+    const dv = await device({ mined: true, respend: true, beefProof: false });
+    dv.chain.proofsLeft.set(dv.txid, 1); // our check gets the proof; UnFail's fetch gets none
+    const err = await intakeWith(dv)
+      .take(dv.txid, dv.beef)
+      .catch((e: unknown) => e);
+    expect(isHeldAsFailed(err)).toBe(true);
+    expect(await statusOf(dv, dv.txid)).toBe('failed');
+    expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
+    expect((await outputOf(dv, dv.fundTxid, 0))?.spendable).toBe(false);
+    // The Monitor's review re-releases inputs of failed transactions it considers terminal: still not spendable.
+    await dv.w.storage.runAsStorageProvider((sp) => sp.reviewStatus({ agedLimit: new Date() }));
+    expect((await outputOf(dv, dv.fundTxid, 0))?.spendable).toBe(false);
+    // Nothing counted that the chain has spent: A's coin, B's change, A's unrepaired outputs.
+    expect(await balanceOf(dv)).toBe(0);
+  }, 30000);
+
+  test('2: a send while the repair runs never escapes it: no coin is counted twice', async () => {
+    const dv = await device({ mined: true, respend: true });
+    let calls = 0;
+    let sent: string | undefined;
+    // A send starts on the wallet just as the repair finishes its conflict check.
+    const racing = {
+      isActiveStorageProvider: () => dv.w.storage.isActiveStorageProvider(),
+      runAsStorageProvider: async <T>(fn: (sp: never) => Promise<T>) => {
+        if (++calls === 3) sent = await payOut(dv.w, 30_000).catch(() => undefined);
+        return dv.w.storage.runAsStorageProvider(fn as never) as Promise<T>;
+      },
+    };
+    await intakeWith(dv, repairOf(dv, racing))
+      .take(dv.txid, dv.beef)
+      .catch(() => undefined);
+    if (sent) expect(await statusOf(dv, sent)).toBe('failed');
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
+  }, 30000);
+
+  test('3: Settings › Find missing coins on the R1 setup: B fails, the balance is what A left us', async () => {
+    const dv = await device({ mined: true, respend: true });
+    toldFailed.length = 0;
+    const aChange = (await outputsOf(dv, dv.txid)).filter((o) => o.change);
+    const coin: MissingCoin = {
+      txid: dv.txid,
+      sats: aChange.reduce((n, o) => n + o.satoshis, 0),
+      outputs: aChange.map((o) => ({ vout: o.vout, satoshis: o.satoshis })),
+      stores: ['this device'],
+      inActive: true,
+    };
+    const rd = makeRecoverDeps({
+      storage: dv.w.storage,
+      wallet: dv.w.wallet,
+      services: dv.services as never,
+      monitor: dv.w.monitor as never,
+    });
+    const deps = makeMissingCoinsDeps({
+      storage: dv.w.storage as never,
+      identityKey: dv.w.kd.identityKey,
+      services: dv.services as never,
+      unfail: async (txids) => {
+        const n = await rd.queueUnfail(txids);
+        if (n) await rd.runUnFail();
+        return typeof n === 'number' ? n : (n as { queued: number }).queued;
+      },
+      recoverTxid: (txid) =>
+        recoverPaymentByTxid(
+          txid,
+          makeTxidRecoverDeps({
+            storage: dv.w.storage as never,
+            wallet: dv.w.wallet as never,
+            services: dv.services as never,
+            settleContested: repairOf(dv),
+            log: () => undefined,
+          } as never),
+        ),
+      log: () => undefined,
+    });
+    await restoreMissingCoins([coin], deps.restore);
+    expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
+    expect(toldFailed).toEqual([dv.bTxid!]);
+  }, 30000);
+
+  test("4: the hold after a checked proof never says 'not mined'", async () => {
+    const dv = await device({ mined: true, beefProof: false });
+    dv.chain.proofsLeft.set(dv.txid, 1);
+    const err = await intakeWith(dv)
+      .take(dv.txid, dv.beef)
+      .catch((e: unknown) => e);
+    expect(isHeldAsFailed(err)).toBe(true);
+    expect((err as Error).message).not.toMatch(/not mined/);
+    expect((err as Error).message).toMatch(/couldn.t confirm the proof yet/);
+  }, 30000);
+
+  test('4: a payment that spent B’s change (paying someone else) is failed too, and the user is told about both', async () => {
+    const dv = await device({ mined: true, respend: true, descendant: true });
+    toldFailed.length = 0;
+    expect(await intakeWith(dv).take(dv.txid, dv.beef)).toBe('taken');
+    expect(await statusOf(dv, dv.cTxid!)).toBe('failed');
+    expect([...toldFailed].sort()).toEqual([dv.bTxid!, dv.cTxid!].sort());
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats);
+  }, 30000);
+
+  test('5: A has 2 confirmations: B is not failed yet; held with an honest line, nothing written; 3 confirmations settle it', async () => {
+    const dv = await device({ mined: true, respend: true });
+    dv.chain.tip = HEIGHT + 1;
+    const before = await snapshot(dv);
+    const repair = repairOf(dv);
+    const err = await intakeWith(dv, repair)
+      .take(dv.txid, dv.beef)
+      .catch((e: unknown) => e);
+    expect(isHeldAsFailed(err)).toBe(true);
+    expect((err as HeldAsFailedError).reason).toBe('unconfirmed');
+    expect((err as Error).message).toMatch(/3 confirmations/);
+    expect(await snapshot(dv)).toEqual(before);
+    dv.chain.tip = HEIGHT + 2;
+    expect(await intakeWith(dv, repair).take(dv.txid, dv.beef)).toBe('taken');
+    expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
   }, 30000);
 });
