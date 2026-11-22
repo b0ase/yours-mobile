@@ -10,6 +10,7 @@ import {
   runFullSnapshot,
   SNAPSHOT_SEND_WAIT,
   SNAPSHOT_SERVER_URL,
+  isOurServer,
   type ChainTrackerLike,
   type SnapOutput,
   type SnapshotClient,
@@ -268,6 +269,34 @@ export async function ourBackupInitPlan(
     return r?.deviceSik === deviceSik && r.check === 'repaired' ? 'attach' : 'defer';
   } catch {
     return 'defer';
+  }
+}
+
+/** Settings › Storage "Make active" for our server while it isn't whole on this device (review of 6888544a, 1). */
+export const OUR_SERVER_ACTIVE_REFUSAL =
+  'Your backup on this server is not complete yet, so it cannot be made active. It stays a backup until then.';
+/**
+ * "Make active" for our server: only with the flag on AND this device's 'repaired' record (its whole fill ran here).
+ * Otherwise the toolbox's switch would copy only from the last sync point and a half-filled server would become the
+ * account's store. Any other URL (or 'local'): undefined. A record that can't be read refuses.
+ */
+export async function makeActiveRefusal(
+  url: string,
+  d: {
+    flagOn: boolean;
+    kv: { get(key: string): Promise<Record<string, unknown> | undefined> };
+    markKey: string;
+    deviceSik: string | undefined;
+  },
+): Promise<string | undefined> {
+  if (url === 'local' || !isOurServer(url)) return undefined;
+  if (!d.flagOn || !d.deviceSik) return OUR_SERVER_ACTIVE_REFUSAL;
+  try {
+    const key = ourBackupCheckKey(d.markKey);
+    const r = (await d.kv.get(key))?.[key] as OurBackupCheckRecord | null | undefined;
+    return r?.deviceSik === d.deviceSik && r.check === 'repaired' ? undefined : OUR_SERVER_ACTIVE_REFUSAL;
+  } catch {
+    return OUR_SERVER_ACTIVE_REFUSAL;
   }
 }
 
@@ -645,6 +674,8 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   } => {
     const failing =
       (fillState?.incomplete?.failures ?? 0) >= OUR_BACKUP_GIVE_UP_FAILURES ? ({ failing: true } as const) : {};
+    // Remote-active: the repair can't run until this device is active, so nothing is said yet (review of f42df01f, 2).
+    if (heldOut() && !d.deviceActive()) return { incomplete: false };
     if (heldOut()) {
       const rows = (fillState?.progress?.offsets ?? [])
         .filter((o) => o.offset < Number.MAX_SAFE_INTEGER)

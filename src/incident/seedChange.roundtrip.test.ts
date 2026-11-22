@@ -681,7 +681,11 @@ describe('review 07b fixes on the real toolbox', () => {
   test('a site naming noSendChange gets random change too', async () => {
     const chain = newChain();
     const services = makeServices(chain);
-    const { w: a } = await fundedWallet(chain, services);
+    // The sweep's coins pinned (fundedWallet's note): with random ones, about 1 run in 750 split off a coin that left
+    // the first payment's change at 4,020 to 4,042 sats, which the second spent whole (4,000 + fee) with no change
+    // left to check (gates of 22 Nov 2026; a 1,500-run probe reproduced it twice). Not a race: the toolbox's random
+    // change split.
+    const { w: a } = await fundedWallet(chain, services, undefined, { randomVals: [0, 0] });
     const first = await a.wallet.createAction(
       {
         description: 'site chain one',
@@ -703,6 +707,9 @@ describe('review 07b fixes on the real toolbox', () => {
       'shop.example',
     );
     const tx2 = Beef.fromBinary(Utils.toArray(Utils.toHex(second.tx!), 'hex')).findTxid(second.txid!)!.tx!;
+    // The first payment's change covers the second with change to spare (else there is nothing to check below).
+    const tx1Outs = Beef.fromBinary(Utils.toArray(Utils.toHex(first.tx!), 'hex')).findTxid(first.txid!)!.tx!.outputs;
+    expect(tx1Outs.slice(1).reduce((n, o) => n + (o.satoshis ?? 0), 0)).toBeGreaterThan(4_000 + 1_000);
     const rows = (await rowsOf(a, second.txid!)).filter((o) => o.change);
     expect(rows.length).toBeGreaterThan(0);
     for (const o of rows) expect(o.derivationPrefix).not.toBe(W.bwxChangePrefix(a.kd, inputsOf(tx2.toBinary())));

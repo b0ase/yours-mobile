@@ -61,6 +61,20 @@ let overlapMs = PULL_OVERLAP_MS;
 /** A pull's cursor with the overlap: undefined stays undefined (a pass from the start). */
 export const overlapped = (since: Date | string | undefined): Date | undefined =>
   since == null ? undefined : new Date(new Date(since).getTime() - overlapMs);
+/**
+ * A page's next cursor with the overlap, never below the cursor the page was asked from (review of a95a1ff0, 2): the
+ * toolbox's validateSyncCheckpoint refuses one that goes back. A pass that started without the overlap (this device's
+ * store marked as its own mid-pull, on the first open after the storage-key fix) keeps its own cursor instead.
+ */
+export const overlappedNext = (
+  next: Date | string | undefined,
+  pageSince: Date | string | undefined,
+): Date | undefined => {
+  const o = overlapped(next);
+  if (o == null || pageSince == null) return o;
+  const floor = new Date(pageSince);
+  return o.getTime() < floor.getTime() ? floor : o;
+};
 /** Test hook: the overlap (ms); no argument restores the default. */
 export const _setPullOverlap = (ms?: number) => void (overlapMs = ms ?? PULL_OVERLAP_MS);
 

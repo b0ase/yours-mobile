@@ -67,6 +67,7 @@ import {
   markOf,
   onDemandAllowed,
   overlapped,
+  overlappedNext,
   passFromStart,
   rewind,
   rewindDeep,
@@ -2034,6 +2035,11 @@ export const isUncheckedPage = (e: unknown): boolean =>
 const deviceStores = new Set<string>();
 
 /** Check rows from other stores merged into this device's store for this account. Returns the unregister. */
+/** This install's own store, by its real key (initWallet keepDeviceStoreKey): the guard's own-store rules apply to it. */
+export function markDeviceStore(storageIdentityKey: string): void {
+  if (storageIdentityKey) deviceStores.add(storageIdentityKey);
+}
+
 export function registerInboundVerifier(storageIdentityKey: string, identityKey: string, v: InboundVerifier) {
   if (storageIdentityKey) deviceStores.add(storageIdentityKey);
   verifiers.set(identityKey, [...(verifiers.get(identityKey) ?? []), v]);
@@ -2299,7 +2305,7 @@ export function installInboundSyncGuard(cls: { prototype: object }): () => void 
     // cursor per pass.
     const next =
       merged.nextCheckpoint && deviceStores.has(deviceSik)
-        ? { ...merged.nextCheckpoint, since: overlapped(merged.nextCheckpoint.since) }
+        ? { ...merged.nextCheckpoint, since: overlappedNext(merged.nextCheckpoint.since, args?.since) }
         : undefined;
     const out = next ? { ...merged, nextCheckpoint: next } : merged;
     if (afterPage(deviceSik) === 'yield') {

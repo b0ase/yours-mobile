@@ -94,6 +94,7 @@ import { guardPModuleSpends } from './services/pModuleSpendGate';
 import { guardAssetIdLoads } from './services/assetIdCheck';
 import { eitherChainSource, oneSatChainLookups, type ChainLookups } from './services/chainSources';
 import {
+  markDeviceStore,
   installInboundSyncGuard,
   registerInboundVerifier,
   admitPending,
@@ -253,7 +254,15 @@ import {
 } from './services/balanceTruth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 import { settleWithin } from './utils/settleWithin';
-import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
+import {
+  backupsFor,
+  isOurServer,
+  normalizeStoreConfig,
+  repairSyncRemote,
+  SNAPSHOT_MARK_KEY,
+  SNAPSHOT_SERVER_URL,
+  spendableFirstOn,
+} from './services/spendableFirst';
 import {
   createSpendableFirst,
   oneSatSnapshotLookups,
@@ -400,6 +409,8 @@ export interface AccountContext {
   ensureOurBackup: () => Promise<boolean>;
   /** Our server is held out of this session until its one-time repair has run (never connected meanwhile). */
   ourBackupHeldOut: () => boolean;
+  /** This device's own store's storage identity key (its IndexedDB's), or undefined before it opens. */
+  deviceStoreKey: () => string | undefined;
   /** Our server's first fill is unfinished: when addOurBackup may try again (undefined: nothing to retry). */
   ourBackupRetryAt: () => number | undefined;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
@@ -471,7 +482,8 @@ const resolveStorageConfig = (
   if (!storageConfig) {
     return {};
   }
-  const { activeRemote, remotes = [] } = storageConfig;
+  // Our server in any spelling becomes its one URL, listed once (review of 6888544a, 2).
+  const { activeRemote, remotes = [] } = normalizeStoreConfig(storageConfig);
   // `remotes[]` holds every configured remote including the active; filter
   // the active out before passing to the factory so it doesn't double-connect.
   const backups = activeRemote ? remotes.filter((url) => url !== activeRemote) : remotes;
@@ -487,7 +499,9 @@ const resolveStorageConfig = (
  * correctly identify which local store is authoritative.
  */
 const ensureStorageIdentityKey = async (chromeStorageService: ChromeStorageService): Promise<string> => {
-  const existing = chromeStorageService.getCurrentAccountObject().storageIdentityKey;
+  // The top-level field (review of f42df01f, 1): getCurrentAccountObject() returns only a few fields once accounts
+  // exist, so reading it there made a fresh random key on every open (the device store kept the first one).
+  const existing = chromeStorageService.storage?.storageIdentityKey;
   if (existing) return existing;
   const bytes = crypto.getRandomValues(new Uint8Array(8));
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -495,6 +509,36 @@ const ensureStorageIdentityKey = async (chromeStorageService: ChromeStorageServi
   await chromeStorageService.update({ storageIdentityKey: key });
   return key;
 };
+
+/** The install's storage identity key as initWallet reads it (tests). */
+export const storageIdentityKeyFor = ensureStorageIdentityKey;
+
+/**
+ * After the stores open: the key kept is the device store's own (its IndexedDB keeps the key it was created with,
+ * whatever later opens pass). One that differs, from an earlier build that made a fresh key per open, is corrected
+ * once, so every later open, the inbound guard's own-store marks and our server's 'repaired' record agree.
+ */
+async function keepDeviceStoreKey(
+  chromeStorageService: ChromeStorageService,
+  storage: unknown,
+  used: string,
+): Promise<string> {
+  const own = (storage as { _stores?: { storage: unknown }[] })._stores
+    ?.map((m) => m.storage)
+    .find((st): st is StorageIdb => st instanceof StorageIdb);
+  let real: string | undefined;
+  try {
+    real = own?.getSettings().storageIdentityKey;
+  } catch {
+    real = undefined;
+  }
+  if (!real || real === used) return used;
+  markDeviceStore(real);
+  await chromeStorageService
+    .update({ storageIdentityKey: real })
+    .catch((e) => console.warn('[initWallet] could not keep the device store key:', e));
+  return real;
+}
 
 export interface InitWalletOptions {
   onTransactionBroadcasted?: (txid: string) => void;
@@ -609,7 +653,7 @@ export async function ourServerHeldOut(
   storageIdentityKey: string,
 ): Promise<boolean> {
   const id = account?.addresses?.identityAddress;
-  if (activeRemote === SNAPSHOT_SERVER_URL || !id || !configured?.includes(SNAPSHOT_SERVER_URL)) return false;
+  if (isOurServer(activeRemote) || !id || !configured?.some(isOurServer)) return false;
   return (
     (await ourBackupInitPlan(chrome.storage.local as never, SNAPSHOT_MARK_KEY(id), storageIdentityKey)) === 'defer'
   );
@@ -637,7 +681,7 @@ export const openAccountStorageForBackup = async (
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   // Our server's one-time repair not run yet on this device: never connected here either (review of 8ee88600, 5).
   const backups = (await ourServerHeldOut(account, activeRemote, configured, storageIdentityKey))
-    ? configured?.filter((u) => u !== SNAPSHOT_SERVER_URL)
+    ? configured?.filter((u) => !isOurServer(u))
     : configured;
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
@@ -655,6 +699,7 @@ export const openAccountStorageForBackup = async (
     onStoragePaymentRequired: storagePaymentHook(),
   };
   const { storage, destroy, monitor, wallet: backupWallet } = await createWebWallet(backupConfig);
+  await keepDeviceStoreKey(chromeStorageService, storage, storageIdentityKey);
   if (!refuseStorageAuthFetchPayments(backupWallet, storageUrls(storage, { activeRemote, backups })))
     console.error('[initWallet] storage 402 payments are not refused');
   // Another account's stores, opened for a backup: their keys count, but never "pending" (this storage may be closed).
@@ -708,7 +753,8 @@ export const initWallet = async (
   const resolved = resolveStorageConfig(account?.storageConfig);
   const { activeRemote } = resolved;
   // Our storage server only with the instant-restore flag on (services/spendableFirst.ts): off, never connected.
-  const configuredBackups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
+  const flagOn = await spendableFirstOn(chrome.storage?.local as never);
+  const configuredBackups = backupsFor(resolved.backups, flagOn);
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   /**
    * Our server joins this session at init only once this device's check found it whole (spendableFirstWiring
@@ -717,7 +763,7 @@ export const initWallet = async (
    */
   const ourServerDeferred = await ourServerHeldOut(account, activeRemote, configuredBackups, storageIdentityKey);
   /** This session's backups: our server joins later when deferred (onAttached adds it back). */
-  let backups = ourServerDeferred ? configuredBackups?.filter((u) => u !== SNAPSHOT_SERVER_URL) : configuredBackups;
+  let backups = ourServerDeferred ? configuredBackups?.filter((u) => !isOurServer(u)) : configuredBackups;
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   if (options?.notice) storageNotice = options.notice;
@@ -752,6 +798,7 @@ export const initWallet = async (
     console.warn('[initWallet] backup storage failed to connect; opening without it:', err);
     return createWebWallet({ ...walletConfig, backups: [] });
   });
+  await keepDeviceStoreKey(chromeStorageService, storage, storageIdentityKey);
   // The factory's own storage calls (/account/status, /account/payment) never pay a 402 (storagePaymentGuard.ts).
   if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups: configuredBackups })))
     console.error('[initWallet] storage 402 payments are not refused');
@@ -1171,10 +1218,10 @@ export const initWallet = async (
         full: o?.full,
       }),
     // Our server is one of this session's backups (it joined at init, or later through ensureOurBackup).
-    registered: () => (backups ?? []).includes(SNAPSHOT_SERVER_URL),
+    registered: () => (backups ?? []).some(isOurServer),
     deferred: ourServerDeferred,
     onAttached: () => {
-      if (!(backups ?? []).includes(SNAPSHOT_SERVER_URL)) backups = [...(backups ?? []), SNAPSHOT_SERVER_URL];
+      if (!(backups ?? []).some(isOurServer)) backups = [...(backups ?? []), SNAPSHOT_SERVER_URL];
     },
     // Payments made during the repair went out flagged "not backed up yet" (review of b936a98c, 4): pushed now.
     flushUnbacked: () => writeAhead?.retryNow() ?? Promise.resolve(true),
@@ -1655,8 +1702,8 @@ export const initWallet = async (
   // Settings > Troubleshooting, where the user can retry. Only a run the
   // worker never finished (no stamp) is tried again on the next open.
   if (dataVersion === 1) {
-    const config = account?.storageConfig;
-    const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+    // Never our server while it is held out, or with the flag off (review of a95a1ff0, 1).
+    const remoteUrl = repairSyncRemote(normalizeStoreConfig(account?.storageConfig), ourServerDeferred, flagOn);
     if (remoteUrl) {
       mark('storage reconcile migration start');
       await reconcileStorage(storage, syncContext.services, remoteUrl, 'migration').catch((err) =>
@@ -1671,8 +1718,8 @@ export const initWallet = async (
   // on the next open, even if its notice was dismissed, up to MAX_RECONCILE_RESUMES times.
   // The repair overlay shows its progress while it runs.
   if (dataVersion >= 1) {
-    const config = account?.storageConfig;
-    const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+    // Never our server while it is held out, or with the flag off (review of a95a1ff0, 1).
+    const remoteUrl = repairSyncRemote(normalizeStoreConfig(account?.storageConfig), ourServerDeferred, flagOn);
     const previous = remoteUrl ? await readReconcileRecord().catch(() => undefined) : undefined;
     if (remoteUrl && previous && shouldResumeReconcile(previous)) {
       mark('storage reconcile resume start');
@@ -2606,6 +2653,7 @@ export const initWallet = async (
     addOurBackup: spendableFirst.addOurBackup,
     ensureOurBackup: spendableFirst.ensureOurBackup,
     ourBackupHeldOut: spendableFirst.heldOut,
+    deviceStoreKey: ownSik,
     ourBackupRetryAt: () => spendableFirst.ourBackup().retryAt,
     backupState: () => {
       const st = deviceSync.state();

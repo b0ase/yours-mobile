@@ -43,8 +43,18 @@ import {
 } from './inboundSync';
 import { withTimeout } from './restoreProgress';
 
-/** Our storage server (bwalletx-storage), a BACKUP beside 1Sat when the flag is on. */
-export const SNAPSHOT_SERVER_URL = 'https://storage.bwalletx.com';
+// Our storage server's URL and every check of it (no heavy imports): services/ourServer.ts.
+export {
+  addRemoteRefusal,
+  backupsFor,
+  forgetDeviceStoreRecords,
+  isOurServer,
+  normalizeStoreConfig,
+  OUR_SERVER_ADD_REFUSAL,
+  repairSyncRemote,
+  SNAPSHOT_SERVER_URL,
+  withSnapshotRemote,
+} from './ourServer';
 /** chrome.storage.local key: `true` turns the restore on for this device (default off). */
 export const SPENDABLE_FIRST_KEY = 'bwxSpendableFirstRestore';
 /** The snapshot's own sync state: never the device's real cursor for that server. */
@@ -77,35 +87,6 @@ export async function spendableFirstOn(kv: Kv | undefined, env: Env = buildEnv):
   } catch {
     return false;
   }
-}
-
-type StoreConfig = { activeRemote?: string; remotes?: string[]; [k: string]: unknown };
-/**
- * The account's storage config with our server added as a BACKUP remote (README Phase 1): only with the flag on, and
- * only once this device's store is the active one (a remote-active account gets it when the restore moves it here,
- * so the toolbox's switch never copies one server into the other). Returns the same object when nothing changes.
- */
-export function withSnapshotRemote<T extends StoreConfig | undefined>(config: T, on: boolean): T {
-  if (!on || !config || config.activeRemote) return config;
-  if (config.remotes?.includes(SNAPSHOT_SERVER_URL)) return config;
-  return { ...config, remotes: [...(config.remotes ?? []), SNAPSHOT_SERVER_URL] };
-}
-
-/**
- * The remote STORAGE_REPAIR_SYNC reconciles with: the active one, else the first backup, never our server while it is
- * held out of the session for its one-time repair (review of 8ee88600, 5). Undefined: none.
- */
-export function repairSyncRemote(config: StoreConfig | undefined, ourServerHeldOut: boolean): string | undefined {
-  if (config?.activeRemote) return config.activeRemote;
-  return config?.remotes?.find((u) => !(ourServerHeldOut && u === SNAPSHOT_SERVER_URL));
-}
-
-/**
- * The backups to connect: our server only with the flag on (review, 20 Nov 2026). An earlier session with the flag on
- * may have saved it in the account's remotes; with the flag off it is never connected or pushed to.
- */
-export function backupsFor(urls: string[] | undefined, on: boolean): string[] | undefined {
-  return on || !urls ? urls : urls.filter((u) => u !== SNAPSHOT_SERVER_URL);
 }
 
 export type SnapshotLimits = { leanPageMax?: number; fullPageMax?: number; beefMaxOutpoints?: number };

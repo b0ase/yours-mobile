@@ -518,3 +518,35 @@ describe('instant restore (services/spendableFirst.ts) in ensureLocalStore', () 
     expect(asked).toBe(0);
   });
 });
+
+describe('review of a95a1ff0, 1: the backup a move to this device reads from is never our server unless it is safe', () => {
+  const OURS = 'https://storage.bwalletx.com';
+  test('remotes = [ours] only (1Sat removed), flag off: no remote picked, nothing switched', async () => {
+    const { state, deps } = harness({ remotes: [`${OURS}.`] }, { localActive: false });
+    const r = await ensureLocalStore(deps);
+    expect(state.switches).toBe(0);
+    expect(r.ok).toBe(false);
+  });
+  test('ours first, 1Sat second: 1Sat is the one read from', async () => {
+    let asked: string | undefined;
+    const { deps } = harness(
+      { remotes: [OURS, REMOTE] },
+      { localActive: false, switchVerified: async (url) => ((asked = url), { ok: true, remote: S, local: S }) },
+    );
+    await ensureLocalStore(deps);
+    expect(asked).toBe(REMOTE);
+  });
+  test('a pick the background supplies (flag on, repaired) may name our server', async () => {
+    let asked: string | undefined;
+    const { deps } = harness(
+      { remotes: [OURS] },
+      {
+        localActive: false,
+        pickRemote: async () => OURS,
+        switchVerified: async (url) => ((asked = url), { ok: true, remote: S, local: S }),
+      },
+    );
+    await ensureLocalStore(deps);
+    expect(asked).toBe(OURS);
+  });
+});
