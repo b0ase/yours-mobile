@@ -22,8 +22,32 @@ const BALANCE =
   /\b(balance|total|you have|available)\b([^.\n]{0,40}?)\d[\d,]*(?:\.\d+)?\s*(bsv|sats?|satoshis|usd|\$)?/gi;
 const MONEY = /(?:\$\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s*(?:bsv|sats?|satoshis)\b)/gi;
 
+/** What leaves: at most this many characters of redacted text. */
+const REDACTED_MAX = 1200;
+/** Recovery words are looked for in the first SCAN_FROM characters, more only when hiding shrinks the text a lot. */
+const SCAN_FROM = 20_000;
+/**
+ * A phrase cut in two where the scan stops may not be found. The last SCAN_TAIL characters scanned must therefore
+ * land past what is kept, or the scan widens.
+ */
+const SCAN_TAIL = 4_000;
+
+/**
+ * Recovery words hidden in the start of `text`: enough of it that what is kept comes from text that was fully scanned.
+ * The phrase guard runs on the main thread, and an error can echo a very long input (review of b-Aware row 353).
+ */
+const hidePhrasesInStart = (text: string): string => {
+  for (let scan = SCAN_FROM; ; scan *= 4) {
+    if (text.length <= scan) return hidePhrases(text);
+    const hidden = hidePhrases(text.slice(0, scan));
+    // A character scanned lands earlier by what hiding removed before it, at most all it removed (a mask is no longer
+    // than the 12+ words it hides), so one from the last SCAN_TAIL lands at hidden.length - SCAN_TAIL or later.
+    if (hidden.length - SCAN_TAIL >= REDACTED_MAX) return hidden;
+  }
+};
+
 export const redactSecrets = (text: string): string =>
-  hidePhrases(
+  hidePhrasesInStart(
     String(text ?? '')
       .replace(SECRET_LABEL, (_m, label: string) => `${label}: [hidden]`)
       .replace(XPRV, '[private key hidden]')
@@ -31,7 +55,7 @@ export const redactSecrets = (text: string): string =>
       .replace(HEX64, '[key hidden]')
       .replace(BALANCE, (_m, word: string) => `${word} [amount hidden]`)
       .replace(MONEY, '[amount]'),
-  ).slice(0, 1200);
+  ).slice(0, REDACTED_MAX);
 
 export type ErrorContext = { screen?: string; version?: string; edition?: string; channel?: string; time?: string };
 

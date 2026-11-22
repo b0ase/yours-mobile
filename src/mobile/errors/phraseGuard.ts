@@ -1,3 +1,4 @@
+import { Hash } from '@bsv/sdk';
 import * as bip39 from 'bip39';
 
 /**
@@ -16,8 +17,15 @@ import * as bip39 from 'bip39';
  *     and its other words repeat (at most FILL_DISTINCT different ones), or when its list words, in order, hold a
  *     run of 12/15/18/21/24 different words that passes the BIP39 checksum.
  *  3. Whole line: a line, or the whole text, of exactly 12/15/18/21/24 words with at most two outside the list.
+ * Passes 1 and 2 run a second time when a list word repeats 3 or more times in a stretch: such a word is filler
+ * ("word 1 is abandon. word 2 is ability", "the abandon then the ability", JSON "index"/"value" keys), counted as
+ * an other word for that run. A match from that run counts only with such a word between every two of its words.
+ * Long text: lists with fewer than MIN_HITS words in the text are skipped, the checksum is worked out from list
+ * positions, and the loops stop as soon as no later word can make a match, so the cost grows with the length of the
+ * text, not its square (review of row 353: 20,000 list words took 16s).
  * Audits: '.', '+' and '_' joins (25 Oct 2026); ':' '=' and other punctuation, filler words (b-Aware row 353,
- * 19 Nov 2026); the nine non-English wordlists (b-Aware row 364, 19 Nov 2026).
+ * 19 Nov 2026); the nine non-English wordlists (b-Aware row 364, 19 Nov 2026); list words as filler, and speed
+ * (review of row 353, 22 Nov 2026).
  */
 
 /** 12 words, or 11 when one was mistyped. */
@@ -28,6 +36,10 @@ const MAX_GAP = 2;
 const FILL_WORDS = 12;
 const FILL_DISTINCT = 2;
 const PHRASE_LENGTHS = [12, 15, 18, 21, 24];
+/** The fewest list words any pass can match on (a 12-word line with two typos). A list with fewer is skipped. */
+const MIN_HITS = 10;
+/** A list word seen this often in one stretch is filler, not part of a phrase. */
+const FILLER_REPEATS = 3;
 
 /** Letter runs (accents and kana voicing marks stay on the word) or digit runs. Everything else is a separator. */
 const TOKEN = /[\p{L}\p{M}]+|\p{N}+/gu;
@@ -35,7 +47,7 @@ const fold = (w: string) => w.normalize('NFKD').toLowerCase();
 const bare = (w: string) => w.replace(/\p{M}/gu, '');
 const LATIN = /^[\p{Script=Latin}\p{M}]+$/u;
 
-type Wordlist = { words: string[]; latin: boolean; lookup: Map<string, string> };
+type Wordlist = { words: string[]; latin: boolean; lookup: Map<string, string>; index: Map<string, number> };
 
 /** Every distinct wordlist bip39 ships (it lists English and Japanese twice, as EN and JA). */
 const LISTS: Wordlist[] = Array.from(new Set(Object.values(bip39.wordlists))).map((words) => {
@@ -44,7 +56,7 @@ const LISTS: Wordlist[] = Array.from(new Set(Object.values(bip39.wordlists))).ma
   for (const w of words) lookup.set(fold(w), w);
   // A Latin-script phrase is often typed without its accents; the Spanish and French lists are unique without them.
   if (latin) for (const w of words) if (!lookup.has(bare(fold(w)))) lookup.set(bare(fold(w)), w);
-  return { words, latin, lookup };
+  return { words, latin, lookup, index: new Map(words.map((w, i) => [w, i])) };
 });
 
 type Raw = { start: number; end: number; text: string; digits: boolean };
@@ -67,25 +79,42 @@ const classify = (raw: Raw[], list: Wordlist): Token[] =>
   });
 
 /**
- * Ordinary text passes the 4-bit checksum of a 12-word window 1 time in 16, so the checksum alone is not enough: a
- * window must also hold no repeated word, which prose and code nearly always do and a phrase rarely does.
+ * The BIP39 checksum of a 12–24 word run, from the words' list positions. Same answer as bip39.validateMnemonic, which
+ * looks each word up with indexOf (2,048 compares) and was far too slow run once per window.
  */
-const distinct = (words: string[]) => new Set(words).size === words.length;
-
-const validRun = (words: string[], list: Wordlist): boolean => {
-  try {
-    return bip39.validateMnemonic(words.join(' '), list.words);
-  } catch {
-    return false;
+const checksumOk = (idx: number[]): boolean => {
+  const bits = idx.length * 11;
+  const cs = bits / 33;
+  const ent = bits - cs;
+  const bytes = new Array<number>(ent / 8).fill(0);
+  let got = 0;
+  for (let b = 0; b < bits; b++) {
+    const bit = (idx[Math.floor(b / 11)] >> (10 - (b % 11))) & 1;
+    if (b < ent) bytes[b >> 3] |= bit << (7 - (b & 7));
+    else got = (got << 1) | bit;
   }
+  return got === Hash.sha256(bytes)[0] >> (8 - cs);
 };
 
-/** Spans [first word index, last word index] (into `words`, the non-numbering tokens) found in one wordlist. */
-const spansInList = (words: Token[], list: Wordlist): Array<[number, number]> => {
+/** Passes 1 and 2 over one classification. Spans are [first word index, last word index] into `words`. */
+const passes = (words: Token[], list: Wordlist): Array<[number, number]> => {
+  const n = words.length;
   const out: Array<[number, number]> = [];
+  // Pass 1 holds at e when bip - 4 * other >= 0 over [s, e], i.e. pre[e + 1] >= pre[s]. ahead[i]: the highest
+  // pre[e + 1] for a list word e from i up to where the stretch ends (the third other word in a row).
+  const pre = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) pre[i + 1] = pre[i] + (words[i].kind === 'bip' ? 1 : -4);
+  const ahead = new Float64Array(n + 1).fill(-Infinity);
+  // gapAt[i]: other words in a row ending at i.
+  const gapAt = new Int32Array(n);
+  for (let i = 0, g = 0; i < n; i++) gapAt[i] = g = words[i].kind === 'bip' ? 0 : g + 1;
+  for (let i = n - 1; i >= 0; i--) {
+    if (gapAt[i] > MAX_GAP) continue; // the loop from any s stops here
+    ahead[i] = Math.max(words[i].kind === 'bip' ? pre[i + 1] : -Infinity, ahead[i + 1]);
+  }
   // 1 and 2a: dense stretches, and stretches whose fillers repeat.
   let s = 0;
-  while (s < words.length) {
+  while (s < n) {
     if (words[s].kind !== 'bip') {
       s++;
       continue;
@@ -96,7 +125,7 @@ const spansInList = (words: Token[], list: Wordlist): Array<[number, number]> =>
     let best = -1;
     const fillers = new Set<string>();
     const seen = new Set<string>();
-    for (let e = s; e < words.length; e++) {
+    for (let e = s; e < n; e++) {
       if (words[e].kind === 'bip') {
         bip++;
         gap = 0;
@@ -109,6 +138,10 @@ const spansInList = (words: Token[], list: Wordlist): Array<[number, number]> =>
         fillers.add(words[e].form);
         if (++gap > MAX_GAP) break;
       }
+      // Stop once nothing later can match: 2a never recovers from a third filler or a second repeat, and pass 1
+      // needs a later list word that brings the density back up.
+      const fillOpen = fillers.size <= FILL_DISTINCT && seen.size >= bip - 1;
+      if (!fillOpen && ahead[e + 1] < pre[s]) break;
     }
     if (best < 0) {
       s++;
@@ -117,30 +150,102 @@ const spansInList = (words: Token[], list: Wordlist): Array<[number, number]> =>
     out.push([s, best]);
     s = best + 1;
   }
-  // 2b: any fillers, but the list words hold a whole phrase with a valid checksum. Each maximal stretch once.
-  let run: number[] = [];
+  // 2b: any fillers, but the list words hold a whole phrase with a valid checksum. Each maximal stretch once; a
+  // window passes 1 or 2a already took is not checked again. Ordinary text passes the 4-bit checksum of a 12-word
+  // window 1 time in 16, so the checksum alone is not enough: a window must also hold no repeated word, which prose
+  // and code nearly always do and a phrase rarely does.
+  const taken = new Int32Array(n).fill(-1);
+  out.forEach(([a, b], k) => taken.fill(k, a, b + 1));
+  let idx: number[] = [];
   let gap = 0;
   const flush = () => {
-    if (run.length >= FILL_WORDS) {
-      const seq = run.map((i) => words[i].word as string);
-      for (let a = 0; a + FILL_WORDS <= seq.length; a++)
-        for (const n of PHRASE_LENGTHS)
-          if (a + n <= seq.length && distinct(seq.slice(a, a + n)) && validRun(seq.slice(a, a + n), list))
-            out.push([run[a], run[a + n - 1]]);
+    const m = idx.length;
+    if (m >= FILL_WORDS) {
+      const seq = idx.map((i) => words[i].word as string);
+      const pos = seq.map((w) => list.index.get(w) as number);
+      // distinctTo[a]: the end (exclusive) of the longest run of different words from a.
+      const distinctTo = new Int32Array(m);
+      const last = new Map<string, number>();
+      for (let a = m - 1, end = m; a >= 0; a--) {
+        const again = last.get(seq[a]);
+        if (again !== undefined) end = Math.min(end, again);
+        last.set(seq[a], a);
+        distinctTo[a] = end;
+      }
+      for (let a = 0; a + FILL_WORDS <= m; a++)
+        for (const len of PHRASE_LENGTHS) {
+          if (a + len > distinctTo[a]) break;
+          const first = idx[a];
+          const lastW = idx[a + len - 1];
+          if (taken[first] >= 0 && taken[first] === taken[lastW]) continue;
+          if (checksumOk(pos.slice(a, a + len))) out.push([first, lastW]);
+        }
     }
-    run = [];
+    idx = [];
   };
-  for (let i = 0; i < words.length; i++) {
+  for (let i = 0; i < n; i++) {
     if (words[i].kind === 'bip') {
-      run.push(i);
+      idx.push(i);
       gap = 0;
-    } else if (run.length && ++gap > MAX_GAP) {
+    } else if (idx.length && ++gap > MAX_GAP) {
       flush();
       gap = 0;
     }
   }
   flush();
   return out;
+};
+
+/**
+ * A list word seen FILLER_REPEATS or more times in one stretch (gaps of up to MAX_GAP other words) is a label or a
+ * key, not a phrase word: "word" in "word 1 is abandon. word 2 is ability", "index" and "value" in JSON. Returns the
+ * words with those counted as other words, or null when there are none.
+ */
+const demoteRepeats = (words: Token[]): Token[] | null => {
+  const out = words.slice();
+  let changed = false;
+  let a = 0;
+  while (a < words.length) {
+    let b = a;
+    for (let gap = 0; b < words.length; b++) {
+      gap = words[b].kind === 'bip' ? 0 : gap + 1;
+      if (gap > MAX_GAP) break;
+    }
+    const count = new Map<string, number>();
+    for (let i = a; i < b; i++)
+      if (words[i].kind === 'bip') count.set(words[i].form, (count.get(words[i].form) ?? 0) + 1);
+    for (let i = a; i < b; i++)
+      if (words[i].kind === 'bip' && (count.get(words[i].form) ?? 0) >= FILLER_REPEATS) {
+        out[i] = { ...words[i], kind: 'other', word: undefined };
+        changed = true;
+      }
+    a = b + 1;
+  }
+  return changed ? out : null;
+};
+
+/**
+ * A match made only once repeated words were counted as filler must look like a labelled list: a demoted word between
+ * every two of its words ("word 2 is", "then the", `"index":1,"value"`). Without this, demoting a common word in long
+ * prose leaves runs of different words, and 1 in 16 of those passes the checksum.
+ */
+const labelledThroughout = (demoted: Token[], words: Token[], [a, b]: [number, number]): boolean => {
+  let label = true;
+  for (let i = a + 1; i <= b; i++) {
+    if (demoted[i].kind === 'bip') {
+      if (!label) return false;
+      label = false;
+    } else if (words[i].kind === 'bip') label = true;
+  }
+  return true;
+};
+
+/** Spans [first word index, last word index] (into `words`, the non-numbering tokens) found in one wordlist. */
+const spansInList = (words: Token[], list: Wordlist): Array<[number, number]> => {
+  const found = passes(words, list);
+  const demoted = demoteRepeats(words);
+  if (demoted) for (const span of passes(demoted, list)) if (labelledThroughout(demoted, words, span)) found.push(span);
+  return found;
 };
 
 /**
@@ -173,6 +278,9 @@ export const findPhraseSpans = (text: string): Array<[number, number]> => {
   const found: Array<[number, number]> = [];
   for (const list of LISTS) {
     const all = classify(raw, list);
+    let hits = 0;
+    for (const t of all) if (t.kind === 'bip') hits++;
+    if (hits < MIN_HITS) continue;
     const words = all.map((t, i) => ({ t, i })).filter((x) => x.t.kind !== 'noise');
     const toks = words.map((x) => x.t);
     for (const [a, b] of [...spansInList(toks, list), ...wholeLineSpans(toks, text)]) {

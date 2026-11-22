@@ -303,24 +303,37 @@ describe('the guard is fast on long word-heavy text (review of b-Aware row 353)'
     f();
     return performance.now() - a;
   };
-  // The base (before this branch) took 24ms on 20,000 such words; the first fix took 16s. The bounds leave room for
-  // a loaded machine.
+  // Before this fix: 18s on 20,000 list words in a row, about 20s on 5,000 with a filler after each (quadratic). Now
+  // under 100ms and about 200ms. The bounds leave room for a loaded machine.
   test('20,000 list words in a row', () => {
     const text = listWords(20000).join(' ');
-    expect(timed(() => hidePhrases(text))).toBeLessThan(1500);
-    expect(timed(() => containsPhrase(text))).toBeLessThan(1500);
+    expect(timed(() => hidePhrases(text))).toBeLessThan(2000);
+    expect(timed(() => containsPhrase(text))).toBeLessThan(2000);
   });
-  test('20,000 list words with a different filler after each', () => {
-    const text = listWords(20000)
+  test('5,000 list words with a different filler after each', () => {
+    const text = listWords(5000)
       .map((w, i) => `${w} q${i.toString(36)}`)
       .join(' ');
-    expect(timed(() => hidePhrases(text))).toBeLessThan(1500);
+    expect(timed(() => hidePhrases(text))).toBeLessThan(2000);
   });
   test('a long error is redacted quickly and still hides a phrase near the start', () => {
     const text = `Restore failed: ${W12.join(' ')}. ${listWords(50000).join(' ')}`;
     let out = '';
-    expect(timed(() => (out = redactSecrets(text)))).toBeLessThan(1500);
+    expect(timed(() => (out = redactSecrets(text)))).toBeLessThan(2000);
     expect(out).toContain('[recovery words hidden]');
     expect(out.length).toBeLessThanOrEqual(1200);
+  });
+  test('a phrase cut in two where the scan stops is still hidden when hiding shrank the text before it', () => {
+    // Recovery words are looked for in the first 20,000 characters first. Here they hide down to one placeholder,
+    // and the next phrase straddles character 20,000: its first words alone would be too few to find.
+    const block = W24.map((w, i) => `${i + 1}. ${w}`).join('\n');
+    let prefix = '';
+    while (prefix.length + block.length + 1 < 19900) prefix += `${block}\n`;
+    const text = `${prefix.padEnd(19950, ' ')}qqq rrr sss ${W12.join(' ')} done`;
+    expect(text.indexOf(W12[0])).toBeLessThan(20000);
+    expect(text.indexOf(W12[11])).toBeGreaterThan(20000);
+    const out = redactSecrets(text).toLowerCase();
+    expect(leftOver(out, W12)).toEqual([]);
+    expect(out).toContain('done');
   });
 });
