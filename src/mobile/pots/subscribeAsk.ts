@@ -8,6 +8,9 @@
  */
 import { cachedExchangeRate } from '../../utils/wallet';
 import type { AppSubscribeRequest, SubscribeDeps } from './appSubscribe';
+import type { PayeeDestination } from './payeeBinding';
+import type { Payee } from './pots';
+import { resolvePayee } from './potSend';
 import { SubscribeError } from './appSubscribe';
 import { chargeSoon, potsRunning } from './potsEngine';
 import { APP_NAME } from '../storeBuild';
@@ -47,9 +50,19 @@ export const watchSubscribeAsk = (f: () => void) => {
 };
 export const currentSubscribeAsk = () => current?.req ?? null;
 
+/**
+ * An app subscription's paymail payee, looked up with a standing order's set-up checks (fresh): its host must serve
+ * an address the wallet can tie to its key, or the request is refused before the sheet (backlog rank 1).
+ */
+export const checkAppPayee = (
+  p: Payee,
+  resolve: (p: Payee, o: { ignorePin?: boolean; fresh?: boolean }) => Promise<PayeeDestination> = resolvePayee,
+): Promise<PayeeDestination> => resolve(p, { ignorePin: true, fresh: true });
+
 /** The real deps every entry point uses. */
 export const subscribeDeps = (): SubscribeDeps => ({
   approve: askSubscribe,
   bsvUsd: () => cachedExchangeRate(),
+  checkPayee: checkAppPayee,
   chargeSoon,
 });
