@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'crypto';
 import * as bip39 from 'bip39';
 import { looksLikeSecret } from '../agent/agent';
 import { redactSecrets } from './errorReport';
@@ -184,11 +185,7 @@ describe('recovery phrases with filler words between them (b-Aware 634, row 353)
   test('two fillers between every word', () => expectBlocked(W12.join(' zz qq '), W12));
   test('a two-column note: "word N" labels between the words', () =>
     expectBlocked(W12.map((w, i) => `word ${i + 1} ${w}`).join('\n'), W12));
-  test('a valid phrase with a different filler between each word', () => {
-    const phrase = bip39.generateMnemonic(128).split(' ');
-    const fill = ['zq', 'xv', 'kj', 'qx', 'vv', 'jz', 'xq', 'zx', 'qj', 'kx', 'jx', 'vq'];
-    expectBlocked(phrase.map((w, i) => `${w} ${fill[i]}`).join(' '), phrase);
-  });
+  // A different filler between each word: fixed phrases, below (a random one failed about 1 run in 30).
 });
 
 /** The nine non-English BIP39 wordlists (b-Aware 657, row 364). bip39 joins Japanese with U+3000. */
@@ -391,5 +388,155 @@ describe('ordinal numbering with a phrase that repeats a word (review of b-Aware
   test('"1st word: X," with a repeated word', () => {
     expect(new Set(repeating).size).toBe(11);
     expectBlocked(repeating.map((x, i) => `${i + 1}${['st', 'nd', 'rd'][i] ?? 'th'} word: ${x},`).join(' '), repeating);
+  });
+});
+
+/**
+ * Fixed valid phrases, the same every run (a random phrase made the tests below flaky: about 1 in 30 repeats a word).
+ * Phrase k comes from sha256("phrase-guard-<k>"); phrases using any word of `avoid` are skipped.
+ */
+const fixedPhrases = (count: number, bits: 128 | 256, avoid: string[] = []): string[][] => {
+  const out: string[][] = [];
+  for (let k = 0; out.length < count; k++) {
+    const hex = createHash('sha256')
+      .update(`phrase-guard-${bits}-${k}`)
+      .digest('hex')
+      .slice(0, bits / 4);
+    const words = bip39.entropyToMnemonic(hex).split(' ');
+    if (!words.some((w) => avoid.includes(w))) out.push(words);
+  }
+  return out;
+};
+
+const SPELLED_ORDINALS = [
+  'first',
+  'second',
+  'third',
+  'fourth',
+  'fifth',
+  'sixth',
+  'seventh',
+  'eighth',
+  'ninth',
+  'tenth',
+  'eleventh',
+  'twelfth',
+  'thirteenth',
+  'fourteenth',
+  'fifteenth',
+  'sixteenth',
+  'seventeenth',
+  'eighteenth',
+  'nineteenth',
+  'twentieth',
+  'twenty-first',
+  'twenty-second',
+  'twenty-third',
+  'twenty-fourth',
+];
+const SPELLED_CARDINALS = [
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'eleven',
+  'twelve',
+  'thirteen',
+  'fourteen',
+  'fifteen',
+  'sixteen',
+  'seventeen',
+  'eighteen',
+  'nineteen',
+  'twenty',
+  'twenty-one',
+  'twenty-two',
+  'twenty-three',
+  'twenty-four',
+];
+/** "1st", "2nd", "3rd", "4th" … "11th" … "21st" for list position i (from 0). */
+const nth = (i: number) => {
+  const n = i + 1;
+  const end = n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `${n}${end}`;
+};
+
+describe('plain-English labelled lists (round-3 review of b-Aware row 353)', () => {
+  // Every word that labels or numbers the list, so the phrase's own words are only phrase words.
+  const LABELS = ['word', 'one', 'number', 'then', ...SPELLED_ORDINALS, ...SPELLED_CARDINALS].flatMap((w) =>
+    w.split('-'),
+  );
+  const CASES: Array<[string, (w: string[]) => string]> = [
+    ['"my 1st word is X, my 2nd word is Y"', (w) => w.map((x, i) => `my ${nth(i)} word is ${x}`).join(', ')],
+    [
+      '"the first word is X. the second word is Y."',
+      (w) => w.map((x, i) => `the ${SPELLED_ORDINALS[i]} word is ${x}.`).join(' '),
+    ],
+    ['"the 1st one is X; the 2nd one is Y"', (w) => w.map((x, i) => `the ${nth(i)} one is ${x}`).join('; ')],
+    ['"word one is X, word two is Y"', (w) => w.map((x, i) => `word ${SPELLED_CARDINALS[i]} is ${x}`).join(', ')],
+    ['"First: X. Second: Y." (no repeated label)', (w) => w.map((x, i) => `${SPELLED_ORDINALS[i]}: ${x}.`).join(' ')],
+    ['"number one is X, number two is Y"', (w) => w.map((x, i) => `number ${SPELLED_CARDINALS[i]} is ${x}`).join(', ')],
+  ];
+  for (const bits of [128, 256] as const)
+    for (const [name, make] of CASES)
+      test(`blocked, ${bits === 128 ? 12 : 24} words: ${name}`, () => {
+        const phrases = [...fixedPhrases(25, bits, LABELS)];
+        if (bits === 128) phrases.push(phraseWith('ocean', 2, 9));
+        for (const words of phrases) expectBlocked(make(words), words);
+      });
+  test('ordinary text with spelled numbers is left alone', () => {
+    for (const p of [
+      'The first time I opened the app it asked for a name. The second time it showed my balance. The third time it crashed.',
+      'Step one: open the menu. Step two: choose settings. Step three: pick a theme. Step four: tap save. Step five: close it.',
+      'I sent one payment of ten dollars, then two more of twenty, then three of seven, and the twelfth one never arrived at all.',
+      'My first word to b was hello, my second word was thanks, and my third word was a question about the price of the token.',
+    ]) {
+      expect(containsPhrase(p)).toBe(false);
+      expect(looksLikeSecret(p)).toBe(false);
+    }
+  });
+});
+
+describe('a different filler between each word, fixed phrases (round-3 review of b-Aware row 353)', () => {
+  const fill = ['zq', 'xv', 'kj', 'qx', 'vv', 'jz', 'xq', 'zx', 'qj', 'kx', 'jx', 'vq'];
+  test('30 fixed phrases', () => {
+    for (const phrase of fixedPhrases(30, 128))
+      expectBlocked(phrase.map((w, i) => `${w} ${fill[i]}`).join(' '), phrase);
+  });
+  test('a phrase that repeats a word', () => {
+    const phrase = phraseWith('ocean', 2, 9);
+    expect(new Set(phrase).size).toBe(11);
+    expectBlocked(phrase.map((w, i) => `${w} ${fill[i]}`).join(' '), phrase);
+  });
+});
+
+describe('invisible characters inside words (round-3 review of b-Aware row 353)', () => {
+  const INVISIBLE: Array<[string, string]> = [
+    ['zero-width space', '​'],
+    ['zero-width non-joiner', '‌'],
+    ['zero-width joiner', '‍'],
+    ['word joiner', '⁠'],
+    ['byte order mark', '﻿'],
+    ['soft hyphen', '­'],
+  ];
+  for (const [name, ch] of INVISIBLE)
+    test(`${name} inside every word`, () => {
+      for (const words of [...fixedPhrases(5, 128), ...fixedPhrases(2, 256)]) {
+        const text = words.map((w) => `${w.slice(0, 2)}${ch}${w.slice(2)}`).join(' ');
+        expectBlocked(text, words);
+        // Nothing of the words is left, split or whole.
+        expect(redactSecrets(text)).toBe('[recovery words hidden]');
+      }
+    });
+  test('between every letter, and joining the words', () => {
+    const words = fixedPhrases(1, 128)[0];
+    expectBlocked(words.map((w) => w.split('').join('​')).join(' '), words);
+    expect(hidePhrases(`before ${words.join('­ ')} after`)).toBe('before [recovery words hidden] after');
   });
 });
