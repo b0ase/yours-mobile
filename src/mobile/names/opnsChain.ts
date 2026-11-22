@@ -12,13 +12,15 @@ import { fieldPairs, isIdentityKey } from '@1sat/utils';
  *     nothing has spent it.
  *  2. The 1sat-stack name index (api.1sat.app, a different service): the name's registered origin, and the origin
  *     of the inscription at that outpoint (ORDFS), are both the origin the first index gave. Without this a lying
- *     index could point at any unspent coin the attacker holds.
+ *     index could point at any unspent coin the attacker holds. When ORDFS answers that the coin holds no
+ *     inscription, or one that isn't application/op-ns, that is a contradiction too and refuses.
  *  3. The key: the index's opns.idKey is called verified only when the owner output carries an identity binding
  *     (registerOpns's PushDrop) that key signed. A binding naming another key refuses; a forged one drops the key.
  *
  * Any source that answers and contradicts another refuses ('refused'). Sources that can't be reached, or don't
  * know the name yet, leave it 'index': payable as before, but labelled "From the OpNS index", never "Verified on
- * chain". Only when all of 1 and 2 agree is it 'chain'; `idKey` is set only when 3 holds.
+ * chain". Only when all of 1 and 2 agree is it 'chain'; `idKey` is set only when 3 holds. An answer with no
+ * readable outpoint can't be checked at all, so it refuses rather than being paid on the index's word.
  */
 
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
@@ -40,7 +42,11 @@ export const opnsMismatch = (name: string) =>
 export const opnsMoved = (name: string) =>
   `"${name}" has moved since the name index last looked, so its new holder isn't known yet. Not paying it. Try again in a few minutes.`;
 
+export const opnsNoCoin = (name: string) =>
+  `The name index didn't say which coin holds "${name}", so it can't be checked. Not paying it. Try again in a few minutes.`;
+
 const HEX64 = /^[0-9a-f]{64}$/i;
+const OPNS_TYPE = 'application/op-ns';
 
 /** `txid_vout` / `txid.vout` → [txid, vout], or undefined when it isn't one. */
 const splitOutpoint = (o: string | undefined): [string, number] | undefined => {
@@ -141,7 +147,7 @@ export const checkOpnsOnChain = async (
 ): Promise<OpnsChainCheck> => {
   const refused = (reason: string): OpnsChainCheck => ({ status: 'refused', reason });
   const at = splitOutpoint(a.outpoint);
-  if (!at) return { status: 'index', idKey: a.idKey, keySigned: false };
+  if (!at) return refused(opnsNoCoin(a.name));
   const [txid, vout] = at;
   const [hexRes, spentRes, nameOrigin, held] = await Promise.all([
     get(f, `${s.woc}/tx/${txid}/hex`),
@@ -152,7 +158,12 @@ export const checkOpnsOnChain = async (
 
   // 2. Which inscription is this, and is it the name? Contradictions refuse; silence leaves it 'index'.
   const registered = typeof nameOrigin?.outpoint === 'string' ? nameOrigin.outpoint : undefined;
-  const heldOrigin = typeof held?.origin === 'string' ? held.origin : undefined;
+  const heldOrigin = typeof held?.origin === 'string' && held.origin ? held.origin : undefined;
+  // ORDFS answered: the coin must hold an OpNS inscription. A plain coin answers 200 with no origin (live, 22 Nov).
+  if (held) {
+    const type = (typeof held.contentType === 'string' ? held.contentType : '').split(';')[0].trim().toLowerCase();
+    if (!heldOrigin || type !== OPNS_TYPE) return refused(opnsMismatch(a.name));
+  }
   if (registered && a.origin && !sameOutpoint(registered, a.origin)) return refused(opnsMismatch(a.name));
   const expected = registered ?? a.origin;
   if (heldOrigin && expected && !sameOutpoint(heldOrigin, expected)) return refused(opnsMismatch(a.name));

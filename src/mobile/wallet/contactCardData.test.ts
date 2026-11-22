@@ -237,7 +237,13 @@ describe('contact card: OpNS names (b-Aware opns-indexer)', () => {
     // The OpNS index claims "alice" is bound to this contact's key; nothing on chain backs it up.
     const f = (async (url: string) =>
       url === 'https://ordinals.gorillapool.io/api/opns/alice'
-        ? new Response(JSON.stringify({ owner: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa', map: { 'opns.idKey': KEY } }))
+        ? new Response(
+            JSON.stringify({
+              outpoint: `${'f'.repeat(64)}_0`,
+              owner: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
+              map: { 'opns.idKey': KEY },
+            }),
+          )
         : new Response('{}', { status: 404 })) as never;
     const inputs = await loadCardInputs(contact({ paymail: null }), f, async () => null);
     expect(inputs.opns?.find((o) => o.name === 'alice')?.pubkey).toBeUndefined();

@@ -8,7 +8,11 @@ const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200 });
 /** OpNS "alice" is owned by ALICE's identity key. */
 const f: Fetch = async (url) =>
   url === `${SERVICES.opnsApi}/alice`
-    ? json({ owner: '1AliceOwnerAddressxxxxxxxxxxxxxxx', map: { 'opns.idKey': ALICE } })
+    ? json({
+        outpoint: `${'f'.repeat(64)}_0`,
+        owner: '1AliceOwnerAddressxxxxxxxxxxxxxxx',
+        map: { 'opns.idKey': ALICE },
+      })
     : new Response('', { status: 404 });
 
 describe('call a name', () => {

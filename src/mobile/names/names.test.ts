@@ -15,6 +15,8 @@ import {
 } from './names';
 
 const ADDR = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
+/** Where the OpNS index says a name is held (it always gives one; an answer without one is refused). */
+const AT = `${'f'.repeat(64)}_0`;
 
 /** Route table mock: url prefix → JSON body (or status number). */
 const mock = (routes: Record<string, unknown>): { f: Fetch; calls: string[] } => {
@@ -122,7 +124,7 @@ describe('paymail resolution', () => {
 describe('opns resolution', () => {
   test('gorillapool index → owner address', async () => {
     const { f } = mock({
-      'https://ordinals.gorillapool.io/api/opns/satchmo': { owner: ADDR, map: { 'opns.idKey': '03ff' } },
+      'https://ordinals.gorillapool.io/api/opns/satchmo': { outpoint: AT, owner: ADDR, map: { 'opns.idKey': '03ff' } },
     });
     const r = await resolveRecipient(f, parseRecipient('satchmo'));
     expect(r).toMatchObject({ target: ADDR, via: 'opns-owner', pubkey: '03ff', ordAddress: ADDR });
@@ -132,16 +134,16 @@ describe('opns resolution', () => {
   test('falls back to 1sat-stack origin + latest inscription', async () => {
     const { f, calls } = mock({
       'https://ordinals.gorillapool.io/api/opns/': 500,
-      'https://api.1sat.app/1sat/opns/origin/zed': { name: 'zed', outpoint: 'aa.2' },
-      'https://ordinals.gorillapool.io/api/inscriptions/aa_2/latest': { owner: ADDR },
+      'https://api.1sat.app/1sat/opns/origin/zed': { name: 'zed', outpoint: `${'a'.repeat(64)}.2` },
+      [`https://ordinals.gorillapool.io/api/inscriptions/${'a'.repeat(64)}_2/latest`]: { owner: ADDR, outpoint: AT },
     });
     const r = await resolveRecipient(f, parseRecipient('zed'));
     expect(r.target).toBe(ADDR);
-    expect(calls.at(-1)).toContain('aa_2/latest');
+    expect(calls.some((u) => u.includes(`${'a'.repeat(64)}_2/latest`))).toBe(true);
   });
 
   test('no binding, no payment: an unbound name is never paid', async () => {
-    const { f } = mock({ 'https://ordinals.gorillapool.io/api/opns/loose': { owner: ADDR } });
+    const { f } = mock({ 'https://ordinals.gorillapool.io/api/opns/loose': { outpoint: AT, owner: ADDR } });
     const r = await resolveRecipient(f, parseRecipient('loose'));
     expect(r.pubkey).toBeFalsy();
     expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: UNBOUND_NAME });
@@ -150,7 +152,7 @@ describe('opns resolution', () => {
 
   test('a bound name still pays as before', async () => {
     const { f } = mock({
-      'https://ordinals.gorillapool.io/api/opns/tied': { owner: ADDR, map: { 'opns.idKey': '03ff' } },
+      'https://ordinals.gorillapool.io/api/opns/tied': { outpoint: AT, owner: ADDR, map: { 'opns.idKey': '03ff' } },
     });
     const r = await resolveRecipient(f, parseRecipient('tied'));
     expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: ADDR });
@@ -213,7 +215,7 @@ describe('bare names inside bWallet (our paymail first, then OpNS)', () => {
   test('falls back to OpNS when bwallet.space has no such paymail', async () => {
     const { f } = mock({
       'https://dns.google.com/': {},
-      'https://ordinals.gorillapool.io/api/opns/satchmo': { owner: ADDR },
+      'https://ordinals.gorillapool.io/api/opns/satchmo': { outpoint: AT, owner: ADDR },
     });
     const r = await resolveRecipient(f, parseRecipient('satchmo'), 'bwallet.space');
     expect(r).toMatchObject({ target: ADDR, via: 'opns-owner' });
