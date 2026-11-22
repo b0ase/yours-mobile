@@ -19,7 +19,7 @@
  * originator, so the signature is the same one the site would have got through the permission manager, and no grant
  * is written that could make the next sign-in silent.
  */
-import { BSM, Utils } from '@bsv/sdk';
+import { BSM, PublicKey, Utils } from '@bsv/sdk';
 import { MESSAGE_SIGNING_PROTOCOL } from '@1sat/types';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE } from '../../services/userDenied';
 import { APP_NAME } from '../storeBuild';
@@ -324,13 +324,24 @@ export async function signFoldedLogin(
   req: LoginRequest,
   wallet: WalletLike | undefined,
   now = Date.now(),
-): Promise<{ k: string; sig: string } | null> {
+  /** The card's account (identity address). The signing wallet's identity key must be that account's (review 4, L6). */
+  expectAccount?: string,
+): Promise<{ k: string; sig: string } | 'wrong-account' | null> {
   if (!wallet) return null; // locked: plain Connect; the site then asks the usual way
   // Review 22 Nov 2026: never sign a challenge that expired while the card was up.
   const m = /\nExpires: (\S+)$/.exec(req.message);
   if (!m || !(Date.parse(m[1]) > now)) return null;
-  const [{ publicKey }, { signature }] = await Promise.all([
-    wallet.getPublicKey({ identityKey: true } as never),
+  const { publicKey } = await wallet.getPublicKey({ identityKey: true } as never);
+  if (expectAccount !== undefined) {
+    let address = '';
+    try {
+      address = PublicKey.fromString(publicKey).toAddress();
+    } catch {
+      address = '';
+    }
+    if (address !== expectAccount) return 'wrong-account';
+  }
+  const [{ signature }] = await Promise.all([
     wallet.createSignature({
       protocolID: [2, LOGIN_PROTOCOL_NAME],
       keyID: req.nonce,

@@ -24,7 +24,7 @@ import {
   type RelayFrame,
 } from '../../pair/protocol';
 import { inOrder } from '../../pair/in-order';
-import { claimRid, planReturn, type ReturnExtra, type ReturnPlan } from '../../pair/returnTo';
+import { claimRid, planReturn, returnIsPlainHttps, type ReturnExtra, type ReturnPlan } from '../../pair/returnTo';
 import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
@@ -937,8 +937,10 @@ function connectPairing(
       // return (the fragment the wallet opens in this phone's browser at the exact relay-seen origin), never over the
       // relay (CTO 22 Nov 2026), so whoever holds the site end of the channel never sees it. No return (a desktop QR,
       // no ret): no fold; the site asks over the relay and gets the separate sheet. Never for the CLI.
+      // Review 4: and only when the return opens plain https (no custom scheme or named Android package, which the
+      // link picks with `b`).
       const loginReq =
-        f.verifiedOrigin === CLI_ORIGIN || !returnPlan
+        f.verifiedOrigin === CLI_ORIGIN || !returnPlan || !returnIsPlainHttps(returnPlan)
           ? null
           : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
       // The account this card opened under: Connect signs with it, or not at all (review 2, 22 Nov 2026).
@@ -1002,9 +1004,17 @@ function connectPairing(
           // Connect and sign in (the card said so). A failure here is a plain Connect: the site then asks as usual.
           // Checked again now: the challenge may have expired while the card was up.
           const freshReq = loginReq && !agent ? foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin!) : null;
-          const login = freshReq
-            ? await signFoldedLogin(link.c, freshReq, agentDeps.ctx?.wallet as never).catch(() => null)
+          // Review 4 (L6): the wallet that signs must be the card's account (its identity key's address), not just the
+          // open account id: refuse with a plain line otherwise.
+          const signed = freshReq
+            ? await signFoldedLogin(link.c, freshReq, agentDeps.ctx?.wallet as never, Date.now(), cardAccount).catch(() => null)
             : null;
+          if (signed === 'wrong-account') {
+            supersede(PAIR_ACCOUNT_CHANGED_MESSAGE);
+            ws.close();
+            return null;
+          }
+          const login = signed;
           if (login) closeConnectCardsFor(f.verifiedOrigin!);
           const stored: StoredSession = {
             c: link.c,

@@ -122,6 +122,13 @@ export const returnTarget = (ret: string, rid: string, extra?: ReturnExtra) => {
   return u.toString();
 };
 
+/**
+ * True when the return opens a plain https URL on every platform (no `b`, or `safari`/`other`). Review 4 (22 Nov 2026):
+ * a link chooses `b`, and other hints return through a custom scheme (googlechromes://, firefox://) or a named Android
+ * package, so a folded sign-in never rides in such a return; the sign-in then goes on the separate sheet.
+ */
+export const returnIsPlainHttps = (plan: NonNullable<ReturnPlan>) => !plan.b || plan.b === 'safari' || plan.b === 'other';
+
 /** Android browser packages for each hint; anything else returns through the https fallback (default browser). */
 export const ANDROID_BROWSERS: Partial<Record<BrowserHint, string>> = {
   chrome: 'com.android.chrome',
