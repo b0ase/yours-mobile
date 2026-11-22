@@ -1,7 +1,7 @@
 /**
- * The once-per-device check and repair of our storage server's backup (review of f5709d81: an older build could register
- * it half-filled; owner's iPhone ran build 153). Our server is left out of the session at init and joins only after the
- * check (and any repair): nothing is ever detached from a live session. Real toolbox stores on fake-indexeddb: a device
+ * The one-time repair of our storage server's backup (an older build could register it half-filled; owner's iPhone ran
+ * build 153). No count heuristic (review of 8ee88600): any device with our server saved and no 'repaired' record gets
+ * the whole two-pass fill once. Our server is held out of the session until it finishes; nothing is ever detached. Real toolbox stores on fake-indexeddb: a device
  * store with a WalletStorageManager and Wallet, our server as a second StorageIdb that the manager really registers.
  */
 import 'fake-indexeddb/auto';
@@ -14,9 +14,11 @@ import {
   createSpendableFirst,
   ourBackupCheckKey,
   ourBackupInitPlan,
-  type BackupCounts,
+  OUR_BACKUP_REBUILDING_REFUSAL,
   type OurServerClient,
 } from './spendableFirstWiring';
+import { backupBeforeSend } from './deviceSync';
+import { repairSyncRemote, SNAPSHOT_SERVER_URL } from './spendableFirst';
 
 const services = {
   chain: 'main',
@@ -72,7 +74,7 @@ async function receive(w: Wallet, kd: KeyDeriver, sats: number) {
   });
   return txid;
 }
-async function token(w: Wallet) {
+async function token(w: Wallet, o: { tags?: string[]; labels?: string[] } = {}) {
   const tx = mined(PrivateKey.fromRandom().toAddress(), 1);
   const txid = tx.id('hex');
   tx.merklePath = new MerklePath(++height, [[{ offset: 0, hash: txid, txid: true }]]);
@@ -80,13 +82,16 @@ async function token(w: Wallet) {
   beef.mergeTransaction(tx);
   await w.internalizeAction({
     tx: beef.toBinaryAtomic(txid),
-    outputs: [{ outputIndex: 0, protocol: 'basket insertion', insertionRemittance: { basket: 'tokens' } }],
+    outputs: [
+      { outputIndex: 0, protocol: 'basket insertion', insertionRemittance: { basket: 'tokens', tags: o.tags } },
+    ],
+    labels: o.labels,
     description: 'a token',
   });
 }
 
 /** A device whose wallet has `n` coins, and our server filled from it once (whole at that time). */
-async function setup(n: number) {
+async function setup(n: number, o: { filled?: boolean } = {}) {
   const kd = new KeyDeriver(PrivateKey.fromRandom());
   const dev = await store('dev');
   const server = await store('server');
@@ -100,7 +105,8 @@ async function setup(n: number) {
     { identityKey: kd.identityKey, userId: user.userId } as never,
     dev.getSettings().storageIdentityKey,
   );
-  await fillBackup({ manager: sm as unknown as FillManager, reader: dev, writer: server, pageGapMs: 0 });
+  if (o.filled !== false)
+    await fillBackup({ manager: sm as unknown as FillManager, reader: dev, writer: server, pageGapMs: 0 });
   return { kd, dev, server, sm, wallet };
 }
 type Setup = Awaited<ReturnType<typeof setup>>;
@@ -114,18 +120,24 @@ const rows = async (s: StorageIdb) => {
       .sort(),
     transactions: (await s.findTransactions({ partial: {} })).map((t) => `${t.txid}:${t.status}`).sort(),
     certificates: (await s.findCertificates({ partial: {} })).map((c) => `${c.type}:${c.serialNumber}`).sort(),
+    ...(await maps(s)),
   };
 };
-
-const deviceCounts = (x: Setup) => async (): Promise<BackupCounts> => {
-  const { userId } = await x.sm.getAuth();
-  const baskets: Record<string, number> = {};
-  for (const b of await x.dev.findOutputBaskets({ partial: { userId: userId! } }))
-    baskets[b.name] = (await x.wallet.listOutputs({ basket: b.name, limit: 1 })).totalOutputs;
+/** Label and tag maps, by txid and label or tag name (what listActions/listOutputs filter on). */
+const maps = async (s: StorageIdb) => {
+  const txid = new Map((await s.findTransactions({ partial: {} })).map((t) => [t.transactionId, t.txid]));
+  const out = new Map((await s.findOutputs({ partial: {} })).map((o) => [o.outputId, `${o.txid}.${o.vout}`]));
+  const label = new Map((await s.findTxLabels({ partial: {} })).map((l) => [l.txLabelId, l.label]));
+  const tag = new Map((await s.findOutputTags({ partial: {} })).map((t) => [t.outputTagId, t.tag]));
   return {
-    actions: (await x.wallet.listActions({ labels: [], limit: 1 })).totalActions,
-    certificates: (await x.wallet.listCertificates({ certifiers: [], types: [], limit: 1 })).totalCertificates,
-    baskets,
+    labelMaps: (await s.findTxLabelMaps({ partial: {} }))
+      .filter((m) => !m.isDeleted)
+      .map((m) => `${txid.get(m.transactionId)}:${label.get(m.txLabelId)}`)
+      .sort(),
+    tagMaps: (await s.findOutputTagMaps({ partial: {} }))
+      .filter((m) => !m.isDeleted)
+      .map((m) => `${out.get(m.outputId)}:${tag.get(m.outputTagId)}`)
+      .sort(),
   };
 };
 
@@ -140,6 +152,9 @@ function init(
     client?: (c: OurServerClient) => OurServerClient;
     fill?: (run: () => Promise<unknown>) => Promise<unknown>;
     on?: boolean;
+    deferred?: boolean;
+    kvGet?: (k: string) => Promise<Record<string, unknown>>;
+    busy?: () => boolean;
   } = {},
 ) {
   const log = { fills: [] as { full?: boolean; unfinished?: boolean }[], attached: 0 };
@@ -178,10 +193,10 @@ function init(
       log.attached++;
     },
     registered: () => log.attached > 0,
-    deferred: true,
-    deviceCounts: deviceCounts(x),
+    deferred: o.deferred ?? true,
+    busy: o.busy,
     sleep: async () => undefined,
-    kv: { get: async (k) => ({ [k]: kv[k] }), set: async (i) => void Object.assign(kv, i) },
+    kv: { get: o.kvGet ?? (async (k) => ({ [k]: kv[k] })), set: async (i) => void Object.assign(kv, i) },
     markKey: 'mark',
   });
   return { w, log };
@@ -211,49 +226,103 @@ async function halfFill(x: Setup) {
   } as never);
 }
 
-describe('our server joins the session only after its check: whole, or repaired first', () => {
-  test('at init: deferred until checked; a whole or repaired record joins at once; an unreadable record joins', async () => {
-    const kv = { get: async (k: string) => ({ [k]: store_[k] }) };
+describe('our server’s one-time repair: held out of the session until the whole fill has run', () => {
+  test('at init: held out until a fill finished on this device; an unreadable record joins as before', async () => {
     const store_: Record<string, unknown> = {};
+    const kv = { get: async (k: string) => ({ [k]: store_[k] }) };
     expect(await ourBackupInitPlan(kv, 'mark', 'sik')).toBe('defer');
     store_[KEY] = { deviceSik: 'sik', check: 'repair-pending', full: true, at: 1 };
     expect(await ourBackupInitPlan(kv, 'mark', 'sik')).toBe('defer');
-    store_[KEY] = { deviceSik: 'sik', check: 'match', at: 1 };
+    store_[KEY] = { deviceSik: 'sik', check: 'repaired', at: 1 };
     expect(await ourBackupInitPlan(kv, 'mark', 'sik')).toBe('attach');
-    // Another device store's record doesn't count.
     expect(await ourBackupInitPlan(kv, 'mark', 'other')).toBe('defer');
     const broken = { get: async () => Promise.reject(new Error('storage unavailable')) };
     expect(await ourBackupInitPlan(broken, 'mark', 'sik')).toBe('attach');
   });
 
-  test('a whole backup: match recorded, no fill, our server joins the session for real', async () => {
+  test('a whole backup gets the fill once too (idempotent): repaired, our server joins for real', async () => {
     const x = await setup(3);
-    const kv: Record<string, unknown> = {};
-    const { w, log } = init(x, kv);
-    expect(await w.ensureOurBackup()).toBe(true);
-    expect((kv[KEY] as { check: string }).check).toBe('match');
-    expect(log.fills).toEqual([]);
-    expect(serverIn(x)).toBe(true);
-  });
-
-  test('(e) half-filled (a token basket, a coin spent here still spendable there, a certificate): repaired row for row', async () => {
-    const x = await setup(4);
-    await halfFill(x);
-    expect(await rows(x.server)).not.toEqual(await rows(x.dev));
+    const before = await rows(x.server);
     const kv: Record<string, unknown> = {};
     const { w, log } = init(x, kv);
     expect(await w.ensureOurBackup()).toBe(true);
     expect(log.fills).toEqual([{ full: true, unfinished: true }]);
-    expect(await rows(x.server)).toEqual(await rows(x.dev));
+    expect(await rows(x.server)).toEqual(before);
     expect((kv[KEY] as { check: string }).check).toBe('repaired');
     expect(serverIn(x)).toBe(true);
   });
 
-  test('(a) a close right after the repair is recorded: the next init repeats the repair (resume keeps it)', async () => {
+  test('half-filled (token basket, a coin spent here still spendable there, a certificate): repaired row for row', async () => {
+    const x = await setup(4);
+    await halfFill(x);
+    expect(await rows(x.server)).not.toEqual(await rows(x.dev));
+    const kv: Record<string, unknown> = {};
+    const { w } = init(x, kv);
+    expect(await w.ensureOurBackup()).toBe(true);
+    expect(await rows(x.server)).toEqual(await rows(x.dev));
+  });
+
+  test('(c) a label map and a tag map our server lacks are there after the repair', async () => {
+    const x = await setup(2);
+    await token(x.wallet, { tags: ['gold'], labels: ['bmint'] });
+    const lacking = await maps(x.server);
+    expect(lacking.labelMaps.some((m) => m.endsWith(':bmint'))).toBe(false);
+    expect(lacking.tagMaps.some((m) => m.endsWith(':gold'))).toBe(false);
+    const { w } = init(x, {});
+    expect(await w.ensureOurBackup()).toBe(true);
+    const after = await maps(x.server);
+    expect(after).toEqual(await maps(x.dev));
+    expect(after.labelMaps.some((m) => m.endsWith(':bmint'))).toBe(true);
+    expect(after.tagMaps.some((m) => m.endsWith(':gold'))).toBe(true);
+  });
+
+  test('(a) our server the only backup, held out: a Store payment is refused with the honest line, never "no backup"', async () => {
+    const x = await setup(2);
+    await halfFill(x);
+    const { w } = init(x, {});
+    const configured = [SNAPSHOT_SERVER_URL];
+    let session: string[] = [];
+    let pushes = 0;
+    // As initWallet wires it: configured backups (fail closed), our server held out with no other backup in session.
+    const pay = () =>
+      backupBeforeSend({
+        deviceActive: () => true,
+        backupConfigured: () => configured.length > 0,
+        heldOut: () =>
+          w.heldOut() && !session.some((u) => u !== SNAPSHOT_SERVER_URL) ? OUR_BACKUP_REBUILDING_REFUSAL : undefined,
+        pushNow: async () => (pushes++, { ok: true, pulled: false, pushed: true }),
+        log: () => undefined,
+      });
+    expect(await pay()).toEqual({ ok: false, error: 'Your backup is being rebuilt. Try again in a few minutes.' });
+    expect(pushes).toBe(0);
+    // Another backup in the session: payments go on as normal.
+    session = ['https://wallet.1sat.app'];
+    expect(await pay()).toEqual({ ok: true, how: 'pushed' });
+    // The repair done, our server in the session: as normal too.
+    session = [];
+    expect(await w.ensureOurBackup()).toBe(true);
+    expect(w.heldOut()).toBe(false);
+    expect(await pay()).toEqual({ ok: true, how: 'pushed' });
+  });
+
+  test('(b) a fresh first fill by this build records it with the registration: the next init joins without a fill', async () => {
+    const x = await setup(3, { filled: false });
+    const kv: Record<string, unknown> = {};
+    const first = init(x, kv, { deferred: false });
+    expect(await first.w.addOurBackup()).toBe(true);
+    expect(kv[KEY]).toMatchObject({ check: 'repaired', deviceSik: x.dev.getSettings().storageIdentityKey });
+    const plan = await ourBackupInitPlan(
+      { get: async (k) => ({ [k]: kv[k] }) },
+      'mark',
+      x.dev.getSettings().storageIdentityKey,
+    );
+    expect(plan).toBe('attach');
+  });
+
+  test('(d) a crash mid-repair: the next init resumes it (resume keeps the pending repair)', async () => {
     const x = await setup(3);
     await halfFill(x);
     const kv: Record<string, unknown> = {};
-    // Init 1: the decision is written, then the wallet closes before the fill ends.
     const one = init(x, kv, { fill: () => new Promise(() => undefined) });
     void one.w.ensureOurBackup();
     for (let i = 0; i < 200 && (kv[KEY] as { check?: string } | undefined)?.check !== 'repair-pending'; i++)
@@ -261,10 +330,8 @@ describe('our server joins the session only after its check: whole, or repaired 
     expect(kv[KEY]).toMatchObject({ check: 'repair-pending', full: true });
     one.w.stop();
     expect(serverIn(x)).toBe(false);
-    // Init 2: still deferred; resume never clears the pending repair; the repair runs and our server joins.
-    expect(
-      await ourBackupInitPlan({ get: async (k) => ({ [k]: kv[k] }) }, 'mark', x.dev.getSettings().storageIdentityKey),
-    ).toBe('defer');
+    const sik = x.dev.getSettings().storageIdentityKey;
+    expect(await ourBackupInitPlan({ get: async (k) => ({ [k]: kv[k] }) }, 'mark', sik)).toBe('defer');
     const two = init(x, kv);
     await two.w.resume();
     expect(kv[KEY]).toMatchObject({ check: 'repair-pending' });
@@ -274,55 +341,54 @@ describe('our server joins the session only after its check: whole, or repaired 
     expect((kv[KEY] as { check: string }).check).toBe('repaired');
   });
 
-  test('(b) after the refill our server is really in the session: an ordinary push reaches it', async () => {
+  test('(e) STORAGE_REPAIR_SYNC during the repair never reconciles with our server', () => {
+    const only = { remotes: [SNAPSHOT_SERVER_URL] };
+    const both = { remotes: [SNAPSHOT_SERVER_URL, 'https://wallet.1sat.app'] };
+    expect(repairSyncRemote(only, true)).toBeUndefined();
+    expect(repairSyncRemote(both, true)).toBe('https://wallet.1sat.app');
+    // Repaired (or not held out): as before, the first remote.
+    expect(repairSyncRemote(both, false)).toBe(SNAPSHOT_SERVER_URL);
+    expect(repairSyncRemote({ activeRemote: 'https://x.example', remotes: [] }, true)).toBe('https://x.example');
+  });
+
+  test('after the repair our server is really in the session: an ordinary push reaches it', async () => {
     const x = await setup(3);
     await halfFill(x);
-    const kv: Record<string, unknown> = {};
-    const { w } = init(x, kv);
+    const { w } = init(x, {});
     expect(await w.ensureOurBackup()).toBe(true);
-    expect(serverIn(x)).toBe(true);
     const fresh = await receive(x.wallet, x.kd, 4321);
-    expect((await x.server.findTransactions({ partial: { txid: fresh } })).length).toBe(0);
     await x.sm.updateBackups();
     expect((await x.server.findTransactions({ partial: { txid: fresh } })).length).toBe(1);
   });
 
-  test('(c) our server can’t be read: no repair, our server joins as before, the check runs again next init', async () => {
-    const x = await setup(3);
-    await halfFill(x);
-    const kv: Record<string, unknown> = {};
-    const failing = (c: OurServerClient) =>
-      Object.assign(Object.create(c), { listActions: async () => Promise.reject(new Error('network error 503')) });
-    const { w, log } = init(x, kv, { client: failing });
-    expect(await w.ensureOurBackup()).toBe(true);
-    expect(log.fills).toEqual([]);
-    expect(kv[KEY]).toBeUndefined();
-    expect(serverIn(x)).toBe(true);
+  test('a payment of its own going, or the record unreadable: not now (never joined unchecked), a retry is kept', async () => {
+    const x = await setup(2);
+    const busy = init(x, {}, { busy: () => true });
+    expect(await busy.w.ensureOurBackup()).toBe(false);
+    expect(busy.log.fills).toEqual([]);
+    expect(serverIn(x)).toBe(false);
+    expect(busy.w.ourBackup().retryAt).toBeGreaterThan(Date.now());
+    const broken = init(x, {}, { kvGet: async () => Promise.reject(new Error('storage unavailable')) });
+    expect(await broken.w.ensureOurBackup()).toBe(false);
+    expect(serverIn(x)).toBe(false);
   });
 
-  test('(d) two inits at once: one check; each session gets our server', async () => {
+  test('two inits at once: one fill; each session gets our server', async () => {
     const x = await setup(3);
     const kv: Record<string, unknown> = {};
-    let reads = 0;
-    const counting = (c: OurServerClient) =>
-      Object.assign(Object.create(c), {
-        listActions: (...a: unknown[]) => (reads++, (c.listActions as (...a: unknown[]) => unknown).apply(c, a)),
-      });
-    const a = init(x, kv, { client: counting });
-    const b = init(x, kv, { client: counting });
+    const a = init(x, kv);
+    const b = init(x, kv);
     const [ra, rb] = await Promise.all([a.w.ensureOurBackup(), b.w.ensureOurBackup()]);
     expect([ra, rb]).toEqual([true, true]);
-    expect(reads).toBe(1);
+    expect(a.log.fills.length + b.log.fills.length).toBe(1);
     expect(a.log.attached + b.log.attached).toBe(2);
   });
 
-  test('flag off: nothing to do, nothing read, nothing joined', async () => {
+  test('flag off: nothing to do, nothing filled, nothing joined', async () => {
     const x = await setup(1);
-    let reads = 0;
-    const counting = (c: OurServerClient) =>
-      Object.assign(Object.create(c), { listActions: async () => (reads++, { totalActions: 0 }) });
-    const { w, log } = init(x, {}, { client: counting, on: false });
+    const { w, log } = init(x, {}, { on: false });
     expect(await w.ensureOurBackup()).toBe(true);
-    expect([reads, log.fills.length, log.attached]).toEqual([0, 0, 0]);
+    expect([log.fills.length, log.attached]).toEqual([0, 0]);
+    expect(w.heldOut()).toBe(false);
   });
 });

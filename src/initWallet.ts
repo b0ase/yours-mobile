@@ -249,10 +249,10 @@ import {
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 import { settleWithin } from './utils/settleWithin';
 import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
-import { validateListOutputsArgs } from '@bsv/sdk/wallet/validationHelpers';
 import {
   createSpendableFirst,
   oneSatSnapshotLookups,
+  OUR_BACKUP_REBUILDING_REFUSAL,
   ourBackupInitPlan,
   type OurServerClient,
 } from './services/spendableFirstWiring';
@@ -393,6 +393,8 @@ export interface AccountContext {
    * check and any repair, then let it join (spendableFirstWiring ensureOurBackup). True once nothing is left to do.
    */
   ensureOurBackup: () => Promise<boolean>;
+  /** Our server is held out of this session until its one-time repair has run (never connected meanwhile). */
+  ourBackupHeldOut: () => boolean;
   /** Our server's first fill is unfinished: when addOurBackup may try again (undefined: nothing to retry). */
   ourBackupRetryAt: () => number | undefined;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
@@ -586,6 +588,23 @@ const checkBackupRows = (keys: Keys, account: Account | undefined, storageIdenti
 };
 
 /**
+ * Our server is saved as this account's backup but its one-time repair hasn't run on this device yet
+ * (spendableFirstWiring ourBackupInitPlan): every opening of the account's stores leaves it out until then.
+ */
+async function ourServerHeldOut(
+  account: { addresses?: { identityAddress?: string } } | undefined,
+  activeRemote: string | undefined,
+  configured: string[] | undefined,
+  storageIdentityKey: string,
+): Promise<boolean> {
+  const id = account?.addresses?.identityAddress;
+  if (activeRemote || !id || !configured?.includes(SNAPSHOT_SERVER_URL)) return false;
+  return (
+    (await ourBackupInitPlan(chrome.storage.local as never, SNAPSHOT_MARK_KEY(id), storageIdentityKey)) === 'defer'
+  );
+}
+
+/**
  * Open storage for the *currently selected* account for master backup only.
  * No address sync, permissions UI, or accountContext side effects.
  * Caller must set selectedAccount before calling, and await close() when done.
@@ -603,8 +622,12 @@ export const openAccountStorageForBackup = async (
   const resolved = resolveStorageConfig(account?.storageConfig);
   const { activeRemote } = resolved;
   // Our storage server only with the instant-restore flag on (services/spendableFirst.ts): off, never connected.
-  const backups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
+  const configured = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
+  // Our server's one-time repair not run yet on this device: never connected here either (review of 8ee88600, 5).
+  const backups = (await ourServerHeldOut(account, activeRemote, configured, storageIdentityKey))
+    ? configured?.filter((u) => u !== SNAPSHOT_SERVER_URL)
+    : configured;
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   const backupConfig: WalletConfigWithStorageHook = {
@@ -681,15 +704,7 @@ export const initWallet = async (
    * ourBackupInitPlan): otherwise it is left out here and joins after the check and any repair (ensureOurBackup), so
    * nothing is ever detached from a live session. Only our server's exact URL; the flag off, never connected anyway.
    */
-  const ourServerDeferred =
-    !activeRemote &&
-    !!configuredBackups?.includes(SNAPSHOT_SERVER_URL) &&
-    !!account?.addresses?.identityAddress &&
-    (await ourBackupInitPlan(
-      chrome.storage.local as never,
-      SNAPSHOT_MARK_KEY(account.addresses.identityAddress),
-      storageIdentityKey,
-    )) === 'defer';
+  const ourServerDeferred = await ourServerHeldOut(account, activeRemote, configuredBackups, storageIdentityKey);
   /** This session's backups: our server joins later when deferred (onAttached adds it back). */
   let backups = ourServerDeferred ? configuredBackups?.filter((u) => u !== SNAPSHOT_SERVER_URL) : configuredBackups;
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
@@ -1151,30 +1166,6 @@ export const initWallet = async (
       if (!(backups ?? []).includes(SNAPSHOT_SERVER_URL)) backups = [...(backups ?? []), SNAPSHOT_SERVER_URL];
     },
     // The once-per-device check of our server's backup (checkOurBackup): this device's own count, never beside a payment.
-    // This device's actions and spendable outputs per basket (every basket it has, by name), read only.
-    deviceCounts: async () => {
-      const own = ownStore() as unknown as {
-        findOutputBaskets(a: { partial: { userId: number } }): Promise<{ name: string; isDeleted?: boolean }[]>;
-      };
-      const { userId } = await storage.getAuth();
-      const names = (await own.findOutputBaskets({ partial: { userId: userId! } }))
-        .filter((b) => !b.isDeleted)
-        .map((b) => b.name)
-        .filter((name) => {
-          try {
-            validateListOutputsArgs({ basket: name, limit: 1 });
-            return true;
-          } catch {
-            return false; // a name listOutputs can't be asked for: left out on both sides
-          }
-        });
-      const baskets: Record<string, number> = {};
-      for (const basket of names) baskets[basket] = (await baseWallet.listOutputs({ basket, limit: 1 })).totalOutputs;
-      const actions = (await baseWallet.listActions({ labels: [], limit: 1 })).totalActions;
-      const certificates = (await baseWallet.listCertificates({ certifiers: [], types: [], limit: 1 }))
-        .totalCertificates;
-      return { actions, certificates, baskets };
-    },
     busy: () => ownPayments.waiting(),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
@@ -1243,7 +1234,9 @@ export const initWallet = async (
   // yet" (balance card, syncHealth) and pushed again urgently until it lands. Hooked to the broadcaster below.
   const unbackedKey = `changeUnbacked:${keys.identityAddress}`;
   writeAhead = createChangeWriteAhead({
-    applies: () => storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
+    // On the configured backups, not this session's (review of 8ee88600, 1): our server held out for its repair still
+    // counts, so a payment's change with no backup in the session is flagged "not backed up yet", never silent.
+    applies: () => storage.isActiveStorageProvider() && (configuredBackups?.length ?? 0) > 0,
     backups: () => managed._backups ?? [],
     storage: storage as unknown as WriteAheadStorage,
     inFlightFor: pushInFlightFor,
@@ -2559,13 +2552,17 @@ export const initWallet = async (
       return {
         held,
         arrivingSats,
-        syncApplies: storage.isActiveStorageProvider() && (backups?.length ?? 0) > 0,
+        syncApplies: storage.isActiveStorageProvider() && (configuredBackups?.length ?? 0) > 0,
         sync,
         changeUnbacked: writeAhead?.count() ?? 0,
         // Only while an instant restore runs (flag on): the card's one calm line instead of "Arriving…".
         ...(spendableFirst.loading() ? { snapshot: true } : {}),
         // Our server's first fill didn't finish (flag on): "Backup incomplete, will retry" until a try lands.
         ...(spendableFirst.ourBackup().incomplete ? { ourBackupIncomplete: true } : {}),
+        // Held out for its one-time repair: how far the whole fill has got, on the same line.
+        ...(spendableFirst.ourBackup().rebuilding
+          ? { ourBackupRebuildingRows: spendableFirst.ourBackup().rebuilding!.rows }
+          : {}),
       };
     },
     receiveWatch: {
@@ -2585,11 +2582,12 @@ export const initWallet = async (
     snapshotLoading: spendableFirst.loading,
     addOurBackup: spendableFirst.addOurBackup,
     ensureOurBackup: spendableFirst.ensureOurBackup,
+    ourBackupHeldOut: spendableFirst.heldOut,
     ourBackupRetryAt: () => spendableFirst.ourBackup().retryAt,
     backupState: () => {
       const st = deviceSync.state();
       return {
-        backupConfigured: (backups?.length ?? 0) > 0,
+        backupConfigured: (configuredBackups?.length ?? 0) > 0,
         pendingPush: st.pendingPush || st.scheduled || st.running,
         failures: st.failures,
         lastPushOkAt: st.lastPushOkAt,
@@ -2603,7 +2601,13 @@ export const initWallet = async (
     backupBeforeSend: () =>
       backupBeforeSend({
         deviceActive: () => storage.isActiveStorageProvider(),
-        backupConfigured: () => (backups?.length ?? 0) > 0,
+        // Fail closed (review of 8ee88600, 1): configured, not this session's. Our server held out for its repair with
+        // no other backup in the session: the payment waits, with an honest line, never "no backup".
+        backupConfigured: () => (configuredBackups?.length ?? 0) > 0,
+        heldOut: () =>
+          spendableFirst.heldOut() && !(backups ?? []).some((u) => u !== SNAPSHOT_SERVER_URL)
+            ? OUR_BACKUP_REBUILDING_REFUSAL
+            : undefined,
         pushNow: () => deviceSync.pushNow(),
       }),
     recoverFailed: () =>

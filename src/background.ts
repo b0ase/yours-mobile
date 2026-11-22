@@ -146,6 +146,7 @@ import {
 import {
   SNAPSHOT_SEND_WAIT,
   SNAPSHOT_SERVER_URL,
+  repairSyncRemote,
   spendableFirstOn,
   withSnapshotRemote,
 } from './services/spendableFirst';
@@ -4863,7 +4864,8 @@ if (!(
     try {
       const { account } = chromeStorageService.getCurrentAccountObject();
       const config: StorageConfig = account?.storageConfig ?? { remotes: [] };
-      const remoteUrl = config.activeRemote || config.remotes?.[0];
+      // Never our server while it is held out of the session for its one-time repair.
+      const remoteUrl = repairSyncRemote(config, accountContext.ourBackupHeldOut());
       // After the reconcile (or alone, with no remote): token outputs on chain
       // that no store recorded, searched over the wider window too. Then a final
       // pass relinquishes token outputs the overlay or chain reports spent: the

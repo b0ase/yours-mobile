@@ -92,6 +92,15 @@ export function withSnapshotRemote<T extends StoreConfig | undefined>(config: T,
 }
 
 /**
+ * The remote STORAGE_REPAIR_SYNC reconciles with: the active one, else the first backup, never our server while it is
+ * held out of the session for its one-time repair (review of 8ee88600, 5). Undefined: none.
+ */
+export function repairSyncRemote(config: StoreConfig | undefined, ourServerHeldOut: boolean): string | undefined {
+  if (config?.activeRemote) return config.activeRemote;
+  return config?.remotes?.find((u) => !(ourServerHeldOut && u === SNAPSHOT_SERVER_URL));
+}
+
+/**
  * The backups to connect: our server only with the flag on (review, 20 Nov 2026). An earlier session with the flag on
  * may have saved it in the account's remotes; with the flag off it is never connected or pushed to.
  */

@@ -118,6 +118,8 @@ export type BalanceTruth = {
    * tried again (spendableFirstWiring addOurBackup): "Backup incomplete, will retry". Absent: nothing to say.
    */
   ourBackupIncomplete?: boolean;
+  /** Our server held out for its one-time repair: rows its whole fill has sent so far (the line shows progress). */
+  ourBackupRebuildingRows?: number;
 };
 
 /** The one line the balance card shows while an instant restore brings the rest in. */
@@ -133,6 +135,11 @@ export type TruthLine =
 
 /** The line for an unfinished backup to our storage server. */
 export const OUR_BACKUP_INCOMPLETE_LINE = 'Backup incomplete, will retry';
+/** The same line while our server's one-time repair runs, with how far it has got. */
+export const ourBackupRebuildingLine = (rows: number) =>
+  rows > 0
+    ? `Backup incomplete: rebuilding it, ${Math.floor(rows).toLocaleString('en-GB')} rows so far`
+    : 'Backup incomplete: rebuilding it';
 
 /** "1 payment's change not backed up yet": a payment whose change is still only on this device. Null when none. */
 export function backupLine(t: Pick<BalanceTruth, 'changeUnbacked'>): TruthLine | null {
@@ -221,7 +228,14 @@ export function truthLines(
   const b = backupLine(t);
   if (b) lines.push(b);
   if (t.ourBackupIncomplete === true)
-    lines.push({ kind: 'server-backup', text: OUR_BACKUP_INCOMPLETE_LINE, warn: true });
+    lines.push({
+      kind: 'server-backup',
+      text:
+        typeof t.ourBackupRebuildingRows === 'number'
+          ? ourBackupRebuildingLine(t.ourBackupRebuildingRows)
+          : OUR_BACKUP_INCOMPLETE_LINE,
+      warn: true,
+    });
   return lines;
 }
 
