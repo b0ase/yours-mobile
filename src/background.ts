@@ -1163,7 +1163,11 @@ const checkSavedOurBackup = async (ctx: NonNullable<typeof accountContext>, befo
     if (!next || next === account.storageConfig) return;
     await chromeStorageService.updateNested('accounts', { [id]: { storageConfig: next } as unknown as Account });
   });
-  if (r === 'repair') console.warn('[background] storage: our server\'s backup was incomplete; it is filled again next open');
+  if (r === 'repair') {
+    console.warn("[background] storage: our server's backup was incomplete; it is filled again");
+    // The refill's retry alarm (its kept retryAt; never sooner than the first back-off step).
+    ourBackupTimer.schedule();
+  }
 };
 
 /**

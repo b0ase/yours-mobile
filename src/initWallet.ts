@@ -249,6 +249,7 @@ import {
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 import { settleWithin } from './utils/settleWithin';
 import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
+import { validateListOutputsArgs } from '@bsv/sdk/wallet/validationHelpers';
 import { createSpendableFirst, oneSatSnapshotLookups, type OurServerClient } from './services/spendableFirstWiring';
 import { fillBackup } from './services/backupFill';
 
@@ -1120,11 +1121,49 @@ export const initWallet = async (
         onProgress: o?.onProgress,
         unfinished: o?.unfinished,
         stopped: o?.stopped,
+        full: o?.full,
       }),
     // Our server already in the account's saved backups: an earlier fill finished.
     registered: () => (backups ?? []).includes(SNAPSHOT_SERVER_URL),
     // The once-per-device check of our server's backup (checkOurBackup): this device's own count, never beside a payment.
-    deviceDefaultCoins: async () => (await baseWallet.listOutputs({ basket: 'default', limit: 1 })).totalOutputs,
+    // This device's actions and spendable outputs per basket (every basket it has, by name), read only.
+    deviceCounts: async () => {
+      const own = ownStore() as unknown as {
+        findOutputBaskets(a: { partial: { userId: number } }): Promise<{ name: string; isDeleted?: boolean }[]>;
+      };
+      const { userId } = await storage.getAuth();
+      const names = (await own.findOutputBaskets({ partial: { userId: userId! } }))
+        .filter((b) => !b.isDeleted)
+        .map((b) => b.name)
+        .filter((name) => {
+          try {
+            validateListOutputsArgs({ basket: name, limit: 1 });
+            return true;
+          } catch {
+            return false; // a name listOutputs can't be asked for: left out on both sides
+          }
+        });
+      const baskets: Record<string, number> = {};
+      for (const basket of names) baskets[basket] = (await baseWallet.listOutputs({ basket, limit: 1 })).totalOutputs;
+      const actions = (await baseWallet.listActions({ labels: [], limit: 1 })).totalActions;
+      return { actions, baskets };
+    },
+    pushNow: () => deviceSync.pushNow(),
+    // Our server out of this session's backups (a repair dropped it from the saved remotes): the refill may then run
+    // without an ordinary push to the same server beside it. As deviceActive's dropStores does it, under the lock.
+    detachRemote: (url) =>
+      storage.runAsSync(async () => {
+        const m = storage as unknown as {
+          _stores: { storage?: { endpointUrl?: string } }[];
+          _isAvailable: boolean;
+          makeAvailable(): Promise<unknown>;
+        };
+        const before = m._stores.length;
+        m._stores = m._stores.filter((s) => s.storage?.endpointUrl !== url);
+        if (m._stores.length === before) return;
+        m._isAvailable = false;
+        await m.makeAvailable();
+      }),
     busy: () => ownPayments.waiting(),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),

@@ -17,7 +17,7 @@ import {
   type SnapshotMark,
   type SpendsLookup,
 } from './spendableFirst';
-import { validateListOutputsArgs } from '@bsv/sdk/wallet/validationHelpers';
+import { validateListActionsArgs, validateListOutputsArgs } from '@bsv/sdk/wallet/validationHelpers';
 import { withTimeout } from './restoreProgress';
 import { buildsTransaction, LocalStoreNeededError } from './localFirst';
 import { isInsufficientFunds } from './fundingPrep';
@@ -29,6 +29,9 @@ const COUNT_MS = 8_000;
 export const SEND_WAIT_MS = 15_000;
 /** After an unfinished fill of our server, the next try waits this long (by failures in a row), or the server's Retry-After if longer. */
 export const OUR_BACKUP_RETRY_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
+/** The backup check: between its reads of our server, and before its one re-read on a difference. */
+export const CHECK_GAP_MS = 250;
+export const CHECK_RECHECK_MS = 5_000;
 /** A fill that stopped making progress is tried again from the start, no sooner than this. */
 export const OUR_BACKUP_STALL_RETRY_MS = 15 * 60_000;
 
@@ -43,7 +46,17 @@ export type OurBackupIncomplete = {
   failures: number;
 };
 /** What is kept between tries: the device store it was for, how far the fill got, and why it stopped. */
-type OurBackupFill = { deviceSik: string; progress?: FillProgress | null; incomplete?: OurBackupIncomplete };
+type OurBackupFill = {
+  deviceSik: string;
+  progress?: FillProgress | null;
+  incomplete?: OurBackupIncomplete;
+  /**
+   * The repair's whole two-pass fill (checkOurBackup): sticky through every try (a stall, a refusal, progress kept)
+   * until a fill finishes, so a later try never becomes a restore-point fill on our server's cursor (review of
+   * 0c74701d, 1).
+   */
+  full?: boolean;
+};
 
 /** When the next try may run after `failures` unfinished tries in a row ending with `e`. */
 export function ourBackupRetryMs(e: unknown, failures: number): number {
@@ -217,7 +230,12 @@ export type OurServerClient = SnapshotClient & {
   setActive(auth: { identityKey: string; userId: number }, storageIdentityKey: string): Promise<unknown>;
   /** The toolbox StorageClient's listOutputs RPC (spendable outputs only; totalOutputs counts them). */
   listOutputs?(auth: { identityKey: string; userId: number }, vargs: unknown): Promise<{ totalOutputs: number }>;
+  /** The toolbox StorageClient's listActions RPC (totalActions counts them). */
+  listActions?(auth: { identityKey: string; userId: number }, vargs: unknown): Promise<{ totalActions: number }>;
 };
+
+/** What the backup check compares: actions, and spendable outputs in each basket this device has. */
+export type BackupCounts = { actions: number; baskets: Record<string, number> };
 
 /** How the once-per-device check of our server's backup went (checkOurBackup). */
 export type OurBackupCheck = 'match' | 'repair' | 'done' | 'skip' | 'error';
@@ -255,6 +273,8 @@ export type SpendableFirstWiringDeps = {
       unfinished?: boolean;
       /** This session closed: the fill ends before its next page. */
       stopped?: () => boolean;
+      /** The whole two-pass fill, never one from the restore point (a repair). */
+      full?: boolean;
     },
   ) => Promise<FillReport>;
   /**
@@ -262,8 +282,14 @@ export type SpendableFirstWiringDeps = {
    * stale (a closed session's late write) and is dropped.
    */
   registered?: () => boolean;
-  /** This device's spendable default-basket coins (one listOutputs on the device store). */
-  deviceDefaultCoins?: () => Promise<number>;
+  /** This device's counts: its actions, and its spendable outputs in each of its baskets (by name). */
+  deviceCounts?: () => Promise<BackupCounts>;
+  /** Push this device's rows to its backups now (deviceSync.pushNow): the check reads after it. */
+  pushNow?: () => Promise<{ ok: boolean }>;
+  /** Take our server out of this session's backups (it was dropped from the saved remotes): the refill may then run. */
+  detachRemote?: (url: string) => Promise<void>;
+  /** Tests: how the check waits (between our server's reads, and before its one re-read). */
+  sleep?: (ms: number) => Promise<void>;
   /** A payment of this wallet's own is waiting or going (ownPayments.waiting): no check runs beside it. */
   busy?: () => boolean;
   /** The factory's addRemote: register a backup for this session. */
@@ -324,7 +350,9 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   };
   /** Our server was added as a backup in this session, or is in the account's saved backups. */
   let added = false;
-  const registered = () => added || (d.registered?.() ?? false);
+  /** Our server was dropped from the saved remotes and taken out of this session (a repair). */
+  let dropped = false;
+  const registered = () => added || (!dropped && (d.registered?.() ?? false));
   let client: OurServerClient | undefined;
   let connecting: Promise<OurServerClient> | undefined;
   let lean = false;
@@ -465,6 +493,13 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       return false;
     }
     let progress: FillProgress | null = st?.progress ?? null;
+    const full = st?.full === true || (progress?.stage === 'restart' && progress.full === true);
+    const keep = (p: FillProgress | null, incomplete?: OurBackupIncomplete): OurBackupFill => ({
+      deviceSik,
+      progress: p,
+      ...(incomplete ? { incomplete } : {}),
+      ...(full ? { full: true } : {}),
+    });
     try {
       const c = await connect();
       const identityKey = await d.identityKey();
@@ -479,11 +514,12 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
           progress = p;
           // A progress write that fails ends the fill as unfinished (review of bcd8129b, 2): never a fill whose state
           // was lost carrying on to "done" while the kept state says otherwise.
-          await saveFill({ deviceSik, progress: p, ...(st?.incomplete ? { incomplete: st.incomplete } : {}) }, true);
+          await saveFill(keep(p, st?.incomplete), true);
         },
         // Any kept state (even with no progress: a stall) means unfinished: never "not-needed" on our server's cursor.
         unfinished: !!st,
         stopped: () => closed,
+        ...(full ? { full: true } : {}),
       });
       if (closed) throw new Error('the wallet closed');
       log(
@@ -510,8 +546,9 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       }
       // A fill that stopped moving starts again from the beginning next time (a restart marker, never null: our
       // server may already hold a cursor from a finished pass); any other goes on from its last acknowledged page.
-      const next: FillProgress | null = err.kind === 'stalled' ? { stage: 'restart', offsets: [] } : progress;
-      await saveFill({ deviceSik, progress: next, incomplete });
+      const next: FillProgress | null =
+        err.kind === 'stalled' ? { stage: 'restart', offsets: [], ...(full ? { full: true } : {}) } : progress;
+      await saveFill(keep(next, incomplete));
       log(
         `[spendable-first] our server's backup incomplete (${err.kind}), will retry in ${Math.ceil((incomplete.retryAt - at) / 1000)} s:`,
         e,
@@ -541,61 +578,114 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
    */
   const checkKey = `${d.markKey}:ourBackupCheck`;
   let repairing = false;
+  const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const sameCounts = (a: BackupCounts, b: BackupCounts) =>
+    a.actions === b.actions &&
+    Object.keys(a.baskets).every((k) => a.baskets[k] === b.baskets[k]) &&
+    Object.keys(b.baskets).every((k) => a.baskets[k] === b.baskets[k]);
   const checkOurBackup = async (drop: () => Promise<void>): Promise<OurBackupCheck> => {
-    if (!d.on || closed || !d.deviceActive() || !d.deviceDefaultCoins) return 'skip';
+    if (!d.on || closed || !d.deviceActive() || !d.deviceCounts) return 'skip';
     if (lean || mark?.stage === 'full' || d.busy?.()) return 'skip';
     const deviceSik = d.device()?.getSettings().storageIdentityKey;
     if (!deviceSik) return 'skip';
     try {
-      const kept = (await d.kv.get(checkKey))?.[checkKey] as { deviceSik?: string } | undefined;
+      const kept = (await d.kv.get(checkKey))?.[checkKey] as { deviceSik?: string } | null | undefined;
       if (kept?.deviceSik === deviceSik) return 'done';
     } catch (e) {
       log('[spendable-first] backup check: could not read its record; again next open:', e);
       return 'error';
     }
-    let server: number;
-    let device: number;
+    /**
+     * Both sides' counts, after a push of this device's rows (review of 0c74701d, 3: a coin received, or a late push,
+     * between the reads is not a half-filled backup). Our server is asked for this device's baskets, one at a time.
+     */
+    let c: OurServerClient;
+    let auth: { identityKey: string; userId: number };
+    const read = async (): Promise<{ device: BackupCounts; server: BackupCounts }> => {
+      const pushed = await d.pushNow?.();
+      if (pushed && !pushed.ok) throw new Error('the push before the check did not go through');
+      const device = await d.deviceCounts!();
+      const server: BackupCounts = {
+        actions: Number((await c.listActions!(auth, validateListActionsArgs({ labels: [], limit: 1 }))).totalActions),
+        baskets: {},
+      };
+      for (const basket of Object.keys(device.baskets)) {
+        await sleep(CHECK_GAP_MS);
+        const vargs = validateListOutputsArgs({ basket, limit: 1 });
+        server.baskets[basket] = Number((await c.listOutputs!(auth, vargs)).totalOutputs);
+      }
+      const finite = (x: BackupCounts) => Number.isFinite(x.actions) && Object.values(x.baskets).every(Number.isFinite);
+      if (!finite(device) || !finite(server)) throw new Error('no count');
+      return { device, server };
+    };
+    let counts: { device: BackupCounts; server: BackupCounts };
     try {
-      const c = await connect();
-      if (typeof c.listOutputs !== 'function') return 'skip';
+      c = await connect();
+      if (typeof c.listOutputs !== 'function' || typeof c.listActions !== 'function') return 'skip';
       const identityKey = await d.identityKey();
       const { user } = await c.findOrInsertUser(identityKey);
-      const vargs = validateListOutputsArgs({ basket: 'default', limit: 1 });
-      server = Number((await c.listOutputs({ identityKey, userId: user.userId }, vargs)).totalOutputs);
-      device = Number(await d.deviceDefaultCoins());
-      if (!Number.isFinite(server) || !Number.isFinite(device)) throw new Error('no count');
+      auth = { identityKey, userId: user.userId };
+      counts = await read();
+      // Repaired only if the difference holds once more after a pause and another push.
+      if (!sameCounts(counts.device, counts.server)) {
+        await sleep(CHECK_RECHECK_MS);
+        counts = await read();
+      }
     } catch (e) {
       log('[spendable-first] backup check: our server or this device could not be read; again next open:', e);
       return 'error';
     }
     if (d.busy?.()) return 'skip';
-    const done = (result: 'match' | 'repaired') =>
-      d.kv
-        .set({ [checkKey]: { deviceSik, result, server, device, at: now() } })
-        .catch((e) => log('[spendable-first] backup check: could not record it; it runs again next open:', e));
-    if (server === device) {
-      await done('match');
+    const record = (result: 'match' | 'repaired') =>
+      d.kv.set({ [checkKey]: { deviceSik, result, ...counts, at: now() } });
+    if (sameCounts(counts.device, counts.server)) {
+      await record('match').catch((e) =>
+        log('[spendable-first] backup check: could not record it; again next open:', e),
+      );
       return 'match';
     }
-    log(`[spendable-first] our server's backup differs (${server} coins there, ${device} here): it is filled again`);
+    log(
+      `[spendable-first] our server's backup differs (${JSON.stringify(counts.server)} there, ${JSON.stringify(counts.device)} here): it is filled again`,
+    );
     try {
-      // The marker first: a remote dropped with no marker would come back "not-needed" on our server's cursor.
+      // The marker first: a remote dropped with no marker would come back "not-needed" on our server's cursor. Then the
+      // record, before the drop (review of 0c74701d, 4): a repair whose record couldn't be written never drops, so no
+      // refill -> register -> check loop.
       const at = now();
       await saveFill(
         {
           deviceSik,
           progress: { stage: 'restart', offsets: [], full: true },
+          full: true,
           incomplete: { at, retryAt: at, reason: "our server's backup was incomplete", kind: 'failed', failures: 0 },
         },
         true,
       );
-      await drop();
+      await record('repaired');
     } catch (e) {
       log('[spendable-first] backup check: the repair could not start; again next open:', e);
       return 'error';
     }
-    repairing = true;
-    await done('repaired');
+    try {
+      await drop();
+    } catch (e) {
+      // Not dropped: the record goes, so the check (and the repair) runs again next open.
+      await d.kv
+        .set({ [checkKey]: null })
+        .catch((err) => log('[spendable-first] backup check: could not clear its record:', err));
+      log('[spendable-first] backup check: our server could not be dropped; again next open:', e);
+      return 'error';
+    }
+    // Out of this session too, so the refill can run now (the background arms its retry alarm on the kept retryAt,
+    // review of 0c74701d, 5); else it waits for the next open, "Backup incomplete" showing meanwhile.
+    try {
+      if (!d.detachRemote) throw new Error('no detach');
+      await d.detachRemote(SNAPSHOT_SERVER_URL);
+      dropped = true;
+    } catch (e) {
+      log('[spendable-first] our server stays in this session; it is filled again next open:', e);
+      repairing = true;
+    }
     return 'repair';
   };
 
