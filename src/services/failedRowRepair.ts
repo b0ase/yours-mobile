@@ -313,8 +313,8 @@ export async function findConflicts(
 }
 
 /** Labels that keep a "payment didn't go through" notice in the wallet's own store until it is shown. */
-export const NOTICE_RESPENT = 'bwx notice: payment respent';
-export const NOTICE_PARENT_FAILED = 'bwx notice: payment parent failed';
+export const NOTICE_RESPENT = 'bwx notice payment respent';
+export const NOTICE_PARENT_FAILED = 'bwx notice payment parent failed';
 const isOutgoing = (row: TxRow) => !!row.isOutgoing || (row.satoshis ?? 0) < 0;
 
 type Settled = { held?: 'conflict' | 'unconfirmed'; detail?: string; victims: Victim[] };
@@ -397,7 +397,9 @@ export async function takeFailedNotices(storage: {
           const sent = (await sp.findOutputs({ partial: { transactionId: m.transactionId }, noScript: true }))
             .filter((o) => o.basketId == null && !o.change)
             .reduce((n, o) => n + (o.satoshis ?? 0), 0);
-          if (t?.txid) out.push({ txid: t.txid, kind, sentSats: sent });
+          // Only a payment that really failed (fifth review, M2): no site can set these labels (reservedLabels.ts), and
+          // a label on anything else is dropped unseen.
+          if (t?.txid && t.status === 'failed') out.push({ txid: t.txid, kind, sentSats: sent });
           await sp.updateTxLabelMap(m.transactionId, m.txLabelId, { isDeleted: true });
         }
     return out;
@@ -525,74 +527,159 @@ type GuardedReq = {
   status: string;
   addHistoryNote(note: unknown): void;
   updateStorageDynamicProperties(sp: unknown): Promise<void>;
+  refreshFromStorage?(sp: unknown): Promise<void>;
 };
 type ProofServices = {
   getMerklePath(txid: string): Promise<{ merklePath?: unknown } | undefined>;
   getChainTracker(): Promise<ChainTracker>;
 };
+type GuardStore = RepairStore & { getServices(): ProofServices };
 const GUARDED = Symbol.for('bwx.unfailGuard');
+
+/** Transaction states of a payment of this device not yet settled on chain (inboundSync IN_FLIGHT). */
+const IN_FLIGHT_STATUSES = ['nosend', 'unsigned', 'unprocessed', 'sending', 'unproven', 'nonfinal', 'unfail'];
+
+/**
+ * Outputs of `txid` (vout -> spender) that an in-flight payment of this device spends (fifth review, L2), the same check
+ * Find by txid makes (recoverByTxidWiring inFlightSpends): failing `txid` cleared those spend links, and the chain, not
+ * having the spender yet, calls the outputs unspent, so the toolbox's un-fail would make them spendable while the
+ * spender's own change counts too.
+ */
+async function inFlightChildren(sp: RepairStore, txid: string, ownIds: Set<number>): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const s = sp as RepairStore & {
+    findTransactions(args: {
+      partial: { status?: string };
+      noRawTx?: boolean;
+    }): Promise<(TxRow & { rawTx?: number[] | null })[]>;
+  };
+  for (const status of IN_FLIGHT_STATUSES)
+    for (const t of await s.findTransactions({ partial: { status } })) {
+      if (ownIds.has(t.transactionId)) continue;
+      const raw = t.rawTx?.length
+        ? t.rawTx
+        : (await sp.findProvenTxReqs({ partial: { txid: t.txid ?? '' } }))[0]?.rawTx;
+      if (!raw?.length) continue;
+      try {
+        for (const i of Transaction.fromBinary(Array.from(raw)).inputs)
+          if (i.sourceTXID === txid) out.set(i.sourceOutputIndex, t.transactionId);
+      } catch {
+        /* unreadable: nothing to go on */
+      }
+    }
+  return out;
+}
+
+/** Put the spend links back: each output an in-flight payment spends is spent by it, not spendable. */
+async function relinkChildren(sp: RepairStore, txid: string, children: Map<number, number>) {
+  if (!children.size) return;
+  await sp.transaction(async (trx) => {
+    for (const [vout, spender] of children)
+      for (const o of await sp.findOutputs({ partial: { txid, vout }, noScript: true, trx }))
+        await sp.updateOutput(o.outputId, { spendable: false, spentBy: spender }, trx);
+  });
+}
+
+type Decision = { proceed: true; ownIds: Set<number> } | { proceed: false; held: string; detail?: string };
+
+/**
+ * May the toolbox un-fail `req.txid` now? Its bytes come from storage (fifth review, L3: never the caller's copy alone;
+ * none at all: held). Nothing else of this wallet spends its coins: yes. Otherwise only with its proof checked and at
+ * SETTLE_CONFIRMATIONS, after settleInputs; else held.
+ */
+async function guardDecision(sp: GuardStore, req: GuardedReq): Promise<Decision> {
+  await req.refreshFromStorage?.(sp);
+  const txs = await sp.findTransactions({ partial: { txid: req.txid }, noRawTx: true });
+  const ownIds = new Set(txs.map((t) => t.transactionId));
+  if (!req.rawTx?.length)
+    return { proceed: false, held: 'unchecked', detail: 'no transaction bytes to check its coins' };
+  const rawTx = Array.from(req.rawTx);
+  const found = await findConflicts(sp, ownIds, rawTx);
+  if (!found.conflict && !found.victims.length) return { proceed: true, ownIds };
+  if (found.conflict) return { proceed: false, held: 'conflict', detail: found.conflict };
+  let proof: ProofCheck = { state: 'unchecked', confirmations: 0 };
+  try {
+    const services = sp.getServices();
+    proof = await checkProof(req.txid, {
+      getMerklePath: (t) => services.getMerklePath(t),
+      tracker: await services.getChainTracker(),
+    });
+  } catch {
+    /* no services: unchecked */
+  }
+  if (proof.state !== 'mined')
+    return { proceed: false, held: 'unchecked', detail: `its proof couldn’t be checked (${proof.state})` };
+  const settled = await settleInputs(sp, { ownIds, rawTx, minedTxid: req.txid, confirmations: proof.confirmations });
+  return settled.held ? { proceed: false, held: settled.held, detail: settled.detail } : { proceed: true, ownIds };
+}
+
+/** Held: the request goes to 'doubleSpend', which the toolbox's reconcile skips and ReviewDoubleSpends brings back. */
+async function holdRequest(sp: GuardStore, req: GuardedReq, d: { held: string; detail?: string }) {
+  console.warn(`[unfailGuard] ${req.txid}: not un-failed (${d.held}): ${d.detail ?? ''}`);
+  req.status = 'doubleSpend';
+  req.addHistoryNote({ what: 'bwxUnfailHeld', reason: d.held } as never);
+  await req.updateStorageDynamicProperties(sp);
+}
 
 /**
  * Every un-fail in the toolbox goes through StorageProvider.unfailTransactionsForProof: TaskUnFail (whatever queued the
  * request: our repair, Find mined payments, or TaskReviewDoubleSpends turning a 'doubleSpend' request it now sees mined
- * into 'unfail'), and the proof completion path (reconcileProvenTxReqTransactions). Third review of fix/385, 1: those
- * handed a coin another live payment of this wallet had spent since to the mined one, with nothing failed and no
- * notice. Guarded here, once, before any wallet opens (its first Monitor run comes with createWebWallet):
- *  - nothing else spends its coins: the toolbox's own un-fail, unchanged;
- *  - otherwise, with its proof checked and at SETTLE_CONFIRMATIONS: settleInputs (the other payments failed through the
- *    toolbox, notices stored, the coins marked spent), then the toolbox's un-fail;
- *  - else held: nothing changes; a request TaskUnFail brought goes back to 'doubleSpend', so TaskReviewDoubleSpends
- *    brings it again and a later run finishes it.
+ * into 'unfail'), and proof completion (reconcileProvenTxReqTransactions, from Arcade SSE MINED, CheckForProofs,
+ * CheckNoSends and ReviewStatus). Third review of fix/385, 1: those handed a coin another live payment of this wallet
+ * had spent since to the mined one, with nothing failed and no notice. Guarded here, once, before any wallet opens
+ * (its first Monitor run comes with createWebWallet), by guardDecision:
+ *  - proceed: the toolbox's own un-fail, then the spend links of in-flight payments that spend its outputs restored;
+ *  - held: nothing changes; the request goes to 'doubleSpend' so TaskReviewDoubleSpends brings it again and a later
+ *    run finishes it. On proof completion the reconcile is not run at all (fifth review, M1): held there, the toolbox
+ *    would loop and throw, leaving a 'completed' request every ReviewStatus run trips over.
  */
 export function installUnfailGuard(proto: object = StorageProvider.prototype): void {
   const p = proto as Record<string | symbol, unknown>;
   if (p[GUARDED]) return;
   p[GUARDED] = true;
-  const orig = p.unfailTransactionsForProof as (
+  const origUnfail = p.unfailTransactionsForProof as (
     this: unknown,
     req: GuardedReq,
     indent?: number,
     requestUpdate?: unknown,
   ) => Promise<string>;
+  const origReconcile = p.reconcileProvenTxReqTransactions as (
+    this: unknown,
+    req: GuardedReq,
+    proven: unknown,
+  ) => Promise<void>;
+
   p.unfailTransactionsForProof = async function (
-    this: RepairStore & { getServices(): ProofServices },
+    this: GuardStore,
     req: GuardedReq,
     indent = 0,
     requestUpdate?: unknown,
   ): Promise<string> {
     const txs = await this.findTransactions({ partial: { txid: req.txid }, noRawTx: true });
-    const toRepair = txs.filter((t) => requestUpdate != null || t.status === 'failed');
-    if (!toRepair.length || !req.rawTx?.length) return orig.call(this, req, indent, requestUpdate);
-    const rawTx = Array.from(req.rawTx);
-    const ownIds = new Set(txs.map((t) => t.transactionId));
-    const found = await findConflicts(this, ownIds, rawTx);
-    if (!found.conflict && !found.victims.length) return orig.call(this, req, indent, requestUpdate);
-    let settled: Settled = { held: 'conflict', detail: found.conflict, victims: [] };
-    if (!found.conflict) {
-      let proof: ProofCheck = { state: 'unchecked', confirmations: 0 };
-      try {
-        const services = this.getServices();
-        proof = await checkProof(req.txid, {
-          getMerklePath: (t) => services.getMerklePath(t),
-          tracker: await services.getChainTracker(),
-        });
-      } catch {
-        /* no services: unchecked */
-      }
-      settled =
-        proof.state === 'mined'
-          ? await settleInputs(this, { ownIds, rawTx, minedTxid: req.txid, confirmations: proof.confirmations })
-          : { held: 'unconfirmed', detail: `its proof couldn’t be checked (${proof.state})`, victims: found.victims };
+    if (!txs.some((t) => requestUpdate != null || t.status === 'failed'))
+      return origUnfail.call(this, req, indent, requestUpdate);
+    const d = await guardDecision(this, req);
+    if (!d.proceed) {
+      await holdRequest(this, req, d);
+      return `${' '.repeat(indent)}held (${d.held}): ${d.detail ?? ''}\n`;
     }
-    if (settled.held) {
-      console.warn(`[unfailGuard] ${req.txid}: not un-failed (${settled.held}): ${settled.detail ?? ''}`);
-      if (requestUpdate != null) {
-        req.status = 'doubleSpend';
-        req.addHistoryNote({ what: 'bwxUnfailHeld', reason: settled.held } as never);
-        await req.updateStorageDynamicProperties(this);
-      }
-      return `${' '.repeat(indent)}held (${settled.held}): ${settled.detail ?? ''}\n`;
-    }
-    return orig.call(this, req, indent, requestUpdate);
+    const children = await inFlightChildren(this, req.txid, d.ownIds);
+    const log = await origUnfail.call(this, req, indent, requestUpdate);
+    await relinkChildren(this, req.txid, children);
+    return log;
   };
+
+  if (typeof origReconcile === 'function')
+    p.reconcileProvenTxReqTransactions = async function (
+      this: GuardStore,
+      req: GuardedReq,
+      proven: unknown,
+    ): Promise<void> {
+      const txs = await this.findTransactions({ partial: { txid: req.txid }, noRawTx: true });
+      if (txs.some((t) => t.status === 'failed')) {
+        const d = await guardDecision(this, req);
+        if (!d.proceed) return holdRequest(this, req, d);
+      }
+      return origReconcile.call(this, req, proven);
+    };
 }

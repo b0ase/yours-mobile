@@ -1589,8 +1589,10 @@ async function admitOnce(
   /**
    * The chain has a transaction this device holds as failed (C4, D6): not failed. Its status becomes 'unproven' (the
    * monitor proves it from there) and the coins it spends are marked spent by it, all only if it is still as read.
+   * A coin it spends that another live payment of this device has spent since is never handed over here (#385 fifth
+   * review, L1): 'contested', nothing written; the gated repair (services/failedRowRepair.ts) settles it.
    */
-  const settleMined = async (t: TxRow, txid: string) => {
+  const settleMined = async (t: TxRow, txid: string): Promise<boolean | 'contested'> => {
     let tx = await deviceTx(txid);
     if (!tx) {
       const c = await chainTx(txid);
@@ -1603,6 +1605,21 @@ async function admitOnce(
         trx,
       });
       if (!cur || cur.status !== 'failed' || (cur.provenTxId ?? null) !== (t.provenTxId ?? null)) return false;
+      if (!tx) return 'contested'; // its coins can't be checked: never set going unchecked
+      for (const input of tx.inputs) {
+        if (!input.sourceTXID) continue;
+        const [o] = await store.findOutputs({
+          partial: { userId, txid: input.sourceTXID, vout: input.sourceOutputIndex },
+          trx,
+        });
+        if (typeof o?.spentBy !== 'number' || o.spentBy === t.transactionId) continue;
+        const [by] = await store.findTransactions({
+          partial: { userId, transactionId: o.spentBy },
+          noRawTx: true,
+          trx,
+        });
+        if (by && by.status !== 'failed') return 'contested';
+      }
       await store.updateTransaction(t.transactionId!, { status: 'unproven' }, trx);
       for (const input of tx?.inputs ?? []) {
         if (!input.sourceTXID) continue;
@@ -1656,7 +1673,9 @@ async function admitOnce(
       if (r === 'restored') return finish(e, 'applied');
       // Nothing of ours to restore (its change spent elsewhere, or none): the chain still has it, so not failed (D6).
     }
-    return (await settleMined(t, e.txid)) ? finish(e, 'applied') : finish(e, 'refused');
+    const settled = await settleMined(t, e.txid);
+    if (settled === 'contested') return wait(e, 'chain');
+    return settled ? finish(e, 'applied') : finish(e, 'refused');
   };
 
   /** The device's row for a coin entry: by its transaction and vout (a row may have no txid: D1), else by outpoint. */
