@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { parseRecipient, resolveRecipient, type Fetch } from './names';
+import { PrivateKey, ProtoWallet } from '@bsv/sdk';
+import { parseRecipient, resolveRecipient, UNSIGNED_ORD, type Fetch } from './names';
+import { signOrdProof } from './paymail';
 import {
   GIFT_NO_ORD_DESTINATION,
   giftDestination,
@@ -12,7 +14,8 @@ import {
 
 const ADDR = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
 const ORD = '1BoatSLRHtKNngkdXEeobR76b53LETtpyT';
-const KEY = '02cbe7d893a7515c726c9f069cdd56d379662c7634a4ba8eaf2279fcea76686ed8';
+const OWNER = PrivateKey.fromRandom();
+const KEY = OWNER.toPublicKey().toString();
 
 const mock =
   (routes: Record<string, unknown>): Fetch =>
@@ -31,7 +34,8 @@ const P2P = {
 };
 
 describe('gift recipient → ordinals destination', () => {
-  test('$handle (bWalletX) with a stored ord_address → that address', async () => {
+  test('$handle (bWalletX) with a stored, owner-signed ord_address → that address', async () => {
+    const ordProof = await signOrdProof(new ProtoWallet(OWNER), ORD);
     const f = mock({
       'https://dns.google.com/': { Status: 3 },
       'https://bwalletx.com/.well-known/bsvalias': {
@@ -42,14 +46,14 @@ describe('gift recipient → ordinals destination', () => {
         },
       },
       'https://pay.bwallet.space/api/paymail/id/': { pubkey: KEY },
-      'https://pay.bwallet.space/api/paymail/ord/alice@bwalletx.com': { address: ORD },
+      'https://pay.bwallet.space/api/paymail/ord/alice@bwalletx.com': { address: ORD, ordProof },
     });
     const r = await resolveRecipient(f, parseRecipient('$alice'), 'bwalletx.com');
     expect(giftDestination(r)).toEqual({ ok: true, to: ORD });
     expect(giftRecipientLabel(r, ORD)).toBe('$alice');
   });
 
-  test('external paymail with the ordinals capability → its ordAddress, never the P2P target', async () => {
+  test('outside paymail with the ordinals capability (no ordProof) → its ordAddress, never the P2P target', async () => {
     const f = mock({
       'https://dns.google.com/': {},
       'https://ord.ex/.well-known/bsvalias': {
@@ -61,6 +65,24 @@ describe('gift recipient → ordinals destination', () => {
     expect(r.targetKind).toBe('paymail');
     expect(giftDestination(r)).toEqual({ ok: true, to: ORD });
     expect(giftRecipientLabel(r, ORD)).toBe('bob@ord.ex');
+  });
+
+  test('b-Aware 102/250: a bWalletX $handle whose ord_address is unsigned → refused', async () => {
+    const f = mock({
+      'https://dns.google.com/': { Status: 3 },
+      'https://bwallet.space/.well-known/bsvalias': {
+        capabilities: {
+          ...P2P,
+          pki: 'https://pay.bwallet.space/api/paymail/id/{alias}@{domain.tld}',
+          ordAddress: 'https://pay.bwallet.space/api/paymail/ord/{alias}@{domain.tld}',
+        },
+      },
+      'https://pay.bwallet.space/api/paymail/id/': { pubkey: KEY },
+      'https://pay.bwallet.space/api/paymail/ord/alice@bwallet.space': { address: ORD },
+    });
+    // bwallet.space (legacy) is ours in every build; tests have no build paymail domain, so bwalletx.com isn't.
+    const r = await resolveRecipient(f, parseRecipient('$alice'), 'bwallet.space');
+    expect(giftDestination(r)).toEqual({ ok: false, error: UNSIGNED_ORD });
   });
 
   test('raw 1… address goes as typed', async () => {

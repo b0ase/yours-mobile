@@ -576,6 +576,57 @@ export const bindMyNames = (
   return bindFlight;
 };
 
+let ordProofFlight: Promise<number> | null = null;
+/**
+ * b-Aware 102/250: payers refuse an ord address the host serves without its owner's signature (names.ts
+ * UNSIGNED_ORD). Names registered before the proof existed, or from an older app, have none, so tokens to them would
+ * be refused. On each name sync the owner's wallet signs its OWN ord address for every name of this wallet whose ord
+ * answer is that address without a valid proof (a profile update of its own name: no fee, name and picture kept).
+ * It never signs whatever the host serves: an address that isn't this account's is left alone. Returns how many.
+ */
+export const proveMyOrdAddress = (
+  f: Fetch,
+  wallet: NameSigner,
+  ordAddress: string | undefined,
+  at: { api: string; domain: string } = { api: BWALLET_PAYMAIL_API, domain: BWALLET_PAYMAIL_DOMAIN },
+): Promise<number> => {
+  if (!ordAddress || !at.api || !at.domain) return Promise.resolve(0);
+  if (ordProofFlight) return ordProofFlight;
+  const url = (path: string) => `${at.api}/api/paymail/${path}`;
+  ordProofFlight = (async () => {
+    const { checkOrdProof } = await import('./names');
+    const { publicKey } = await wallet.getPublicKey({ identityKey: true });
+    const r = await f(`${url('lookup')}?key=${publicKey}`).catch(() => null);
+    const j = r?.ok ? ((await r.json().catch(() => null)) as { names?: { paymail?: unknown }[] } | null) : null;
+    let signed = 0;
+    for (const n of Array.isArray(j?.names) ? j.names : []) {
+      if (typeof n?.paymail !== 'string' || !n.paymail) continue;
+      const alias = aliasOf(n.paymail);
+      const o = await f(url(`ord/${alias}@${at.domain}`)).catch(() => null);
+      const ord = o?.ok
+        ? ((await o.json().catch(() => null)) as { address?: unknown; ordProof?: unknown } | null)
+        : null;
+      if (!ord || ord.address !== ordAddress) continue;
+      if (ord.ordProof !== undefined && (await checkOrdProof(publicKey, ordAddress, ord.ordProof)) === 'ok') continue;
+      const body = {
+        ...(await signRequest(wallet, 'register', { alias, ordAddress })),
+        ordProof: await signOrdProof(wallet, ordAddress),
+      };
+      if (
+        await postJson(f, url('register'), body).then(
+          () => true,
+          () => false,
+        )
+      )
+        signed++;
+    }
+    return signed;
+  })().finally(() => {
+    ordProofFlight = null;
+  });
+  return ordProofFlight;
+};
+
 /** Two-party handovers (docs/NAME-BINDINGS.md): the owner releases a name to a key; that key accepts. */
 export type Handover = { alias: string; from_key: string; to_key: string; seq: number };
 
