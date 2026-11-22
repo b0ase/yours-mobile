@@ -146,6 +146,7 @@ import {
 import {
   SNAPSHOT_SEND_WAIT,
   SNAPSHOT_SERVER_URL,
+  addRemoteRefusal,
   repairSyncRemote,
   spendableFirstOn,
   withSnapshotRemote,
@@ -4865,7 +4866,11 @@ if (!(
       const { account } = chromeStorageService.getCurrentAccountObject();
       const config: StorageConfig = account?.storageConfig ?? { remotes: [] };
       // Never our server while it is held out of the session for its one-time repair.
-      const remoteUrl = repairSyncRemote(config, accountContext.ourBackupHeldOut());
+      const remoteUrl = repairSyncRemote(
+        config,
+        accountContext.ourBackupHeldOut(),
+        await spendableFirstOn(chrome.storage?.local as never),
+      );
       // After the reconcile (or alone, with no remote): token outputs on chain
       // that no store recorded, searched over the wider window too. Then a final
       // pass relinquishes token outputs the overlay or chain reports spent: the
@@ -5063,6 +5068,12 @@ if (!(
   };
 
   const processStorageAddRemote = async (url: string, sendResponse: CallbackResponse) => {
+    // Our server joins only through its fill and hold-out (spendableFirstWiring), never by hand (review of f42df01f, 3).
+    const refused = addRemoteRefusal(url);
+    if (refused) {
+      sendResponse({ type: 'STORAGE_ADD_REMOTE', success: false, error: refused });
+      return;
+    }
     try {
       await ensureWallet(true);
     } catch (err) {

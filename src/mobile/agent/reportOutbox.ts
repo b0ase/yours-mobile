@@ -9,7 +9,7 @@
 import { redactSecrets } from '../errors/errorReport';
 import { reportToB, type ReportResult } from './paid';
 import { isNetworkError, OFFLINE_TEXT } from '../../utils/offline';
-import { setReportSink } from '../../services/reportSink';
+import { setReportSink, takeWalletReports } from '../../services/reportSink';
 
 export type OutboxReason = 'offline' | 'signin' | 'error';
 
@@ -206,5 +206,11 @@ export const flushOutbox = (
 };
 
 // Wallet-core reports (services/reportSink.ts, e.g. our server's backup failing again and again) join this outbox:
-// sent with its retries and listed in "Your reports".
-setReportSink((account, text) => void enqueueReport(account, text, 'error'));
+// sent with its retries and listed in "Your reports"; in the extension, also those its background kept.
+const takeReport = (account: string | null | undefined, text: string) => void enqueueReport(account, text, 'error');
+/** Join wallet-core reports to this outbox, with those the extension's background kept (run once at load). */
+export const joinWalletReports = () => {
+  setReportSink(takeReport);
+  takeWalletReports(takeReport);
+};
+joinWalletReports();

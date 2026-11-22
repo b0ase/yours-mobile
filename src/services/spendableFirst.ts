@@ -95,9 +95,27 @@ export function withSnapshotRemote<T extends StoreConfig | undefined>(config: T,
  * The remote STORAGE_REPAIR_SYNC reconciles with: the active one, else the first backup, never our server while it is
  * held out of the session for its one-time repair (review of 8ee88600, 5). Undefined: none.
  */
-export function repairSyncRemote(config: StoreConfig | undefined, ourServerHeldOut: boolean): string | undefined {
+export function repairSyncRemote(
+  config: StoreConfig | undefined,
+  ourServerHeldOut: boolean,
+  flagOn: boolean,
+): string | undefined {
   if (config?.activeRemote) return config.activeRemote;
-  return config?.remotes?.find((u) => !(ourServerHeldOut && u === SNAPSHOT_SERVER_URL));
+  // Flag off: our server is never connected (backupsFor), Repair Sync included (review of f42df01f, 4).
+  return backupsFor(config?.remotes, flagOn)?.find((u) => !(ourServerHeldOut && u === SNAPSHOT_SERVER_URL));
+}
+
+/** Settings › Storage: our server is never added by hand (it joins only through its fill and hold-out). */
+export const OUR_SERVER_ADD_REFUSAL =
+  'This server is added by bWalletX itself once your backup to it is complete, so it cannot be added here.';
+/** Settings › Storage's add: the refusal for our server's URL in any spelling (review of f42df01f, 3), else undefined. */
+export function addRemoteRefusal(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    return u.hostname.toLowerCase() === new URL(SNAPSHOT_SERVER_URL).hostname ? OUR_SERVER_ADD_REFUSAL : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

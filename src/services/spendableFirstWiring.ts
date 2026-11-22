@@ -645,6 +645,8 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   } => {
     const failing =
       (fillState?.incomplete?.failures ?? 0) >= OUR_BACKUP_GIVE_UP_FAILURES ? ({ failing: true } as const) : {};
+    // Remote-active: the repair can't run until this device is active, so nothing is said yet (review of f42df01f, 2).
+    if (heldOut() && !d.deviceActive()) return { incomplete: false };
     if (heldOut()) {
       const rows = (fillState?.progress?.offsets ?? [])
         .filter((o) => o.offset < Number.MAX_SAFE_INTEGER)

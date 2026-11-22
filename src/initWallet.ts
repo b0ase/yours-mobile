@@ -94,6 +94,7 @@ import { guardPModuleSpends } from './services/pModuleSpendGate';
 import { guardAssetIdLoads } from './services/assetIdCheck';
 import { eitherChainSource, oneSatChainLookups, type ChainLookups } from './services/chainSources';
 import {
+  markDeviceStore,
   installInboundSyncGuard,
   registerInboundVerifier,
   admitPending,
@@ -482,7 +483,9 @@ const resolveStorageConfig = (
  * correctly identify which local store is authoritative.
  */
 const ensureStorageIdentityKey = async (chromeStorageService: ChromeStorageService): Promise<string> => {
-  const existing = chromeStorageService.getCurrentAccountObject().storageIdentityKey;
+  // The top-level field (review of f42df01f, 1): getCurrentAccountObject() returns only a few fields once accounts
+  // exist, so reading it there made a fresh random key on every open (the device store kept the first one).
+  const existing = chromeStorageService.storage?.storageIdentityKey;
   if (existing) return existing;
   const bytes = crypto.getRandomValues(new Uint8Array(8));
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -490,6 +493,36 @@ const ensureStorageIdentityKey = async (chromeStorageService: ChromeStorageServi
   await chromeStorageService.update({ storageIdentityKey: key });
   return key;
 };
+
+/** The install's storage identity key as initWallet reads it (tests). */
+export const storageIdentityKeyFor = ensureStorageIdentityKey;
+
+/**
+ * After the stores open: the key kept is the device store's own (its IndexedDB keeps the key it was created with,
+ * whatever later opens pass). One that differs, from an earlier build that made a fresh key per open, is corrected
+ * once, so every later open, the inbound guard's own-store marks and our server's 'repaired' record agree.
+ */
+async function keepDeviceStoreKey(
+  chromeStorageService: ChromeStorageService,
+  storage: unknown,
+  used: string,
+): Promise<string> {
+  const own = (storage as { _stores?: { storage: unknown }[] })._stores
+    ?.map((m) => m.storage)
+    .find((st): st is StorageIdb => st instanceof StorageIdb);
+  let real: string | undefined;
+  try {
+    real = own?.getSettings().storageIdentityKey;
+  } catch {
+    real = undefined;
+  }
+  if (!real || real === used) return used;
+  markDeviceStore(real);
+  await chromeStorageService
+    .update({ storageIdentityKey: real })
+    .catch((e) => console.warn('[initWallet] could not keep the device store key:', e));
+  return real;
+}
 
 export interface InitWalletOptions {
   onTransactionBroadcasted?: (txid: string) => void;
@@ -650,6 +683,7 @@ export const openAccountStorageForBackup = async (
     onStoragePaymentRequired: storagePaymentHook(),
   };
   const { storage, destroy, monitor, wallet: backupWallet } = await createWebWallet(backupConfig);
+  await keepDeviceStoreKey(chromeStorageService, storage, storageIdentityKey);
   if (!refuseStorageAuthFetchPayments(backupWallet, storageUrls(storage, { activeRemote, backups })))
     console.error('[initWallet] storage 402 payments are not refused');
   // Another account's stores, opened for a backup: their keys count, but never "pending" (this storage may be closed).
@@ -747,6 +781,7 @@ export const initWallet = async (
     console.warn('[initWallet] backup storage failed to connect; opening without it:', err);
     return createWebWallet({ ...walletConfig, backups: [] });
   });
+  await keepDeviceStoreKey(chromeStorageService, storage, storageIdentityKey);
   // The factory's own storage calls (/account/status, /account/payment) never pay a 402 (storagePaymentGuard.ts).
   if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups: configuredBackups })))
     console.error('[initWallet] storage 402 payments are not refused');

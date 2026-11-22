@@ -591,6 +591,29 @@ describe('initWallet: our server held out for its repair (review of b936a98c, 3,
     expect(allAsked.slice(before)).toEqual([]);
   });
 
+  test("review of f42df01f, 1: one stable storage identity key, the device store's own, read through the account object", async () => {
+    const deviceSik = (
+      (held.storage as unknown as { _stores: { storage: unknown }[] })._stores
+        .map((m) => m.storage)
+        .find((st): st is StorageIdb => st instanceof StorageIdb) as StorageIdb
+    ).getSettings().storageIdentityKey;
+    // Both opens in this file (two accounts, one install) kept the install's key: the device store's own.
+    expect(local.storageIdentityKey).toBe(deviceSik);
+    const { ChromeStorageService } = await import('./services/ChromeStorage.service');
+    const { storageIdentityKeyFor, ourServerHeldOut } = await import('./initWallet');
+    const svc = new ChromeStorageService();
+    await svc.getAndSetStorage();
+    const sik = await storageIdentityKeyFor(svc);
+    expect(sik).toBe(deviceSik);
+    expect(await storageIdentityKeyFor(svc)).toBe(sik); // stable: never a fresh key per open
+    // A 'repaired' record (written with the device store's key, as the repair writes it) is found at the next open.
+    const account = svc.getCurrentAccountObject().account;
+    expect(await ourServerHeldOut(account, undefined, [SNAPSHOT_SERVER_URL], sik)).toBe(true);
+    local[ourBackupCheckKey(SNAPSHOT_MARK_KEY(address))] = { deviceSik, check: 'repaired', at: 1 };
+    expect(await ourServerHeldOut(account, undefined, [SNAPSHOT_SERVER_URL], sik)).toBe(false);
+    delete local[ourBackupCheckKey(SNAPSHOT_MARK_KEY(address))];
+  });
+
   test('held out whatever the active store (3); never when our server IS the active store', async () => {
     const { ourServerHeldOut } = await import('./initWallet');
     const acct = { addresses: { identityAddress: 'acct-x' } };

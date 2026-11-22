@@ -2034,6 +2034,11 @@ export const isUncheckedPage = (e: unknown): boolean =>
 const deviceStores = new Set<string>();
 
 /** Check rows from other stores merged into this device's store for this account. Returns the unregister. */
+/** This install's own store, by its real key (initWallet keepDeviceStoreKey): the guard's own-store rules apply to it. */
+export function markDeviceStore(storageIdentityKey: string): void {
+  if (storageIdentityKey) deviceStores.add(storageIdentityKey);
+}
+
 export function registerInboundVerifier(storageIdentityKey: string, identityKey: string, v: InboundVerifier) {
   if (storageIdentityKey) deviceStores.add(storageIdentityKey);
   verifiers.set(identityKey, [...(verifiers.get(identityKey) ?? []), v]);

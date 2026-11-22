@@ -21,7 +21,7 @@ import {
 import { backupBeforeSend } from './deviceSync';
 import { createChangeWriteAhead } from './changeWriteAhead';
 import { createInFlight } from './pushView';
-import { repairSyncRemote, SNAPSHOT_SERVER_URL } from './spendableFirst';
+import { addRemoteRefusal, OUR_SERVER_ADD_REFUSAL, repairSyncRemote, SNAPSHOT_SERVER_URL } from './spendableFirst';
 
 const services = {
   chain: 'main',
@@ -161,6 +161,7 @@ function init(
     flushUnbacked?: () => Promise<unknown>;
     now?: () => number;
     report?: (text: string) => void;
+    deviceActive?: () => boolean;
   } = {},
 ) {
   const log = { fills: [] as { full?: boolean; unfinished?: boolean }[], attached: 0 };
@@ -170,7 +171,7 @@ function init(
     newClient: client,
     device: () => x.dev as never,
     identityKey: async () => x.kd.identityKey,
-    deviceActive: () => true,
+    deviceActive: o.deviceActive ?? (() => true),
     tracker: async () => ({ isValidRootForHeight: async () => true }),
     remoteDefaultCoins: async () => 0,
     makeDeviceActive: async () => undefined,
@@ -405,11 +406,45 @@ describe('our server’s one-time repair: held out of the session until the whol
   test('(e) STORAGE_REPAIR_SYNC during the repair never reconciles with our server', () => {
     const only = { remotes: [SNAPSHOT_SERVER_URL] };
     const both = { remotes: [SNAPSHOT_SERVER_URL, 'https://wallet.1sat.app'] };
-    expect(repairSyncRemote(only, true)).toBeUndefined();
-    expect(repairSyncRemote(both, true)).toBe('https://wallet.1sat.app');
+    expect(repairSyncRemote(only, true, true)).toBeUndefined();
+    expect(repairSyncRemote(both, true, true)).toBe('https://wallet.1sat.app');
     // Repaired (or not held out): as before, the first remote.
-    expect(repairSyncRemote(both, false)).toBe(SNAPSHOT_SERVER_URL);
-    expect(repairSyncRemote({ activeRemote: 'https://x.example', remotes: [] }, true)).toBe('https://x.example');
+    expect(repairSyncRemote(both, false, true)).toBe(SNAPSHOT_SERVER_URL);
+    expect(repairSyncRemote({ activeRemote: 'https://x.example', remotes: [] }, true, true)).toBe('https://x.example');
+  });
+
+  test('review of f42df01f, 4: flag off, Repair Sync never connects our server (even first in the saved remotes)', () => {
+    const both = { remotes: [SNAPSHOT_SERVER_URL, 'https://wallet.1sat.app'] };
+    expect(repairSyncRemote(both, false, false)).toBe('https://wallet.1sat.app');
+    expect(repairSyncRemote({ remotes: [SNAPSHOT_SERVER_URL] }, false, false)).toBeUndefined();
+    // The account's active store is its store, flag or not.
+    expect(repairSyncRemote({ activeRemote: SNAPSHOT_SERVER_URL, remotes: [] }, false, false)).toBe(
+      SNAPSHOT_SERVER_URL,
+    );
+  });
+
+  test('review of f42df01f, 3: Settings › Storage can never add our server by hand (no fill, no hold-out)', () => {
+    for (const url of [
+      SNAPSHOT_SERVER_URL,
+      `${SNAPSHOT_SERVER_URL}/`,
+      'HTTPS://Storage.bwalletx.com',
+      'https://storage.bwalletx.com:443',
+    ])
+      expect(addRemoteRefusal(url)).toBe(OUR_SERVER_ADD_REFUSAL);
+    expect(OUR_SERVER_ADD_REFUSAL).toMatch(/^[^:]+\.$/); // one plain sentence
+    expect(addRemoteRefusal('https://wallet.1sat.app')).toBeUndefined();
+    expect(addRemoteRefusal('not a url')).toBeUndefined();
+  });
+
+  test('review of f42df01f, 2: "rebuilding" only while this device is active (the repair can run)', async () => {
+    const x = await setup(2);
+    let active = false;
+    const { w } = init(x, {}, { deviceActive: () => active });
+    expect(w.heldOut()).toBe(true);
+    // Remote-active: ensureOurBackup can't run, so no "rebuilding" line.
+    expect(w.ourBackup()).toEqual({ incomplete: false });
+    active = true;
+    expect(w.ourBackup()).toMatchObject({ incomplete: true, rebuilding: { rows: 0 } });
   });
 
   test('after the repair our server is really in the session: an ordinary push reaches it', async () => {
