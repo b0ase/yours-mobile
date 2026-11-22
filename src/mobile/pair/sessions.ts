@@ -28,7 +28,7 @@ import { claimRid, planReturn, type ReturnExtra, type ReturnPlan } from '../../p
 import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
-import { pairedKeyHost, setProvenPairingCheck } from '../../services/crossSiteSignGuard';
+import { setProvenPairingCheck } from '../../services/crossSiteSignGuard';
 import { APP_NAME } from '../storeBuild';
 import type { OneSatContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
