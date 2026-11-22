@@ -34,6 +34,7 @@ import { HeldAsFailedError, isHeldAsFailed, makeUnfailRepair, withFailedRowRepai
 // What initWallet installs before any wallet opens: every toolbox un-fail checks the coins first (third review, 1).
 // Looked up by name so this file runs (and fails on behaviour) against a build without it.
 const optional = repairModule as unknown as {
+  NOTICE_RESPENT?: string;
   installUnfailGuard?: () => void;
   takeFailedNotices?: (s: unknown) => Promise<{ txid: string; kind: string; sentSats: number }[]>;
   noticeText?: (n: unknown) => { message: string };
@@ -179,7 +180,14 @@ async function openWallet(services: unknown, chain: Chain) {
  *    so B is 'unproven' here, but A is what the network mined (review of fix/385, R1).
  *  - beefProof: the BEEF the sync downloads carries A's proof (default: when mined).
  */
-async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boolean; descendant?: boolean }) {
+async function device(opts: {
+  mined: boolean;
+  respend?: boolean;
+  beefProof?: boolean;
+  descendant?: boolean;
+  /** A goes out delayed, a payment D (not broadcast) spends A's change, then A's broadcast is refused (fifth review, L2). */
+  childOfA?: boolean;
+}) {
   const chain: Chain = {
     post: 'success',
     mined: new Set(),
@@ -217,8 +225,8 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
 
   // 2. A payment to our own receive address; the broadcaster refuses it, so storage marks it failed.
   const keys = await deriveSyncKeys(w.wallet as never, 1);
-  chain.post = 'invalid';
-  await w.wallet
+  chain.post = opts.childOfA ? 'success' : 'invalid';
+  const aResult = await w.wallet
     .createAction({
       description: 'pay my receive address',
       outputs: [
@@ -228,12 +236,38 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
           outputDescription: 'to my receive address',
         },
       ],
-      options: { acceptDelayedBroadcast: false },
+      options: { acceptDelayedBroadcast: !!opts.childOfA },
     })
     .catch((e: unknown) => {
       if ((e as Error).name !== 'WERR_REVIEW_ACTIONS') throw e;
     });
   chain.post = 'success';
+  let dTxid: string | undefined;
+  if (opts.childOfA) {
+    const aTxid = (aResult as { txid?: string } | undefined)?.txid;
+    expect(aTxid).toBeDefined();
+    // D spends A's change and is not broadcast yet.
+    const d = await w.wallet.createAction({
+      description: 'pay someone else later',
+      outputs: [
+        {
+          lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+          satoshis: 20_000,
+          outputDescription: 'to someone else',
+        },
+      ],
+      // Queued for the Monitor to broadcast, which hasn't run: on its way, not on the network.
+      options: { acceptDelayedBroadcast: true },
+    });
+    dTxid = d.txid!;
+    // A's broadcast is refused after all: the toolbox's failed path (its outputs' spend links cleared).
+    await w.storage.runAsStorageProvider(async (sp) => {
+      const [a] = await sp.findTransactions({ partial: { txid: aTxid }, noRawTx: true });
+      for (const r of await sp.findProvenTxReqs({ partial: { txid: aTxid } }))
+        await sp.updateProvenTxReq(r.provenTxReqId, { status: 'invalid' });
+      await sp.updateTransactionStatus('failed', a.transactionId);
+    });
+  }
   const row = await w.storage.runAsStorageProvider(async (sp) =>
     (await sp.findTransactions({ partial: {} })).find((t) => t.satoshis < 0),
   );
@@ -290,6 +324,7 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
     fundTxid,
     bTxid,
     cTxid,
+    dTxid,
     paidScript,
     paidVout,
     aOutputsSats,
@@ -712,23 +747,23 @@ describe('#385 second review', () => {
   }, 30000);
 });
 
-describe('#385 third review: every toolbox un-fail goes through the check', () => {
-  const reqOf = (dv: Dev, txid: string) =>
-    dv.w.storage.runAsStorageProvider(async (sp) => (await sp.findProvenTxReqs({ partial: { txid } }))[0]);
-  const setReq = (dv: Dev, txid: string, status: string) =>
-    dv.w.storage.runAsStorageProvider(async (sp) => {
-      for (const r of await sp.findProvenTxReqs({ partial: { txid } }))
-        await sp.updateProvenTxReq(r.provenTxReqId, { status: status as never });
-    });
-  /** The Monitor's own tasks, as the next open runs them: ReviewDoubleSpends (no minimum age here), then UnFail. */
-  const monitorRun = async (dv: Dev) => {
-    const tasks = (dv.w.monitor as unknown as { _tasks: { name: string; minAgeMinutes?: number }[] })._tasks;
-    const review = tasks.find((t) => t.name === 'ReviewDoubleSpends')!;
-    review.minAgeMinutes = 0;
-    await dv.w.monitor.runTask('ReviewDoubleSpends');
-    await dv.w.monitor.runTask('UnFail');
-  };
+const reqOf = (dv: Dev, txid: string) =>
+  dv.w.storage.runAsStorageProvider(async (sp) => (await sp.findProvenTxReqs({ partial: { txid } }))[0]);
+const setReq = (dv: Dev, txid: string, status: string) =>
+  dv.w.storage.runAsStorageProvider(async (sp) => {
+    for (const r of await sp.findProvenTxReqs({ partial: { txid } }))
+      await sp.updateProvenTxReq(r.provenTxReqId, { status: status as never });
+  });
+/** The Monitor's own tasks, as the next open runs them: ReviewDoubleSpends (no minimum age here), then UnFail. */
+const monitorRun = async (dv: Dev) => {
+  const tasks = (dv.w.monitor as unknown as { _tasks: { name: string; minAgeMinutes?: number }[] })._tasks;
+  const review = tasks.find((t) => t.name === 'ReviewDoubleSpends')!;
+  review.minAgeMinutes = 0;
+  await dv.w.monitor.runTask('ReviewDoubleSpends');
+  await dv.w.monitor.runTask('UnFail');
+};
 
+describe('#385 third review: every toolbox un-fail goes through the check', () => {
   test('1: A refused as a double spend, then mined; B re-spent its coin; the Monitor un-fails A: B is failed first, balance true', async () => {
     const dv = await device({ mined: true, respend: true });
     await setReq(dv, dv.txid, 'doubleSpend');
@@ -811,5 +846,96 @@ describe('#385 third review: every toolbox un-fail goes through the check', () =
       }),
     ).rejects.toThrow(/another payment of this wallet spent the same coins/);
     expect(await snapshot(dv)).toEqual(before);
+  }, 30000);
+});
+
+describe('#385 fifth review', () => {
+  test('M1: proof completion (CheckForProofs) of a contested A at 1 confirmation: no throw, ReviewStatus keeps running, 3 confirmations settle it', async () => {
+    const dv = await device({ mined: true, respend: true });
+    dv.chain.tip = HEIGHT;
+    // The request as a broadcast the network took would leave it: CheckForProofs looks for its proof.
+    await setReq(dv, dv.txid, 'unmined');
+    (dv.w.monitor as unknown as { lastNewHeader: { height: number } }).lastNewHeader = { height: HEIGHT + 10 };
+    const sp = dv.w.storage.getActive() as unknown as { reviewStatus: (a: unknown) => Promise<unknown> };
+    let reviews = 0;
+    const review = sp.reviewStatus.bind(sp);
+    sp.reviewStatus = async (a) => {
+      reviews++;
+      return review(a);
+    };
+    const before = await balanceOf(dv);
+    await dv.w.monitor.runTask('CheckForProofs');
+    expect(await statusOf(dv, dv.txid)).toBe('failed');
+    expect(await statusOf(dv, dv.bTxid!)).toBe('unproven');
+    expect(await balanceOf(dv)).toBe(before);
+    // Not left 'completed' for ReviewStatus to trip over on every run.
+    expect((await reqOf(dv, dv.txid)).status).not.toBe('completed');
+    await dv.w.monitor.runTask('ReviewStatus');
+    await dv.w.monitor.runTask('ReviewStatus');
+    expect(reviews).toBe(2);
+    dv.chain.tip = HEIGHT + 2;
+    await monitorRun(dv);
+    expect(await statusOf(dv, dv.bTxid!)).toBe('failed');
+    expect(await statusOf(dv, dv.txid)).not.toBe('failed');
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats - PAID);
+  }, 30000);
+
+  test('M2: a notice label on a transaction that did not fail is never shown', async () => {
+    const dv = await device({ mined: true, respend: true });
+    // A site (or anything) labels a live payment with the notice label.
+    await dv.w.storage.runAsStorageProvider(async (sp) => {
+      const [b] = await sp.findTransactions({ partial: { txid: dv.bTxid! }, noRawTx: true });
+      const l = await sp.findOrInsertTxLabel(b.userId, optional.NOTICE_RESPENT!);
+      await sp.findOrInsertTxLabelMap(b.transactionId, l.txLabelId);
+    });
+    expect(await told(dv)).toEqual([]);
+  }, 30000);
+
+  test("L2: a payment D not yet broadcast spent A's change; A is un-failed: A's change stays D's, nothing counted twice", async () => {
+    const dv = await device({ mined: true, childOfA: true });
+    const [d] = await dv.w.storage.runAsStorageProvider((sp) =>
+      sp.findTransactions({ partial: { txid: dv.dTxid! }, noRawTx: true }),
+    );
+    expect(d.status).toBe('sending');
+    expect(
+      await makeCoinIntake({
+        wallet: syncWallet(dv) as never,
+        keyByHash: dv.keys.keyByHash,
+        processed: memoryProcessed(),
+      }).take(dv.txid, dv.beef),
+    ).toBe('taken');
+    expect(await statusOf(dv, dv.txid)).not.toBe('failed');
+    // The output of A's that D spends is D's: spent by D, not spendable.
+    const [dRow] = await dv.w.storage.runAsStorageProvider((sp) =>
+      sp.findTransactions({ partial: { txid: dv.dTxid! } }),
+    );
+    const dIns = Transaction.fromBinary(Array.from(dRow.rawTx!))
+      .inputs.filter((i) => i.sourceTXID === dv.txid)
+      .map((i) => i.sourceOutputIndex);
+    expect(dIns.length).toBeGreaterThan(0);
+    let spentByD = 0;
+    for (const vout of dIns) {
+      const o = await outputOf(dv, dv.txid, vout);
+      expect(o?.spendable).toBe(false);
+      expect(o?.spentBy).toBe(d.transactionId);
+      spentByD += o!.satoshis;
+    }
+    // What counts: what A left us, less what D spends of it, plus D's change; nothing counted twice.
+    const dChange = (await outputsOf(dv, dv.dTxid!)).filter((o) => o.change).reduce((n, o) => n + o.satoshis, 0);
+    expect(await balanceOf(dv)).toBe(dv.aOutputsSats - spentByD + dChange);
+  }, 30000);
+
+  test('L3: an un-fail whose request arrives without its bytes is checked from storage, never let through unchecked', async () => {
+    const dv = await device({ mined: true, respend: true });
+    dv.chain.tip = HEIGHT; // one confirmation: with B live, A must be held
+    const sp = dv.w.storage.getActive() as unknown as {
+      unfailTransactionsForProof: (req: unknown, indent?: number, update?: unknown) => Promise<string>;
+    };
+    const api = await reqOf(dv, dv.txid);
+    const { EntityProvenTxReq } = await import('@bsv/wallet-toolbox-client');
+    const req = new EntityProvenTxReq({ ...api, rawTx: [] } as never);
+    await sp.unfailTransactionsForProof(req, 0, { status: 'unmined', attempts: 0 });
+    expect(await statusOf(dv, dv.txid)).toBe('failed');
+    expect(await statusOf(dv, dv.bTxid!)).toBe('unproven');
   }, 30000);
 });
