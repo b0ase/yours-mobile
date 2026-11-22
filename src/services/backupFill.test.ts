@@ -633,3 +633,63 @@ describe('review of 30a4fbcd / bcd8129b: a resumed or retried fill never leaves 
     expect(touched).toEqual([]);
   });
 });
+
+describe('review of 82bdb7e3: every pass shares the fill’s pace; a backup that lost its state gets the whole fill', () => {
+  test('2: refs, restore and final pages are paced like bulk ones (one budget, at least 400 ms apart)', async () => {
+    const x = await setup(8);
+    const clock = { t: Date.now() };
+    const sentAt: number[] = [];
+    const writer = Object.assign(Object.create(x.backup), {
+      processSyncChunk: async (args: never, chunk: never) => (
+        sentAt.push(clock.t),
+        x.backup.processSyncChunk(args, chunk)
+      ),
+    });
+    // A restore point 10 min back: the refs-only pass, then a restore pass over every row, all inside the locks.
+    const r = await fillBackup({
+      manager: x.manager,
+      reader: x.dev,
+      writer,
+      maxItems: 3,
+      restorePoint: new Date(),
+      marginMs: 600_000,
+      now: () => clock.t,
+      sleep: async (ms) => void (clock.t += ms),
+    });
+    expect(r.how).toBe('restore-point');
+    expect(r.unlockedPages).toBe(0);
+    expect(sentAt.length).toBeGreaterThan(4);
+    for (let i = 1; i < sentAt.length; i++) expect(sentAt[i] - sentAt[i - 1]).toBeGreaterThanOrEqual(400);
+    expect(await rows(x.backup)).toEqual(await rows(x.dev));
+  });
+
+  for (const stage of ['refs', 'restore', 'restart'] as const)
+    test(`3: a kept ${stage} stage on a backup with no cursor (it lost its state): the whole two-pass fill`, async () => {
+      const x = await setup(5);
+      await new Promise((r) => setTimeout(r, 20));
+      const restorePoint = new Date();
+      await new Promise((r) => setTimeout(r, 20));
+      // A coin changed after the restore point: a restore pass alone would land and leave the backup without the rest.
+      const [coin] = await x.dev.findOutputs({ partial: {} });
+      await x.dev.updateOutput(coin.outputId, { outputDescription: 'changed', updated_at: new Date() } as never);
+      const kept: FillProgress = {
+        stage,
+        since: restorePoint.getTime(),
+        offsets: ['provenTx', 'outputBasket', 'outputTag', 'txLabel'].map((name) => ({ name, offset: 0 })),
+      };
+      const unguard = installInboundSyncGuard(StorageIdb);
+      const r = await fillBackup({
+        manager: x.manager,
+        reader: x.dev,
+        writer: x.backup,
+        restorePoint,
+        marginMs: 0,
+        pageGapMs: 0,
+        resume: kept,
+      }).finally(unguard);
+      // Never a pass from the restore point alone: the backup holds none of the rows from before it.
+      expect(r.how).toBe('full');
+      expect(r.unlockedPages).toBeGreaterThan(0);
+      expect(await rows(x.backup)).toEqual(await rows(x.dev));
+    });
+});

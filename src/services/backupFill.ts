@@ -54,7 +54,12 @@ export const FILL_MARGIN_MS = 30_000;
 const REFS = ['outputBasket', 'outputTag', 'txLabel'];
 /** A refs-only pass's offset for every other entity: past any real list. Never added to (see the file comment). */
 const PAST_END = Number.MAX_SAFE_INTEGER;
-/** The bulk pass's pause between pages: about 2.5 a second, well inside our server's 300 requests a minute. */
+/**
+ * The least time between any two pages of a fill, every pass alike (refs, restore, bulk, final): 150 a minute at most
+ * for the whole fill, well inside our server's 300 requests a minute per IP, which the wallet's own snapshot and send
+ * calls share. A since-pass starts again from its since on every try, so a burst that earned a 429 would earn it again
+ * on every try (review of 82bdb7e3, 2).
+ */
 export const FILL_PAGE_GAP_MS = 400;
 /** A pass that reads more pages than 2 per row the device holds, plus this, is not getting anywhere. */
 const ROUNDS_SLACK = 20;
@@ -218,7 +223,7 @@ export async function fillBackup(d: {
   unfinished?: boolean;
   /** The wallet closed: the fill ends before its next page. */
   stopped?: () => boolean;
-  /** The bulk pass's pause between pages (default FILL_PAGE_GAP_MS). */
+  /** The least time between any two pages of the fill (default FILL_PAGE_GAP_MS). */
   pageGapMs?: number;
   /** Tests: how a pause is taken. */
   sleep?: (ms: number) => Promise<void>;
@@ -240,9 +245,16 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
   const base = await load();
   const sleep = d.sleep ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   const margin = d.marginMs ?? FILL_MARGIN_MS;
-  // A final pass needs the bulk pass's rows on the backup: a backup with no cursor lost them, so the fill starts again.
   const kept = d.resume ?? undefined;
-  const resume = !kept || kept.stage === 'restart' || (kept.stage === 'final' && base.since == null) ? undefined : kept;
+  /**
+   * Every stage but bulk runs after a pass that left the backup a cursor (refs or bulk said "done"), or after a stall
+   * that may have: a kept refs, restore, final or restart stage on a backup with no cursor means it lost its state
+   * (review of 82bdb7e3, 3). The fill then starts from scratch, the two-pass fill from the beginning: never a pass from
+   * a restore point or a final pass, which both count on rows the backup no longer has. A bulk pass checks its offsets
+   * against the backup's own (startOf).
+   */
+  const lost = !!kept && kept.stage !== 'bulk' && base.since == null;
+  const resume = !kept || kept.stage === 'restart' || lost ? undefined : kept;
   /**
    * The backup has a cursor for this device: ordinary pushes from there. Not when our own fill is unfinished: a done
    * refs-only or bulk pass gives the backup a cursor long before the fill is (review of 30a4fbcd, 2). Nor, after an
@@ -262,6 +274,14 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
       ? resume.offsets.map((o) => ({ ...o }))
       : zeros();
   const save = async (p: FillProgress | null) => void (await d.onProgress?.(p));
+  /** One budget for the whole fill: no page goes sooner than pageGapMs after the one before, whatever its pass. */
+  const gap = d.pageGapMs ?? FILL_PAGE_GAP_MS;
+  let lastSent: number | undefined;
+  const paced = async () => {
+    const wait = lastSent === undefined ? 0 : lastSent + gap - now();
+    if (wait > 0) await sleep(wait);
+    lastSent = now();
+  };
 
   /**
    * A refs-only page: baskets, tags and labels read straight from the device, every other entity empty. Through
@@ -330,6 +350,7 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
       // The writer only checks the offsets against its limits (no requireMatchingCheckpoint): our server refuses any over
       // its profile's maximum (100,000 to 10,000,000; "RPC list offsets must not exceed 1000000" on storage.bwalletx.com,
       // 1p checks 21 Nov 2026), and the refs-only pass's "past the end" is MAX_SAFE_INTEGER.
+      await paced();
       const r = await d.writer.processSyncChunk(
         { ...args, offsets: offsets.map((o) => ({ name: o.name, offset: Math.min(o.offset, WRITER_MAX_OFFSET) })) },
         chunk,
@@ -366,9 +387,8 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
         report.unlockedPages++;
         await d.afterPage?.();
         while (d.yieldWhile?.()) await sleep(200);
-        // Paced: reads and payments get in, and a big wallet never bursts into our server's per-IP limit (300 a
-        // minute), which the wallet's own snapshot and send calls share (review of 30a4fbcd, 4).
-        await sleep(d.pageGapMs ?? FILL_PAGE_GAP_MS);
+        // Reads and payments get in between pages (the next page also waits for the fill's shared pace: paced()).
+        await sleep(0);
       }
     }
   };
@@ -382,8 +402,9 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
     return { ...report, how };
   };
 
-  const restoreFrom =
-    resume?.stage === 'refs' || resume?.stage === 'restore'
+  const restoreFrom = lost
+    ? undefined
+    : resume?.stage === 'refs' || resume?.stage === 'restore'
       ? resume.since
       : !resume && d.restorePoint
         ? d.restorePoint.getTime() - margin
