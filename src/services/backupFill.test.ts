@@ -7,7 +7,8 @@ import 'fake-indexeddb/auto';
 import { describe, expect, test } from 'bun:test';
 import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Random, Transaction, Utils } from '@bsv/sdk';
 import { StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
-import { fillBackup, type FillManager } from './backupFill';
+import { fillBackup, FillIncompleteError, type FillManager, type FillProgress } from './backupFill';
+import { installInboundSyncGuard } from './inboundSync';
 
 const services = {
   chain: 'main',
@@ -15,6 +16,9 @@ const services = {
   getHeight: async () => 2_000_000,
   getHeaderForHeight: async () => new Array(80).fill(0),
   nLockTimeIsFinal: async () => true,
+  postBeef: async (_beef: unknown, txids: string[]) => [
+    { name: 'fake', status: 'success', txidResults: txids.map((txid) => ({ txid, status: 'success' })) },
+  ],
 } as never;
 
 let seq = 0;
@@ -185,18 +189,22 @@ describe('first fill of a new backup', () => {
   test('1p checks, 21 Nov 2026: fill pages are push pages, so they carry the rows they are filed under', async () => {
     // A coin marked spent after an instant restore has a transaction row older than the restore point: the page must
     // carry that parent (services/pushParents.ts treats only includeNextCheckpoint pages as pushes), or our server
-    // can't file the coin ("Undefined binding(s)… transactionId") and the push never lands.
+    // can't file the coin ("Undefined binding(s)… transactionId") and the push never lands. The refs-only pass (baskets,
+    // tags, labels: no parents) is read as it is (mainnet 1p test, 22 Nov 2026: see below).
     const x = await setup(2);
-    const asked: unknown[] = [];
+    const asked: { push: unknown; refs: boolean }[] = [];
     const reader = Object.assign(Object.create(x.dev), {
-      getSyncChunk: (args: { includeNextCheckpoint?: unknown }) => (
-        asked.push(args.includeNextCheckpoint),
+      getSyncChunk: (args: { includeNextCheckpoint?: unknown; offsets: { name: string; offset: number }[] }) => (
+        asked.push({
+          push: args.includeNextCheckpoint,
+          refs: args.offsets.some((o) => o.offset === Number.MAX_SAFE_INTEGER),
+        }),
         x.dev.getSyncChunk(args as never)
       ),
     });
     await fillBackup({ manager: x.manager, reader, writer: x.backup, restorePoint: new Date(), marginMs: 0 });
-    expect(asked.length).toBeGreaterThan(0);
-    expect(asked.every((a) => a === true)).toBe(true);
+    expect(asked.filter((a) => !a.refs).length).toBeGreaterThan(0);
+    expect(asked.every((a) => a.push === !a.refs)).toBe(true);
   });
 
   test('nothing new since the restore point: the two-pass fill instead (never a from-the-start push in the locks)', async () => {
@@ -216,5 +224,215 @@ describe('first fill of a new backup', () => {
     const x = await setup(3);
     await fillBackup({ manager: x.manager, reader: x.dev, writer: x.backup });
     expect((await fillBackup({ manager: x.manager, reader: x.dev, writer: x.backup })).how).toBe('not-needed');
+  });
+});
+
+/** A writer that refuses to loop: past `max` pages the test fails instead of hanging. */
+const bounded = (backup: StorageIdb, max = 60, hook?: (n: number, args: never) => void) => {
+  let n = 0;
+  const real = backup.processSyncChunk.bind(backup);
+  const calls: { offsets: { name: string; offset: number }[] }[] = [];
+  const writer = Object.assign(Object.create(backup), {
+    processSyncChunk: async (args: never, chunk: never) => {
+      if (++n > max) throw new Error('LOOP: the fill kept sending pages');
+      calls.push(JSON.parse(JSON.stringify(args)));
+      hook?.(n, args);
+      return real(args, chunk);
+    },
+  });
+  return { writer, calls, pages: () => n };
+};
+const sum = (o: { offset: number }[]) => o.reduce((a, x) => a + x.offset, 0);
+
+describe('mainnet 1p test, 22 Nov 2026: a fill that can’t finish stops, says so, and goes on later', () => {
+  test('root cause: the refs-only pass, read as a push page, re-read every row from 0 and its offsets stopped moving', async () => {
+    // Wallet B after an instant restore: a payment sent after the restore point, then the restore-point fill, with the
+    // app's push pages (inboundSync's guard, as initWallet installs it). The refs-only pass went as a push page; its
+    // MAX_SAFE_INTEGER offsets looked like a lost pass record (pushParents readPushPage rebase), so every transaction and
+    // coin was read from 0, and MAX_SAFE_INTEGER + n lost precision: the same one-coin page went again and again, never
+    // "done", until storage.bwalletx.com answered 429.
+    const unguard = installInboundSyncGuard(StorageIdb);
+    try {
+      const x = await setup(4);
+      await new Promise((r) => setTimeout(r, 20));
+      const restorePoint = new Date();
+      await new Promise((r) => setTimeout(r, 20));
+      const paid = await x.wallet.createAction({
+        description: 'a payment',
+        outputs: [
+          {
+            lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()).toHex(),
+            satoshis: 3000,
+            outputDescription: 'to someone',
+          },
+        ],
+        options: { acceptDelayedBroadcast: false },
+      });
+      const w = bounded(x.backup);
+      const r = await fillBackup({ manager: x.manager, reader: x.dev, writer: w.writer, restorePoint, marginMs: 0 });
+      expect(r.how).toBe('restore-point');
+      expect(w.pages()).toBeLessThan(10);
+      // The payment's change reached the backup (cf0b.1 and cf0b.2 never did on mainnet).
+      const change = (await x.dev.findOutputs({ partial: { txid: paid.txid! } })).filter((o) => o.change);
+      expect(change.length).toBeGreaterThan(0);
+      const held = await x.backup.findOutputs({ partial: { txid: paid.txid! } });
+      for (const c of change) expect(held.some((o) => o.vout === c.vout)).toBe(true);
+    } finally {
+      unguard();
+    }
+  });
+
+  const fakeReader = (pages: (n: number) => Record<string, unknown>, counts?: number) => {
+    let n = 0;
+    const reader: Record<string, unknown> = {
+      getSettings: () => ({ storageIdentityKey: 'dev-sik' }),
+      getSyncChunk: async () => pages(++n),
+    };
+    if (counts !== undefined)
+      for (const c of [
+        'ProvenTxs',
+        'OutputBaskets',
+        'OutputTags',
+        'TxLabels',
+        'Transactions',
+        'Outputs',
+        'TxLabelMaps',
+        'OutputTagMaps',
+        'Certificates',
+        'CertificateFields',
+        'Commissions',
+        'ProvenTxReqs',
+      ])
+        reader[`count${c}`] = async () => counts;
+    return { reader: reader as never, read: () => n };
+  };
+  const neverDone = (max = 100) => {
+    let n = 0;
+    return {
+      writer: {
+        makeAvailable: async () => ({ storageIdentityKey: 'server-sik' }),
+        processSyncChunk: async () => {
+          if (++n > max) throw new Error('LOOP: the fill kept sending pages');
+          return { done: false };
+        },
+      } as never,
+      pages: () => n,
+    };
+  };
+  const manager = {
+    getAuth: async () => ({ identityKey: '02ab', userId: 1 }),
+    loadSyncRequest: async () => ({
+      identityKey: '02ab',
+      fromStorageIdentityKey: 'dev-sik',
+      toStorageIdentityKey: 'server-sik',
+    }),
+    runAsSync: async <T>(fn: (a: unknown) => Promise<T>) => fn(undefined),
+  };
+  const ENTITY_KEYS = ['provenTxs', 'outputBaskets', 'outputTags', 'txLabels', 'transactions', 'outputs'];
+  const page = (rows: Record<string, unknown[]>) =>
+    Object.fromEntries([...ENTITY_KEYS.map((k) => [k, rows[k] ?? []]), ['txLabelMaps', undefined]]);
+
+  test('(a) a page that moves no offset, never "done": stopped at once, not resent', async () => {
+    const w = neverDone();
+    const r = fakeReader(() => page({}));
+    const e = await fillBackup({ manager, reader: r.reader, writer: w.writer }).catch((x) => x);
+    expect(e).toBeInstanceOf(FillIncompleteError);
+    expect((e as FillIncompleteError).kind).toBe('stalled');
+    expect(w.pages()).toBe(1);
+  });
+
+  test('(a) the same rows twice (the cursor not really moving): stopped on the second', async () => {
+    const w = neverDone();
+    const at = new Date(Date.UTC(2026, 10, 22));
+    const r = fakeReader(() => page({ outputs: [{ outputId: 9, vout: 1, updated_at: at, lockingScript: [1, 2] }] }));
+    const e = await fillBackup({ manager, reader: r.reader, writer: w.writer }).catch((x) => x);
+    expect((e as FillIncompleteError).kind).toBe('stalled');
+    expect(w.pages()).toBe(2);
+  });
+
+  test('(a) a hard cap from the data: no more than 2 pages per row the device holds (plus 20)', async () => {
+    const w = neverDone(1000);
+    // A new row every page, forever: no page repeats, but the device holds only 12 × 1 rows.
+    const r = fakeReader((n) => page({ outputs: [{ outputId: n, updated_at: new Date(n) }] }), 1);
+    const e = await fillBackup({ manager, reader: r.reader, writer: w.writer }).catch((x) => x);
+    expect((e as FillIncompleteError).kind).toBe('stalled');
+    expect(w.pages()).toBeLessThanOrEqual(20 + 2 * 12 + 1);
+  });
+
+  test('(b, d) a 429 ends the fill at once with its Retry-After; the next fill goes on from the last acknowledged page', async () => {
+    const x = await setup(12);
+    let saved: FillProgress | null | undefined;
+    const progress: (FillProgress | null)[] = [];
+    const onProgress = (p: FillProgress | null) => {
+      saved = p;
+      progress.push(p);
+    };
+    let refusedAt: { name: string; offset: number }[] | undefined;
+    const first = bounded(x.backup, 60, (n, args: { offsets: { name: string; offset: number }[] }) => {
+      if (n !== 4) return;
+      refusedAt = args.offsets;
+      throw Object.assign(new Error('WalletStorageClient rpcCall: network error 429'), { retryAfterMs: 42_000 });
+    });
+    const e = await fillBackup({
+      manager: x.manager,
+      reader: x.dev,
+      writer: first.writer,
+      maxItems: 3,
+      onProgress,
+    }).catch((err) => err);
+    expect(e).toBeInstanceOf(FillIncompleteError);
+    expect((e as FillIncompleteError).kind).toBe('refused');
+    expect((e as FillIncompleteError).retryAfterMs).toBe(42_000);
+    // Never a resend: the refused page was the last request.
+    expect(first.pages()).toBe(4);
+    // (d) Only acknowledged pages count: the kept progress is where the refused page started, not past it.
+    expect(saved?.stage).toBe('bulk');
+    expect(saved?.offsets).toEqual(refusedAt);
+    expect(sum(saved!.offsets)).toBeGreaterThan(0);
+
+    const second = bounded(x.backup);
+    const r = await fillBackup({
+      manager: x.manager,
+      reader: x.dev,
+      writer: second.writer,
+      maxItems: 3,
+      resume: saved,
+      onProgress,
+    });
+    expect(r.how).toBe('full');
+    // From where it stopped: the first page of the second fill is the refused one.
+    expect(second.calls[0].offsets).toEqual(refusedAt!);
+    expect(await rows(x.backup)).toEqual(await rows(x.dev));
+    expect(progress.at(-1)).toBeNull();
+  });
+
+  test('(b) progress the server’s checkpoint doesn’t hold (a page taken but its answer lost): that pass starts again', async () => {
+    const x = await setup(6);
+    const bogus: FillProgress = {
+      stage: 'bulk',
+      finalSince: Date.now() - 60_000,
+      offsets: [
+        'provenTx',
+        'outputBasket',
+        'outputTag',
+        'txLabel',
+        'transaction',
+        'output',
+        'txLabelMap',
+        'outputTagMap',
+        'certificate',
+        'certificateField',
+        'commission',
+        'provenTxReq',
+      ].map((name) => ({
+        name,
+        offset: 2,
+      })),
+    };
+    const w = bounded(x.backup);
+    const r = await fillBackup({ manager: x.manager, reader: x.dev, writer: w.writer, maxItems: 3, resume: bogus });
+    expect(r.how).toBe('full');
+    expect(sum(w.calls[0].offsets)).toBe(0);
+    expect(await rows(x.backup)).toEqual(await rows(x.dev));
   });
 });
