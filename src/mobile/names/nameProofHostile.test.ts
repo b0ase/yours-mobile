@@ -562,7 +562,7 @@ describe('third review: the kept proven key never moves backwards (finding 2, re
   });
 });
 
-describe('fourth review: the kept key is ordered by the provider\'s own time, not only the self-signed seq', () => {
+describe("fourth review: the kept key is ordered by the provider's own time, not only the self-signed seq", () => {
   const pr = () => parseRecipient('victim.gmail@bwallet.space');
   const answerFor = async (w: ReturnType<typeof wallet>, binding: unknown, at: number, signer: Signer = google) => ({
     handle: 'victim.gmail@bwalletx.com',
@@ -583,7 +583,7 @@ describe('fourth review: the kept key is ordered by the provider\'s own time, no
     expect(destinationFor(r, 'bsv').ok).toBe(true);
   };
 
-  test("finding 1: compromised K0 re-signs its own binding at seq 3 with its old token: not proven, Send stops", async () => {
+  test('finding 1: compromised K0 re-signs its own binding at seq 3 with its old token: not proven, Send stops', async () => {
     const k0 = wallet(1001);
     const k1 = wallet(1002);
     expect((await resolve(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1), iat))).nameProof?.status).toBe(

@@ -107,7 +107,7 @@ describe("GitHub gist proofs: ordered by GitHub's created_at, not only the self-
         }),
       )) as never;
 
-  test("compromised K0 re-signs its binding at seq 3 with its old gist: refused; a newer gist still passes", async () => {
+  test('compromised K0 re-signs its binding at seq 3 with its old gist: refused; a newer gist still passes', async () => {
     const p0 = PrivateKey.fromRandom();
     const p1 = PrivateKey.fromRandom();
     const p2 = PrivateKey.fromRandom();
