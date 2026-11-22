@@ -122,13 +122,6 @@ export const returnTarget = (ret: string, rid: string, extra?: ReturnExtra) => {
   return u.toString();
 };
 
-/**
- * True when the return opens a plain https URL on every platform (no `b`, or `safari`/`other`). Review 4 (22 Nov 2026):
- * a link chooses `b`, and other hints return through a custom scheme (googlechromes://, firefox://) or a named Android
- * package, so a folded sign-in never rides in such a return; the sign-in then goes on the separate sheet.
- */
-export const returnIsPlainHttps = (plan: NonNullable<ReturnPlan>) => !plan.b || plan.b === 'safari' || plan.b === 'other';
-
 /** Android browser packages for each hint; anything else returns through the https fallback (default browser). */
 export const ANDROID_BROWSERS: Partial<Record<BrowserHint, string>> = {
   chrome: 'com.android.chrome',
@@ -136,7 +129,62 @@ export const ANDROID_BROWSERS: Partial<Record<BrowserHint, string>> = {
   firefox: 'org.mozilla.firefox',
   edge: 'com.microsoft.emmx',
   brave: 'com.brave.browser',
+  opera: 'com.opera.browser',
 };
+
+/**
+ * May this return URL carry a folded sign-in (review 4 L3, CTO 22 Nov 2026)? Only when it can reach nothing but the
+ * site, in the browser the user came from:
+ * - a plain https URL on exactly the return's origin;
+ * - an Android `intent://` with scheme=https, an exact package from ANDROID_BROWSERS (our table, never the link's), the
+ *   same origin as its target, and, if present, a browser_fallback_url on that same origin root. Android delivers an
+ *   explicit-package intent only to that installed package, and package names are unique on the device.
+ * Never an iOS custom scheme (googlechromes://, firefox://): any app may register those.
+ */
+export function isFoldableReturnUrl(url: string, ret: string): boolean {
+  let root: URL;
+  try {
+    root = new URL(ret);
+  } catch {
+    return false;
+  }
+  if (root.protocol !== 'https:' || root.pathname !== '/') return false;
+  const sameRoot = (u: string) => {
+    try {
+      const x = new URL(u);
+      return x.protocol === 'https:' && x.origin === root.origin;
+    } catch {
+      return false;
+    }
+  };
+  if (url.startsWith('https://')) return sameRoot(url);
+  if (!url.startsWith('intent://')) return false;
+  const at = url.lastIndexOf('#Intent;');
+  if (at < 0 || !url.endsWith(';end')) return false;
+  if (!sameRoot(`https://${url.slice('intent://'.length, at)}`)) return false;
+  const params = new Map<string, string>();
+  for (const part of url.slice(at + '#Intent;'.length, -';end'.length).split(';')) {
+    const eq = part.indexOf('=');
+    if (eq > 0) params.set(part.slice(0, eq), part.slice(eq + 1));
+  }
+  if (params.get('scheme') !== 'https') return false;
+  if (!(Object.values(ANDROID_BROWSERS) as string[]).includes(params.get('package') ?? '')) return false;
+  const fallback = params.get('S.browser_fallback_url');
+  if (fallback !== undefined) {
+    let f: URL;
+    try {
+      f = new URL(decodeURIComponent(fallback));
+    } catch {
+      return false;
+    }
+    if (f.protocol !== 'https:' || f.origin !== root.origin || f.pathname !== '/') return false;
+  }
+  return true;
+}
+
+/** Whether this plan's return, as this shell would open it, may carry a folded sign-in (isFoldableReturnUrl). */
+export const returnIsFoldable = (plan: NonNullable<ReturnPlan>, platform: ReturnPlatform) =>
+  isFoldableReturnUrl(returnUrlFor(returnTarget(plan.ret, plan.rid), plan.b, platform), plan.ret);
 
 export type ReturnPlatform = 'ios' | 'android' | 'web';
 

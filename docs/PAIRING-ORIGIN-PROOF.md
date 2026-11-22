@@ -100,7 +100,12 @@ counts as proven.
 | Web wallet            | any                                             | the https URL in a new tab, after the user taps **Return** (browsers block untapped popups); the wallet tab must stay open for your requests |
 
 Android packages: chrome `com.android.chrome`, samsung `com.sec.android.app.sbrowser`, firefox `org.mozilla.firefox`,
-edge `com.microsoft.emmx`, brave `com.brave.browser`.
+edge `com.microsoft.emmx`, brave `com.brave.browser`, opera `com.opera.browser`.
+
+**Which returns carry the one-tap sign-in** (CTO 22 Nov 2026): a plain https return, or an Android explicit-package
+`intent://` (scheme https, a package from this table, fallback on the same origin root): Android delivers it only to
+that installed browser. Never an iOS custom scheme (`googlechromes://`, `firefox://`): any app may register those, so
+on iOS Chrome/Firefox the sign-in comes as the separate sheet.
 
 **No app installed.** `www.bwallet.space/pair` (site/pair.html) on a phone offers **Open in the bWallet app**
 (`bwalletx://pair?<same params>`), **Use the web wallet**

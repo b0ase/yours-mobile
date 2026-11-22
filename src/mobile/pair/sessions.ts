@@ -24,7 +24,8 @@ import {
   type RelayFrame,
 } from '../../pair/protocol';
 import { inOrder } from '../../pair/in-order';
-import { claimRid, planReturn, returnIsPlainHttps, type ReturnExtra, type ReturnPlan } from '../../pair/returnTo';
+import { claimRid, planReturn, returnIsFoldable, type ReturnExtra, type ReturnPlan, type ReturnPlatform } from '../../pair/returnTo';
+import { returnPlatform } from './openReturn';
 import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
@@ -148,6 +149,13 @@ const defaultRevoke: Revoke = async (originator) => {
 };
 let revoke: Revoke = defaultRevoke;
 /** Tests only. */
+/** The shell the return opens in (openReturn.ts), overridable for tests. */
+let platformOverride: ReturnPlatform | null = null;
+const returnPlatformNow = (): ReturnPlatform => platformOverride ?? returnPlatform();
+/** Tests: pretend to be the iOS or Android app (null: the real shell). */
+export const setReturnPlatform = (p: ReturnPlatform | null) => {
+  platformOverride = p;
+};
 export const setPairRevoker = (fn: Revoke) => {
   revoke = fn;
 };
@@ -939,10 +947,10 @@ function connectPairing(
       // return (the fragment the wallet opens in this phone's browser at the exact relay-seen origin), never over the
       // relay (CTO 22 Nov 2026), so whoever holds the site end of the channel never sees it. No return (a desktop QR,
       // no ret): no fold; the site asks over the relay and gets the separate sheet. Never for the CLI.
-      // Review 4: and only when the return opens plain https (no custom scheme or named Android package, which the
-      // link picks with `b`).
+      // Review 4 (L3, CTO 22 Nov 2026): and only when that return reaches nothing but the site: plain https, or an
+      // Android explicit-package intent to a browser in our own table. Never an iOS custom scheme.
       const loginReq =
-        f.verifiedOrigin === CLI_ORIGIN || !returnPlan || !returnIsPlainHttps(returnPlan)
+        f.verifiedOrigin === CLI_ORIGIN || !returnPlan || !returnIsFoldable(returnPlan, returnPlatformNow())
           ? null
           : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
       // The account this card opened under: Connect signs with it, or not at all (review 2, 22 Nov 2026).

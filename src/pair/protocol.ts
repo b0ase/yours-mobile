@@ -33,7 +33,7 @@ export type Role = 'site' | 'wallet';
 export type WalletInfo = { name: string; icon?: string; rdns: string };
 
 /** Browser hints a v2 link may carry (`b`): which browser the wallet should return the user to. */
-export const BROWSER_HINTS = ['safari', 'chrome', 'firefox', 'samsung', 'edge', 'brave', 'other'] as const;
+export const BROWSER_HINTS = ['safari', 'chrome', 'firefox', 'samsung', 'edge', 'brave', 'opera', 'other'] as const;
 export type BrowserHint = (typeof BROWSER_HINTS)[number];
 
 /**
