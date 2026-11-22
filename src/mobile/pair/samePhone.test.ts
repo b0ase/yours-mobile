@@ -174,28 +174,21 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(c.p.returnPlan).toBeNull();
   });
 
-  test('the card says it signs in, and Connect folds the signature into ready and the return', async () => {
+  test('CTO 22 Nov: the sign-in signature goes ONLY in the return; the relay ready says ls:1 and carries none', async () => {
     const lf = loginFields();
+    // A valid s2 for this link: also what a script that got its own link signed would hold. It still sees no signature.
     const c = await card(lf, true, true);
     expect(c.p.signIn).toBe(true);
     const back = c.p.takeReturn();
     const r = await c.p.confirm();
     await settle();
+    // Over the relay: "signed in, see the return", no signature anywhere.
     const msgs = await sealedFrom(c.ws, c.siteSealer);
-    const ready = msgs.find((m) => m?.t === 'ready') as { login?: { k: string; sig: string } };
-    expect(ready?.login?.k).toBe(root.toPublicKey().toString());
-    // The signature is the login signature the site's verifySignIn checks: protocol [2,'bwallet sign in'], keyID =
-    // nonce, counterparty anyone, over loginMessage(origin, nonce, expiry).
-    const { loginMessage } = await import('./pairLogin');
-    const { valid } = await new ProtoWallet('anyone').verifySignature({
-      protocolID: [2, 'bwallet sign in'],
-      keyID: lf.ln,
-      counterparty: root.toPublicKey().toString(),
-      data: Utils.toArray(loginMessage(HOST, lf.ln, lf.lx), 'utf8'),
-      signature: Utils.toArray(ready.login!.sig, 'hex'),
-    } as never).catch(() => ({ valid: false }));
-    expect(valid).toBe(true);
-    // The return carries the wallet's pairing key and the same sealed ready, for a new tab that missed the relay.
+    const ready = msgs.find((m) => m?.t === 'ready') as { login?: unknown; ls?: number };
+    expect(ready?.ls).toBe(1);
+    expect(ready?.login).toBeUndefined();
+    expect(msgs.some((m) => JSON.stringify(m).includes('"sig"'))).toBe(false);
+    // The return carries the wallet's pairing key and the sealed ready WITH the signature, to the exact origin only.
     expect(r?.wk).toBe(c.hello.k);
     const href = returnHref(back!, 'ios', r ?? undefined);
     const u = new URL(href);
@@ -205,12 +198,32 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(q.get('wk')).toBe(c.hello.k);
     const b64 = q.get('f')!.replace(/-/g, '+').replace(/_/g, '/');
     const frame = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)), (ch) => ch.charCodeAt(0))));
-    const fresh = new Sealer((await deriveSession(c.site, q.get('wk')!, c.link.c)).key, 'site');
-    const m = (await fresh.open(frame)) as { t: string; login?: { k: string } };
+    const m = (await c.siteSealer.open(frame)) as { t: string; login?: { k: string; sig: string } }; // after the relay ready
     expect(m.t).toBe('ready');
     expect(m.login?.k).toBe(root.toPublicKey().toString());
+    // The signature is the login signature the site's verifySignIn checks.
+    const { loginMessage } = await import('./pairLogin');
+    const { valid } = await new ProtoWallet('anyone').verifySignature({
+      protocolID: [2, 'bwallet sign in'],
+      keyID: lf.ln,
+      counterparty: root.toPublicKey().toString(),
+      data: Utils.toArray(loginMessage(HOST, lf.ln, lf.lx), 'utf8'),
+      signature: Utils.toArray(m.login!.sig, 'hex'),
+    } as never).catch(() => ({ valid: false }));
+    expect(valid).toBe(true);
     expect(PublicKey.fromString(m.login!.k)).toBeTruthy();
     expect(Signature).toBeTruthy();
+    // A rejoin's ready carries no signature either.
+    const from = c.ws.sent.length;
+    c.ws.deliver({ t: 'relay', peer: 'joined', role: 'site' });
+    await settle();
+    expect(c.ws.sent.slice(from).some((x) => x.includes('"sig"'))).toBe(false);
+  });
+
+  test('CTO 22 Nov (a): no return possible (a desktop QR, no ret) means no folded sign-in: the separate sheet', async () => {
+    const c = await card(loginFields(), false, false);
+    expect(c.p.returnPlan).toBeNull();
+    expect(c.p.signIn).toBe(false);
   });
 
   test('an expired or malformed challenge is not signed: plain Connect', async () => {
