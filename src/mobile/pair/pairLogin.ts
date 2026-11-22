@@ -282,3 +282,59 @@ export async function handlePairLoginCall(
   }
   return null;
 }
+
+/* ---------- sign-in folded into Connect (same phone, @bwalletx/connect 0.9.0; P0 22 Nov 2026) ---------- */
+
+/**
+ * The sign-in a pairing link asks for with Connect (`ln` nonce, `lx` expiry), as the same createSignature params the
+ * site would otherwise send after pairing. Checked exactly like that request (parseLoginRequest): the text is rebuilt
+ * here for the relay-verified origin, so the link chooses nothing but the nonce and a near expiry. null when the link
+ * asks for none, or for one that can't be signed (expired, too far ahead, malformed).
+ */
+export const foldedLoginRequest = (
+  ln: string | undefined,
+  lx: string | undefined,
+  sessionOrigin: string,
+  now = Date.now(),
+): LoginRequest | null => {
+  if (!ln || !lx) return null;
+  let origin: string;
+  try {
+    origin = new URL(sessionOrigin).origin;
+  } catch {
+    return null;
+  }
+  const params = {
+    protocolID: [2, LOGIN_PROTOCOL_NAME],
+    keyID: ln,
+    counterparty: 'anyone',
+    data: Utils.toArray(loginMessage(origin, ln, lx), 'utf8'),
+  };
+  const req = parseLoginRequest(params, sessionOrigin, now);
+  return typeof req === 'string' ? null : req;
+};
+
+/**
+ * Sign a folded sign-in. The user approved it on the Connect card itself ("Connect and sign in to <host>"), which
+ * names the host and the account just like the separate sign-in sheet, so there is no second sheet. Not remembered as
+ * a grant; the chat-key proof that may follow over the same text is allowed once (noteApprovedLogin), as after the sheet.
+ */
+export async function signFoldedLogin(
+  channel: string,
+  req: LoginRequest,
+  wallet: WalletLike | undefined,
+  now = Date.now(),
+): Promise<{ k: string; sig: string } | null> {
+  if (!wallet) return null; // locked: plain Connect; the site then asks the usual way
+  const [{ publicKey }, { signature }] = await Promise.all([
+    wallet.getPublicKey({ identityKey: true } as never),
+    wallet.createSignature({
+      protocolID: [2, LOGIN_PROTOCOL_NAME],
+      keyID: req.nonce,
+      counterparty: 'anyone',
+      data: Utils.toArray(req.message, 'utf8'),
+    } as never),
+  ]);
+  noteApprovedLogin(channel, req.message, now);
+  return { k: publicKey, sig: Utils.toHex(signature) };
+}

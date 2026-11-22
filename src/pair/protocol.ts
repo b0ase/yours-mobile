@@ -55,7 +55,18 @@ export type PairLink = {
   s2?: string;
   /** Comparison-code length the site will show (BRC-185 alignment). Absent = legacy 4 digits. */
   cd?: CodeDigits;
+  /**
+   * Same-phone sign-in (@bwalletx/connect 0.9.0, P0 22 Nov 2026): the site's sign-in challenge nonce and expiry (ISO).
+   * Connect then signs in too, on the same card, and the signature goes back with `ready` (and in the return), so the
+   * user isn't sent back to the wallet a second time. The wallet signs only pairLogin.ts loginMessage for the
+   * relay-verified origin; these fields choose nothing else.
+   */
+  ln?: string;
+  lx?: string;
 };
+
+export const LOGIN_NONCE_RE = /^[A-Za-z0-9_-]{8,128}$/;
+export const LOGIN_EXPIRY_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 /** Code lengths a link may ask for. 8 is the BRC-185 length; 4 is kept for sites on older @bwalletx/connect. */
 export type CodeDigits = 4 | 8;
@@ -71,7 +82,7 @@ export type PairMessage =
    * checking `nc` against its own derivation) and sends it as `wc` on its next connects, re-binding the wallet role to
    * it; that is also how a pairing that started as v1 upgrades. Older sites ignore both.
    */
-  | { t: 'ready'; wcv?: 2; nc?: string }
+  | { t: 'ready'; wcv?: 2; nc?: string; login?: { k: string; sig: string } }
   | { t: 'ping' }
   | { t: 'close'; reason: string };
 
@@ -122,6 +133,10 @@ export function pairUrl(link: PairLink): string {
   if (link.b) q.set('b', link.b);
   if (link.s2) q.set('s2', link.s2);
   if (link.cd) q.set('cd', String(link.cd));
+  if (link.ln && link.lx) {
+    q.set('ln', link.ln);
+    q.set('lx', link.lx);
+  }
   return `https://${PAIR_HOST}/pair?${q}`;
 }
 
@@ -214,6 +229,10 @@ export function parsePairUrl(
   const cd = g('cd');
   if (cd === '8') link.cd = 8;
   else if (cd === '4') link.cd = 4;
+  if (LOGIN_NONCE_RE.test(g('ln')) && LOGIN_EXPIRY_RE.test(g('lx'))) {
+    link.ln = g('ln');
+    link.lx = g('lx');
+  }
   return link;
 }
 

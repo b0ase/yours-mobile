@@ -173,7 +173,7 @@ describe('same phone: sign in with Connect, and go back', () => {
     // The signature is the login signature the site's verifySignIn checks: protocol [2,'bwallet sign in'], keyID =
     // nonce, counterparty anyone, over loginMessage(origin, nonce, expiry).
     const { loginMessage } = await import('./pairLogin');
-    const { valid } = await new ProtoWallet(PrivateKey.fromRandom()).verifySignature({
+    const { valid } = await new ProtoWallet('anyone').verifySignature({
       protocolID: [2, 'bwallet sign in'],
       keyID: lf.ln,
       counterparty: root.toPublicKey().toString(),
@@ -189,7 +189,8 @@ describe('same phone: sign in with Connect, and go back', () => {
     const q = new URLSearchParams(u.hash.slice(1));
     expect(q.get('bwx')).toBe('ok');
     expect(q.get('wk')).toBe(c.hello.k);
-    const frame = JSON.parse(new TextDecoder().decode(Utils.toArray(q.get('f')!.replace(/-/g, '+').replace(/_/g, '/'), 'base64') as unknown as Uint8Array));
+    const b64 = q.get('f')!.replace(/-/g, '+').replace(/_/g, '/');
+    const frame = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)), (ch) => ch.charCodeAt(0))));
     const fresh = new Sealer((await deriveSession(c.site, q.get('wk')!, c.link.c)).key, 'site');
     const m = (await fresh.open(frame)) as { t: string; login?: { k: string } };
     expect(m.t).toBe('ready');

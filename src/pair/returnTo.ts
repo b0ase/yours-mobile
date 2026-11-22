@@ -11,7 +11,7 @@
  *
  * Pure apart from the default nonce store (localStorage), so every rule is unit-tested in returnTo.test.ts.
  */
-import { RET_MAX_BYTES, RID_RE, type BrowserHint, type PairLink } from './protocol';
+import { RET_MAX_BYTES, RID_RE, type BrowserHint, type PairLink, type SealedFrame } from './protocol';
 
 /** True when `ret` may be used as the return for a pairing proven to come from `origin`. */
 export function isAllowedReturn(ret: string, origin: string): boolean {
@@ -81,17 +81,44 @@ export const resetRidMemory = () => memory.clear();
 
 /** The decision taken when the pairing is checked: return to `ret` (still subject to the rid) or not at all. */
 export type ReturnPlan = { ret: string; rid: string; b?: BrowserHint } | null;
+/**
+ * P0 22 Nov 2026: a link WITHOUT a v2 proof returns too. Sites on @bwalletx/connect have no well-known pairing key, so
+ * requiring `s2` meant the same-phone sign-in never came back. It stays safe because `ret` must be on the origin the
+ * relay saw (`origin === link.o`) and pass isAllowedReturn: the wallet only ever opens the site the user came from,
+ * the fragment carries no secret a third party can read (its frame is sealed to the site's pairing key), and `rid` is
+ * still one-time. A link that carries `s2` which does NOT verify (tampered, or a stale key) still never returns.
+ */
 export function planReturn(link: PairLink, origin: string, v2Proven: boolean): ReturnPlan {
-  if (!v2Proven || !link.ret || !link.rid) return null;
+  if (!link.ret || !link.rid) return null;
+  if (link.s2 && !v2Proven) return null;
   if (origin !== link.o) return null;
   if (!isAllowedReturn(link.ret, link.o)) return null;
   return { ret: link.ret, rid: link.rid, ...(link.b && { b: link.b }) };
 }
 
-/** `ret` with the result in the fragment (never sent to the server): `#bwx=ok&rid=<rid>`. */
-export const returnTarget = (ret: string, rid: string) => {
+/**
+ * What a same-phone return may carry besides the rid (@bwalletx/connect 0.9.0): the wallet's pairing public key and
+ * its sealed `ready` (which holds the folded sign-in). Only the tab with the site's pairing key can open the frame. On a
+ * phone the site's tab was asleep, its relay socket may have swallowed hello and ready, and iOS/Android usually open
+ * the return in a NEW tab, so this is how that tab finishes without the relay.
+ */
+export type ReturnExtra = { wk: string; frame: SealedFrame };
+
+const b64url = (bytes: Uint8Array) => {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+/** `ret` with the result in the fragment (never sent to the server): `#bwx=ok&rid=<rid>[&wk=<key>&f=<frame>]`. */
+export const returnTarget = (ret: string, rid: string, extra?: ReturnExtra) => {
   const u = new URL(ret);
-  u.hash = `bwx=ok&rid=${encodeURIComponent(rid)}`;
+  const q = new URLSearchParams({ bwx: 'ok', rid });
+  if (extra) {
+    q.set('wk', extra.wk);
+    q.set('f', b64url(new TextEncoder().encode(JSON.stringify(extra.frame))));
+  }
+  u.hash = q.toString();
   return u.toString();
 };
 

@@ -25,7 +25,7 @@ import {
   type RelayFrame,
 } from '../../pair/protocol';
 import { inOrder } from '../../pair/in-order';
-import { claimRid, planReturn, type ReturnPlan } from '../../pair/returnTo';
+import { claimRid, planReturn, type ReturnExtra, type ReturnPlan } from '../../pair/returnTo';
 import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
@@ -41,7 +41,14 @@ import type { TwetchStore } from '../twetch/twetchLink';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
 import { isRefusalCode } from '../../services/refusalCodes';
 import { PAIR_MIRROR_KEY, toPairMirror } from '../../services/pairedPromptGuard';
-import { closeConnectCardsFor, forgetLogin, handlePairLoginCall, watchConnectCard } from './pairLogin';
+import {
+  closeConnectCardsFor,
+  foldedLoginRequest,
+  forgetLogin,
+  handlePairLoginCall,
+  signFoldedLogin,
+  watchConnectCard,
+} from './pairLogin';
 import { accountNamesFor } from '../names/accountNames';
 import { dropProposalFromSession } from '../agents/strategyProposal';
 
@@ -252,7 +259,17 @@ export type PendingPair = {
    */
   returnPlan: ReturnPlan;
   takeReturn: () => ReturnPlan;
-  confirm: (agent?: AgentGrant) => void;
+  /**
+   * The link carries the site's sign-in challenge (@bwalletx/connect 0.9.0) and it can be signed: Connect signs in too
+   * (the card says so). P0 22 Nov 2026: on one phone a separate sign-in request would arrive while bWallet is in the
+   * background, after the user has gone back to the browser, so the sign-in never happened.
+   */
+  signIn: boolean;
+  /**
+   * Resolves, once `ready` is sealed, with what a same-phone return carries (the wallet's pairing key and that sealed
+   * ready), or null (a gone card, a CLI pairing).
+   */
+  confirm: (agent?: AgentGrant) => Promise<ReturnExtra | null>;
   cancel: () => void;
   /**
    * Called once if the card is no longer wanted before Connect or Cancel: the site closed its QR (its socket left the
@@ -462,6 +479,8 @@ type Live = {
   upgrade?: boolean;
   /** The relay admitted this socket (its verifiedOrigin frame arrived). */
   relayed?: boolean;
+  /** A sign-in signed with Connect: said again in every `ready` until it expires (a sleeping tab may have missed it). */
+  login?: { k: string; sig: string; until: number };
 };
 const live = new Map<string, Live>();
 /** Per channel: which of its candidate claims the next connect brings (connect explains why). Memory only. */
@@ -473,8 +492,22 @@ const claimTry = new Map<string, number>();
  * That is how a v1 session upgrades (review 13 Nov 2026): the relay never lets a v1 claim bind on its own, because
  * whoever saw the QR holds the same claim. Older sites ignore both fields.
  */
-const readyFor = (l: Live): PairMessage =>
-  l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session) } : { t: 'ready' };
+const readyFor = (l: Live): PairMessage => {
+  const login = l.login && Date.now() < l.login.until ? { login: { k: l.login.k, sig: l.login.sig } } : {};
+  return l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session), ...login } : { t: 'ready', ...login };
+};
+
+/**
+ * Our hello again (plaintext, as at pairing). P0 22 Nov 2026: a site tab that slept through the pairing (iOS freezes
+ * it while the user is in bWallet) may have lost the first hello with its frozen socket, or come back in a new tab, so
+ * it can't open `ready` without our pairing key. Sites that already have it ignore a second hello.
+ */
+const helloFor = (stored: StoredSession): string =>
+  JSON.stringify({
+    t: 'hello',
+    k: PrivateKey.fromHex(stored.phoneKey).toPublicKey().toString(),
+    info: { name: APP_NAME, rdns: 'space.bwallet.mobile' },
+  } satisfies HelloFrame);
 
 const update = (c: string, patch: Partial<StoredSession>) =>
   save(loadAll().map((s) => (s.c === c ? { ...s, ...patch } : s)));
@@ -643,8 +676,11 @@ function attach(l: Live) {
         if (l.upgrade && l.session) onUpgradeAnswer(l, l.session, rf.wcv === 2);
       }
       // The site's tab came back (iOS kills its socket while the user is in bWallet, e.g. after a return-to-site):
-      // say `ready` again so it resumes and resends, without relying on the relay's 60 s queue.
-      if (rf.peer === 'joined' && rf.role === 'site') void reply(l, readyFor(l));
+      // say hello and `ready` again so it resumes and resends, without relying on the relay's 60 s queue.
+      if (rf.peer === 'joined' && rf.role === 'site') {
+        if (ws.readyState === WebSocket.OPEN) ws.send(helloFor(stored));
+        void reply(l, readyFor(l));
+      }
       return;
     }
     if (!isSealed(f)) return;
@@ -830,6 +866,8 @@ function connectPairing(
       void relayReachable(link.r).then((up) => fail(up ? PAIR_CODE_USED_MESSAGE : PAIR_UNREACHABLE_MESSAGE));
     };
     ws.onclose = (ev) => !settled && !probing && fail(ev.code === 1006 ? PAIR_CODE_USED_MESSAGE : 'Pairing closed.');
+    const samePhone = !!(link.ret && link.rid);
+    let helloSent = '';
     // After the card is up (settled) and until Connect or Cancel: the site leaving, or the channel closing, ends it.
     let open = false;
     let goneFns: ((message?: string) => void)[] = [];
@@ -859,7 +897,13 @@ function connectPairing(
     ws.onmessage = inOrder(async (ev: MessageEvent) => {
       const f = JSON.parse(String(ev.data)) as RelayFrame;
       if (settled) {
-        if (f.t === 'relay' && f.peer === 'left' && f.role === 'site') supersede();
+        // Same phone (the link has a return): the site's tab is ASLEEP, not gone. iOS freezes it and kills its socket
+        // as soon as the user opens bWallet, so a 'left' says nothing about the QR; the card stays (P0 22 Nov 2026).
+        if (f.t === 'relay' && f.peer === 'left' && f.role === 'site') {
+          if (!samePhone) supersede();
+        }
+        // The tab woke and rejoined before Connect: it may have lost our hello with its frozen socket.
+        else if (f.t === 'relay' && f.peer === 'joined' && f.role === 'site' && open && helloSent) ws.send(helloSent);
         // The site ended it before Connect (its user said the codes didn't match): end the card and say so.
         else if (open && sealer && isSealed(f)) {
           const msg = await sealer.open(f);
@@ -883,7 +927,8 @@ function connectPairing(
         ...(link.cd === 8 && { cd: 8 as const }),
         ...(v2 && { wcv: 2 as const }),
       };
-      ws.send(JSON.stringify(hello));
+      helloSent = JSON.stringify(hello);
+      ws.send(helloSent);
       const { key, code } = await deriveSession(P, link.k, link.c, link.cd ?? 4);
       sealer = new Sealer(key, 'wallet');
       // The relay's origin is only a header; the host is shown plainly only when the site proves it (B3).
@@ -894,6 +939,8 @@ function connectPairing(
       const proven = proofs.v1 || proofs.v2;
       const returnPlan = f.verifiedOrigin === CLI_ORIGIN ? null : planReturn(link, f.verifiedOrigin, proofs.v2);
       let returnTaken = false;
+      // The site's sign-in, folded into Connect (never for the CLI, whose confirm screen is its own).
+      const loginReq = f.verifiedOrigin === CLI_ORIGIN ? null : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
       // A new pairing starts with nothing. Its key names its own channel, so it never shares another pairing's grants
       // (b-Aware 24 Oct 2026); still withdraw anything left under that key unless this channel is being resumed.
       // Bounded: right after launch the wallet may still be loading, and the revoke waited for it, so the sheet sat on
@@ -915,6 +962,7 @@ function connectPairing(
         cli: f.verifiedOrigin === CLI_ORIGIN && !!opts.allowCli,
         proven,
         returnPlan,
+        signIn: !!loginReq,
         takeReturn: () => {
           if (!returnPlan || returnTaken) return null;
           returnTaken = true;
@@ -924,12 +972,21 @@ function connectPairing(
           if (gone) g(goneMessage);
           else goneFns.push(g);
         },
-        confirm: (agent?: AgentGrant) => {
-          if (gone) return;
+        confirm: async (agent?: AgentGrant): Promise<ReturnExtra | null> => {
+          if (gone) return null;
           end();
           ws.onclose = null;
-          if (f.verifiedOrigin === CLI_ORIGIN && (!agent || !opts.allowCli)) return ws.close(); // a CLI must be bound to an agent account
-          if (agent && f.verifiedOrigin !== CLI_ORIGIN) return ws.close(); // only a CLI pairing carries an agent grant
+          // A CLI must be bound to an agent account; only a CLI pairing carries an agent grant.
+          if ((f.verifiedOrigin === CLI_ORIGIN && (!agent || !opts.allowCli)) || (agent && f.verifiedOrigin !== CLI_ORIGIN)) {
+            ws.close();
+            return null;
+          }
+          // Connect and sign in (the card said so). A failure here is a plain Connect: the site then asks as usual.
+          const login =
+            loginReq && !agent
+              ? await signFoldedLogin(link.c, loginReq, agentDeps.ctx?.wallet as never).catch(() => null)
+              : null;
+          if (login) closeConnectCardsFor(f.verifiedOrigin!);
           const stored: StoredSession = {
             c: link.c,
             r: link.r,
@@ -950,14 +1007,34 @@ function connectPairing(
           dropProposalsOf(peek(link.c));
           if (agent) dropProposalFromSession(agent.agentId, link.c);
           save([...loadAll().filter((s) => s.c !== link.c), stored]);
-          const l: Live = { ws, sealer: sealer!, stored, relayed: true, session: sessionClaim };
+          const l: Live = {
+            ws,
+            sealer: sealer!,
+            stored,
+            relayed: true,
+            session: sessionClaim,
+            ...(login && { login: { ...login, until: Date.parse(link.lx!) } }),
+          };
           attach(l);
-          void reply(l, readyFor(l));
+          // Sealed here (nothing else is on this fresh channel yet) so the same frame can travel in the return.
+          const frame = await sealer!.seal(readyFor(l));
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(frame));
+            update(link.c, { ...sealer!.counters });
+          }
+          return { wk: P.toPublicKey().toString(), frame };
         },
         cancel: () => {
           end();
           ws.onclose = null;
-          ws.close();
+          // Tell the site (its pairing would otherwise wait on the code until it expires: the "loop" in the P0).
+          const bye = sealer ? sealer.seal({ t: 'close', reason: 'declined' }) : null;
+          void Promise.resolve(bye)
+            .then((fr) => {
+              if (fr && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(fr));
+            })
+            .catch(() => undefined)
+            .finally(() => ws.close());
         },
       });
     });
