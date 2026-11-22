@@ -11,6 +11,7 @@ import {
   getAgentAccount,
   isPotAccount,
   markAgentAccount,
+  markCapAwaitsPrice,
   setAgentDailyCap,
 } from '../agents/agentAccounts';
 import { PNEE_POTS_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
@@ -304,6 +305,25 @@ export const defaultDailyCap = (subs: Subscription[], bsvUsd: number): number | 
   return max > 0 ? Math.round(max * MAX_CATCH_UP * 110) / 100 : null;
 };
 
+/**
+ * An uncapped pot gets the default cap from its orders (addSubscription, moveSub). When no cap can be sized because a
+ * sats order has no BSV price yet, the pot is marked and payDue sizes it once a price is known (settleAwaitedCap):
+ * otherwise a pot filled while the price was missing paid with no daily cap for good (b-Aware row 350, review fix).
+ */
+const applyDefaultCap = (potId: string, bsvUsd: number) => {
+  const a = getAgentAccount(potId);
+  if (!a || a.dailyCapUsd !== null) return;
+  const subs = listSubs(potId).filter((s) => s.status !== 'cancelled' && s.status !== 'ended');
+  const cap = defaultDailyCap(subs, bsvUsd);
+  if (cap !== null) setAgentDailyCap(potId, cap);
+  else if (subs.some((s) => amountUsdKnown(s.amount, bsvUsd) === null)) markCapAwaitsPrice(potId);
+};
+
+/** Pay time: a pot still waiting for a price to size its default cap gets it now, if `bsvUsd` prices its orders. */
+export const settleAwaitedCap = (potId: string, bsvUsd: number) => {
+  if (getAgentAccount(potId)?.capAwaitsPrice) applyDefaultCap(potId, bsvUsd);
+};
+
 // ── Billing gate (OFF) ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -493,8 +513,7 @@ export const addSubscription = (n: NewSub, bsvUsd: number, now = Date.now()): Su
     status: 'active',
     mode: 'onOpen',
   });
-  const a = getAgentAccount(n.potId);
-  if (a && a.dailyCapUsd === null) setAgentDailyCap(n.potId, defaultDailyCap(listSubs(n.potId), bsvUsd));
+  applyDefaultCap(n.potId, bsvUsd);
   appendAgentLog(n.potId, { at: now, action: 'sub-create', detail: `Subscription to ${n.payee.name}`, usd: 0 });
   return s;
 };
@@ -590,8 +609,7 @@ export const moveSub = (id: string, potId: string, now = Date.now(), bsvUsd = 0)
   const to = getPot(potId);
   if (!s || s.potId === potId || !to || !potCurrencyOk(to.unit, s.amount.currency)) return;
   saveSub({ ...s, potId, lastError: undefined });
-  const a = getAgentAccount(potId);
-  if (a && a.dailyCapUsd === null) setAgentDailyCap(potId, defaultDailyCap(listSubs(potId), bsvUsd));
+  applyDefaultCap(potId, bsvUsd);
   appendAgentLog(potId, { at: now, action: 'sub-move', detail: `${s.payee.name} now pays from here`, usd: 0 });
 };
 

@@ -31,6 +31,7 @@ import {
   savePending,
   saveSub,
   servicePayee,
+  settleAwaitedCap,
   type Payee,
   type PendingPayment,
   type Subscription,
@@ -188,6 +189,7 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
         // booked (a kill after the log, before the record was cleared): its dollars are on the cap already, so only
         // Stop and Stop all are checked again.
         const usd = booked(pending.potId, pending.txid) ? 0 : pending.usd;
+        settleAwaitedCap(pending.potId, deps.bsvUsd);
         const gate = cur ? checkAgentSpend(pending.potId, usd, now) : null;
         if (!cur || !gate?.ok) {
           return {
@@ -277,6 +279,8 @@ async function run(deps: PayDeps, now: number): Promise<PayOutcome[]> {
       // A payment from this pot is unsure in this run: its coins may be in flight. Left for the next run, no alert.
       if (unsure.has(s.potId))
         return { id: s.id, ok: false, reason: 'Waiting for an earlier payment from this pot to go through' };
+      // A pot filled while no price was loaded gets its default cap now, before the check (b-Aware row 350).
+      settleAwaitedCap(s.potId, deps.bsvUsd);
       const gate = checkAgentSpend(s.potId, usd, now);
       if (!gate.ok) {
         return fail(s, gate.reason, deps);
