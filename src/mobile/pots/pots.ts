@@ -566,6 +566,34 @@ export const confirmPayeeReview = (id: string, dest: { address: string; pubkey?:
   });
 };
 
+/**
+ * The payee now serves a different destination than the review card showed (payeeBinding PayeeReviewMovedError):
+ * show that one instead, so the next Approve tap checks what the card shows. Pins nothing and pays nothing; only a
+ * card that showed a destination is updated, and the caller passes only a destination that passed the set-up checks.
+ * `reason` gives the card's "Not paying" line for the new destination against the stored order (payeeBinding
+ * reviewReason), so the card never describes the destination it showed before.
+ */
+export const refreshPayeeReview = (
+  id: string,
+  dest: { address: string; pubkey?: string },
+  reason: (s: Subscription) => string,
+  now = Date.now(),
+) => {
+  const s = getSub(id);
+  if (!s?.needsReview?.servedAddress || !dest.address) return;
+  const { servedKey: _old, ...review } = s.needsReview;
+  saveSub({
+    ...s,
+    needsReview: {
+      ...review,
+      reason: reason(s),
+      at: now,
+      servedAddress: dest.address,
+      ...(dest.pubkey ? { servedKey: dest.pubkey } : {}),
+    },
+  });
+};
+
 export const cancelSub = (id: string, now = Date.now()) => {
   const s = getSub(id);
   if (!s || s.status === 'cancelled') return;

@@ -145,7 +145,8 @@ export const AddOrderSheet = ({
       setChecking(true);
       setError('');
       try {
-        setChecked({ ...(await resolvePayee(n.payee, { ignorePin: true })), forTo: recipient });
+        // fresh: a host-served address must be the served key's own address, or the order isn't set up.
+        setChecked({ ...(await resolvePayee(n.payee, { ignorePin: true, fresh: true })), forTo: recipient });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -260,8 +261,8 @@ export const AddOrderSheet = ({
           <div style={{ color: MUTED }}>To address {checked.address}</div>
           <div style={{ color: MUTED }}>
             {checked.pubkey ? `Wallet key ${keyFingerprint(checked.pubkey)}. ` : ''}
-            If this paymail ever gives a different address{checked.pubkey ? ' or wallet key' : ''}, payments stop until
-            you approve the new destination.
+            Only this address is paid. If this name ever gives a different address
+            {checked.pubkey ? ' or wallet key' : ''}, nothing is paid until you approve the new one.
           </div>
         </div>
       )}

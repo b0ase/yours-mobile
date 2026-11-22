@@ -29,7 +29,16 @@ import {
   recordNonce,
   verifyMerchant,
 } from './merchantSig';
-import { addSubscription, cancelSub, getSub, isPayingPot, listSubs, nextDue, type Subscription } from './pots';
+import {
+  addSubscription,
+  cancelSub,
+  getSub,
+  isPayingPot,
+  listSubs,
+  nextDue,
+  type Payee,
+  type Subscription,
+} from './pots';
 
 export const SUBSCRIBE_MSG = 'BWX_SUBSCRIBE';
 export type SubscribeCall = 'subscribe' | 'status' | 'cancel' | 'list';
@@ -220,6 +229,11 @@ export type SubscribeDeps = {
   /** The wallet's one approval sheet. Resolves with the pot the user picked, or null when declined. */
   approve: (r: AppSubscribeRequest) => Promise<string | null>;
   bsvUsd: () => number;
+  /**
+   * Looks a paymail payee up with a standing order's set-up checks (subscribeAsk.checkAppPayee) and throws when it
+   * can't be paid, e.g. its host serves an address nothing ties to its key (backlog rank 1). Run before the sheet.
+   */
+  checkPayee: (payee: Payee) => Promise<unknown>;
   /** Ask the charger to run now (the first month is due at once). */
   chargeSoon?: () => void;
   now?: () => number;
@@ -238,6 +252,11 @@ export const handleSubscribeCall = async (
       takeSlot(origin, now);
       try {
         const { req: r, proof } = parseSigned(args, origin, now);
+        // A paymail payee the wallet can't check would be approved and then fail every month: refuse it now, before
+        // the sheet, so the user is never asked. The first payment checks again (payeeBinding.ts pinOnFirstPay).
+        const payee: Payee = newAppSub(r, '', now).payee;
+        if (payee.paymail)
+          await deps.checkPayee(payee).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
         const potId = await deps.approve(r);
         if (!potId) return fail('Declined');
         // Approved: burn the nonce (re-checked for a replay while the sheet was open), then pin the key.

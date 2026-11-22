@@ -55,7 +55,10 @@ export const potBalanceSats = async (store: ChromeStorageService, potId: string)
  * (destinationFor) and against the key pinned at setup (payeeBinding.ts). Paymails that only take P2P payments
  * (a fresh destination per payment, submitted to their host) aren't supported for standing orders in v1.
  */
-export const resolvePayee = async (p: Payee, opts: { ignorePin?: boolean } = {}): Promise<PayeeDestination> => {
+export const resolvePayee = async (
+  p: Payee,
+  opts: { ignorePin?: boolean; fresh?: boolean } = {},
+): Promise<PayeeDestination> => {
   if (p.address) return { address: p.address };
   if (!p.paymail) throw new Error('No payee address');
   const r = await resolveRecipient((u, i) => fetch(u, i), parseRecipient(p.paymail));
