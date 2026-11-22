@@ -17,7 +17,11 @@ import {
   type SnapshotMark,
   type SpendsLookup,
 } from './spendableFirst';
-import { validateListActionsArgs, validateListOutputsArgs } from '@bsv/sdk/wallet/validationHelpers';
+import {
+  validateListActionsArgs,
+  validateListCertificatesArgs,
+  validateListOutputsArgs,
+} from '@bsv/sdk/wallet/validationHelpers';
 import { withTimeout } from './restoreProgress';
 import { buildsTransaction, LocalStoreNeededError } from './localFirst';
 import { isInsufficientFunds } from './fundingPrep';
@@ -32,6 +36,8 @@ export const OUR_BACKUP_RETRY_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000
 /** The backup check: between its reads of our server, and before its one re-read on a difference. */
 export const CHECK_GAP_MS = 250;
 export const CHECK_RECHECK_MS = 5_000;
+/** Each read of the check (our server's, this device's) gets this long; past it the check gives up for this init. */
+export const CHECK_READ_MS = 10_000;
 /** A fill that stopped making progress is tried again from the start, no sooner than this. */
 export const OUR_BACKUP_STALL_RETRY_MS = 15 * 60_000;
 
@@ -51,7 +57,7 @@ type OurBackupFill = {
   progress?: FillProgress | null;
   incomplete?: OurBackupIncomplete;
   /**
-   * The repair's whole two-pass fill (checkOurBackup): sticky through every try (a stall, a refusal, progress kept)
+   * The repair's whole two-pass fill (ensureOurBackup): sticky through every try (a stall, a refusal, progress kept)
    * until a fill finishes, so a later try never becomes a restore-point fill on our server's cursor (review of
    * 0c74701d, 1).
    */
@@ -232,13 +238,53 @@ export type OurServerClient = SnapshotClient & {
   listOutputs?(auth: { identityKey: string; userId: number }, vargs: unknown): Promise<{ totalOutputs: number }>;
   /** The toolbox StorageClient's listActions RPC (totalActions counts them). */
   listActions?(auth: { identityKey: string; userId: number }, vargs: unknown): Promise<{ totalActions: number }>;
+  /** The toolbox StorageClient's listCertificates RPC (totalCertificates counts them). */
+  listCertificates?(
+    auth: { identityKey: string; userId: number },
+    vargs: unknown,
+  ): Promise<{ totalCertificates: number }>;
 };
 
 /** What the backup check compares: actions, and spendable outputs in each basket this device has. */
-export type BackupCounts = { actions: number; baskets: Record<string, number> };
+export type BackupCounts = { actions: number; certificates: number; baskets: Record<string, number> };
 
-/** How the once-per-device check of our server's backup went (checkOurBackup). */
-export type OurBackupCheck = 'match' | 'repair' | 'done' | 'skip' | 'error';
+/**
+ * The once-per-device check of our server's backup, as kept (kv `${markKey}:ourBackupCheck`): one record, written in
+ * one store write. 'repair-pending' (with `full`) is the decision and the state of a repair at once: a close at any
+ * point leaves it, and the next init repeats the repair.
+ */
+export type OurBackupCheckRecord = {
+  deviceSik: string;
+  check: 'match' | 'repair-pending' | 'repaired';
+  full?: true;
+  at: number;
+  device?: BackupCounts;
+  server?: BackupCounts;
+};
+export const ourBackupCheckKey = (markKey: string) => `${markKey}:ourBackupCheck`;
+
+/**
+ * At wallet init, before the stores connect: may our server (saved as a backup) join this session now? Only once this
+ * device's check found it whole ('match' or 'repaired'). Not checked yet, or a repair pending: it is left out of the
+ * session and joins only after the check (ensureOurBackup), never detached from a live session. A record that can't be
+ * read: it joins as before, and the check runs again next init (never a drop on an error).
+ */
+export async function ourBackupInitPlan(
+  kv: { get(key: string): Promise<Record<string, unknown> | undefined> },
+  markKey: string,
+  deviceSik: string,
+): Promise<'attach' | 'defer'> {
+  try {
+    const key = ourBackupCheckKey(markKey);
+    const r = (await kv.get(key))?.[key] as OurBackupCheckRecord | null | undefined;
+    return r?.deviceSik === deviceSik && (r.check === 'match' || r.check === 'repaired') ? 'attach' : 'defer';
+  } catch {
+    return 'attach';
+  }
+}
+
+/** One check per device and account in this process: a second init (or worker) joins the one running. */
+const checksInFlight = new Map<string, Promise<boolean>>();
 
 export type SpendableFirstWiringDeps = {
   on: boolean;
@@ -278,16 +324,19 @@ export type SpendableFirstWiringDeps = {
     },
   ) => Promise<FillReport>;
   /**
-   * Our server is in this account's saved backups (an earlier session's fill finished): any kept "incomplete" state is
-   * stale (a closed session's late write) and is dropped.
+   * Our server is one of this session's backups (it joined at init): any kept "incomplete" state is stale (a closed
+   * session's late write) and is dropped, unless a repair is pending.
    */
   registered?: () => boolean;
-  /** This device's counts: its actions, and its spendable outputs in each of its baskets (by name). */
+  /** This device's counts: its actions, certificates, and spendable outputs in each of its baskets (by name). */
   deviceCounts?: () => Promise<BackupCounts>;
-  /** Push this device's rows to its backups now (deviceSync.pushNow): the check reads after it. */
-  pushNow?: () => Promise<{ ok: boolean }>;
-  /** Take our server out of this session's backups (it was dropped from the saved remotes): the refill may then run. */
-  detachRemote?: (url: string) => Promise<void>;
+  /**
+   * Our server is saved as a backup but was left out of this session at init (ourBackupInitPlan 'defer'): it joins
+   * only through ensureOurBackup, after the check (and a repair, if one is due).
+   */
+  deferred?: boolean;
+  /** Our server joined this session (addRemote went through): the session's backup list now counts it. */
+  onAttached?: () => void;
   /** Tests: how the check waits (between our server's reads, and before its one re-read). */
   sleep?: (ms: number) => Promise<void>;
   /** A payment of this wallet's own is waiting or going (ownPayments.waiting): no check runs beside it. */
@@ -350,9 +399,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   };
   /** Our server was added as a backup in this session, or is in the account's saved backups. */
   let added = false;
-  /** Our server was dropped from the saved remotes and taken out of this session (a repair). */
-  let dropped = false;
-  const registered = () => added || (!dropped && (d.registered?.() ?? false));
+  const registered = () => added || (d.registered?.() ?? false);
   let client: OurServerClient | undefined;
   let connecting: Promise<OurServerClient> | undefined;
   let lean = false;
@@ -452,11 +499,9 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     (adding ??= tryOurBackup().finally(() => {
       adding = undefined;
     }));
-  const tryOurBackup = async (): Promise<boolean> => {
+  /** `repair`: the check found our server half-filled: the whole two-pass fill, as unfinished, whatever is kept. */
+  const tryOurBackup = async (o: { repair?: boolean } = {}): Promise<boolean> => {
     if (!d.on || closed || !d.deviceActive()) return false;
-    // A repair started this session (checkOurBackup): our server is still registered until the next open, which fills
-    // it as new. Nothing here may touch its restart marker meanwhile.
-    if (repairing) return false;
     const deviceSik = d.device()?.getSettings().storageIdentityKey;
     if (!deviceSik) return false;
     const read = await loadFill();
@@ -493,7 +538,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       return false;
     }
     let progress: FillProgress | null = st?.progress ?? null;
-    const full = st?.full === true || (progress?.stage === 'restart' && progress.full === true);
+    const full = o.repair === true || st?.full === true || (progress?.stage === 'restart' && progress.full === true);
     const keep = (p: FillProgress | null, incomplete?: OurBackupIncomplete): OurBackupFill => ({
       deviceSik,
       progress: p,
@@ -517,7 +562,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
           await saveFill(keep(p, st?.incomplete), true);
         },
         // Any kept state (even with no progress: a stall) means unfinished: never "not-needed" on our server's cursor.
-        unfinished: !!st,
+        unfinished: !!st || o.repair === true,
         stopped: () => closed,
         ...(full ? { full: true } : {}),
       });
@@ -527,6 +572,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       );
       await d.addRemote(SNAPSHOT_SERVER_URL);
       added = true;
+      d.onAttached?.();
       await saveFill(null);
       return true;
     } catch (e) {
@@ -559,134 +605,155 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
 
   /** Our server's backup didn't finish: "Backup incomplete, will retry", and when the next try may run. */
   const ourBackup = (): { incomplete: boolean; retryAt?: number } => {
-    if (d.on && repairing) return { incomplete: true };
     const inc = d.on && !registered() ? fillState?.incomplete : undefined;
     return inc ? { incomplete: true, retryAt: inc.retryAt } : { incomplete: false };
   };
 
   /**
    * Builds before 30a4fbcd could register our server half-filled: their fill answered "not-needed" on any cursor our
-   * server held (owner's iPhone ran build 153 with the flag on). Once per device and account, with our server saved as a
-   * backup: compare the spendable default-basket coins on this device and on our server, one listOutputs each.
-   *  - Equal: done, never asked again.
-   *  - Different: fewer on our server (coins it never got), or more (a coin spent here still spendable there, the
-   *    round-1 finding): a restart marker for the whole two-pass fill is kept, then `drop` takes our server (only ours)
-   *    out of the saved remotes, so the next open fills it as new, "Backup incomplete, will retry" showing until done.
-   *  - Our server unreachable, any read or write failing: nothing changes and the check runs again next open. The
-   *    remote is never dropped on an error, and the device's own data is only read.
-   * Never while a snapshot is still coming in (the device's count isn't whole yet) or beside a payment of its own.
+   * server held (owner's iPhone ran build 153 with the flag on). Once per device and account, our server is left out of
+   * the session at init (ourBackupInitPlan) and joins only here, so nothing is ever detached from a live session:
+   *  - The check reads our server through a throwaway client of its own (never the session's), each read bounded, then
+   *    this device: actions, certificates, and spendable outputs in each of this device's baskets. A difference is read
+   *    again once after a pause (a coin arriving between the reads); it must hold.
+   *  - Whole: 'match' is recorded and our server joins the session.
+   *  - Half-filled: ONE store write records the decision and its state, {check: 'repair-pending', full: true}. The
+   *    whole two-pass fill runs (sticky `full` through every try); only once it finishes does our server join the
+   *    session, and then 'repaired' is recorded. A close at any point leaves 'repair-pending': the next init repeats it.
+   *  - Any read failing or timing out: our server joins as before and the check runs again next init. Never a drop on
+   *    an error; only our server's exact URL is ever left out.
+   * Returns true once nothing is left to do here (our server joined, or isn't deferred); false: a repair's fill didn't
+   * finish (its retry is kept: ourBackup().retryAt).
    */
-  const checkKey = `${d.markKey}:ourBackupCheck`;
-  let repairing = false;
+  const checkKey = ourBackupCheckKey(d.markKey);
   const sleep = d.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const sameCounts = (a: BackupCounts, b: BackupCounts) =>
     a.actions === b.actions &&
+    a.certificates === b.certificates &&
     Object.keys(a.baskets).every((k) => a.baskets[k] === b.baskets[k]) &&
     Object.keys(b.baskets).every((k) => a.baskets[k] === b.baskets[k]);
-  const checkOurBackup = async (drop: () => Promise<void>): Promise<OurBackupCheck> => {
-    if (!d.on || closed || !d.deviceActive() || !d.deviceCounts) return 'skip';
-    if (lean || mark?.stage === 'full' || d.busy?.()) return 'skip';
-    const deviceSik = d.device()?.getSettings().storageIdentityKey;
-    if (!deviceSik) return 'skip';
+  /** Our server joins the session as it always did (the factory's addRemote). */
+  const attach = async (): Promise<boolean> => {
+    await d.addRemote(SNAPSHOT_SERVER_URL);
+    added = true;
+    d.onAttached?.();
+    return true;
+  };
+  const record = (r: Omit<OurBackupCheckRecord, 'at'>) => d.kv.set({ [checkKey]: { ...r, at: now() } });
+  const runCheck = async (deviceSik: string): Promise<boolean> => {
+    let kept: OurBackupCheckRecord | null | undefined;
     try {
-      const kept = (await d.kv.get(checkKey))?.[checkKey] as { deviceSik?: string } | null | undefined;
-      if (kept?.deviceSik === deviceSik) return 'done';
+      kept = (await d.kv.get(checkKey))?.[checkKey] as OurBackupCheckRecord | null | undefined;
     } catch (e) {
-      log('[spendable-first] backup check: could not read its record; again next open:', e);
-      return 'error';
+      log('[spendable-first] backup check: its record could not be read; our server joins, checked next init:', e);
+      return attach();
     }
-    /**
-     * Both sides' counts, after a push of this device's rows (review of 0c74701d, 3: a coin received, or a late push,
-     * between the reads is not a half-filled backup). Our server is asked for this device's baskets, one at a time.
-     */
-    let c: OurServerClient;
-    let auth: { identityKey: string; userId: number };
-    const read = async (): Promise<{ device: BackupCounts; server: BackupCounts }> => {
-      const pushed = await d.pushNow?.();
-      if (pushed && !pushed.ok) throw new Error('the push before the check did not go through');
-      const device = await d.deviceCounts!();
-      const server: BackupCounts = {
-        actions: Number((await c.listActions!(auth, validateListActionsArgs({ labels: [], limit: 1 }))).totalActions),
-        baskets: {},
-      };
-      for (const basket of Object.keys(device.baskets)) {
-        await sleep(CHECK_GAP_MS);
-        const vargs = validateListOutputsArgs({ basket, limit: 1 });
-        server.baskets[basket] = Number((await c.listOutputs!(auth, vargs)).totalOutputs);
-      }
-      const finite = (x: BackupCounts) => Number.isFinite(x.actions) && Object.values(x.baskets).every(Number.isFinite);
-      if (!finite(device) || !finite(server)) throw new Error('no count');
-      return { device, server };
-    };
-    let counts: { device: BackupCounts; server: BackupCounts };
-    try {
-      c = await connect();
-      if (typeof c.listOutputs !== 'function' || typeof c.listActions !== 'function') return 'skip';
-      const identityKey = await d.identityKey();
-      const { user } = await c.findOrInsertUser(identityKey);
-      auth = { identityKey, userId: user.userId };
-      counts = await read();
-      // Repaired only if the difference holds once more after a pause and another push.
-      if (!sameCounts(counts.device, counts.server)) {
-        await sleep(CHECK_RECHECK_MS);
+    const pending = kept?.deviceSik === deviceSik && kept.check === 'repair-pending';
+    if (!pending) {
+      if (kept?.deviceSik === deviceSik && (kept.check === 'match' || kept.check === 'repaired')) return attach();
+      // Snapshot still coming in, or a payment of its own going: the counts aren't settled. Joins; checked next init.
+      if (lean || mark?.stage === 'full' || d.busy?.() || !d.deviceCounts) return attach();
+      let counts: { device: BackupCounts; server: BackupCounts };
+      try {
+        const c = d.newClient();
+        await withTimeout(c.makeAvailable(), CHECK_READ_MS, 'our storage server');
+        if (typeof c.listOutputs !== 'function' || typeof c.listActions !== 'function') return attach();
+        const identityKey = await d.identityKey();
+        const { user } = await withTimeout(c.findOrInsertUser(identityKey), CHECK_READ_MS, 'our storage server');
+        const auth = { identityKey, userId: user.userId };
+        const bounded = <T>(p: Promise<T>) => withTimeout(p, CHECK_READ_MS, 'the backup check');
+        // Our server first (nothing reaches it meanwhile: it isn't in the session), then this device.
+        const read = async () => {
+          const device0 = await bounded(d.deviceCounts!());
+          const server: BackupCounts = {
+            actions: Number(
+              (await bounded(c.listActions!(auth, validateListActionsArgs({ labels: [], limit: 1 })))).totalActions,
+            ),
+            certificates:
+              typeof c.listCertificates === 'function'
+                ? Number(
+                    (
+                      await bounded(
+                        c.listCertificates(auth, validateListCertificatesArgs({ certifiers: [], types: [], limit: 1 })),
+                      )
+                    ).totalCertificates,
+                  )
+                : device0.certificates,
+            baskets: {},
+          };
+          for (const basket of Object.keys(device0.baskets)) {
+            await sleep(CHECK_GAP_MS);
+            const vargs = validateListOutputsArgs({ basket, limit: 1 });
+            server.baskets[basket] = Number((await bounded(c.listOutputs!(auth, vargs))).totalOutputs);
+          }
+          const device = await bounded(d.deviceCounts!());
+          const finite = (x: BackupCounts) =>
+            Number.isFinite(x.actions) &&
+            Number.isFinite(x.certificates) &&
+            Object.values(x.baskets).every(Number.isFinite);
+          if (!finite(device) || !finite(server)) throw new Error('no count');
+          return { device, server };
+        };
         counts = await read();
+        if (!sameCounts(counts.device, counts.server)) {
+          await sleep(CHECK_RECHECK_MS);
+          counts = await read();
+        }
+      } catch (e) {
+        log(
+          '[spendable-first] backup check: our server or this device could not be read; joins, checked next init:',
+          e,
+        );
+        return attach();
       }
-    } catch (e) {
-      log('[spendable-first] backup check: our server or this device could not be read; again next open:', e);
-      return 'error';
-    }
-    if (d.busy?.()) return 'skip';
-    const record = (result: 'match' | 'repaired') =>
-      d.kv.set({ [checkKey]: { deviceSik, result, ...counts, at: now() } });
-    if (sameCounts(counts.device, counts.server)) {
-      await record('match').catch((e) =>
-        log('[spendable-first] backup check: could not record it; again next open:', e),
+      if (sameCounts(counts.device, counts.server)) {
+        await record({ deviceSik, check: 'match', ...counts }).catch((e) =>
+          log('[spendable-first] backup check: could not record it; checked again next init:', e),
+        );
+        return attach();
+      }
+      log(
+        `[spendable-first] our server's backup differs (${JSON.stringify(counts.server)} there, ${JSON.stringify(counts.device)} here): it is filled again`,
       );
-      return 'match';
+      try {
+        // The decision and its state in one write: from here a close at any point repeats the repair next init.
+        await record({ deviceSik, check: 'repair-pending', full: true, ...counts });
+      } catch (e) {
+        log(
+          '[spendable-first] backup check: the repair could not be recorded; our server joins, checked next init:',
+          e,
+        );
+        return attach();
+      }
     }
-    log(
-      `[spendable-first] our server's backup differs (${JSON.stringify(counts.server)} there, ${JSON.stringify(counts.device)} here): it is filled again`,
+    // The repair: the whole fill, then our server joins (tryOurBackup's addRemote), then 'repaired'.
+    if (!(await tryOurBackup({ repair: true }))) return false;
+    await record({ deviceSik, check: 'repaired' }).catch((e) =>
+      log("[spendable-first] backup check: 'repaired' not recorded; the repair runs once more next init:", e),
     );
-    try {
-      // The marker first: a remote dropped with no marker would come back "not-needed" on our server's cursor. Then the
-      // record, before the drop (review of 0c74701d, 4): a repair whose record couldn't be written never drops, so no
-      // refill -> register -> check loop.
-      const at = now();
-      await saveFill(
-        {
-          deviceSik,
-          progress: { stage: 'restart', offsets: [], full: true },
-          full: true,
-          incomplete: { at, retryAt: at, reason: "our server's backup was incomplete", kind: 'failed', failures: 0 },
-        },
-        true,
-      );
-      await record('repaired');
-    } catch (e) {
-      log('[spendable-first] backup check: the repair could not start; again next open:', e);
-      return 'error';
+    return true;
+  };
+  /** This session's running check: a close lets the next init's check start at once (it never waits on a dead one). */
+  let ownCheck: { key: string; run: Promise<boolean> } | undefined;
+  const ensureOurBackup = async (): Promise<boolean> => {
+    if (!d.on || !d.deferred || added || closed) return true;
+    if (!d.deviceActive()) return false;
+    const deviceSik = d.device()?.getSettings().storageIdentityKey;
+    if (!deviceSik) return false;
+    const key = `${d.markKey}|${deviceSik}`;
+    // Another init's check is running: wait for it, then act on its record in this session (attach here, or carry on
+    // a repair it left pending). Its counts are not read again.
+    const running = checksInFlight.get(key);
+    if (running) {
+      await running.catch(() => undefined);
+      return ensureOurBackup();
     }
-    try {
-      await drop();
-    } catch (e) {
-      // Not dropped: the record goes, so the check (and the repair) runs again next open.
-      await d.kv
-        .set({ [checkKey]: null })
-        .catch((err) => log('[spendable-first] backup check: could not clear its record:', err));
-      log('[spendable-first] backup check: our server could not be dropped; again next open:', e);
-      return 'error';
-    }
-    // Out of this session too, so the refill can run now (the background arms its retry alarm on the kept retryAt,
-    // review of 0c74701d, 5); else it waits for the next open, "Backup incomplete" showing meanwhile.
-    try {
-      if (!d.detachRemote) throw new Error('no detach');
-      await d.detachRemote(SNAPSHOT_SERVER_URL);
-      dropped = true;
-    } catch (e) {
-      log('[spendable-first] our server stays in this session; it is filled again next open:', e);
-      repairing = true;
-    }
-    return 'repair';
+    const run: Promise<boolean> = runCheck(deviceSik).finally(() => {
+      if (checksInFlight.get(key) === run) checksInFlight.delete(key);
+    });
+    checksInFlight.set(key, run);
+    ownCheck = { key, run };
+    return run;
   };
 
   return {
@@ -722,16 +789,24 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     /** At open: hook the BEEF builder and carry on an unfinished background snapshot. */
     resume: async () => {
       if (!d.on) return;
-      // State kept while our server is a saved backup is stale (a closed session's late write): dropped.
+      // State kept while our server is one of this session's backups is stale (a closed session's late write): dropped.
+      // Never while a repair is pending: our server is then left out of the session, and the repair's state stays.
       const read = await loadFill();
-      if (read.ok && read.state && registered()) await saveFill(null);
+      let pending = true;
+      try {
+        const r = (await d.kv.get(checkKey))?.[checkKey] as OurBackupCheckRecord | null | undefined;
+        pending = r?.check === 'repair-pending';
+      } catch {
+        // can't tell: keep the state
+      }
+      if (read.ok && read.state && registered() && !pending) await saveFill(null);
       mark = await loadMark();
       if (mark?.stage !== 'full') return;
       hook();
       void runFull();
     },
     addOurBackup,
-    checkOurBackup,
+    ensureOurBackup,
     ourBackup,
     /** Every send waits for (or is refused while) the snapshot is still coming in: holdSendsForSnapshot. */
     guardSends: (wallet: unknown) =>
@@ -773,6 +848,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
      */
     stop: () => {
       closed = true;
+      if (ownCheck && checksInFlight.get(ownCheck.key) === ownCheck.run) checksInFlight.delete(ownCheck.key);
       unhook?.();
       unhook = undefined;
     },

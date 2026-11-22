@@ -92,16 +92,6 @@ export function withSnapshotRemote<T extends StoreConfig | undefined>(config: T,
 }
 
 /**
- * The account's storage config without our server among its remotes (the repair of a backup an older build registered
- * half-filled: spendableFirstWiring checkOurBackup). Every other remote, and the active one, stay as they are. Returns
- * the same object when ours isn't there.
- */
-export function withoutSnapshotRemote<T extends StoreConfig | undefined>(config: T): T {
-  if (!config?.remotes?.includes(SNAPSHOT_SERVER_URL)) return config;
-  return { ...config, remotes: config.remotes.filter((u) => u !== SNAPSHOT_SERVER_URL) };
-}
-
-/**
  * The backups to connect: our server only with the flag on (review, 20 Nov 2026). An earlier session with the flag on
  * may have saved it in the account's remotes; with the flag off it is never connected or pushed to.
  */

@@ -250,7 +250,12 @@ import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/token
 import { settleWithin } from './utils/settleWithin';
 import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
 import { validateListOutputsArgs } from '@bsv/sdk/wallet/validationHelpers';
-import { createSpendableFirst, oneSatSnapshotLookups, type OurServerClient } from './services/spendableFirstWiring';
+import {
+  createSpendableFirst,
+  oneSatSnapshotLookups,
+  ourBackupInitPlan,
+  type OurServerClient,
+} from './services/spendableFirstWiring';
 import { fillBackup } from './services/backupFill';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
@@ -384,10 +389,10 @@ export interface AccountContext {
    */
   addOurBackup: () => Promise<boolean>;
   /**
-   * Once per device: our server is a saved backup; compare its coin count with this device's. Different: a restart
-   * marker is kept and `drop` takes our server out of the saved remotes (spendableFirstWiring checkOurBackup).
+   * Our server saved as a backup but left out of this session at init (not checked yet, or a repair pending): run the
+   * check and any repair, then let it join (spendableFirstWiring ensureOurBackup). True once nothing is left to do.
    */
-  checkOurBackup: (drop: () => Promise<void>) => Promise<'match' | 'repair' | 'done' | 'skip' | 'error'>;
+  ensureOurBackup: () => Promise<boolean>;
   /** Our server's first fill is unfinished: when addOurBackup may try again (undefined: nothing to retry). */
   ourBackupRetryAt: () => number | undefined;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
@@ -669,8 +674,24 @@ export const initWallet = async (
   const resolved = resolveStorageConfig(account?.storageConfig);
   const { activeRemote } = resolved;
   // Our storage server only with the instant-restore flag on (services/spendableFirst.ts): off, never connected.
-  const backups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
+  const configuredBackups = backupsFor(resolved.backups, await spendableFirstOn(chrome.storage?.local as never));
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
+  /**
+   * Our server joins this session at init only once this device's check found it whole (spendableFirstWiring
+   * ourBackupInitPlan): otherwise it is left out here and joins after the check and any repair (ensureOurBackup), so
+   * nothing is ever detached from a live session. Only our server's exact URL; the flag off, never connected anyway.
+   */
+  const ourServerDeferred =
+    !activeRemote &&
+    !!configuredBackups?.includes(SNAPSHOT_SERVER_URL) &&
+    !!account?.addresses?.identityAddress &&
+    (await ourBackupInitPlan(
+      chrome.storage.local as never,
+      SNAPSHOT_MARK_KEY(account.addresses.identityAddress),
+      storageIdentityKey,
+    )) === 'defer';
+  /** This session's backups: our server joins later when deferred (onAttached adds it back). */
+  let backups = ourServerDeferred ? configuredBackups?.filter((u) => u !== SNAPSHOT_SERVER_URL) : configuredBackups;
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   if (options?.notice) storageNotice = options.notice;
@@ -706,7 +727,7 @@ export const initWallet = async (
     return createWebWallet({ ...walletConfig, backups: [] });
   });
   // The factory's own storage calls (/account/status, /account/payment) never pay a 402 (storagePaymentGuard.ts).
-  if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups })))
+  if (!refuseStorageAuthFetchPayments(baseWallet, storageUrls(storage, { activeRemote, backups: configuredBackups })))
     console.error('[initWallet] storage 402 payments are not refused');
   // The stores this wallet signs in to (its online storage and backups): no site may sign in to them as the user. Each
   // store's key is saved under its own chrome.storage key when the store connects (watchStoreConnections, above), so
@@ -1123,8 +1144,12 @@ export const initWallet = async (
         stopped: o?.stopped,
         full: o?.full,
       }),
-    // Our server already in the account's saved backups: an earlier fill finished.
+    // Our server is one of this session's backups (it joined at init, or later through ensureOurBackup).
     registered: () => (backups ?? []).includes(SNAPSHOT_SERVER_URL),
+    deferred: ourServerDeferred,
+    onAttached: () => {
+      if (!(backups ?? []).includes(SNAPSHOT_SERVER_URL)) backups = [...(backups ?? []), SNAPSHOT_SERVER_URL];
+    },
     // The once-per-device check of our server's backup (checkOurBackup): this device's own count, never beside a payment.
     // This device's actions and spendable outputs per basket (every basket it has, by name), read only.
     deviceCounts: async () => {
@@ -1146,24 +1171,10 @@ export const initWallet = async (
       const baskets: Record<string, number> = {};
       for (const basket of names) baskets[basket] = (await baseWallet.listOutputs({ basket, limit: 1 })).totalOutputs;
       const actions = (await baseWallet.listActions({ labels: [], limit: 1 })).totalActions;
-      return { actions, baskets };
+      const certificates = (await baseWallet.listCertificates({ certifiers: [], types: [], limit: 1 }))
+        .totalCertificates;
+      return { actions, certificates, baskets };
     },
-    pushNow: () => deviceSync.pushNow(),
-    // Our server out of this session's backups (a repair dropped it from the saved remotes): the refill may then run
-    // without an ordinary push to the same server beside it. As deviceActive's dropStores does it, under the lock.
-    detachRemote: (url) =>
-      storage.runAsSync(async () => {
-        const m = storage as unknown as {
-          _stores: { storage?: { endpointUrl?: string } }[];
-          _isAvailable: boolean;
-          makeAvailable(): Promise<unknown>;
-        };
-        const before = m._stores.length;
-        m._stores = m._stores.filter((s) => s.storage?.endpointUrl !== url);
-        if (m._stores.length === before) return;
-        m._isAvailable = false;
-        await m.makeAvailable();
-      }),
     busy: () => ownPayments.waiting(),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
@@ -2573,7 +2584,7 @@ export const initWallet = async (
     },
     snapshotLoading: spendableFirst.loading,
     addOurBackup: spendableFirst.addOurBackup,
-    checkOurBackup: spendableFirst.checkOurBackup,
+    ensureOurBackup: spendableFirst.ensureOurBackup,
     ourBackupRetryAt: () => spendableFirst.ourBackup().retryAt,
     backupState: () => {
       const st = deviceSync.state();
