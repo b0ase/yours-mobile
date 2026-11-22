@@ -24,9 +24,7 @@ import {
   admissionListFor,
 } from './services/inboundSync';
 import { outpointStates } from './services/heldOutpoints';
-import { SYNC_HEALTH_KEY } from './services/storageHealth';
-import { SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, SPENDABLE_FIRST_KEY } from './services/spendableFirst';
-import { OUR_BACKUP_REBUILDING_REFUSAL, ourBackupCheckKey } from './services/spendableFirstWiring';
+import { OUR_BACKUP_REBUILDING_REFUSAL } from './services/spendableFirstWiring';
 
 type Store = Record<string, unknown>;
 const local: Store = {};
@@ -75,13 +73,11 @@ const SITE = 'evil.example';
 let ctx: Awaited<ReturnType<typeof import('./initWallet').initWallet>>;
 let identityKey = '';
 let root: PrivateKey;
-/** This file's session key (a second account below is encrypted with it too). */
-let passKey = '';
 const BRC29: [2, string] = [2, '3241645161d8'];
 
 beforeAll(async () => {
   const keys = getKeys();
-  passKey = Utils.toHex(Random(32));
+  const passKey = Utils.toHex(Random(32));
   root = PrivateKey.fromWif(keys.identityWif);
   identityKey = root.toPublicKey().toString();
   Object.assign(local, {
@@ -534,95 +530,54 @@ describe('the real initWallet wiring', () => {
 });
 
 /**
- * Our storage server held out for its one-time repair, through the REAL initWallet (review of b936a98c, 3, 6 and 7):
- * its backupBeforeSend / backupConfigured / heldOut wiring. A second account (random keys) in the same fake store, the
- * instant-restore flag on, our server saved with another backup that can't connect (skipped at open, as an iPhone
- * WebView refused by 1Sat is), no 'repaired' record. In this file, not its own: initWallet's modules keep the first
- * chrome.storage stub they saw, so a second file's account could not be decrypted.
+ * Our storage server held out for its one-time repair, through the REAL initWallet (reviews of b936a98c 3/6/7,
+ * f42df01f 1, 6888544a 5): run in a process of its own (src/testing/initWalletHeldOut.child.ts), so nothing it leaves
+ * running touches this file's stubs or another file's, whatever the order or load; and with every fetch and DNS lookup
+ * refused there, so it provably makes no network call.
  */
-describe('initWallet: our server held out for its repair (review of b936a98c, 3, 6 and 7)', () => {
-  /** Another saved backup that can't connect (.invalid never resolves). */
-  const UNREACHABLE = 'https://backup.invalid';
-  let held: Awaited<ReturnType<typeof import('./initWallet').initWallet>>;
-  let address = '';
-  beforeAll(async () => {
-    const keys = getKeys();
-    address = keys.identityAddress;
-    const accounts = local.accounts as Record<string, unknown>;
-    accounts[address] = {
-      name: 'Held',
-      icon: '',
-      network: 'mainnet',
-      encryptedKeys: await encrypt(JSON.stringify(keys), passKey),
-      derivationTags: [],
-      settings: {},
-      addresses: { identityAddress: address, ordAddress: keys.ordAddress, bsvAddress: keys.walletAddress },
-      balance: {},
-      mneeBalance: {},
-      pubKeys: { identityPubKey: keys.identityPubKey, ordPubKey: keys.ordPubKey, bsvPubKey: keys.walletPubKey },
-      dataVersion: ACCOUNT_DATA_VERSION,
-      storageConfig: { remotes: [SNAPSHOT_SERVER_URL, UNREACHABLE] },
-    };
-    local.selectedAccount = address;
-    local[SPENDABLE_FIRST_KEY] = true;
-    const { ChromeStorageService } = await import('./services/ChromeStorage.service');
-    const { initWallet } = await import('./initWallet');
-    held = await initWallet(new ChromeStorageService(), { startSyncsAfter: () => new Promise(() => undefined) });
-    // Its address sync (fire-and-forget) ends before the tests and the close: nothing of it runs after this file.
-    for (let i = 0; i < 600 && local[SYNC_HEALTH_KEY(address)] === undefined; i++)
-      await new Promise((r) => setTimeout(r, 50));
-  }, 60_000);
-  afterAll(async () => {
-    await held?.close?.().catch(() => undefined);
-  });
-
-  test('no repaired record: our server is never connected, and it is held out', () => {
-    expect(local[ourBackupCheckKey(SNAPSHOT_MARK_KEY(address))]).toBeUndefined();
-    expect(allAsked.some((u) => u.startsWith(SNAPSHOT_SERVER_URL))).toBe(false);
-    expect(held.ourBackupHeldOut()).toBe(true);
-  });
-
-  test('a Store payment is refused with the honest line, never a push to a backup that is not connected', async () => {
-    // Configured backups, not the session's: fail closed.
-    expect(held.backupState().backupConfigured).toBe(true);
-    const before = allAsked.length;
-    expect(await held.backupBeforeSend()).toEqual({ ok: false, error: OUR_BACKUP_REBUILDING_REFUSAL });
-    // Refused before any push or reconnect was tried.
-    expect(allAsked.slice(before)).toEqual([]);
-  });
-
-  test("review of f42df01f, 1: one stable storage identity key, the device store's own, read through the account object", async () => {
-    const deviceSik = (
-      (held.storage as unknown as { _stores: { storage: unknown }[] })._stores
-        .map((m) => m.storage)
-        .find((st): st is StorageIdb => st instanceof StorageIdb) as StorageIdb
-    ).getSettings().storageIdentityKey;
-    // Both opens in this file (two accounts, one install) kept the install's key: the device store's own.
-    expect(local.storageIdentityKey).toBe(deviceSik);
-    const { ChromeStorageService } = await import('./services/ChromeStorage.service');
-    const { storageIdentityKeyFor, ourServerHeldOut } = await import('./initWallet');
-    const svc = new ChromeStorageService();
-    await svc.getAndSetStorage();
-    const sik = await storageIdentityKeyFor(svc);
-    expect(sik).toBe(deviceSik);
-    expect(await storageIdentityKeyFor(svc)).toBe(sik); // stable: never a fresh key per open
-    // A 'repaired' record (written with the device store's key, as the repair writes it) is found at the next open.
-    const account = svc.getCurrentAccountObject().account;
-    expect(await ourServerHeldOut(account, undefined, [SNAPSHOT_SERVER_URL], sik)).toBe(true);
-    local[ourBackupCheckKey(SNAPSHOT_MARK_KEY(address))] = { deviceSik, check: 'repaired', at: 1 };
-    expect(await ourServerHeldOut(account, undefined, [SNAPSHOT_SERVER_URL], sik)).toBe(false);
-    delete local[ourBackupCheckKey(SNAPSHOT_MARK_KEY(address))];
-  });
-
-  test('held out whatever the active store (3); never when our server IS the active store', async () => {
-    const { ourServerHeldOut } = await import('./initWallet');
-    const acct = { addresses: { identityAddress: 'acct-x' } };
-    // Another backup active, our server saved, no record: held out (a move to this device never finds it attached).
-    expect(await ourServerHeldOut(acct, UNREACHABLE, [SNAPSHOT_SERVER_URL], 'sik')).toBe(true);
-    // Our server is the active store (not among the backups): never held out, the account opens on it as before.
-    expect(await ourServerHeldOut(acct, SNAPSHOT_SERVER_URL, [UNREACHABLE], 'sik')).toBe(false);
-    local[ourBackupCheckKey(SNAPSHOT_MARK_KEY('acct-x'))] = { deviceSik: 'sik', check: 'repaired', at: 1 };
-    expect(await ourServerHeldOut(acct, UNREACHABLE, [SNAPSHOT_SERVER_URL], 'sik')).toBe(false);
-    expect(await ourServerHeldOut(acct, undefined, [SNAPSHOT_SERVER_URL], 'sik')).toBe(false);
-  });
+describe('initWallet: our server held out for its repair (own process)', () => {
+  test('held out with no repaired record, honest Store refusal, one stable key corrected once, no network', async () => {
+    const child = Bun.spawn(
+      [process.execPath, new URL('./testing/initWalletHeldOut.child.ts', import.meta.url).pathname],
+      {
+        cwd: new URL('..', import.meta.url).pathname,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
+    const [out, err, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    const line = out.split('\n').find((l) => l.startsWith('RESULT '));
+    if (!line || code !== 0) console.error(out.slice(-4000), err.slice(-4000));
+    const r = JSON.parse(line!.slice('RESULT '.length)) as Record<string, unknown>;
+    expect(r.error).toBeUndefined();
+    expect(code).toBe(0);
+    // No 'repaired' record: our server held out, never connected; the unreachable backup was skipped.
+    expect(r.heldOut).toBe(true);
+    expect(r.connectedBackups).toBe(0);
+    // Configured backups count (fail closed): the Store payment gets the honest line, without a push or a reconnect.
+    expect(r.backupConfigured).toBe(true);
+    expect(r.storePayment).toEqual({ ok: false, error: OUR_BACKUP_REBUILDING_REFUSAL });
+    expect(r.fetchedDuringPayment).toEqual([]);
+    // One stable key, the device store's own: a stale top-level key is corrected at open and read back through the
+    // account object, where the repair's record (written with the device store's key) is found.
+    expect([r.deviceKey, r.keyCorrected, r.keyRead]).toEqual([true, true, true]);
+    expect([r.heldOutNoRecord, r.heldOutRepaired]).toEqual([true, false]);
+    // Whatever the active store; never when our server IS it; any spelling of our server.
+    expect([r.heldOutRemoteActive, r.heldOutOursActive, r.heldOutSpelled, r.heldOutRemoteActiveRepaired]).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
+    // No network: nothing reached our server; the backup's connect went through the refused fetch (so the storage
+    // transport uses the replaced fetch, not a real one), and no DNS lookup was made at all.
+    const fetched = r.fetched as string[];
+    expect(fetched.some((u) => u.includes('storage.bwalletx.com'))).toBe(false);
+    expect(fetched.some((u) => u.startsWith('https://backup.invalid/'))).toBe(true);
+    expect(r.lookedUp).toEqual([]);
+  }, 120_000);
 });

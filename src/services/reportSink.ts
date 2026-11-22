@@ -2,22 +2,27 @@
  * Wallet-core code (no UI) handing a report to b through the existing report path: the app's report outbox
  * (mobile/agent/reportOutbox.ts) registers itself here when it loads, and sends it with the outbox's own retries,
  * redaction (redactSecrets) and "Your reports" listing. Where no outbox is loaded (the extension's background, review
- * of f42df01f, 6), the report waits in chrome.storage.local and the outbox takes it in when a wallet page loads it (or
- * at once, when one is open). Callers pass text without keys or secrets; the outbox scrubs it again.
+ * of f42df01f, 6), the report waits in chrome.storage.local, one key per report, and the outbox takes it in when a
+ * wallet page loads it (or at once, when one is open). Callers pass text without keys or secrets; the outbox scrubs it.
+ *
+ * Claim-safe (review of 6888544a, 6): each report is its own key (a background write never rewrites a list, so none is
+ * lost), and pages take them in one at a time under a Web Lock shared by every extension page, removing each by its
+ * key only after the outbox has it: two open pages never both take the same report.
  */
 type Sink = (account: string | null | undefined, text: string) => void;
 
-/** Reports waiting for an outbox (chrome.storage.local), oldest first. */
-export const PENDING_WALLET_REPORTS_KEY = 'bwx.pendingWalletReports';
+/** One waiting report: chrome.storage.local `${WALLET_REPORT_PREFIX}${id}`. */
+export const WALLET_REPORT_PREFIX = 'bwx.walletReport:';
 /** Waiting reports kept at most (the oldest dropped): a repeating failure never fills storage. */
 const PENDING_CAP = 20;
 const MAX_TEXT = 4000;
+const LOCK_NAME = 'bwx.walletReports';
 
 type Pending = { account: string | null; text: string; at: number };
 type Area = {
-  get(keys: string): Promise<Record<string, unknown>>;
+  get(keys: string | null): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
-  remove(keys: string): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
 };
 type ChromeLike = {
   storage?: {
@@ -25,27 +30,49 @@ type ChromeLike = {
     onChanged?: { addListener(fn: (changes: Record<string, unknown>, area: string) => void): void };
   };
 };
+/** The Web Locks API as used here (navigator.locks); tests pass their own. */
+export type Locks = { request<T>(name: string, fn: () => Promise<T>): Promise<T> };
 const chromeOf = () => (globalThis as { chrome?: ChromeLike }).chrome;
 const area = (): Area | undefined => chromeOf()?.storage?.local;
+/** Without navigator.locks (a context that lacks it): this context's drains still run one at a time. */
+let localTail: Promise<unknown> = Promise.resolve();
+const localLocks: Locks = {
+  request<T>(_name: string, fn: () => Promise<T>): Promise<T> {
+    const run = localTail.then(fn, fn);
+    localTail = run.catch(() => undefined);
+    return run;
+  },
+};
+const defaultLocks = (): Locks => (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks ?? localLocks;
 
 let sink: Sink | undefined;
+/** This context's writes, in order (two in the same millisecond keep their order). */
+let written = 0;
 
 /** The report outbox registers here (once, when it loads). */
 export function setReportSink(fn: Sink | undefined): void {
   sink = fn;
 }
 
-/** Keep a report in chrome.storage.local for the outbox. True when kept. */
+const waiting = (all: Record<string, unknown>) =>
+  Object.entries(all ?? {})
+    .filter(([k, v]) => k.startsWith(WALLET_REPORT_PREFIX) && !!v && typeof (v as Pending).text === 'string')
+    .map(([k, v]) => [k, v as Pending] as const)
+    // Keys sort by when they were written (padded time, then a counter).
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+
+/** Keep a report in chrome.storage.local for the outbox (its own key). True when kept. */
 export async function queueForOutbox(account: string | null | undefined, text: string): Promise<boolean> {
   const a = area();
   if (!a) return false;
   try {
-    const got = (await a.get(PENDING_WALLET_REPORTS_KEY))?.[PENDING_WALLET_REPORTS_KEY];
-    const list = Array.isArray(got) ? (got as Pending[]) : [];
-    const next = [...list, { account: account ?? null, text: text.slice(0, MAX_TEXT), at: Date.now() }].slice(
-      -PENDING_CAP,
-    );
-    await a.set({ [PENDING_WALLET_REPORTS_KEY]: next });
+    const id = `${Date.now().toString(36).padStart(10, '0')}-${(++written).toString(36).padStart(6, '0')}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const item: Pending = { account: account ?? null, text: text.slice(0, MAX_TEXT), at: Date.now() };
+    await a.set({ [`${WALLET_REPORT_PREFIX}${id}`]: item });
+    const over = waiting(await a.get(null)).slice(0, -PENDING_CAP);
+    if (over.length) await a.remove(over.map(([k]) => k));
     return true;
   } catch {
     return false;
@@ -67,38 +94,43 @@ export async function reportFromWallet(account: string | null | undefined, text:
   }
 }
 
-let draining: Promise<number> | undefined;
-/** Move the waiting reports into the outbox (`take`), then clear them. Returns how many. */
-export function drainPendingWalletReports(take: Sink): Promise<number> {
-  draining ??= (async () => {
-    const a = area();
-    if (!a) return 0;
+/**
+ * Move the waiting reports into the outbox (`take`), each removed by its key once taken. Under the shared Web Lock:
+ * one page at a time. Returns how many this call took.
+ */
+export async function drainPendingWalletReports(
+  take: Sink,
+  locks: Locks | undefined = defaultLocks(),
+): Promise<number> {
+  const a = area();
+  if (!a) return 0;
+  const run = async () => {
+    let n = 0;
     try {
-      const got = (await a.get(PENDING_WALLET_REPORTS_KEY))?.[PENDING_WALLET_REPORTS_KEY];
-      if (!Array.isArray(got) || !got.length) return 0;
-      await a.remove(PENDING_WALLET_REPORTS_KEY);
-      let n = 0;
-      for (const r of got as Pending[])
-        if (r && typeof r.text === 'string' && r.text) {
-          take(r.account, r.text);
-          n++;
-        }
-      return n;
+      for (const [key, r] of waiting(await a.get(null))) {
+        // Still there (another page may have taken it before this lock): taken, then removed by its key.
+        if (!(await a.get(key))?.[key]) continue;
+        take(r.account, r.text);
+        await a.remove(key);
+        n++;
+      }
     } catch {
-      return 0;
+      // the rest stay for the next drain
     }
-  })().finally(() => {
-    draining = undefined;
-  });
-  return draining;
+    return n;
+  };
+  return locks.request(LOCK_NAME, run);
 }
 
 /** The outbox's side: take in what is waiting now, and whatever the background writes while this page is open. */
-export function takeWalletReports(take: Sink): void {
-  void drainPendingWalletReports(take);
+export function takeWalletReports(take: Sink, locks: Locks = defaultLocks()): void {
+  void drainPendingWalletReports(take, locks);
   try {
     chromeOf()?.storage?.onChanged?.addListener((changes, where) => {
-      if (where === 'local' && PENDING_WALLET_REPORTS_KEY in changes) void drainPendingWalletReports(take);
+      const added = Object.entries(changes).some(
+        ([k, c]) => k.startsWith(WALLET_REPORT_PREFIX) && (c as { newValue?: unknown } | undefined)?.newValue,
+      );
+      if (where === 'local' && added) void drainPendingWalletReports(take, locks);
     });
   } catch {
     // no listener: the next load takes them in

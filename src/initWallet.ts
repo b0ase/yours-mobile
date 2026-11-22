@@ -249,7 +249,14 @@ import {
 } from './services/balanceTruth';
 import type { TokenRecoveryOptions, TokenRecoveryResult } from './services/tokenRecovery';
 import { settleWithin } from './utils/settleWithin';
-import { backupsFor, SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, spendableFirstOn } from './services/spendableFirst';
+import {
+  backupsFor,
+  isOurServer,
+  normalizeStoreConfig,
+  SNAPSHOT_MARK_KEY,
+  SNAPSHOT_SERVER_URL,
+  spendableFirstOn,
+} from './services/spendableFirst';
 import {
   createSpendableFirst,
   oneSatSnapshotLookups,
@@ -396,6 +403,8 @@ export interface AccountContext {
   ensureOurBackup: () => Promise<boolean>;
   /** Our server is held out of this session until its one-time repair has run (never connected meanwhile). */
   ourBackupHeldOut: () => boolean;
+  /** This device's own store's storage identity key (its IndexedDB's), or undefined before it opens. */
+  deviceStoreKey: () => string | undefined;
   /** Our server's first fill is unfinished: when addOurBackup may try again (undefined: nothing to retry). */
   ourBackupRetryAt: () => number | undefined;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
@@ -467,7 +476,8 @@ const resolveStorageConfig = (
   if (!storageConfig) {
     return {};
   }
-  const { activeRemote, remotes = [] } = storageConfig;
+  // Our server in any spelling becomes its one URL, listed once (review of 6888544a, 2).
+  const { activeRemote, remotes = [] } = normalizeStoreConfig(storageConfig);
   // `remotes[]` holds every configured remote including the active; filter
   // the active out before passing to the factory so it doesn't double-connect.
   const backups = activeRemote ? remotes.filter((url) => url !== activeRemote) : remotes;
@@ -637,7 +647,7 @@ export async function ourServerHeldOut(
   storageIdentityKey: string,
 ): Promise<boolean> {
   const id = account?.addresses?.identityAddress;
-  if (activeRemote === SNAPSHOT_SERVER_URL || !id || !configured?.includes(SNAPSHOT_SERVER_URL)) return false;
+  if (isOurServer(activeRemote) || !id || !configured?.some(isOurServer)) return false;
   return (
     (await ourBackupInitPlan(chrome.storage.local as never, SNAPSHOT_MARK_KEY(id), storageIdentityKey)) === 'defer'
   );
@@ -665,7 +675,7 @@ export const openAccountStorageForBackup = async (
   const storageIdentityKey = await ensureStorageIdentityKey(chromeStorageService);
   // Our server's one-time repair not run yet on this device: never connected here either (review of 8ee88600, 5).
   const backups = (await ourServerHeldOut(account, activeRemote, configured, storageIdentityKey))
-    ? configured?.filter((u) => u !== SNAPSHOT_SERVER_URL)
+    ? configured?.filter((u) => !isOurServer(u))
     : configured;
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
@@ -746,7 +756,7 @@ export const initWallet = async (
    */
   const ourServerDeferred = await ourServerHeldOut(account, activeRemote, configuredBackups, storageIdentityKey);
   /** This session's backups: our server joins later when deferred (onAttached adds it back). */
-  let backups = ourServerDeferred ? configuredBackups?.filter((u) => u !== SNAPSHOT_SERVER_URL) : configuredBackups;
+  let backups = ourServerDeferred ? configuredBackups?.filter((u) => !isOurServer(u)) : configuredBackups;
   const stopBackupCheck = checkBackupRows(keys, account, storageIdentityKey);
 
   if (options?.notice) storageNotice = options.notice;
@@ -1201,10 +1211,10 @@ export const initWallet = async (
         full: o?.full,
       }),
     // Our server is one of this session's backups (it joined at init, or later through ensureOurBackup).
-    registered: () => (backups ?? []).includes(SNAPSHOT_SERVER_URL),
+    registered: () => (backups ?? []).some(isOurServer),
     deferred: ourServerDeferred,
     onAttached: () => {
-      if (!(backups ?? []).includes(SNAPSHOT_SERVER_URL)) backups = [...(backups ?? []), SNAPSHOT_SERVER_URL];
+      if (!(backups ?? []).some(isOurServer)) backups = [...(backups ?? []), SNAPSHOT_SERVER_URL];
     },
     // Payments made during the repair went out flagged "not backed up yet" (review of b936a98c, 4): pushed now.
     flushUnbacked: () => writeAhead?.retryNow() ?? Promise.resolve(true),
@@ -2632,6 +2642,7 @@ export const initWallet = async (
     addOurBackup: spendableFirst.addOurBackup,
     ensureOurBackup: spendableFirst.ensureOurBackup,
     ourBackupHeldOut: spendableFirst.heldOut,
+    deviceStoreKey: ownSik,
     ourBackupRetryAt: () => spendableFirst.ourBackup().retryAt,
     backupState: () => {
       const st = deviceSync.state();
