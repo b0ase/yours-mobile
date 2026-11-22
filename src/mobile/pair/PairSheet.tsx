@@ -185,6 +185,11 @@ export default function PairSheet({
                 </p>
               </>
             )}
+            {stage.p.signIn && (
+              <p className="mt-2 text-sm" style={{ color: MUTED }} data-testid="pair-sign-in-as">
+                as <span className="font-semibold text-white">{stage.p.signInAs || 'this account'}</span>
+              </p>
+            )}
             <p className="mt-6 text-sm" style={{ color: MUTED }}>
               Does the website show this code?
             </p>

@@ -7,7 +7,7 @@ older wallets ignore the new fields and still see your v1 proof.
 
 | Field | Value                                                                                                                                |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `ret` | The https URL to send the user back to after Allow. Same host as `o`, or a subdomain of it. At most 512 bytes. No userinfo, no port. |
+| `ret` | The https URL to send the user back to after Allow. Exactly the origin `o` (no subdomains, since 22 Nov 2026). At most 512 bytes. No userinfo, no port. Without a valid `s2` the wallet returns to the origin's root only. |
 | `rid` | A one-time request id: 16 random bytes, base64url (22 chars; 16–64 `[A-Za-z0-9_-]` accepted). New for every link.                    |
 | `b`   | Browser hint: `safari`, `chrome`, `firefox`, `samsung`, `edge`, `brave` or `other`. Optional.                                        |
 | `s2`  | The v2 proof: DER signature (hex), by a key in your `/.well-known/bwalletx-pair.json`, over the UTF-8 string below.                  |
@@ -47,12 +47,16 @@ https://www.tokenblaster.lol/terrornode#bwx=ok&rid=Zm9vYmFyYmF6cXV4MTIzNA
 ```
 
 Since 22 Nov 2026 the fragment also carries `wk` (the wallet's pairing public key) and `f` (its sealed `ready`,
-base64url of the frame's JSON): `#bwx=ok&rid=<rid>&wk=<02…>&f=<…>`. Only the holder of the site's pairing key can
-open `f`. A tab that slept through the relay (iOS freezes it while the user is in bWallet, often swallowing the hello
-and ready with its frozen socket), or a NEW tab (iOS and Android usually open the return in one), finishes the pairing
-from the fragment alone. With `ln`/`lx` (the site's sign-in nonce and ISO expiry) on the link, Connect also signs the
-standard sign-in text for the relay-verified origin and the `ready` carries `login: { k, sig }`, so the user is sent
-to the wallet once, not twice. `@bwalletx/connect` 0.9.0 does all of this (`resumeReturnedPairing`).
+base64url of the frame's JSON): `#bwx=ok&rid=<rid>&wk=<02…>&f=<…>`. It is a CLAIM, not proof: the link carries the
+channel, the site's pairing key and the rid, so anyone holding the link can seal their own `ready` (and their own
+sign-in) and build this fragment. A page uses it only once the relay's wallet says hello with the same `wk` (the relay
+binds one wallet to the channel). Then it saves a tab that slept through the relay (iOS freezes it while the user is
+in bWallet, often swallowing hello and ready with its frozen socket), or a NEW tab, from waiting on frames already
+spent. With `ln`/`lx` (the site's sign-in nonce and ISO expiry) on the link, Connect also signs the standard sign-in
+text for the relay-verified origin and the `ready` carries `login: { k, sig }`, so the user is sent to the wallet once,
+not twice. Without a valid `s2` the wallet returns to the origin's ROOT only (the relay's origin is the WebSocket
+`Origin` header: honest from a browser, but any other client can set it), so an unproven link can't pick a path.
+`@bwalletx/connect` 0.9.0 does all of this (`resumeReturnedPairing`, which hands back the starting page).
 
 On that page: check `rid` is the one you issued (then forget it), restore the pairing you saved before navigating
 (`restorePairing`) and carry on. Save the pairing state in **localStorage keyed by `rid`**, not only sessionStorage: the
@@ -66,7 +70,7 @@ screen and nothing else changes:
   binds `c`, `k`, `o`, `e`, `ret`, `rid` and `b`, so none of them can be swapped). Since 22 Nov 2026 (P0: phone
   sign-in never came back) a link without any proof returns too: sites on `@bwalletx/connect` have no well-known key,
   and the rules below already keep the return on the site the user came from. A link whose `s2` fails never returns;
-- `ret` is https, on the host of `o` or a subdomain of it (never a parent domain or a look-alike), no userinfo, no
+- `ret` is https on exactly the origin `o` (no subdomains, never a parent domain or a look-alike), no userinfo, no
   port, at most 512 bytes; and the relay's origin equals `o`;
 - `rid` has not been used on that device in the last 24 hours.
 

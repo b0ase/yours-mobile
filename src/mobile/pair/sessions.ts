@@ -62,6 +62,7 @@ export const REPAIR_NEEDED_CODE = 'REPAIR_NEEDED';
 export const REPAIR_NEEDED_MESSAGE = 'This pairing has ended. Scan the QR code on the site again to reconnect.';
 /** The relay refused the join: someone else already joined with this QR, or it expired. */
 export const PAIR_CODE_USED_MESSAGE = 'This code has expired or was already used.';
+export const PAIR_CODE_EXPIRED_MESSAGE = 'This code has expired. Ask the site for a new one.';
 export const PAIR_UNREACHABLE_MESSAGE = 'Could not reach the pairing service. Check your connection and try again.';
 /** The site sent a sealed close before Connect: on the site, the user said the codes didn't match. */
 export const SITE_SAID_NO_MESSAGE =
@@ -265,6 +266,8 @@ export type PendingPair = {
    * background, after the user has gone back to the browser, so the sign-in never happened.
    */
   signIn: boolean;
+  /** The account that signs in on this card ("$b0asex"), or '' when it has no name. Shown on the card (review 22 Nov). */
+  signInAs: string;
   /**
    * Resolves, once `ready` is sealed, with what a same-phone return carries (the wallet's pairing key and that sealed
    * ready), or null (a gone card, a CLI pairing).
@@ -876,8 +879,10 @@ function connectPairing(
     let unwatch = () => {};
     // Made with the key once the hello is out; Connect hands it to the live session so the counters carry on.
     let sealer: Sealer | null = null;
+    let expireTimer: ReturnType<typeof setTimeout> | undefined;
     const end = () => {
       open = false;
+      clearTimeout(expireTimer);
       unwatch();
     };
     const supersede = (message?: string) => {
@@ -956,6 +961,10 @@ function connectPairing(
       ws.onclose = () => supersede();
       ws.onerror = null;
       unwatch = watchConnectCard(f.verifiedOrigin, supersede);
+      // Review 22 Nov 2026: a card can stay up (the same-phone tab's 'left' no longer closes it), so it closes when the
+      // code expires, and Connect re-checks.
+      expireTimer = setTimeout(() => supersede(PAIR_CODE_EXPIRED_MESSAGE), Math.max(0, link.e * 1000 - Date.now()));
+      (expireTimer as { unref?: () => void } | undefined)?.unref?.(); // tests: never keeps the process up
       resolve({
         origin: f.verifiedOrigin,
         code,
@@ -963,6 +972,10 @@ function connectPairing(
         proven,
         returnPlan,
         signIn: !!loginReq,
+        signInAs: (() => {
+          const raw = (accountNamesFor(agentDeps.currentId).payable ?? '').trim();
+          return raw ? (raw.startsWith('$') ? raw : `$${raw}`) : '';
+        })(),
         takeReturn: () => {
           if (!returnPlan || returnTaken) return null;
           returnTaken = true;
@@ -974,6 +987,10 @@ function connectPairing(
         },
         confirm: async (agent?: AgentGrant): Promise<ReturnExtra | null> => {
           if (gone) return null;
+          if (Date.now() > link.e * 1000) {
+            supersede(PAIR_CODE_EXPIRED_MESSAGE);
+            return null;
+          }
           end();
           ws.onclose = null;
           // A CLI must be bound to an agent account; only a CLI pairing carries an agent grant.
@@ -982,10 +999,11 @@ function connectPairing(
             return null;
           }
           // Connect and sign in (the card said so). A failure here is a plain Connect: the site then asks as usual.
-          const login =
-            loginReq && !agent
-              ? await signFoldedLogin(link.c, loginReq, agentDeps.ctx?.wallet as never).catch(() => null)
-              : null;
+          // Checked again now: the challenge may have expired while the card was up.
+          const freshReq = loginReq && !agent ? foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin!) : null;
+          const login = freshReq
+            ? await signFoldedLogin(link.c, freshReq, agentDeps.ctx?.wallet as never).catch(() => null)
+            : null;
           if (login) closeConnectCardsFor(f.verifiedOrigin!);
           const stored: StoredSession = {
             c: link.c,

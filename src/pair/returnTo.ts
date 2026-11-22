@@ -13,7 +13,11 @@
  */
 import { RET_MAX_BYTES, RID_RE, type BrowserHint, type PairLink, type SealedFrame } from './protocol';
 
-/** True when `ret` may be used as the return for a pairing proven to come from `origin`. */
+/**
+ * True when `ret` may be used as the return for a pairing from `origin`: https, no userinfo, and EXACTLY that origin
+ * (scheme, host and port). Review 22 Nov 2026: no subdomains. The relay's origin is the WebSocket Origin header, which
+ * any non-browser client can set (relay.mjs), so "a subdomain of the claimed origin" could be one the claimant runs.
+ */
 export function isAllowedReturn(ret: string, origin: string): boolean {
   if (!ret || ret.length > RET_MAX_BYTES) return false;
   try {
@@ -22,9 +26,7 @@ export function isAllowedReturn(ret: string, origin: string): boolean {
     if (o.protocol !== 'https:' || r.protocol !== 'https:') return false;
     if (r.username || r.password || r.port) return false;
     if (o.port) return false; // proven origins with a port are dev setups; no automatic return there
-    const host = r.hostname.toLowerCase();
-    const base = o.hostname.toLowerCase();
-    return host === base || host.endsWith(`.${base}`);
+    return r.origin === o.origin;
   } catch {
     return false;
   }
@@ -82,18 +84,19 @@ export const resetRidMemory = () => memory.clear();
 /** The decision taken when the pairing is checked: return to `ret` (still subject to the rid) or not at all. */
 export type ReturnPlan = { ret: string; rid: string; b?: BrowserHint } | null;
 /**
- * P0 22 Nov 2026: a link WITHOUT a v2 proof returns too. Sites on @bwalletx/connect have no well-known pairing key, so
- * requiring `s2` meant the same-phone sign-in never came back. It stays safe because `ret` must be on the origin the
- * relay saw (`origin === link.o`) and pass isAllowedReturn: the wallet only ever opens the site the user came from,
- * the fragment carries no secret a third party can read (its frame is sealed to the site's pairing key), and `rid` is
- * still one-time. A link that carries `s2` which does NOT verify (tampered, or a stale key) still never returns.
+ * P0 22 Nov 2026: a link WITHOUT a v2 proof returns too (sites on @bwalletx/connect have no well-known pairing key, so
+ * requiring `s2` meant the same-phone sign-in never came back), but only to the ROOT of the exact origin the relay saw
+ * (review 22 Nov 2026): that origin is only a claim without a proof, so the link may not choose a path on it. With a
+ * valid `s2` the site chose and signed `ret`, so its path is used. A link whose `s2` does NOT verify never returns.
+ * `rid` stays one-time, and the fragment's frame is sealed to the site's pairing key.
  */
 export function planReturn(link: PairLink, origin: string, v2Proven: boolean): ReturnPlan {
   if (!link.ret || !link.rid) return null;
   if (link.s2 && !v2Proven) return null;
   if (origin !== link.o) return null;
   if (!isAllowedReturn(link.ret, link.o)) return null;
-  return { ret: link.ret, rid: link.rid, ...(link.b && { b: link.b }) };
+  const ret = v2Proven ? link.ret : `${new URL(link.o).origin}/`;
+  return { ret, rid: link.rid, ...(link.b && { b: link.b }) };
 }
 
 /**

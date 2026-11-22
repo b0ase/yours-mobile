@@ -326,6 +326,9 @@ export async function signFoldedLogin(
   now = Date.now(),
 ): Promise<{ k: string; sig: string } | null> {
   if (!wallet) return null; // locked: plain Connect; the site then asks the usual way
+  // Review 22 Nov 2026: never sign a challenge that expired while the card was up.
+  const m = /\nExpires: (\S+)$/.exec(req.message);
+  if (!m || !(Date.parse(m[1]) > now)) return null;
   const [{ publicKey }, { signature }] = await Promise.all([
     wallet.getPublicKey({ identityKey: true } as never),
     wallet.createSignature({
