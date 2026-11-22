@@ -57,7 +57,14 @@ export type ProofCheck = {
    * the proven wallet key (before this update): the payer may deliberately get through (names.ts proofKeyOverride).
    */
   overridable?: true;
+  /** The served binding's version (seq) the check used, when it was a signed one; kept with the proven key. */
+  seq?: number;
 };
+/**
+ * The served binding of the name being checked, passed only when its signature (and any handover release) checked
+ * out: its version, and for a handover the key that released the name.
+ */
+export type ProofBinding = { seq?: number; handoverFrom?: string };
 
 const env = (v: string | undefined) => (typeof v === 'string' ? v.trim() : '');
 
@@ -220,28 +227,58 @@ export const trustProofSub = (alias: string, sub: string) => {
   }
 };
 
-// The wallet key each provable name was last proven for (or that the payer deliberately accepted for it), lowercase.
-// A proof this wallet can't check (unknown provider key) is payable only for this key (second review, finding 1).
+// The wallet key each provable name was last proven for (or that the payer deliberately accepted for it), lowercase,
+// with the version (seq) of the signed binding it was served with. A proof this wallet can't check (unknown provider
+// key) is payable only for this key (second review, finding 1), and the key never moves back to an older binding
+// version (third review, finding 2: a server replaying a superseded key with its old token).
 const PROOF_KEY = 'bwallet.names.proofKeys';
-const readProofKeys = (): Record<string, string> => {
+type KeptKey = { key: string; seq?: number };
+const isSeq = (n: unknown): n is number => Number.isInteger(n);
+const readProofKeys = (): Record<string, KeptKey | string> => {
   try {
-    return JSON.parse(localStorage.getItem(PROOF_KEY) ?? '{}') as Record<string, string>;
+    const v = JSON.parse(localStorage.getItem(PROOF_KEY) ?? '{}') as unknown;
+    return v && typeof v === 'object' ? (v as Record<string, KeptKey | string>) : {};
   } catch {
     return {};
   }
 };
-/** Remember the wallet key this name's proof is accepted for: on every proven check, or the payer's override. */
-export const trustProofKey = (alias: string, identityKey: string) => {
+/** The wallet key (and its binding seq) this name's proof is accepted for; undefined if none kept. */
+export const provenKeyFor = (alias: string): KeptKey | undefined => {
+  const v = readProofKeys()[alias.toLowerCase()];
+  if (typeof v === 'string') return { key: v };
+  if (!v || typeof v.key !== 'string') return undefined;
+  return isSeq(v.seq) ? { key: v.key, seq: v.seq } : { key: v.key };
+};
+/**
+ * A key other than the kept one, at a binding version not newer than the kept one's (or with no signed binding at
+ * all, once the kept key has a version): a replayed or rolled-back key, never accepted as proven.
+ */
+export const olderThanKept = (alias: string, identityKey: string, seq?: number): boolean => {
+  const kept = provenKeyFor(alias);
+  if (!kept || kept.key === identityKey.toLowerCase() || !isSeq(kept.seq)) return false;
+  return !(isSeq(seq) && seq > kept.seq);
+};
+/**
+ * Remember the wallet key this name's proof is accepted for: on every proven check, a verified handover from the kept
+ * key, or the payer's override. Never replaces the kept key with one at an older (or equal) binding version.
+ */
+export const trustProofKey = (alias: string, identityKey: string, seq?: number) => {
   const a = alias.toLowerCase();
   const k = identityKey.toLowerCase();
-  const all = readProofKeys();
-  if (all[a] === k) return;
+  if (olderThanKept(a, k, seq)) return;
+  const kept = provenKeyFor(a);
+  // The same key served at an older version keeps the newer version this wallet saw.
+  const keepSeq = kept?.key === k && isSeq(kept.seq) && !(isSeq(seq) && seq > kept.seq) ? kept.seq : seq;
+  if (kept?.key === k && kept.seq === keepSeq) return;
   try {
-    localStorage.setItem(PROOF_KEY, JSON.stringify({ ...all, [a]: k }));
+    const next: KeptKey = isSeq(keepSeq) ? { key: k, seq: keepSeq } : { key: k };
+    localStorage.setItem(PROOF_KEY, JSON.stringify({ ...readProofKeys(), [a]: next }));
   } catch {
     /* private mode: nothing remembered */
   }
 };
+/** The reason a proof for a key older than the kept one is refused. */
+export const OLDER_KEY = 'older than the wallet this name was proven for';
 
 // Every key this wallet has fetched from a provider itself: provider → kid → key (b-Aware 357).
 const SEEN_PROVIDER_KEYS = 'bwallet.names.providerKeys';
@@ -317,11 +354,16 @@ export async function checkNameProof(
   alias: string,
   identityKey: string,
   proof: unknown,
+  binding: ProofBinding = {},
 ): Promise<ProofCheck | null> {
+  const b: ProofBinding = {
+    seq: isSeq(binding.seq) ? binding.seq : undefined,
+    handoverFrom: typeof binding.handoverFrom === 'string' ? binding.handoverFrom.toLowerCase() : undefined,
+  };
   const res = /\.github$/i.test(alias)
-    ? await checkGistProof(f, alias, identityKey, proof)
-    : await checkProviderProof(f, alias, identityKey, proof);
-  return res && { ...res, alias: alias.toLowerCase() };
+    ? await checkGistProof(f, alias, identityKey, proof, b)
+    : await checkProviderProof(f, alias, identityKey, proof, b);
+  return res && { ...res, alias: alias.toLowerCase(), ...(isSeq(b.seq) ? { seq: b.seq } : {}) };
 }
 
 async function checkProviderProof(
@@ -329,6 +371,7 @@ async function checkProviderProof(
   alias: string,
   identityKey: string,
   proof: unknown,
+  b: ProofBinding,
 ): Promise<ProofCheck | null> {
   const provider = provableProvider(alias);
   if (!provider) return null;
@@ -353,18 +396,29 @@ async function checkProviderProof(
     // so a hostile server can't turn a missing or bad proof into a tap-through (second review, finding 1).
     const key = identityKey.toLowerCase();
     if (!seen) return { status: 'unproven', provider, reason: v.reason };
-    const kept = readProofKeys()[alias.toLowerCase()];
-    if (kept) return { status: kept === key ? 'unproven' : 'unchecked', provider, reason: v.reason };
+    const kept = provenKeyFor(alias);
+    if (kept) {
+      if (kept.key === key) return { status: 'unproven', provider, reason: v.reason };
+      // The kept key itself signed the name over to this one at a newer binding version (checkBinding verified the
+      // release): the owner moved, so it pays (no badge) and the kept key follows the handover (third review, 1).
+      if (b.handoverFrom === kept.key && (!isSeq(kept.seq) || (isSeq(b.seq) && b.seq > kept.seq))) {
+        trustProofKey(alias, key, b.seq);
+        return { status: 'unproven', provider, reason: v.reason };
+      }
+      return { status: 'unchecked', provider, reason: v.reason };
+    }
     // Seen proven before this update kept the key: the key the payer paid, or a deliberate override.
     if (trustedKeyFor(alias) === key) return { status: 'unproven', provider, reason: v.reason };
     return { status: 'unchecked', provider, reason: v.reason, overridable: true };
   }
   if (!v.ok) return { status: 'bad', provider, reason: v.reason };
+  // A genuine but superseded proof (an old key with its old token) never counts: the kept key only moves forward.
+  if (olderThanKept(alias, identityKey, b.seq)) return { status: 'bad', provider, reason: OLDER_KEY };
   if (seen && seen !== v.sub) return { status: 'sub-changed', provider, sub: v.sub };
   // First proof this wallet sees for the name: remember its account, so a later missing or swapped proof stops.
   if (!seen) trustProofSub(alias, v.sub);
   // ...and the wallet key it proves, the only one a later proof this wallet can't check may pay.
-  trustProofKey(alias, identityKey);
+  trustProofKey(alias, identityKey, b.seq);
   return { status: 'proven', provider, sub: v.sub };
 }
 
@@ -407,6 +461,7 @@ export async function checkGistProof(
   alias: string,
   identityKey: string,
   proof: unknown,
+  b: ProofBinding = {},
 ): Promise<ProofCheck> {
   const provider = 'github' as const;
   const p = proof && typeof proof === 'object' ? (proof as { provider?: string; gist?: string }) : null;
@@ -428,8 +483,11 @@ export async function checkGistProof(
   for (const file of Object.values(g.files ?? {}))
     if (file && !file.truncated && (await verifyGistText(String(file.content ?? ''), alias, identityKey))) ok = true;
   if (!ok) return { status: 'bad', provider, reason: 'gist does not prove this wallet' };
+  // An old gist for a superseded key stays on GitHub: the same never-backwards rule as provider tokens.
+  if (olderThanKept(alias, identityKey, b.seq)) return { status: 'bad', provider, reason: OLDER_KEY };
   const sub = String(g.owner?.id ?? '');
   if (seen && seen !== sub) return { status: 'sub-changed', provider, sub };
   if (!seen && sub) trustProofSub(alias, sub);
+  trustProofKey(alias, identityKey, b.seq);
   return { status: 'proven', provider, sub };
 }

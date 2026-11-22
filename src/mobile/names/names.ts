@@ -319,7 +319,7 @@ export const trustResolvedKey = (
   if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
   // proofKeyOverride's stop: accept this key for the name the proof was checked for (a forward's target).
   const p = r.nameProof;
-  if (p?.status === 'unchecked' && p.overridable && p.alias) trustProofKey(p.alias, r.pubkey);
+  if (p?.status === 'unchecked' && p.overridable && p.alias) trustProofKey(p.alias, r.pubkey, p.seq);
 };
 
 /**
@@ -396,7 +396,10 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
       r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from, r.bindingSeq);
       // Provable names: the provider's own signature says which wallet this name belongs to; checked here.
       // A forward's proof is the target's (the server serves the target row), so check it against the target.
-      r.nameProof = (await checkNameProof(f, boundTo, r.pubkey, id?.proof)) ?? undefined;
+      // Its binding version (and handover signer) goes with it, only when that binding checked out: the kept proven key
+      // follows a signed handover and never moves back to an older version.
+      const proofBinding = status === 'signed' ? { seq: served?.seq, handoverFrom: from } : {};
+      r.nameProof = (await checkNameProof(f, boundTo, r.pubkey, id?.proof, proofBinding)) ?? undefined;
     }
     // Our host only pays names it knows (pki answers with a key). Without this an unknown alias resolved as payable
     // and failed later at send time as "the paymail host answered 404" (owner, 25 Oct 2026: bwalletx@bwalletx.com).
