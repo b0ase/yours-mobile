@@ -430,3 +430,123 @@ describe('binding seq replay (row 136)', () => {
     expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: KEY_CHANGED });
   });
 });
+
+describe('third review: a signed handover from the kept key (finding 1)', () => {
+  const pr = () => parseRecipient('victim.gmail@bwallet.space');
+  const answerFor = async (w: ReturnType<typeof wallet>, binding: unknown, signer: Signer) => ({
+    handle: 'victim.gmail@bwalletx.com',
+    pubkey: w.key,
+    binding,
+    proof: { provider: 'google', idToken: await signJwt(signer, await claimsFor(w.key)), keys: [] },
+  });
+
+  test('kept K0, owner hands over to K1 at a newer seq, K1 token under a kid Google no longer publishes: pays (no badge)', async () => {
+    const k0 = wallet(971);
+    const k1 = wallet(972);
+    const r0 = await resolveRecipient(
+      host(await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1), google), [google.pub]),
+      pr(),
+    );
+    expect(r0.nameProof?.status).toBe('proven');
+    resetProviderKeyCache();
+    const gone = await makeKey('g-gone-971'); // signed K1's token; rotated out before this wallet looked
+    const moved = await answerFor(k1, await handedOver(k0, k1, 'victim.gmail', 2), gone);
+    let r = await resolveRecipient(host(moved, [google.pub]), pr());
+    expect(r.nameBinding).toBe('signed');
+    expect(r.nameProof?.status).toBe('unproven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
+    // The handover moved the kept key to K1: K1's own later binding (no handover) still pays.
+    resetProviderKeyCache();
+    r = await resolveRecipient(
+      host(await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 3), gone), [google.pub]),
+      pr(),
+    );
+    expect(r.nameProof?.status).toBe('unproven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
+  });
+
+  test('a real but older handover from the kept key, replayed with an uncheckable token, still stops', async () => {
+    const a = wallet(973);
+    const b = wallet(974);
+    // History: a (seq 1) -> b (seq 2) -> back to a (seq 3). The wallet saw a proven at seq 3.
+    const r0 = await resolveRecipient(
+      host(await answerFor(a, await handedOver(b, a, 'victim.gmail', 3), google), [google.pub]),
+      pr(),
+    );
+    expect(r0.nameProof?.status).toBe('proven');
+    resetProviderKeyCache();
+    const gone = await makeKey('g-gone-973');
+    const r = await resolveRecipient(
+      host(await answerFor(b, await handedOver(a, b, 'victim.gmail', 2), gone), [google.pub]),
+      pr(),
+    );
+    expect(r.nameProof?.status).toBe('unchecked');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+  });
+});
+
+describe('third review: the kept proven key never moves backwards (finding 2, replayed superseded key)', () => {
+  const pr = () => parseRecipient('victim.gmail@bwallet.space');
+  const answerFor = async (w: ReturnType<typeof wallet>, binding: unknown, signer: Signer = google) => ({
+    handle: 'victim.gmail@bwalletx.com',
+    pubkey: w.key,
+    binding,
+    proof: { provider: 'google', idToken: await signJwt(signer, await claimsFor(w.key)), keys: [] },
+  });
+  /** K0 proven at seq 1, then K1 proven at seq 2: the server keeps K0's old binding and token. */
+  const history = async (n: number) => {
+    const k0 = wallet(n);
+    const k1 = wallet(n + 1);
+    const old = await answerFor(k0, await bindingFrom(k0, 'victim.gmail', 1));
+    expect((await resolveRecipient(host(old, [google.pub]), pr())).nameProof?.status).toBe('proven');
+    resetProviderKeyCache();
+    const now = await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 2));
+    expect((await resolveRecipient(host(now, [google.pub]), pr())).nameProof?.status).toBe('proven');
+    resetProviderKeyCache();
+    return { k0, k1, old, now };
+  };
+
+  test('replaying superseded K0 with its old token and seq-1 binding is not "proven", and Send stops', async () => {
+    const { old } = await history(981);
+    const r = await resolveRecipient(host(old, [google.pub]), pr());
+    expect(r.nameProof?.status).not.toBe('proven');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+  });
+
+  test('replaying K0 with no binding, or at the same seq as K1, is not "proven" either', async () => {
+    const { k0, old } = await history(983);
+    let r = await resolveRecipient(host({ ...old, binding: undefined }, [google.pub]), pr());
+    expect(r.nameProof?.status).not.toBe('proven');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    resetProviderKeyCache();
+    r = await resolveRecipient(host({ ...old, binding: await bindingFrom(k0, 'victim.gmail', 2) }, [google.pub]), pr());
+    expect(r.nameProof?.status).not.toBe('proven');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+  });
+
+  test('the replay does not move the kept key back to K0: K1 with an uncheckable token still pays', async () => {
+    const { k1, old } = await history(985);
+    await resolveRecipient(host(old, [google.pub]), pr());
+    resetProviderKeyCache();
+    const gone = await makeKey('g-gone-985');
+    const r = await resolveRecipient(
+      host(await answerFor(k1, await bindingFrom(k1, 'victim.gmail', 2), gone), [google.pub]),
+      pr(),
+    );
+    expect(r.nameProof?.status).toBe('unproven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
+  });
+
+  test('the kept key itself served again (even at an older seq) is still proven, and a newer key is too', async () => {
+    const { k1, now } = await history(987);
+    let r = await resolveRecipient(
+      host({ ...now, binding: await bindingFrom(k1, 'victim.gmail', 1) }, [google.pub]),
+      pr(),
+    );
+    expect(r.nameProof?.status).toBe('proven');
+    resetProviderKeyCache();
+    const k2 = wallet(989);
+    r = await resolveRecipient(host(await answerFor(k2, await bindingFrom(k2, 'victim.gmail', 3)), [google.pub]), pr());
+    expect(r.nameProof?.status).toBe('proven');
+  });
+});
