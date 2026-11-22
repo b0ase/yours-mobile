@@ -41,8 +41,14 @@ const MIN_HITS = 10;
 /** A list word seen this often in one stretch is filler, not part of a phrase. */
 const FILLER_REPEATS = 3;
 
-/** Letter runs (accents and kana voicing marks stay on the word) or digit runs. Everything else is a separator. */
-const TOKEN = /[\p{L}\p{M}]+|\p{N}+/gu;
+/**
+ * Letter runs (accents and kana voicing marks stay on the word) or digit runs. Everything else is a separator.
+ * Invisible format characters (zero-width space and joiners, word joiner, byte order mark, soft hyphen, direction marks:
+ * Unicode Cf) inside a letter run stay in it and are dropped from the word, so "aban\u200Bdon" is still "abandon"
+ * (round-3 review of b-Aware row 353: such words got past Ask b every time).
+ */
+const TOKEN = /[\p{L}\p{M}][\p{L}\p{M}\p{Cf}]*|\p{N}+/gu;
+const INVISIBLE = /\p{Cf}/gu;
 const fold = (w: string) => w.normalize('NFKD').toLowerCase();
 const bare = (w: string) => w.replace(/\p{M}/gu, '');
 const LATIN = /^[\p{Script=Latin}\p{M}]+$/u;
@@ -75,7 +81,7 @@ const rawTokens = (text: string): Raw[] => {
     const start = m.index ?? 0;
     const prev = out[out.length - 1];
     const digits = /^\p{N}+$/u.test(m[0]) || (prev?.digits === true && prev.end === start && ORDINAL.test(m[0]));
-    out.push({ start, end: start + m[0].length, text: m[0], digits });
+    out.push({ start, end: start + m[0].length, text: m[0].replace(INVISIBLE, ''), digits });
   }
   return out;
 };

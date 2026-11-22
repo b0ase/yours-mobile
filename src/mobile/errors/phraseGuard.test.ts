@@ -518,12 +518,12 @@ describe('a different filler between each word, fixed phrases (round-3 review of
 
 describe('invisible characters inside words (round-3 review of b-Aware row 353)', () => {
   const INVISIBLE: Array<[string, string]> = [
-    ['zero-width space', '​'],
-    ['zero-width non-joiner', '‌'],
-    ['zero-width joiner', '‍'],
-    ['word joiner', '⁠'],
-    ['byte order mark', '﻿'],
-    ['soft hyphen', '­'],
+    ['zero-width space', String.fromCharCode(0x200b)],
+    ['zero-width non-joiner', String.fromCharCode(0x200c)],
+    ['zero-width joiner', String.fromCharCode(0x200d)],
+    ['word joiner', String.fromCharCode(0x2060)],
+    ['byte order mark', String.fromCharCode(0xfeff)],
+    ['soft hyphen', String.fromCharCode(0x00ad)],
   ];
   for (const [name, ch] of INVISIBLE)
     test(`${name} inside every word`, () => {
@@ -536,7 +536,10 @@ describe('invisible characters inside words (round-3 review of b-Aware row 353)'
     });
   test('between every letter, and joining the words', () => {
     const words = fixedPhrases(1, 128)[0];
-    expectBlocked(words.map((w) => w.split('').join('​')).join(' '), words);
-    expect(hidePhrases(`before ${words.join('­ ')} after`)).toBe('before [recovery words hidden] after');
+    expectBlocked(words.map((w) => w.split('').join(String.fromCharCode(0x200b))).join(' '), words);
+    // "qqq"/"zzz", not list words: the guard takes neighbouring list words ("before") into the hidden stretch.
+    expect(hidePhrases(`qqq ${words.join(`${String.fromCharCode(0x00ad)} `)} zzz`)).toBe(
+      'qqq [recovery words hidden] zzz',
+    );
   });
 });
