@@ -4,6 +4,7 @@ import { EXPECTED_HASHES } from './opnsPow';
 import { MiningCancelled, NameTakenError, TreeHoldError } from './opnsRegister';
 import type { OpnsTree } from './opnsTree';
 import { releasedNote, type SweepResult } from './opnsTxStatus';
+import { STORE_BUILD, bcorpFeeAddress } from '../storeBuild';
 
 /**
  * "Mint a list" (owner, 13 Oct 2026): mine several OpNS names in one go from the user's own wallet.
@@ -264,8 +265,10 @@ export const saveBatch = (identityAddress: string, s: BatchState | null, kv: KV 
 /**
  * Optional service fee for other users: $1 per name minted, paid to OPNS_FEE_ADDRESS (build-time
  * VITE_OPNS_FEE_ADDRESS). Empty by default, so there is no fee (owner, 13 Oct 2026: leave it unset for now).
+ * Never in a store build, whatever the env says: it goes through bcorpFeeAddress like every other fee to bCorp.
  */
-export const OPNS_FEE_ADDRESS: string = import.meta.env?.VITE_OPNS_FEE_ADDRESS ?? '';
+export const opnsFeeAddress = (address: string, store = STORE_BUILD): string => bcorpFeeAddress(address, store);
+export const OPNS_FEE_ADDRESS: string = opnsFeeAddress(import.meta.env?.VITE_OPNS_FEE_ADDRESS ?? '');
 export const OPNS_FEE_USD_PER_NAME = 1;
 export const serviceFeeUsd = (namesToMint: number, address = OPNS_FEE_ADDRESS) =>
   address ? namesToMint * OPNS_FEE_USD_PER_NAME : 0;

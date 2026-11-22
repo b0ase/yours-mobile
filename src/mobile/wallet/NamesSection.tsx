@@ -160,7 +160,7 @@ export const NamesSection = () => {
                       >
                         {n.published ? 'Bound' : 'Not bound'}
                       </span>
-                      {n.listedSats != null && (
+                      {MARKET_ENABLED && n.listedSats != null && (
                         <span className="text-[10px] shrink-0" style={{ color: 'var(--bw-muted)' }}>
                           For sale
                         </span>

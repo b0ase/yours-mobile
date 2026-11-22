@@ -8,11 +8,16 @@ import {
   LocalStoreNeededError,
   ensureLocalStore,
   isOnDeviceStore,
+  SEND_WAIT_MS,
+  joinOrStartMove,
+  movingMessage,
+  moveProgressTracker,
   requireLocalStoreForChange,
   type EnsureLocalDeps,
   type StoreConfigLike,
 } from './localFirst';
-import type { SwitchResult } from './restoreFromRemote';
+import { errorLayout, isMovingError } from '../mobile/themeStore/buySheetState';
+import { switchToLocalVerified, type SwitchDeps, type SwitchResult } from './restoreFromRemote';
 
 const REMOTE = 'https://wallet.1sat.app';
 const S = { outputs: 1, spendableSats: 10, actions: 1 };
@@ -252,5 +257,296 @@ describe('review 4 Nov 2026', () => {
     expect(bg).toContain("case 'STORAGE_MOVE_TO_DEVICE':");
     for (const page of ['src/pages/BsvWallet.tsx', 'src/pages/StorageStatus.tsx', 'src/mobile/themeStore/StoreBuy.tsx'])
       expect(readFileSync(page, 'utf8')).toContain('<MoveToDeviceNotice');
+  });
+});
+
+describe('a send during the copy (never a second copy, refuse within 2 s with progress)', () => {
+  const never = () => new Promise<void>(() => undefined);
+  /**
+   * "Within 2 s" is the wait the code asks for, not the wall clock (the full gate run under load took 2.28 s, 22 Nov
+   * 2026): every timer `fn` sets is recorded and fires at once, so the refusal path runs whole and fast under any load.
+   */
+  const timed = async <T>(fn: () => Promise<T>): Promise<{ value: T; waits: number[] }> => {
+    const real = globalThis.setTimeout;
+    const waits: number[] = [];
+    globalThis.setTimeout = ((cb: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => {
+      waits.push(ms ?? 0);
+      return real(cb, 0, ...a);
+    }) as typeof setTimeout;
+    try {
+      return { value: await fn(), waits };
+    } finally {
+      globalThis.setTimeout = real;
+    }
+  };
+
+  test('joins the copy already running: start() is never called', async () => {
+    let starts = 0;
+    const { value: ok, waits } = await timed(() =>
+      joinOrStartMove({
+        isLocal: () => false,
+        running: () => never(),
+        start: async () => void starts++,
+        waitMs: 50,
+      }),
+    );
+    expect(ok).toBe(false);
+    expect(starts).toBe(0);
+    // It waits only its own waitMs for the copy already running, never for the copy to finish.
+    expect(waits).toEqual([50]);
+  });
+
+  test('starts exactly one copy when none runs, and a second send joins it', async () => {
+    let starts = 0;
+    let running: Promise<unknown> | null = null;
+    const deps = {
+      isLocal: () => false,
+      running: () => running,
+      start: () => {
+        starts++;
+        running = never();
+        return running;
+      },
+      waitMs: 20,
+    };
+    await joinOrStartMove(deps);
+    await joinOrStartMove(deps);
+    await joinOrStartMove(deps);
+    expect(starts).toBe(1);
+  });
+
+  test('once coins are admitted (local active), a send proceeds without waiting', async () => {
+    const ok = await joinOrStartMove({
+      isLocal: () => true,
+      running: () => never(),
+      start: never,
+      waitMs: 10_000,
+    });
+    expect(ok).toBe(true);
+  });
+
+  test('the wrapped createAction refuses within 2 s with the progress message and signs nothing', async () => {
+    let built = 0;
+    let local = false;
+    const wallet = { createAction: async () => void built++ };
+    requireLocalStoreForChange(wallet, {
+      isLocal: () => local,
+      ensureLocal: () =>
+        joinOrStartMove({ isLocal: () => local, running: () => never(), start: never, waitMs: SEND_WAIT_MS }),
+      refusal: () => movingMessage({ done: 250, total: 1000, startedAt: Date.now() - 5 * 60_000 }),
+      log: () => undefined,
+    });
+    const { value: err, waits } = await timed(() => wallet.createAction({ outputs: [{}] } as never).catch((e) => e));
+    // Refused after one wait of SEND_WAIT_MS (2 s at most), never after the copy: the copy here never ends.
+    expect(SEND_WAIT_MS).toBeLessThanOrEqual(2000);
+    expect(waits).toEqual([SEND_WAIT_MS]);
+    expect(err).toBeInstanceOf(LocalStoreNeededError);
+    expect(err.message).toBe(
+      'Moving your wallet to this device: 250 of 1000. You can send in about 15 minutes. Nothing was sent.',
+    );
+    expect(built).toBe(0);
+    // Coins admitted: the same wrapped send now goes through.
+    local = true;
+    await wallet.createAction({ outputs: [{}] } as never);
+    expect(built).toBe(1);
+  });
+
+  test('the progress message is recognised by the popup as the moving notice', () => {
+    expect(isMovingError(movingMessage({ done: 1, total: 4, startedAt: Date.now() - 60_000 }))).toBe(true);
+    expect(isMovingError(movingMessage(null))).toBe(true);
+  });
+});
+
+describe("task 70 review: one switch for every caller (B1), the move's own counts (B2)", () => {
+  /** A switch whose copy (setActiveStorage('local')) waits until released; counts the copies started. */
+  const fakeSwitch = (key: object, remoteUrl = 'https://backup.example') => {
+    let active: string | undefined = remoteUrl;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const copies = { started: 0 };
+    const summary = { outputs: 1, spendableSats: 100, actions: 1 };
+    const deps: SwitchDeps = {
+      key,
+      remoteUrl,
+      activeRemoteUrl: () => active,
+      setActiveStorage: async (t) => {
+        if (t === 'local') {
+          copies.started++;
+          await gate;
+          active = undefined;
+        } else active = t;
+      },
+      summarize: async () => summary,
+      pullRemote: async () => undefined,
+    };
+    return { deps, release, copies };
+  };
+
+  test('B1: a second caller (Recover mined, Restore from backup) joins the running switch: one copy', async () => {
+    const store = {};
+    const a = fakeSwitch(store);
+    const first = switchToLocalVerified(a.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    // Another caller, its own deps for the same account's store.
+    const b = fakeSwitch(store);
+    const second = switchToLocalVerified(b.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(a.copies.started + b.copies.started).toBe(1);
+    a.release();
+    b.release();
+    const [r1, r2] = await Promise.all([first, second]);
+    expect(r1.ok).toBe(true);
+    expect(r2).toBe(r1);
+    expect(b.copies.started).toBe(0);
+    // Once it has finished, a later switch runs again.
+    const c = fakeSwitch(store);
+    c.release();
+    expect((await switchToLocalVerified(c.deps)).ok).toBe(true);
+    expect(c.copies.started).toBe(1);
+  });
+
+  test("B1: a switch to a different backup waits for the running one; another account's store is not held up", async () => {
+    const store = {};
+    const a = fakeSwitch(store, 'https://one.example');
+    const b = fakeSwitch(store, 'https://two.example');
+    const other = fakeSwitch({});
+    const first = switchToLocalVerified(a.deps);
+    const second = switchToLocalVerified(b.deps);
+    const third = switchToLocalVerified(other.deps);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(a.copies.started).toBe(1);
+    expect(b.copies.started).toBe(0); // never two copies into one store at once
+    expect(other.copies.started).toBe(1);
+    a.release();
+    b.release();
+    other.release();
+    await Promise.all([first, second, third]);
+    expect(b.copies.started).toBe(1);
+  });
+
+  test("B2: the counts come from the move's own admission runs, and only while it runs", async () => {
+    let now = 1_000_000;
+    const t = moveProgressTracker(() => now);
+    t.admission({ admitted: 5, applied: 0, refused: 0, retired: 0, left: 10 }); // no move: ignored
+    expect(t.current()).toBeNull();
+    let finish!: () => void;
+    const move = t.track(() => new Promise<void>((r) => (finish = r)));
+    expect(t.message()).toBe(movingMessage(null)); // nothing checked yet: the plain line
+    now += 60_000;
+    t.admission({ admitted: 40, applied: 0, refused: 10, retired: 0, left: 150 });
+    expect(t.current()).toEqual({ done: 50, total: 200, startedAt: 1_000_000 });
+    now += 60_000;
+    t.admission({ admitted: 50, applied: 0, refused: 0, retired: 0, left: 100 });
+    expect(t.message()).toBe(
+      'Moving your wallet to this device: 100 of 200. You can send in about 2 minutes. Nothing was sent.',
+    );
+    finish();
+    await move;
+    expect(t.current()).toBeNull();
+    expect(t.message()).toBe(movingMessage(null));
+  });
+
+  test('B2: a move that fails leaves no counts behind', async () => {
+    const t = moveProgressTracker(() => 0);
+    const failed = t.track(async () => {
+      t.admission({ admitted: 3, applied: 0, refused: 0, retired: 0, left: 7 });
+      expect(t.current()?.total).toBe(10);
+      throw new Error('copy to this device failed');
+    });
+    await expect(failed).rejects.toThrow('copy to this device failed');
+    expect(t.current()).toBeNull();
+    expect(t.message()).toBe(movingMessage(null));
+  });
+
+  test('B2: the Store pay sheet shows the same progress line, not the short generic one', () => {
+    const line = movingMessage({ done: 3, total: 9, startedAt: Date.now() - 60_000 });
+    expect(errorLayout(line)).toEqual({ hero: false, notice: true, error: line });
+    expect(errorLayout(movingMessage(null)).error).toBe(movingMessage(null));
+  });
+});
+
+describe('instant restore (services/spendableFirst.ts) in ensureLocalStore', () => {
+  const OURS = 'https://storage.bwalletx.com';
+
+  test('used on a remote-active restore: no verified copy, saved local-first with our server added as a backup', async () => {
+    const { state, deps } = harness({ activeRemote: REMOTE, remotes: [REMOTE] });
+    const asked: string[] = [];
+    deps.spendableFirst = async (url) => {
+      asked.push(url);
+      state.local = true; // the snapshot path makes the device store active itself
+      return { used: true, remotes: [OURS] };
+    };
+    expect(await ensureLocalStore(deps)).toEqual({ ok: true, how: 'snapshot' });
+    expect(asked).toEqual([REMOTE]);
+    expect(state.switches).toBe(0);
+    expect(state.saved).toEqual([{ activeRemote: undefined, remotes: [REMOTE, OURS], localFirst: true }]);
+  });
+
+  test('not used (or throws): exactly the path without it, step for step', async () => {
+    const run = async (snap?: EnsureLocalDeps['spendableFirst']) => {
+      const h = harness({ activeRemote: REMOTE, remotes: [REMOTE] });
+      if (snap) h.deps.spendableFirst = snap;
+      const r = await ensureLocalStore(h.deps);
+      return { r, switches: h.state.switches, saved: h.state.saved, failed: h.state.failed };
+    };
+    const without = await run();
+    expect(await run(async () => ({ used: false }))).toEqual(without);
+    expect(await run(() => Promise.reject(new Error('boom')))).toEqual(without);
+    const runEmpty = async (snap?: EnsureLocalDeps['spendableFirst']) => {
+      const h = harness({ remotes: [REMOTE], localFirst: true }, { localIsEmpty: async () => true });
+      if (snap) h.deps.spendableFirst = snap;
+      const r = await ensureLocalStore(h.deps);
+      return { r, pulls: h.state.pulls, saved: h.state.saved };
+    };
+    expect(await runEmpty(async () => ({ used: false }))).toEqual(await runEmpty());
+  });
+
+  test('an empty local-active device: the snapshot instead of the pull; our server added once', async () => {
+    const h = harness({ remotes: [REMOTE], localFirst: true }, { localIsEmpty: async () => true });
+    h.deps.spendableFirst = async () => ({ used: true, remotes: [OURS] });
+    expect(await ensureLocalStore(h.deps)).toEqual({ ok: true, how: 'snapshot' });
+    expect(h.state.pulls).toBe(0);
+    expect(h.state.saved).toEqual([{ remotes: [REMOTE, OURS], localFirst: true }]);
+    // A device that already holds rows never asks for it.
+    const full = harness({ remotes: [REMOTE], localFirst: true });
+    let asked = 0;
+    full.deps.spendableFirst = async () => {
+      asked++;
+      return { used: false };
+    };
+    expect(await ensureLocalStore(full.deps)).toEqual({ ok: true, how: 'already-local' });
+    expect(asked).toBe(0);
+  });
+});
+
+describe('review of a95a1ff0, 1: the backup a move to this device reads from is never our server unless it is safe', () => {
+  const OURS = 'https://storage.bwalletx.com';
+  test('remotes = [ours] only (1Sat removed), flag off: no remote picked, nothing switched', async () => {
+    const { state, deps } = harness({ remotes: [`${OURS}.`] }, { localActive: false });
+    const r = await ensureLocalStore(deps);
+    expect(state.switches).toBe(0);
+    expect(r.ok).toBe(false);
+  });
+  test('ours first, 1Sat second: 1Sat is the one read from', async () => {
+    let asked: string | undefined;
+    const { deps } = harness(
+      { remotes: [OURS, REMOTE] },
+      { localActive: false, switchVerified: async (url) => ((asked = url), { ok: true, remote: S, local: S }) },
+    );
+    await ensureLocalStore(deps);
+    expect(asked).toBe(REMOTE);
+  });
+  test('a pick the background supplies (flag on, repaired) may name our server', async () => {
+    let asked: string | undefined;
+    const { deps } = harness(
+      { remotes: [OURS] },
+      {
+        localActive: false,
+        pickRemote: async () => OURS,
+        switchVerified: async (url) => ((asked = url), { ok: true, remote: S, local: S }),
+      },
+    );
+    await ensureLocalStore(deps);
+    expect(asked).toBe(OURS);
   });
 });

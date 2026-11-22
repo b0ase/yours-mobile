@@ -28,6 +28,7 @@ import {
 } from './tickets';
 import { hasRate, money, moneyWithSats, satsNote, usdToSats } from '../money/money';
 import { ErrorActions } from '../errors/ErrorActions';
+import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 /**
  * MINT → "Start a room": mint a ticket (BSV-21, fixed supply, 0 decimals) and open its holders'
@@ -131,9 +132,11 @@ export const TicketMint = ({
       <div className="flex flex-col gap-3 text-sm">
         <p>
           ${done.ticket.ticker} is minted: {Number(done.ticket.supply ?? 0).toLocaleString()} tickets in your wallet.{' '}
-          {done.room
-            ? `The room "${done.ticket.name}" is open.`
-            : 'Set up its room (Settings › My tokens) to list it in other wallets and the Market and open its chat.'}
+          {!TOKEN_ROOMS_ENABLED
+            ? ''
+            : done.room
+              ? `The room "${done.ticket.name}" is open.`
+              : 'Set up its room (Settings › My tokens) to list it in other wallets and the Market and open its chat.'}
         </p>
         <p className="text-xs" style={{ color: '#999' }}>
           {TICKET_COPY}

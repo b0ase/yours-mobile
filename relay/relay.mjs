@@ -389,6 +389,9 @@ export function createRelay({
     // Nobody bound or holds the wallet role and this wallet takes it: first come, which only the window lets through.
     if (role === 'wallet' && !ch.walletBinding && !ch.claims.wallet) ch.legacyWallet = true;
     let bound = false;
+    // Review 22 Nov 2026: who held the wallet role before this attach. If that changes, frames the old holder queued
+    // for the site are dropped, so a returning site never reads a replaced wallet's hello or ready.
+    const heldBefore = ch.claims.wallet;
     if (mayBind(ch, role, claim, nc)) {
       // Wallet claim v2: from now on only the session claim admits the wallet; the QR claim is spent.
       ch.walletBinding = nc;
@@ -403,6 +406,7 @@ export function createRelay({
     }
     // The wallet role is now bound to a digest the site chose (only the paired ends can compute it), not first-come.
     if (siteProven && wc) ch.legacyWallet = false;
+    if (role === 'wallet' && ch.claims.wallet !== heldBefore) ch.queue.site = [];
     ch[role]?.close(4001, 'replaced');
     ch[role] = ws;
     ch.lastActive = now();

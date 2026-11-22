@@ -35,6 +35,9 @@ export const RESERVED_PROTOCOLS: readonly Protocol[] = [
   [2, 'bwallet paymail'],
   // Contract listing author signature (src/mobile/contracts/contractNft.ts): "I listed this contract, pay me here".
   [2, 'bwallet contract'],
+  // Feed-author binding (src/mobile/feed/authorBinding.ts): "these feed posts are by this $name". Reserved so no
+  // site can attach its own posting address to the user's name.
+  [2, 'bwallet feed author'],
   [2, 'bwallet agreement'],
   // Company offers (src/mobile/offer/offer.ts): seal, director and subscriber signatures over the document hash.
   [2, 'bcorp offer'],
@@ -84,6 +87,7 @@ export const EXTERNAL_OK: readonly (readonly [number, string, string])[] = [
   [2, 'bjobsx records', 'bJobsX private profile records: pinned to bjobsx.com only (pinnedProtocols.ts)'],
   [2, 'bdrivex records', 'bDriveX private file records: pinned to bdrivex.com only (pinnedProtocols.ts)'],
   [2, 'bcalx records', 'bCalX private calendar records: pinned to bcalx.com only (pinnedProtocols.ts)'],
+  [2, 'bchatx chat key', 'bChatX DM key backup: pinned to the bChatX room hosts only (pinnedProtocols.ts)'],
   // Token receive keys for sites (services/siteTokens.ts, docs/SITE-TOKENS.md): getPublicKey only, answered with a
   // fresh wallet token key the wallet picks; every signing/crypto method with it is refused for apps.
   [1, 'bwalletx token receive', 'Site token receive keys: getPublicKey only (siteTokens.ts)'],

@@ -10,6 +10,7 @@ import { withIssuerSignature } from '../issuer/issuerSign';
 import { registerIssuer } from '../issuer/issuerVerify';
 import { rememberOwnToken } from '../tokens/indexFund';
 import { CURVE_MAP_DESCRIPTION, curveMapScript } from '../curves/curveMap';
+import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 import type { Curve } from '../../lib/curves';
 import {
   TICKET_DECIMALS,
@@ -87,7 +88,11 @@ export async function deployBsv21(
     /** The launch curve, committed on the deploy tx as its own MAP output (fixed from then on). */
     curve?: Curve | null;
   },
+  store = STORE_BUILD,
 ): Promise<string> {
+  // Fungible token minting is bWalletX only (storeBuild.ts FUNGIBLE_MINT_ENABLED; S8): refused before the wallet,
+  // the fee or the curve is touched.
+  if (store) throw new Error(STORE_NAME_NOTE);
   const withFee = withIssuerSignature(withFeeOutput(ctx, opts.feeSats), 'bsv21');
   const withCurve = opts.curve ? withMapOutput(withFee, curveMapScript(opts.curve), CURVE_MAP_DESCRIPTION) : withFee;
   const res = await deployBsv21Mint.execute(

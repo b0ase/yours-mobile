@@ -20,6 +20,7 @@
 import { BCHAT_ORIGINS } from '../../services/bchatOrigin';
 import { ChatApiError, needsHandle, type ChatSession } from './api';
 import { FRAME_SESSION_CALL } from '../bappFrame/frameBridge';
+import { APP_NAME } from '../storeBuild';
 
 export { FRAME_SESSION_CALL };
 /** bit-sign route that mints the one-time code from the wallet's Bearer session. */
@@ -92,7 +93,7 @@ export const withStepTimeout = <T>(what: string, p: Promise<T>, ms = FRAME_SESSI
 
 const errorText = (e: unknown): string => {
   if (needsHandle(e)) return 'Choose your bChatX name in the Chat tab first.';
-  return e instanceof Error && e.message ? e.message : 'bWalletX could not sign you in to bChatX.';
+  return e instanceof Error && e.message ? e.message : `${APP_NAME} could not sign you in to bChatX.`;
 };
 
 /** The frame's `bchatx.frameSession` call, answered for one origin. Never throws. */

@@ -6,6 +6,7 @@
 import { TicketsSection } from '../wallet/TicketsSection';
 import { WalletTabs } from '../nfts/WalletTabs';
 import { NamesSection } from '../wallet/NamesSection';
+import { MARKET_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 const Intro = ({ children }: { children: React.ReactNode }) => (
   <p className="px-[4%] pt-5 pb-3 m-0 text-sm" style={{ color: '#a3a9b3' }}>
@@ -17,8 +18,9 @@ export const TicketsPage = () => (
   <div className="bs-spaces min-h-full flex flex-col overflow-y-auto pb-10" style={{ color: '#fff' }}>
     <WalletTabs active="tickets" />
     <Intro>
-      Tickets are tokens that get you into a room: chatroom tickets you minted or were given, room tokens, and your own
-      personal token. Holding one lets you open its room (and join that room’s Space); you can also list them for sale.
+      {TOKEN_ROOMS_ENABLED
+        ? 'Tickets are tokens that get you into a room: chatroom tickets you minted or were given, room tokens, and your own personal token. Holding one lets you open its room (and join that room’s Space); you can also list them for sale.'
+        : ''}
     </Intro>
     <TicketsSection />
   </div>
@@ -29,8 +31,9 @@ export const MyNamesPage = () => (
   <div className="bs-spaces min-h-full flex flex-col overflow-y-auto pb-10" style={{ color: '#fff' }}>
     <WalletTabs active="names" />
     <Intro>
-      Names this wallet holds: your $handle paymail and your OpNS names. Bind a name to your identity, sell it or give
-      it away.
+      {MARKET_ENABLED
+        ? 'Names this wallet holds: your $handle paymail and your OpNS names. Bind a name to your identity, sell it or give it away.'
+        : 'Names this wallet holds: your $handle paymail and your OpNS names. Bind a name to your identity or give it away.'}
     </Intro>
     <NamesSection />
   </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Github, Linkedin, Loader2 } from 'lucide-react';
 import { LINK_ACCOUNTS_ENABLED } from '../storeBuild';
-import { DEFAULT_PROVIDERS, PROVIDER_LABEL, fetchProviders, type ProviderState } from './links';
+import { DEFAULT_PROVIDERS, PROVIDER_LABEL, fetchProviders, signupPanelAsks, type ProviderState } from './links';
 import {
   NEW_ACCOUNT,
   clearSocial,
@@ -44,13 +44,18 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
   const [error, setError] = useState(socialError);
   const [busy, setBusy] = useState<SocialProvider | null>(null);
   const [hidden, setHidden] = useState(skipped);
+  const desktop = typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  // Ask which providers are switched on (our sign-in service, and bMarketX for eBay) only when the buttons will show:
+  // not on Desktop or in a store build (no panel), nor after Skip, nor while a started link is waiting.
+  const asks = signupPanelAsks({ enabled: LINK_ACCOUNTS_ENABLED, desktop, hidden, pending: !!pending });
   useEffect(() => {
+    if (!asks) return;
     let live = true;
     void fetchProviders().then((p) => live && setProviders(p));
     return () => {
       live = false;
     };
-  }, []);
+  }, [asks]);
   useEffect(
     () =>
       onSocialChange(() => {
@@ -60,7 +65,6 @@ export const SignupLinkPanel = ({ color, gray }: { color: string; gray: string }
       }),
     [],
   );
-  const desktop = typeof window !== 'undefined' && !!(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   if (!LINK_ACCOUNTS_ENABLED || desktop) return null;
   const live = ORDER.filter((p) => providers[p]);
   if (!live.length) return null;

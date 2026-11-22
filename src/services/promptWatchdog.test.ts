@@ -171,7 +171,7 @@ describe('the hang it fixes: a payment queued behind a dead sheet', () => {
     expect(bg).toContain("if (requestID && kind !== 'unlock') promptWatchdog.watch({ kind, requestID });");
     expect(bg).toContain('if (requestID) promptWatchdog.confirm({ kind, requestID });');
     expect(bg).toContain("if (blocking) watchPrompt({ kind: 'bundle', requestID: blocking.id });");
-    expect(bg).toContain('answer(withPromptNotShownCode(withDenialCode(response)))');
+    expect(bg).toContain('answer(withPromptNotShownCode(withRefusalCode(withDenialCode(response))))');
     expect(bg).toContain('promptWatchdog.watch({ kind, requestID });\n    notifyPromptWindow(kind, requestID);');
   });
 });

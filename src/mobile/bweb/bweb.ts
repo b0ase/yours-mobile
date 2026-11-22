@@ -8,6 +8,7 @@
  * add-ons are added to b's instructions and sent as `addOns` with each turn so the server can log/route them.
  */
 import { ASK_B_FREE } from '../agent/agent';
+import { MARKET_ENABLED } from '../storeBuild';
 
 export type AddOnId = 'names' | 'exchange' | 'bmail' | 'feed';
 
@@ -21,12 +22,18 @@ export const ADD_ONS: readonly AddOn[] = [
     description: 'Check handles and OpNS names, and explain how to claim one',
     prompt: 'Names: help the user check, compare and claim $handles and OpNS names (Names screen, /m/names).',
   },
-  {
-    id: 'exchange',
-    label: 'Exchange search',
-    description: 'Find tokens, apps and strategies on the Exchange',
-    prompt: 'Exchange search: help the user find tokens, apps and strategies on the Exchange (/m/exchange).',
-  },
+  // bWalletX only (CTO decision 6, 16 Nov 2026): a store build has no Exchange, so the add-on is not listed and a stored
+  // "on" is ignored (ADD_ON_IDS, parseBWeb, enabledAddOns, bwebContext all read this list). MARKET_ENABLED is a literal.
+  ...(MARKET_ENABLED
+    ? [
+        {
+          id: 'exchange' as const,
+          label: 'Exchange search',
+          description: 'Find tokens, apps and strategies on the Exchange',
+          prompt: 'Exchange search: help the user find tokens, apps and strategies on the Exchange (/m/exchange).',
+        },
+      ]
+    : []),
   {
     id: 'bmail',
     label: 'bMail drafting',

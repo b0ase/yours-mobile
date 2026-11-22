@@ -406,4 +406,8 @@ export const webm = (tagged: boolean): B =>
     noise(60, 3),
   );
 
+/** An MKV / WebM whose cover art (an attachment) holds an "Exif\0\0" + TIFF block, with or without GPS. */
+export const mkvWithExif = (gps: boolean): B =>
+  cat([0x1a, 0x45, 0xdf, 0xa3], noise(60), ascii('Exif\0\0'), tiff(gps), noise(60, 3));
+
 export const ASCII_XYZ = ascii('\xA9xyz');

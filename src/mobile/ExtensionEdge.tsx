@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { IS_EXTENSION } from './extension';
+import { APP_NAME } from './storeBuild';
 
 /**
  * bWalletX extension: a bold gold strip down the left edge of the side panel. Click (or drag it
@@ -25,7 +26,7 @@ export default function ExtensionEdge() {
   return (
     <button
       type="button"
-      aria-label="Open bWalletX full screen"
+      aria-label={`Open ${APP_NAME} full screen`}
       title="Open full screen"
       onClick={openFull}
       onPointerDown={(e) => {

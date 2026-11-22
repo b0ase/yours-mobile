@@ -1,5 +1,6 @@
 import { LockingScript, OP, Utils, type CreateActionArgs, type WalletInterface } from '@bsv/sdk';
 import type { OneSatContext } from '@1sat/actions';
+import { PAID_FEATURES_ENABLED } from '../storeBuild';
 
 /**
  * Personal token: claiming a name ($BOASE) also mints a BSV-21 token with ticker = the name and
@@ -243,5 +244,7 @@ export const drawerRoomState = (s: { name: string; link: PersonalLink | null; fi
 /** A second personal token for the same identity is refused (owner, 24 Oct 2026: restored devices minted twice). */
 export const secondPersonalError = (existing: Pick<PersonalLink, 'ticker'> | null | undefined): string | null =>
   existing
-    ? `This wallet already has its personal token $${existing.ticker}. Open its room instead of creating another.`
+    ? PAID_FEATURES_ENABLED
+      ? `This wallet already has its personal token $${existing.ticker}. Open its room instead of creating another.`
+      : 'This wallet already has one.'
     : null;

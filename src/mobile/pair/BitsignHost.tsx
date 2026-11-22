@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { drawNote } from './claimedHost';
 import { SignaturePad } from '../signature/SignaturePad';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import {
@@ -11,14 +12,6 @@ import {
   shortHash,
   takeKeptDrawing,
 } from './bitsign';
-
-const hostOf = (origin: string) => {
-  try {
-    return new URL(origin).host;
-  } catch {
-    return origin;
-  }
-};
 
 /**
  * Shows the pad for a paired site's bitsign.drawSignature (bitsign.ts), one request at a time. Done sends the
@@ -69,11 +62,7 @@ export function BitsignHost() {
           : 'Done'
       }
       turnInfo={{ title: req.title || 'Document', code: `#${req.docHash.slice(0, 8)}`, signer: who || undefined }}
-      note={
-        req.review
-          ? `Sends only this drawing to ${hostOf(req.origin)}. You approve the seal and its fee next.`
-          : `Sends only this drawing to ${hostOf(req.origin)}. No keys, no payment.`
-      }
+      note={drawNote(req.origin, !!req.review)}
       details={
         <div className="bw-sigpad-doc">
           <strong>{req.title || 'Document'}</strong>

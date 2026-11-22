@@ -1,22 +1,35 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  BAD_ORD_PROOF,
   bareName,
+  destinationCheck,
   bwalletPaymails,
   isOurDomain,
   checkOpnsAvailability,
   destinationFor,
   parseRecipient,
   resolveRecipient,
+  trustResolvedKey,
+  trustedKey,
+  opnsKeyUnverified,
   scriptToAddress,
   externalLabel,
   TOKENS_UNSUPPORTED,
   UNBOUND_NAME,
+  UNSIGNED_ORD,
   type Fetch,
 } from './names';
+import { giftDestination } from './opnsGift';
 
 const ADDR = '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa';
+/** Where the OpNS index says a name is held (it always gives one; an answer without one is refused). */
+const AT = `${'f'.repeat(64)}_0`;
 
-/** Route table mock: url prefix → JSON body (or status number). */
+/**
+ * Route table mock: url prefix → JSON body (or status number). Unlisted urls answer 404, except the OpNS check
+ * sources (opnsChain.ts), which answer 503: these tests are about resolution, and a 404 there means "no such coin".
+ */
+const CHECK_SOURCES = ['https://api.whatsonchain.com/', 'https://api.1sat.app/1sat/ordfs/'];
 const mock = (routes: Record<string, unknown>): { f: Fetch; calls: string[] } => {
   const calls: string[] = [];
   const f: Fetch = async (url) => {
@@ -24,7 +37,8 @@ const mock = (routes: Record<string, unknown>): { f: Fetch; calls: string[] } =>
     const hit = Object.keys(routes)
       .sort((a, b) => b.length - a.length)
       .find((k) => url.startsWith(k));
-    const body = hit === undefined ? 404 : routes[hit];
+    const unlisted = CHECK_SOURCES.some((s) => url.startsWith(s)) ? 503 : 404;
+    const body = hit === undefined ? unlisted : routes[hit];
     if (typeof body === 'number') return new Response('{}', { status: body });
     return new Response(JSON.stringify(body), { status: 200 });
   };
@@ -97,19 +111,76 @@ describe('paymail resolution', () => {
     expect(r).toMatchObject({ targetKind: 'address', via: 'paymail-address', target: ADDR });
   });
 
-  test('ordAddress capability enables tokens', async () => {
+  test('b-Aware 102/250: our host serving an ord address with no owner signature is never sent tokens', async () => {
+    // Our own host answers c@bwallet.space's ordinal capability with SOMEONE ELSE's address and no ordProof.
+    const { f } = mock({
+      'https://dns.google.com/': { Answer: [{ type: 33, data: '0 10 443 pay.bwallet.space.' }] },
+      'https://pay.bwallet.space/.well-known/bsvalias': {
+        capabilities: {
+          pki: 'https://pay.bwallet.space/api/paymail/id/{alias}@{domain.tld}',
+          '2a40af698840': 'https://pay.bwallet.space/api/paymail/p2p-destination/{alias}@{domain.tld}',
+          '5c55a7fdb7bb': 'https://pay.bwallet.space/api/paymail/receive-beef/{alias}@{domain.tld}',
+          ordAddress: 'https://pay.bwallet.space/api/paymail/ord/{alias}@{domain.tld}',
+        },
+      },
+      'https://pay.bwallet.space/api/paymail/id/': { pubkey: '02ab' },
+      'https://pay.bwallet.space/api/paymail/ord/': { address: ADDR },
+    });
+    const r = await resolveRecipient(f, parseRecipient('c@bwallet.space'));
+    expect(r.external).toBeUndefined();
+    // Tokens, NFTs and names are refused; nothing points at the unproven address.
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: UNSIGNED_ORD });
+    expect(giftDestination(r)).toEqual({ ok: false, error: UNSIGNED_ORD });
+    expect(r.ordAddress).toBeUndefined();
+    // BSV still goes by the paymail's own (P2P) route.
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: 'c@bwallet.space' });
+  });
+
+  test('an outside host (1Sat, Yours…) has no ordProof: its ord address is used, marked not verified', async () => {
+    // The outside host also serves the key a proof would be checked against, so a proof proves nothing there and
+    // no outside host serves one. Refusing would only stop every outside name receiving tokens; the pay sheet says
+    // "Not verified" instead, the same as a BSV payment to that host.
     const { f } = mock({
       'https://dns.google.com/': {},
       'https://ord.ex/.well-known/bsvalias': {
         capabilities: {
+          pki: 'https://ord.ex/id/{alias}@{domain.tld}',
           '2a40af698840': 'https://ord.ex/p2p/{alias}@{domain.tld}',
           '5c55a7fdb7bb': 'https://ord.ex/beef/{alias}@{domain.tld}',
           ordAddress: 'https://ord.ex/ord/{alias}@{domain.tld}',
         },
       },
+      'https://ord.ex/id/': { pubkey: '02ab' },
       'https://ord.ex/ord/': { address: ADDR },
     });
     const r = await resolveRecipient(f, parseRecipient('c@ord.ex'));
+    expect(r.external).toBe('ord.ex');
+    expect(destinationFor(r, 'token')).toEqual({ ok: true, to: ADDR });
+    expect(giftDestination(r)).toEqual({ ok: true, to: ADDR });
+    expect(destinationCheck(r, 'token')).toBe('unverified');
+  });
+
+  test('an outside host whose ord proof does not verify is still refused', async () => {
+    const { f } = mock({
+      'https://dns.google.com/': {},
+      'https://ord.ex/.well-known/bsvalias': {
+        capabilities: {
+          pki: 'https://ord.ex/id/{alias}@{domain.tld}',
+          '2a40af698840': 'https://ord.ex/p2p/{alias}@{domain.tld}',
+          '5c55a7fdb7bb': 'https://ord.ex/beef/{alias}@{domain.tld}',
+          ordAddress: 'https://ord.ex/ord/{alias}@{domain.tld}',
+        },
+      },
+      'https://ord.ex/id/': { pubkey: '02ab' },
+      'https://ord.ex/ord/': { address: ADDR, ordProof: { timestamp: 1, signature: '00' } },
+    });
+    const r = await resolveRecipient(f, parseRecipient('c@ord.ex'));
+    expect(r.ordAddress).toBeUndefined();
+    expect(destinationFor(r, 'token')).toEqual({ ok: false, error: BAD_ORD_PROOF });
+  });
+
+  test('a typed ordinals address is still sent to as-is (nothing a host could swap)', async () => {
+    const r = await resolveRecipient(mock({}).f, parseRecipient(ADDR));
     expect(destinationFor(r, 'token')).toEqual({ ok: true, to: ADDR });
   });
 
@@ -122,7 +193,7 @@ describe('paymail resolution', () => {
 describe('opns resolution', () => {
   test('gorillapool index → owner address', async () => {
     const { f } = mock({
-      'https://ordinals.gorillapool.io/api/opns/satchmo': { owner: ADDR, map: { 'opns.idKey': '03ff' } },
+      'https://ordinals.gorillapool.io/api/opns/satchmo': { outpoint: AT, owner: ADDR, map: { 'opns.idKey': '03ff' } },
     });
     const r = await resolveRecipient(f, parseRecipient('satchmo'));
     expect(r).toMatchObject({ target: ADDR, via: 'opns-owner', pubkey: '03ff', ordAddress: ADDR });
@@ -132,16 +203,16 @@ describe('opns resolution', () => {
   test('falls back to 1sat-stack origin + latest inscription', async () => {
     const { f, calls } = mock({
       'https://ordinals.gorillapool.io/api/opns/': 500,
-      'https://api.1sat.app/1sat/opns/origin/zed': { name: 'zed', outpoint: 'aa.2' },
-      'https://ordinals.gorillapool.io/api/inscriptions/aa_2/latest': { owner: ADDR },
+      'https://api.1sat.app/1sat/opns/origin/zed': { name: 'zed', outpoint: `${'a'.repeat(64)}.2` },
+      [`https://ordinals.gorillapool.io/api/inscriptions/${'a'.repeat(64)}_2/latest`]: { owner: ADDR, outpoint: AT },
     });
     const r = await resolveRecipient(f, parseRecipient('zed'));
     expect(r.target).toBe(ADDR);
-    expect(calls.at(-1)).toContain('aa_2/latest');
+    expect(calls.some((u) => u.includes(`${'a'.repeat(64)}_2/latest`))).toBe(true);
   });
 
   test('no binding, no payment: an unbound name is never paid', async () => {
-    const { f } = mock({ 'https://ordinals.gorillapool.io/api/opns/loose': { owner: ADDR } });
+    const { f } = mock({ 'https://ordinals.gorillapool.io/api/opns/loose': { outpoint: AT, owner: ADDR } });
     const r = await resolveRecipient(f, parseRecipient('loose'));
     expect(r.pubkey).toBeFalsy();
     expect(destinationFor(r, 'bsv')).toEqual({ ok: false, error: UNBOUND_NAME });
@@ -150,7 +221,7 @@ describe('opns resolution', () => {
 
   test('a bound name still pays as before', async () => {
     const { f } = mock({
-      'https://ordinals.gorillapool.io/api/opns/tied': { owner: ADDR, map: { 'opns.idKey': '03ff' } },
+      'https://ordinals.gorillapool.io/api/opns/tied': { outpoint: AT, owner: ADDR, map: { 'opns.idKey': '03ff' } },
     });
     const r = await resolveRecipient(f, parseRecipient('tied'));
     expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: ADDR });
@@ -213,7 +284,7 @@ describe('bare names inside bWallet (our paymail first, then OpNS)', () => {
   test('falls back to OpNS when bwallet.space has no such paymail', async () => {
     const { f } = mock({
       'https://dns.google.com/': {},
-      'https://ordinals.gorillapool.io/api/opns/satchmo': { owner: ADDR },
+      'https://ordinals.gorillapool.io/api/opns/satchmo': { outpoint: AT, owner: ADDR },
     });
     const r = await resolveRecipient(f, parseRecipient('satchmo'), 'bwallet.space');
     expect(r).toMatchObject({ target: ADDR, via: 'opns-owner' });
@@ -311,5 +382,65 @@ describe('bmailx.com sibling domain (one name, two addresses)', () => {
   test('bwalletPaymails lists both addresses, primary first', () => {
     expect(bwalletPaymails('john', 'bwalletx.com')).toEqual(['john@bwalletx.com', 'john@bmailx.com']);
     expect(bwalletPaymails('john', '')).toEqual([]);
+  });
+});
+
+describe('remembered keys: never an OpNS key only the index vouches for (b-Aware opns-indexer)', () => {
+  const mem = new Map<string, string>();
+  const real = globalThis.localStorage;
+  const seen = () => JSON.parse(mem.get('bwallet.names.seenKeys') ?? '{}') as Record<string, string>;
+  const withMem = (fn: () => void) => {
+    mem.clear();
+    globalThis.localStorage = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => void mem.set(k, v),
+      removeItem: (k: string) => void mem.delete(k),
+      clear: () => mem.clear(),
+      key: () => null,
+      length: 0,
+    } as Storage;
+    try {
+      fn();
+    } finally {
+      globalThis.localStorage = real;
+    }
+  };
+  const opns = { input: 'satchmo', via: 'opns-owner' as const, pubkey: '03ff' };
+
+  test('an index-only or unsigned OpNS key is not saved for the name', () =>
+    withMem(() => {
+      trustResolvedKey({ ...opns, opnsChecked: 'index', opnsKeySigned: true });
+      trustResolvedKey({ ...opns, opnsChecked: 'chain', opnsKeySigned: false });
+      trustResolvedKey({ ...opns });
+      expect(seen().satchmo).toBeUndefined();
+    }));
+
+  test('a chain-checked, key-signed OpNS key, and a paymail key, are still saved', () =>
+    withMem(() => {
+      trustResolvedKey({ ...opns, opnsChecked: 'chain', opnsKeySigned: true });
+      trustResolvedKey({ input: '$cafe', via: 'p2p-paymail', pubkey: '02aa' });
+      expect(seen()).toEqual({ satchmo: '03ff', cafe: '02aa' });
+    }));
+});
+
+describe('trustedKey: an OpNS key is used only when checked on chain and signed by that key', () => {
+  const opns = { via: 'opns-owner' as const, pubkey: '03ff' };
+  test('index-only or unsigned OpNS key → no key, and flagged unverified', () => {
+    for (const r of [
+      { ...opns, opnsChecked: 'index' as const, opnsKeySigned: true },
+      { ...opns, opnsChecked: 'chain' as const, opnsKeySigned: false },
+      { ...opns },
+    ]) {
+      expect(trustedKey(r)).toBeUndefined();
+      expect(opnsKeyUnverified(r)).toBe(true);
+    }
+  });
+  test('chain-checked and key-signed OpNS key, a paymail key, and no key at all pass through', () => {
+    const ok = { ...opns, opnsChecked: 'chain' as const, opnsKeySigned: true };
+    expect(trustedKey(ok)).toBe('03ff');
+    expect(opnsKeyUnverified(ok)).toBe(false);
+    expect(trustedKey({ via: 'p2p-paymail', pubkey: '02aa' })).toBe('02aa');
+    expect(opnsKeyUnverified({ via: 'opns-owner' })).toBe(false);
+    expect(trustedKey({ via: 'opns-owner' })).toBeUndefined();
   });
 });

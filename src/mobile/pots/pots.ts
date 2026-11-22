@@ -11,6 +11,7 @@ import {
   getAgentAccount,
   isPotAccount,
   markAgentAccount,
+  markCapAwaitsPrice,
   setAgentDailyCap,
 } from '../agents/agentAccounts';
 import { PNEE_POTS_ENABLED, SUBSCRIPTIONS_ENABLED } from '../storeBuild';
@@ -44,6 +45,17 @@ export type Payee = {
    * only go to this key; a different one flags the order for review (payeeBinding.ts).
    */
   pinnedKey?: string;
+  /**
+   * Where a paymail / $name / OpNS payee was paid when the user approved it (b-Aware row 73): the address it resolved
+   * to on the confirm card, or one the user approved later on a review card. Automatic payments go only to this
+   * address; a host that serves any other address (even with the same key) flags the order for review.
+   */
+  pinnedAddress?: string;
+  /**
+   * Set on an approved app subscription to a paymail (newAppSub): the approval named the paymail, not an address, so
+   * its first payment pins what it pays. Only while nothing has been paid; never used for older orders.
+   */
+  pinOnFirstPay?: boolean;
 };
 
 export type Subscription = {
@@ -73,14 +85,23 @@ export type Subscription = {
   /** What the app said it is for (app subscriptions). */
   description?: string;
   /** The last payment that went through: the receipt the Subscriptions list and status call show. */
-  lastReceipt?: { at: number; txid: string; usd: number; sats: number };
+  lastReceipt?: { at: number; txid: string; usd: number; sats: number; to?: string };
   /** When the user cancelled. A tombstone: once set, no write can move this order out of 'cancelled'. */
   cancelledAt?: number;
   /**
    * The payee's destination failed verification (changed key, bad binding): nothing is paid until the user
    * confirms the new destination (confirmPayeeReview).
    */
-  needsReview?: { reason: string; at: number; servedKey?: string };
+  needsReview?: {
+    reason: string;
+    at: number;
+    /** The key the payee serves now, if any. */
+    servedKey?: string;
+    /** The address the payee resolves to now: what Approve pins. Absent when the destination itself was refused. */
+    servedAddress?: string;
+    /** An order saved before address pinning, asked once: there is no approved address to compare with. */
+    legacy?: boolean;
+  };
 };
 
 const POTS = 'bwallet.pots';
@@ -212,12 +233,19 @@ export const potCurrencyOk = (unit: Pot['unit'], currency: Currency) =>
       ? currency === 'PNEE'
       : currency !== 'PNEE';
 
-/** One payment in dollars (for the spend gate and log). */
-export const amountUsd = (amount: Subscription['amount'], bsvUsd: number): number => {
+/**
+ * One payment in dollars for the spend gate and the log. null when it can't be priced: a sats order with no BSV rate.
+ * Never 0 for a real payment, so a cap check can't pass a payment as free (b-Aware row 267, 12 Nov 2026).
+ */
+export const amountUsdKnown = (amount: Subscription['amount'], bsvUsd: number): number | null => {
   if (amount.currency === 'USD') return amount.value;
-  if (amount.currency === 'SAT') return bsvUsd > 0 ? (amount.value / 1e8) * bsvUsd : 0;
+  if (amount.currency === 'SAT') return bsvUsd > 0 ? (amount.value / 1e8) * bsvUsd : null;
   return amount.value / 100; // PNEE: 1 unit = 1¢
 };
+
+/** One payment in dollars for display and the default cap: a sats order with no rate counts 0 here, never in a gate. */
+export const amountUsd = (amount: Subscription['amount'], bsvUsd: number): number =>
+  amountUsdKnown(amount, bsvUsd) ?? 0;
 
 /**
  * How many upcoming payments `balanceSats` covers across a pot's live subscriptions, paying them in due order.
@@ -275,6 +303,25 @@ export const defaultDailyCap = (subs: Subscription[], bsvUsd: number): number | 
     .map((s) => amountUsd(s.amount, bsvUsd));
   const max = Math.max(0, ...amounts);
   return max > 0 ? Math.round(max * MAX_CATCH_UP * 110) / 100 : null;
+};
+
+/**
+ * An uncapped pot gets the default cap from its orders (addSubscription, moveSub). When no cap can be sized because a
+ * sats order has no BSV price yet, the pot is marked and payDue sizes it once a price is known (settleAwaitedCap):
+ * otherwise a pot filled while the price was missing paid with no daily cap for good (b-Aware row 350, review fix).
+ */
+const applyDefaultCap = (potId: string, bsvUsd: number) => {
+  const a = getAgentAccount(potId);
+  if (!a || a.dailyCapUsd !== null) return;
+  const subs = listSubs(potId).filter((s) => s.status !== 'cancelled' && s.status !== 'ended');
+  const cap = defaultDailyCap(subs, bsvUsd);
+  if (cap !== null) setAgentDailyCap(potId, cap);
+  else if (subs.some((s) => amountUsdKnown(s.amount, bsvUsd) === null)) markCapAwaitsPrice(potId);
+};
+
+/** Pay time: a pot still waiting for a price to size its default cap gets it now, if `bsvUsd` prices its orders. */
+export const settleAwaitedCap = (potId: string, bsvUsd: number) => {
+  if (getAgentAccount(potId)?.capAwaitsPrice) applyDefaultCap(potId, bsvUsd);
 };
 
 // ── Billing gate (OFF) ──────────────────────────────────────────────────────────────────────────────────────
@@ -352,6 +399,8 @@ export type PendingPayment = {
   at: number;
   /** 'PNEE': rawTx is a BEEF hex of a PNEE transfer, broadcast with broadcastPnee. Absent = a BSV payment. */
   unit?: 'PNEE';
+  /** The address this payment pays (absent on records written before address pinning). */
+  to?: string;
 };
 export const getPending = (subId: string): PendingPayment | null =>
   read<Record<string, PendingPayment>>(PENDING, {})[subId] ?? null;
@@ -361,6 +410,31 @@ export const clearPending = (subId: string) => {
   const all = read<Record<string, PendingPayment>>(PENDING, {});
   delete all[subId];
   write(PENDING, all);
+};
+
+/**
+ * Per-period pay claims (b-Aware row 233, BL-01): written before a payment is signed and checked again after, so two tabs
+ * (two JS realms, one localStorage) can't both sign and send the same periods when navigator.locks is missing. A claim
+ * older than CLAIM_TTL_MS (a tab killed mid-sign) no longer blocks: by then its tx was recorded as pending, or never sent.
+ */
+const CLAIMS = 'bwallet.pots.claims';
+export const CLAIM_TTL_MS = 2 * 60_000;
+type PayClaim = { periodIndex: number; by: string; at: number };
+/** Claim `periodIndex` of an order for the run `by`. false: another run holds a live claim on it. */
+export const claimPeriod = (subId: string, periodIndex: number, by: string, now = Date.now()): boolean => {
+  const all = read<Record<string, PayClaim>>(CLAIMS, {});
+  const c = all[subId];
+  if (c && c.by !== by && c.periodIndex === periodIndex && Math.abs(now - c.at) < CLAIM_TTL_MS) return false;
+  write(CLAIMS, { ...all, [subId]: { periodIndex, by, at: now } });
+  return true;
+};
+export const holdsClaim = (subId: string, by: string): boolean =>
+  read<Record<string, PayClaim>>(CLAIMS, {})[subId]?.by === by;
+export const releaseClaim = (subId: string, by: string) => {
+  const all = read<Record<string, PayClaim>>(CLAIMS, {});
+  if (all[subId]?.by !== by) return;
+  delete all[subId];
+  write(CLAIMS, all);
 };
 
 /** Turn a freshly created account into a pot (agent account kind 'pot' + the pot record). */
@@ -439,8 +513,7 @@ export const addSubscription = (n: NewSub, bsvUsd: number, now = Date.now()): Su
     status: 'active',
     mode: 'onOpen',
   });
-  const a = getAgentAccount(n.potId);
-  if (a && a.dailyCapUsd === null) setAgentDailyCap(n.potId, defaultDailyCap(listSubs(n.potId), bsvUsd));
+  applyDefaultCap(n.potId, bsvUsd);
   appendAgentLog(n.potId, { at: now, action: 'sub-create', detail: `Subscription to ${n.payee.name}`, usd: 0 });
   return s;
 };
@@ -471,16 +544,53 @@ export const resumeSub = (id: string, now = Date.now()) => {
   appendAgentLog(s.potId, { at: now, action: 'sub-resume', detail: `Resumed ${s.payee.name}`, usd: 0 });
 };
 
-/** The user checked and accepted the payee's current destination: pin its key and let payments go again. */
-export const confirmPayeeReview = (id: string, key: string | undefined, now = Date.now()) => {
+/**
+ * The user tapped Approve on the destination the review card showed: pin that address (and key) and let payments go
+ * again. Only this explicit tap moves a pin (b-Aware row 73); the scheduler never does.
+ */
+export const confirmPayeeReview = (id: string, dest: { address: string; pubkey?: string }, now = Date.now()) => {
   const s = getSub(id);
-  if (!s) return;
-  saveSub({ ...s, payee: { ...s.payee, pinnedKey: key }, needsReview: undefined, lastError: undefined });
+  if (!s || !dest.address) return;
+  const { pinOnFirstPay: _first, ...payee } = s.payee;
+  saveSub({
+    ...s,
+    payee: { ...payee, pinnedKey: dest.pubkey, pinnedAddress: dest.address },
+    needsReview: undefined,
+    lastError: undefined,
+  });
   appendAgentLog(s.potId, {
     at: now,
     action: 'sub-review',
     detail: `Confirmed new destination for ${s.payee.name}`,
     usd: 0,
+  });
+};
+
+/**
+ * The payee now serves a different destination than the review card showed (payeeBinding PayeeReviewMovedError):
+ * show that one instead, so the next Approve tap checks what the card shows. Pins nothing and pays nothing; only a
+ * card that showed a destination is updated, and the caller passes only a destination that passed the set-up checks.
+ * `reason` gives the card's "Not paying" line for the new destination against the stored order (payeeBinding
+ * reviewReason), so the card never describes the destination it showed before.
+ */
+export const refreshPayeeReview = (
+  id: string,
+  dest: { address: string; pubkey?: string },
+  reason: (s: Subscription) => string,
+  now = Date.now(),
+) => {
+  const s = getSub(id);
+  if (!s?.needsReview?.servedAddress || !dest.address) return;
+  const { servedKey: _old, ...review } = s.needsReview;
+  saveSub({
+    ...s,
+    needsReview: {
+      ...review,
+      reason: reason(s),
+      at: now,
+      servedAddress: dest.address,
+      ...(dest.pubkey ? { servedKey: dest.pubkey } : {}),
+    },
   });
 };
 
@@ -517,12 +627,17 @@ export const formatAmount = (a: Subscription['amount']) =>
 
 const liveSub = (s: Subscription) => s.status === 'active' || s.status === 'lowFunds';
 
-/** Pays from: move a subscription to another pot. Its schedule and approval stay the same. */
-export const moveSub = (id: string, potId: string, now = Date.now()) => {
+/**
+ * Pays from: move a subscription to another pot. Its schedule and approval stay the same. A pot with no cap yet gets
+ * the default cap from its orders, as when an order is created in it (b-Aware row 350: a pot filled only by moves paid
+ * with no daily cap). `bsvUsd` prices a sats order; a pot whose cap is already set keeps it.
+ */
+export const moveSub = (id: string, potId: string, now = Date.now(), bsvUsd = 0) => {
   const s = getSub(id);
   const to = getPot(potId);
   if (!s || s.potId === potId || !to || !potCurrencyOk(to.unit, s.amount.currency)) return;
   saveSub({ ...s, potId, lastError: undefined });
+  applyDefaultCap(potId, bsvUsd);
   appendAgentLog(potId, { at: now, action: 'sub-move', detail: `${s.payee.name} now pays from here`, usd: 0 });
 };
 

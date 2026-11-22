@@ -61,6 +61,20 @@ let overlapMs = PULL_OVERLAP_MS;
 /** A pull's cursor with the overlap: undefined stays undefined (a pass from the start). */
 export const overlapped = (since: Date | string | undefined): Date | undefined =>
   since == null ? undefined : new Date(new Date(since).getTime() - overlapMs);
+/**
+ * A page's next cursor with the overlap, never below the cursor the page was asked from (review of a95a1ff0, 2): the
+ * toolbox's validateSyncCheckpoint refuses one that goes back. A pass that started without the overlap (this device's
+ * store marked as its own mid-pull, on the first open after the storage-key fix) keeps its own cursor instead.
+ */
+export const overlappedNext = (
+  next: Date | string | undefined,
+  pageSince: Date | string | undefined,
+): Date | undefined => {
+  const o = overlapped(next);
+  if (o == null || pageSince == null) return o;
+  const floor = new Date(pageSince);
+  return o.getTime() < floor.getTime() ? floor : o;
+};
 /** Test hook: the overlap (ms); no argument restores the default. */
 export const _setPullOverlap = (ms?: number) => void (overlapMs = ms ?? PULL_OVERLAP_MS);
 
@@ -570,11 +584,79 @@ export async function withFullPassMode<T>(deviceSik: string | undefined, mode: M
 /** An explicit restore (services/restoreFromRemote.ts): its merges run whole, as before, whatever pass is under way. */
 export async function asRestore<T>(fn: () => Promise<T>): Promise<T> {
   restoring++;
+  // The restore's copy starts: the backlog mark (restoreBacklog), from this copy's own start.
+  markRestore();
+  let done = false;
   try {
-    return await fn();
+    const r = await fn();
+    done = true;
+    return r;
   } finally {
     restoring--;
+    // The copy went through whole (its pass from the start included): the backlog is over. One that threw leaves the
+    // mark: the device-sync pulls carry the same first pass on, and restoreCaughtUp clears it when they catch up.
+    if (done && !restoring) endRestoreBacklog();
   }
+}
+
+// ── the post-restore backlog (services/changeWriteAhead.ts: no push waited for before a broadcast while it runs) ──
+
+/** The longest a restore's backlog holds the pushes before broadcasts off, from the restore's start (task 71 review). */
+export const RESTORE_BACKLOG_MS = 2 * HOUR;
+/**
+ * One latch per wallet open (task 71 re-check): the first mark's start (ms). Every later mark in this open counts from
+ * it, and once it is RESTORE_BACKLOG_MS old no mark takes effect again, so the cap holds whatever re-marks (a store that
+ * still has no sync-state row on every pull, an asRestore that keeps failing). Only clearRestoreMark (the wallet's close)
+ * resets it. In memory only: a restarted worker or a reopened wallet forgets it, and the pushes run as normal.
+ */
+let latchAt: number | undefined;
+/** The backlog is on (a mark not yet ended): from latchAt. */
+let restoreMarkAt: number | undefined;
+
+/** A fresh restore's copy, or a store's first pass from the start, is starting now (`startedAt`). */
+export const markRestore = (startedAt = Date.now()) => {
+  if (latchAt === undefined) latchAt = startedAt;
+  else if (!(Math.abs(startedAt - latchAt) < RESTORE_BACKLOG_MS)) return; // spent for this open
+  restoreMarkAt ??= latchAt;
+};
+/** The backlog is over (copy done, caught up, stuck pass, past the cap): the latch stays spent for this open. */
+const endRestoreBacklog = () => void (restoreMarkAt = undefined);
+/** The wallet closed: the next open starts with no mark and a fresh latch. */
+export const clearRestoreMark = () => {
+  restoreMarkAt = undefined;
+  latchAt = undefined;
+};
+/** Is a restore mark set (no store read needed when not)? */
+export const restoreMarked = () => restoreMarkAt !== undefined;
+/** A device-sync pull caught up with the backup (pullIntegrity afterPull: no pass under way): the backlog is over. */
+export const restoreCaughtUp = () => endRestoreBacklog();
+
+/**
+ * Is a fresh restore's backlog still running? Only with a restore mark (asRestore's copy, or a store's first pass), for
+ * at most RESTORE_BACKLOG_MS after it: the weekly full pass, the daily deep pull, a heal, an interrupted pull or a cursor
+ * left empty (an empty backup's completed pull) never count on their own. True while the copy runs; after it, while
+ * that first pass is under way and not stuck (its offsets unmoved for STUCK_PASS_MS of uptime). `row`: this device
+ * store's sync state for the backup, as just read.
+ */
+export function restoreBacklog(row: SyncStateRow | undefined, now = Date.now(), capMs = RESTORE_BACKLOG_MS): boolean {
+  const at = restoreMarkAt;
+  if (at === undefined) return false;
+  // Past the cap (or a clock moved back past it): the push runs again, whatever the pass is doing.
+  if (!(Math.abs(now - at) < capMs)) {
+    endRestoreBacklog();
+    return false;
+  }
+  if (restoring > 0) return true; // the copy itself is running
+  if (!row) return true; // the first pass has not written its row yet (still inside the cap)
+  const mark = markOf(row);
+  if ((mark.stuckMs ?? 0) >= STUCK_PASS_MS) return false; // reported stuck: not a backlog that is draining
+  if (typeof mark.pullOkAt === 'number' && mark.pullOkAt >= at) {
+    endRestoreBacklog(); // a pull caught up since the restore started
+    return false;
+  }
+  if (passFromStart(row) || passUnderWay(row)) return true;
+  endRestoreBacklog();
+  return false;
 }
 
 export type PageKind = {

@@ -72,6 +72,37 @@ describe('pinned protocols', () => {
     expect(pinnedAllowed(VIDEO, 'bvideox.com')).toBe(true);
     expect(knownProtocol(VIDEO)?.label).toBe('Your video records (bVideoX)');
   });
+  test('the bChatX chat key (DM key backup) is pinned to the hosts that serve bChatX rooms', () => {
+    const CHAT_KEY = [2, 'bchatx chat key'] as const;
+    const args = { protocolID: CHAT_KEY, keyID: 'chat-key-v1', counterparty: 'self' };
+    for (const o of [
+      'www.bchatx.com',
+      'bchatx.com',
+      'chat.bwalletx.com',
+      'scammerscartel.com',
+      'www.scammerscartel.com',
+    ])
+      for (const m of ['encrypt', 'decrypt']) expect(pinnedProtocolRefusal(m, args, o)).toBeNull();
+    for (const o of [
+      'bjobsx.com',
+      'evil.com',
+      'x.bchatx.com',
+      'www.bchatx.com.evil.com',
+      'www.bit-sign.online',
+      'bsocialx.com',
+      'bmessagex.com',
+      undefined,
+    ])
+      for (const m of ['encrypt', 'decrypt', 'getPublicKey', 'createSignature', 'createHmac'])
+        expect(pinnedProtocolRefusal(m, args, o)).toContain(PINNED_REFUSAL);
+    expect(pinnedProtocolRefusal('decrypt', { ...args, protocolID: [2, ' BChatX Chat Key '] }, 'evil.com')).toContain(
+      PINNED_REFUSAL,
+    );
+    expect(pinnedAllowed(CHAT_KEY, 'evil.com')).toBe(false);
+    expect(pinnedAllowed(CHAT_KEY, 'www.bchatx.com')).toBe(true);
+    expect(knownProtocol(CHAT_KEY)?.label).toBe('Your private messages (bChatX)');
+    expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(4);
+  });
   test('the advertised version covers bvideox records (bvideox.com checks >= 2)', () => {
     expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(2);
   });
@@ -134,5 +165,15 @@ describe('pinLevelFromVersion (sites and SDK)', () => {
     expect(OLD.test(v)).toBe(false);
     expect(Number(v.match(DUAL)?.[1])).toBe(PINNED_PROTOCOLS_VERSION);
     expect(Number('bwalletx-5.2.40+p2'.match(DUAL)?.[1])).toBe(2);
+  });
+});
+
+describe('bJobsX sheet text', () => {
+  test('says both things the key does: locks the private records, signs the public profile on publish', () => {
+    const d = knownProtocol([2, 'bjobsx records'])?.description ?? '';
+    expect(d).toBe(
+      'bJobsX wants to lock your profile records with your own keys before they go on chain, and to sign your public profile when you publish it. Only your 12 words can open them; nothing is made public unless you choose.',
+    );
+    expect(knownProtocol([2, 'bjobsx records'])?.label).toBe('Your work records (bJobsX)');
   });
 });

@@ -61,7 +61,7 @@ import {
   type Pic,
 } from './bpics';
 import { ALLOWED_COLLECTIONS, fetchCollectionPage, COLLECTION_PAGE, ordfsUrl, type ChainPic } from './collections';
-import { MARKET_ENABLED } from '../storeBuild';
+import { APP_NAME, MARKET_ENABLED } from '../storeBuild';
 
 /**
  * bPics (Apps › bPics, /m/bpics; Desktop /bpics): a photo app for picture ordinals.
@@ -416,7 +416,7 @@ const toItem = (p: ChainPic, collection: string): Item => ({
 const OnChain = ({ q }: { q: string }) => (
   <>
     <p className="text-sm mb-4" style={{ color: MUTED }}>
-      Picture collections already public on Bitcoin, chosen by bWalletX. Only checked collections appear here.
+      Picture collections already public on Bitcoin, chosen by {APP_NAME}. Only checked collections appear here.
     </p>
     {ALLOWED_COLLECTIONS.map((c) => (
       <CollectionSection key={c.id} id={c.id} name={c.name} artist={c.artist} description={c.description} q={q} />
@@ -1345,7 +1345,8 @@ const MintPicSheet = ({ onClose, onMinted }: { onClose: () => void; onMinted: (m
                     </>
                   ) : (
                     <span className="text-xs" style={{ color: MUTED }}>
-                      Choose a picture to see the price.
+                      {/* "cost" in a store build: no price wording on a mint there (S8). */}
+                      {MARKET_ENABLED ? 'Choose a picture to see the price.' : 'Choose a picture to see the cost.'}
                     </span>
                   )}
                 </div>

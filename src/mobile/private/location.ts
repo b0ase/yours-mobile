@@ -926,7 +926,7 @@ export function locationVerdict(input: Uint8Array | ArrayLike<number>, mime = ''
   else if (magic(b, 0x49, 0x49, 0x2a, 0x00) || magic(b, 0x4d, 0x4d, 0x00, 0x2a)) [v, still] = [tiffVerdict(b, 0), true];
   else if (magic(b, 0x42, 0x4d) && /bmp/i.test(mime)) [v, still] = ['none', true];
   else if (isBmff(b)) v = bmff(b, /^audio\//i.test(mime.trim()));
-  else if (magic(b, 0x1a, 0x45, 0xdf, 0xa3)) v = anyNeedle(b, MKV_NEEDLES) ? 'found' : 'none';
+  else if (magic(b, 0x1a, 0x45, 0xdf, 0xa3)) v = worst(anyNeedle(b, MKV_NEEDLES) ? 'found' : 'none', wholeFileScan(b));
   else if (/svg|xml/i.test(mime)) [v, still] = ['none', true];
   if (v === null) {
     if (visual) return 'unknown';

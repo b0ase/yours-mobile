@@ -1312,7 +1312,7 @@ describe('signed requests are used once (b-Aware 26 Oct 2026, N3-6)', () => {
 
 describe('P2P destination hourly limits', () => {
   test('business accounts (npg, bcorp) get 20000/h, everyone else 200', () => {
-    expect(pm.P2P_HOURLY_LIMITS).toEqual({ npg: 20000, bcorp: 20000 });
+    expect(pm.P2P_HOURLY_LIMITS).toEqual({ npg: 20000, bcorp: 20000, scammers: 20000 });
   });
 });
 

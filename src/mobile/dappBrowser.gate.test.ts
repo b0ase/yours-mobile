@@ -4,6 +4,7 @@
  * sign must pass the biometric gate first.
  */
 import { beforeAll, describe, expect, test } from 'bun:test';
+import { reservedLabelRefusal } from '../services/reservedLabels';
 
 const gateCalls: string[] = [];
 let gateAnswer: 'ok' | 'deny' = 'ok';
@@ -24,6 +25,8 @@ const fakeGate = {
 
 let handleSiteCall: typeof import('./dappBrowser').handleSiteCall;
 const reached: string[] = [];
+/** Every message handed to the wallet's router, as sent. */
+const forwarded: { action: string; params?: unknown; originator?: string }[] = [];
 const timedOut: string[] = [];
 let committed = false;
 beforeAll(async () => {
@@ -36,8 +39,9 @@ beforeAll(async () => {
   });
   m.initDappBrowser(() => ({
     runtime: {
-      sendMessage: (msg: { action: string }) => {
+      sendMessage: (msg: { action: string; params?: unknown; originator?: string }) => {
         reached.push(msg.action);
+        forwarded.push(msg);
         // The step that hung on the phone: createSignature never answers.
         if (msg.action === 'createSignature') return new Promise(() => undefined);
         // A payment approved and still broadcasting when the limit hits: answers a bit later.
@@ -104,5 +108,24 @@ describe('handleSiteCall settles every step', () => {
     committed = true;
     expect(await handleSiteCall(ORIGIN, URL_, 'createAction', {})).toEqual({ success: true, data: { txid: 'ab' } });
     committed = false;
+  });
+});
+
+// bMail review 15 Nov 2026 (N1): the wallet's own action labels. The phone's in-app browser, bApp frames and paired
+// sites all come in through handleSiteCall; what it hands the router is what the router's reserved-label check sees.
+describe('handleSiteCall and the reserved action labels', () => {
+  test("a site's label call reaches the router under the site's own originator, labels untouched, and is refused there", async () => {
+    const labels = [`bmail stamp ${'ab'.repeat(32)}.0`, `bmail paid ${'ab'.repeat(32)}.0 ${'cd'.repeat(20)}`];
+    for (const call of ['internalizeAction', 'listActions']) {
+      forwarded.length = 0;
+      await handleSiteCall(ORIGIN, URL_, call, { labels });
+      expect(forwarded.length).toBe(1);
+      const msg = forwarded[0];
+      expect(msg.action).toBe(call);
+      expect(msg.originator).toBe('www.bchatx.com');
+      expect((msg.params as { labels: string[] }).labels).toEqual(labels);
+      // background.ts refuses this message before any wallet or sheet (reservedLabels.test.ts checks the wiring).
+      expect(reservedLabelRefusal(msg.action, msg.params)).toContain('reserved');
+    }
   });
 });

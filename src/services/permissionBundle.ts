@@ -23,6 +23,7 @@ import {
   isSignInShapedName,
   SIGN_IN_NAME,
 } from './sharedKeySigning';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export { BLOCK_SITE_BASKET };
 
@@ -104,7 +105,7 @@ export const MAX_QUEUED_PER_SITE = 10;
 export class PermissionQueueFullError extends Error {
   constructor(originator: string) {
     super(
-      `Too many permission requests from ${originator} are waiting for an answer. Answer the open request in bWalletX, then try again.`,
+      `Too many permission requests from ${originator} are waiting for an answer. Answer the open request in ${APP_NAME}, then try again.`,
     );
     this.name = 'PermissionQueueFullError';
   }
@@ -933,8 +934,7 @@ export const sheetAnswer = (
 export const blockActive = (grant: { expiry: number } | null | undefined, nowMs: number = Date.now()): boolean =>
   !!grant && (grant.expiry === 0 || grant.expiry * 1000 > nowMs);
 
-export const BLOCKED_SITE_REFUSAL =
-  'You blocked this site in bWalletX. To unblock it, open Permissions in bWalletX settings and choose Revoke all for this site.';
+export const BLOCKED_SITE_REFUSAL = `You blocked this site in ${APP_NAME}. To unblock it, open Permissions in ${APP_NAME} settings and choose Revoke all for this site.`;
 
 /** Convert a dollar allowance to satoshis at a USD-per-BSV rate. 0 or no rate → 0. */
 export const allowanceSats = (usd: number, usdPerBsv: number | undefined): number => {

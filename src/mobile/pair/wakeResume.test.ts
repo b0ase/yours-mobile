@@ -178,11 +178,18 @@ describe('phone pairing after the phone sleeps', () => {
     const after = FakeWS.all.findLast((w) => w.url.includes('/v1/c/WAKEBBBBBBBBBBBBBBBBBB'))!;
     expect(after).not.toBe(before);
     expect(after.url).toContain('/v1/c/WAKEBBBBBBBBBBBBBBBBBB');
-    await settle();
-    // The rejoin announces itself so the site resends.
-    expect((await readAll(phone, after)).map((m) => m.t)).toContain('ready');
+    // The rejoin announces itself so the site resends. `phone` only opens frames newer than the last it read, so
+    // poll and keep what arrives rather than trust one fixed wait under a loaded suite.
+    const seen: Array<Record<string, unknown>> = [];
+    const got = async (hit: (m: Record<string, unknown>) => boolean) => {
+      seen.push(...(await readAll(phone, after)));
+      return seen.some(hit);
+    };
+    await until(() => got((m) => m.t === 'ready'));
+    expect(seen.map((m) => m.t)).toContain('ready');
     const id = await ask(site, after);
-    const res = (await readAll(phone, after)).find((m) => m.t === 'res' && m.id === id);
+    await until(() => got((m) => m.t === 'res' && m.id === id));
+    const res = seen.find((m) => m.t === 'res' && m.id === id);
     expect(res).toEqual({ t: 'res', id, result: { publicKey: '02ab' } });
   });
 

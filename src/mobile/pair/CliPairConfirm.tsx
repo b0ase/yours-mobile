@@ -40,6 +40,7 @@ export const CliPairConfirm = ({
   const id = account?.addresses.identityAddress;
   const agent = isPairableAgent(id); // never a pot: pots keep no daily cap
   const [trade, setTrade] = useState(MARKET_ENABLED);
+  const [strategy, setStrategy] = useState(false);
   const [send, setSend] = useState(false);
   const [days, setDays] = useState(7);
   // Minting works on any account (e.g. the owner's main one), within the limits set here.
@@ -49,6 +50,7 @@ export const CliPairConfirm = ({
   const limits = makeMintLimits(maxItems, maxUsd);
   const scopes: AgentScope[] = [
     ...(agent && trade ? ['trade' as AgentScope] : []),
+    ...(agent && MARKET_ENABLED && strategy ? ['strategy' as AgentScope] : []),
     ...(agent && send ? ['send' as AgentScope] : []),
     ...(mint ? ['mint' as AgentScope] : []),
   ];
@@ -109,7 +111,7 @@ export const CliPairConfirm = ({
       >
         <Terminal size={28} color={GOLD} />
       </span>
-      <p className="mt-4 text-xl font-bold text-white">Pair the bWalletX CLI</p>
+      <p className="mt-4 text-xl font-bold text-white">Pair the {APP_NAME} CLI</p>
       <p className="mt-1 break-all font-mono text-sm text-white">{originHost(origin)}</p>
       <p className="mt-1 text-sm" style={{ color: MUTED }}>
         A program on a computer (CLI or an AI agent through MCP)
@@ -141,8 +143,18 @@ export const CliPairConfirm = ({
           toggle(
             trade,
             setTrade,
-            'Buy tokens and load strategies',
-            'Within the account’s limits and its strategy’s rules, except the percent stop, which isn’t active yet',
+            MARKET_ENABLED ? 'Buy tokens' : '',
+            MARKET_ENABLED
+              ? 'Within the account’s limits and its strategy’s rules, except the percent stop, which isn’t active yet'
+              : '',
+          )}
+        {agent &&
+          MARKET_ENABLED &&
+          toggle(
+            strategy,
+            setStrategy,
+            'Suggest strategies',
+            'It can only send a strategy for you to read and approve here. Nothing changes until you tap Approve',
           )}
         {agent && toggle(send, setSend, 'Send BSV', "To anyone, up to the account's daily cap")}
         {toggle(mint, setMint, 'Mint NFTs', 'Photos, music, video, PDFs: signed here, within the limits below')}
@@ -164,8 +176,10 @@ export const CliPairConfirm = ({
       </div>
       {!canPair && (
         <p className="mt-4 text-sm" style={{ color: '#FDA29B' }}>
-          Trading and sending need an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for
-          minting only.
+          {/* Store wording (CTO decision 8, 16 Nov 2026): no trading in the store edition. */}
+          {MARKET_ENABLED
+            ? 'Trading and sending need an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for minting only.'
+            : 'Sending needs an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for minting only.'}
         </p>
       )}
       <div className="mt-4 flex w-full items-center gap-2 text-sm" style={{ color: MUTED }}>

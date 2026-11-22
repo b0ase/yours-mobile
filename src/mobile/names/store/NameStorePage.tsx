@@ -14,7 +14,7 @@ import { fmtSats, fmtUsd, usdToSats, useBsvUsd } from '../../money/money';
 import { fetchExchangeRate } from '../../../utils/wallet';
 import { AccountList, AccountRow } from '../../account/AccountSwitcher';
 import { useAccountSwitch } from '../../account/accountSwitch';
-import { MARKET_ENABLED } from '../../storeBuild';
+import { APP_NAME, MARKET_ENABLED } from '../../storeBuild';
 import { GuestCtx } from '../../media/artists/guestCtx';
 import { resumeAt } from '../../url/resume';
 import { checkOpnsAvailability, parseRecipient, resolveRecipient } from '../names';
@@ -322,7 +322,9 @@ export const NameStorePage = () => {
     if (!o) return;
     setMsg('');
     const usd = Number(sellUsd || nameTierUsd(n) || 15);
-    if (!(usd >= 0.01 && usd <= 100_000)) return setMsg('Choose a price between $0.01 and $100,000.');
+    // Selling is bWalletX only (MARKET_ENABLED): the wording is not in a store bundle.
+    if (!(usd >= 0.01 && usd <= 100_000))
+      return setMsg(MARKET_ENABLED ? 'Choose a price between $0.01 and $100,000.' : '');
     const sats = usdToSats(usd, rate || (await fetchExchangeRate('main').catch(() => 0))) ?? 0;
     if (!sats) return setMsg("Couldn't get the BSV price. Try again in a minute.");
     setPendingSell({ name: n, id: o.id, usd, sats });
@@ -335,7 +337,9 @@ export const NameStorePage = () => {
     try {
       await listOpnsName(apiContext, id, sats);
       setOwned((m) => new Map(m).set(n, { id, listedSats: sats }));
-      setMsg(`${n} is on sale for ${fmtUsd(usd)}. Buyers pay you directly; take it off sale any time.`);
+      // listOpnsName refuses in a store build, so this line is bWalletX only (literal, dropped from a store bundle).
+      if (MARKET_ENABLED)
+        setMsg(`${n} is on sale for ${fmtUsd(usd)}. Buyers pay you directly; take it off sale any time.`);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : `Couldn't list ${n}`);
     } finally {
@@ -507,10 +511,10 @@ export const NameStorePage = () => {
           </p>
         )}
 
-        {/* Your names: tap one to sell it, take it off sale or give it (owner, 14 Oct 2026). */}
+        {/* Your names: tap one to sell it, take it off sale or give it (owner, 14 Oct 2026). Store build: give only. */}
         {yourNames.length > 0 && (
           <div className="mt-12">
-            <Rail title="Your names" sub="tap to sell or give" loading={false}>
+            <Rail title="Your names" sub={MARKET_ENABLED ? 'tap to sell or give' : 'tap to give'} loading={false}>
               {yourNames.map((n) => (
                 <button
                   key={n}
@@ -521,7 +525,7 @@ export const NameStorePage = () => {
                 >
                   <span className="block text-base font-semibold break-all">{n}</span>
                   <span className="block mt-1 text-xs tabular-nums" style={{ color: MUTED }}>
-                    {owned.get(n)?.listedSats
+                    {MARKET_ENABLED && owned.get(n)?.listedSats
                       ? `On sale · ${rate ? fmtUsd(((owned.get(n)?.listedSats ?? 0) / 1e8) * rate) : fmtSats(owned.get(n)?.listedSats ?? 0)}`
                       : 'Yours'}
                   </span>
@@ -980,7 +984,7 @@ const Preview = ({ name }: { name: string }) => (
     </div>
     <dl className="m-0 grid gap-3 text-sm">
       {[
-        ['Pay me', `Anyone with bWalletX pays you by typing ${name}.`],
+        ['Pay me', `Anyone with ${APP_NAME} pays you by typing ${name}.`],
         ['Profile', `${name}@${OPNS_PROFILE_DOMAIN} shows your name and picture.`],
         ['Yours', 'One payment. No renewals, no expiry.'],
       ].map(([k, v]) => (
@@ -1041,7 +1045,7 @@ const WhatIsThis = () => (
           Purchases are final; there are no refunds.
         </p>
       )}
-      <p className="m-0">Your name takes payments in bWalletX once you set it as your name in Settings › Identity.</p>
+      <p className="m-0">Your name takes payments in {APP_NAME} once you set it as your name in Settings › Identity.</p>
     </div>
   </details>
 );
@@ -1067,7 +1071,7 @@ const BuySheet = (p: {
     >
       <ApprovalCard
         ours
-        site="bWalletX"
+        site={`${APP_NAME}`}
         siteSub="Names"
         onClose={p.onClose}
         hero={
@@ -1095,7 +1099,7 @@ const BuySheet = (p: {
           {p.verb === 'Sell' ? (
             <>
               <Chip>Asking price, paid to you</Chip>
-              <Chip>On the Exchange until it sells</Chip>
+              <Chip>{MARKET_ENABLED ? 'On the Exchange until it sells' : ''}</Chip>
               <Chip>Take it off sale any time</Chip>
               <Chip>Plus a small network fee</Chip>
             </>

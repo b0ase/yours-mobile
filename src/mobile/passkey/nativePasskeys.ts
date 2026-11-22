@@ -8,6 +8,7 @@
  * All binary values cross the bridge as base64url strings.
  */
 import { b64url, fromB64url } from './seedBackup';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * The wallet's rpId (web, desktop and the apps). Scoped to web.bwalletx.com, not the registrable domain: with
@@ -91,7 +92,7 @@ export async function nativeCreateWithPrf(
   try {
     r = await plugin.create({
       rpId,
-      rpName: 'bWalletX',
+      rpName: `${APP_NAME}`,
       userId: rand(16),
       userName: label,
       challenge: rand(32),

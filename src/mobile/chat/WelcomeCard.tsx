@@ -1,5 +1,6 @@
 import { FileSignature, Info, MessageCircle, UserPlus } from 'lucide-react';
 import bGlyph from '../brand/bwallet-glyph.svg';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * b's welcome in a new room (as on bchatx.com; logic in roomWelcome.ts). One line and a few buttons; a button
@@ -36,7 +37,7 @@ export const WelcomeCard = ({
           <span className="font-semibold" style={{ color: GOLD }}>
             b
           </span>
-          , bWalletX’s assistant. What’s this room for?
+          , {APP_NAME}’s assistant. What’s this room for?
         </p>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {onInvite && (

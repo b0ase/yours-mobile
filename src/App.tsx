@@ -1,7 +1,7 @@
 import { lazy, Suspense, useContext, useEffect, useState } from 'react';
 import { SiteRoomChip } from './mobile/chat/SiteRoomViews';
 import { keepPanelPort } from './services/panelPrompt';
-import { STORE_BUILD } from './mobile/storeBuild';
+import { APP_NAME, STORE_BUILD } from './mobile/storeBuild';
 import { wearActiveSite } from './mobile/theme/siteLook';
 import { MemoryRouter as Router, Route, Routes } from 'react-router-dom';
 import { Show } from './components/Show';
@@ -217,7 +217,7 @@ export const App = () => {
         <div className="flex flex-col gap-4 max-w-sm text-center" style={{ color: theme.color.global.contrast }}>
           <h1 className="text-xl font-bold m-0">Passkey sign-in isn&rsquo;t available yet</h1>
           <p className="text-sm m-0" style={{ color: theme.color.global.gray }}>
-            Close this tab and go back to bWalletX in Chrome. Choose <strong>Restore Wallet</strong> to use your 12
+            Close this tab and go back to {APP_NAME} in Chrome. Choose <strong>Restore Wallet</strong> to use your 12
             words or backup file, or <strong>Create New Wallet</strong> to start a new one with a password.
           </p>
           <button

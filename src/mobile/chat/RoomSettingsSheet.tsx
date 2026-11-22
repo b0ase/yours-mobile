@@ -37,6 +37,7 @@ import {
 import type { Derivation } from './tokenRooms';
 import { ErrorActions } from '../errors/ErrorActions';
 import { keepAnimated } from '../names/animatedAvatar';
+import { MARKET_ENABLED } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent-hi)';
 const PANEL = '#121316';
@@ -383,13 +384,13 @@ export const RoomSettingsSheet = ({
           >
             {busy === 'save' ? 'Saving…' : 'Save'}
           </button>
-          {onSell && (
+          {MARKET_ENABLED && onSell && (
             <button
               onClick={onSell}
               className="w-full rounded-2xl py-3 font-semibold text-white"
               style={{ background: PANEL, border: `1px solid ${GOLD}` }}
             >
-              {`List $${symbol} tickets for sale`}
+              {MARKET_ENABLED ? `List $${symbol} tickets for sale` : ''}
             </button>
           )}
           <div className="flex gap-2">

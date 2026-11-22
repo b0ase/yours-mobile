@@ -9,6 +9,7 @@
  * proveHoldingsSite.test.ts.
  */
 import { isProveHoldingsOrigin } from './proveHoldingsAction';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export { isProveHoldingsAction, isProveHoldingsOrigin } from './proveHoldingsAction';
 
@@ -34,7 +35,7 @@ export async function runSiteProveHoldings(
   if (!origin || !isProveHoldingsOrigin(origin))
     return { success: false, error: 'Only bChatX can link wallet addresses', code: 'ORIGIN' };
   try {
-    if (await deps.locked()) return { success: false, error: 'Unlock bWalletX first', code: 'LOCKED' };
+    if (await deps.locked()) return { success: false, error: `Unlock ${APP_NAME} first`, code: 'LOCKED' };
     if (!(await deps.granted(origin))) {
       const allow = await deps.ask(new URL(origin).host);
       if (!allow) return { success: false, error: 'Declined', code: 'ERR_PERMISSION_DENIED' };

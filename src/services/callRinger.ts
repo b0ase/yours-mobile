@@ -9,6 +9,7 @@
  * Limits, stated: up to ~30 s late; nothing rings while the wallet is locked (no keys to sign the
  * calls session with).
  */
+import { APP_NAME } from '../mobile/storeBuild';
 export const CALL_RING_ALARM = 'calls-ring';
 export const CALL_NOTIFICATION_PREFIX = 'bwx-call:';
 
@@ -38,7 +39,7 @@ export function callNotification(c: RingCandidate) {
       type: 'basic' as const,
       iconUrl: 'icons/icon128.png',
       title: 'Incoming call',
-      message: who ? `${who} is calling you on bWalletX` : 'Someone is calling you on bWalletX',
+      message: who ? `${who} is calling you on ${APP_NAME}` : `Someone is calling you on ${APP_NAME}`,
       requireInteraction: true,
       priority: 2,
     },

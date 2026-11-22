@@ -424,7 +424,7 @@ const RESERVED_MSG = 'That alias is reserved';
 /** One-time P2P destinations per alias per hour. Business accounts that take game revenue get more (owner, 27 Oct
  * 2026: TERRORNODE splits 50/50 to npg and bcorp; 200/h capped paid sessions). Everyone else keeps 200. */
 const P2P_HOURLY_DEFAULT = 200;
-const P2P_HOURLY_LIMITS = Object.freeze({ npg: 20000, bcorp: 20000 });
+const P2P_HOURLY_LIMITS = Object.freeze({ npg: 20000, bcorp: 20000, scammers: 20000 });
 const p2pHourlyLimit = (alias) => P2P_HOURLY_LIMITS[alias] ?? P2P_HOURLY_DEFAULT;
 
 const RESERVED_OWNERS = Object.freeze({
@@ -883,7 +883,7 @@ function makeHandlers({
         vout: vouts,
         satoshis: sats,
         rate: picked ? picked.rate : 0,
-        rateSource: picked ? picked.source : 'none',
+        rateSource: picked ? picked.source : offers.RATE_UNAVAILABLE,
         rateAt:
           picked && picked.source.startsWith('payer') && meta.rateAt ? String(meta.rateAt).slice(0, 40) : firstSeen,
         usdValue: picked ? offers.usdValueOf(sats, picked.rate) : '0.00',

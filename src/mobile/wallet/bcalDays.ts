@@ -1,5 +1,6 @@
 import type { HistoryRow } from './txHistory';
 import { assetText } from './historyEvents';
+import { MARKET_ENABLED } from '../storeBuild';
 import type { PodcastEpisode } from '../bradio/rssPodcasts';
 import type { Podcast } from '../bradio/podcasts';
 
@@ -57,7 +58,10 @@ export const tradeItems = (rows: HistoryRow[]): CalItem[] =>
       id: `tx:${r.txid}`,
       at: r.time,
       kind: r.type as 'buy' | 'sell',
-      title: (r.type === 'buy' ? 'Bought ' : 'Sold ') + (assetText(r.asset) || r.label || 'an item'),
+      // A store build has no Market: a listing of ours that was taken reads "Listing ended" (A7.5, round A8 S5).
+      title:
+        (r.type === 'buy' ? 'Bought ' : MARKET_ENABLED ? 'Sold ' : 'Listing ended: ') +
+        (assetText(r.asset) || r.label || 'an item'),
       sub: `${Math.abs(r.amountSats).toLocaleString('en-US')} sats`,
     }));
 

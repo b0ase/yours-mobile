@@ -10,6 +10,7 @@ import { DEPOSIT_BASKET } from '@1sat/types';
 import { canonicalInputs, canonicalOutpoint, hasNoTxid } from './canonicalOutpoint';
 import { everyOutput } from './everyOutput';
 import { takeTokenInsertionTicket } from './siteTokens';
+import { APP_NAME } from '../mobile/storeBuild';
 
 /** Same value as permissionBundle.TRUST_SITE_BASKET (not imported: permissionBundle imports this file). */
 const TRUST_SITE_BASKET = 'bwalletx.trust-site';
@@ -46,7 +47,7 @@ const SITE_INSERTABLE = new Set(['1sat', DEPOSIT_BASKET]);
 export const siteMayInsertInto = (basket: unknown, usageType: unknown): boolean =>
   usageType === 'insertion' && typeof basket === 'string' && SITE_INSERTABLE.has(basket.trim().toLowerCase());
 
-export const RESERVED_BASKET_REFUSAL = 'This basket is reserved for bWalletX itself';
+export const RESERVED_BASKET_REFUSAL = `This basket is reserved for ${APP_NAME} itself`;
 
 export const OWN_COIN_REFUSAL = "A site can't spend your wallet's own coins, ordinals or names as its inputs";
 
@@ -101,6 +102,8 @@ export const isSpecOpBasket = (basket: unknown): boolean => {
 
 export const isReservedBasket = (basket: unknown): boolean => {
   if (typeof basket !== 'string') return false;
+  // Not plain ASCII: a database that compares text without accents could read it as one of the names below.
+  if (!/^[\x20-\x7e]*$/.test(basket)) return true;
   const b = basket.trim().toLowerCase();
   if (!b) return false;
   return RESERVED.has(b) || b.startsWith('admin') || b.startsWith('bwalletx.') || isSpecOpBasket(b);

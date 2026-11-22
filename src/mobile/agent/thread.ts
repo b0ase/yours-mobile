@@ -1,4 +1,5 @@
 import type { AgentMessage } from './agent';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * The Ask b conversation shared by the floating bar (AskBar on every Desktop page) and the full /m/ask-b page,
@@ -33,5 +34,5 @@ export const threadId = (account: string | null | undefined): string | null => {
 export const screenContext = (pathname: string | undefined): string => {
   if (!pathname) return '';
   const screen = pathname.replace(/^\/m\/?/, '').split(/[/?#]/)[0] || 'home';
-  return `\n\nThe user is on the "${screen}" screen of bWalletX (${pathname.slice(0, 120)}). Prefer answers about that screen when relevant.`;
+  return `\n\nThe user is on the "${screen}" screen of ${APP_NAME} (${pathname.slice(0, 120)}). Prefer answers about that screen when relevant.`;
 };

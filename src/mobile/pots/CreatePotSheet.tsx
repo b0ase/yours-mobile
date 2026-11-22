@@ -116,7 +116,10 @@ export const AddOrderSheet = ({
         ...(recipient.includes('@') || recipient.startsWith('$')
           ? {
               paymail: recipient,
-              ...(checked?.forTo === recipient && checked.pubkey ? { pinnedKey: checked.pubkey } : {}),
+              // Pin what the confirm card showed: the address, and the wallet key when the host serves one.
+              ...(checked?.forTo === recipient
+                ? { pinnedAddress: checked.address, ...(checked.pubkey ? { pinnedKey: checked.pubkey } : {}) }
+                : {}),
             }
           : { address: recipient }),
       };
@@ -138,11 +141,12 @@ export const AddOrderSheet = ({
     const p = subProblem(n);
     if (p) return setError(p);
     if (needsCheck) {
-      // Resolve and verify the paymail now, show who it is, and pin that key on Set up.
+      // Resolve and verify the paymail now, show who it is, and pin that address (and key) on Set up.
       setChecking(true);
       setError('');
       try {
-        setChecked({ ...(await resolvePayee(n.payee, { ignorePin: true })), forTo: recipient });
+        // fresh: a host-served address must be the served key's own address, or the order isn't set up.
+        setChecked({ ...(await resolvePayee(n.payee, { ignorePin: true, fresh: true })), forTo: recipient });
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -256,9 +260,9 @@ export const AddOrderSheet = ({
           <div className="text-white">Pays {recipient}</div>
           <div style={{ color: MUTED }}>To address {checked.address}</div>
           <div style={{ color: MUTED }}>
-            {checked.pubkey
-              ? `Wallet key ${keyFingerprint(checked.pubkey)}. If this paymail ever points elsewhere, payments stop until you confirm.`
-              : 'This paymail shows no wallet key, so a change of wallet can’t be detected.'}
+            {checked.pubkey ? `Wallet key ${keyFingerprint(checked.pubkey)}. ` : ''}
+            Only this address is paid. If this name ever gives a different address
+            {checked.pubkey ? ' or wallet key' : ''}, nothing is paid until you approve the new one.
           </div>
         </div>
       )}

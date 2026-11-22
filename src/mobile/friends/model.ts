@@ -4,8 +4,9 @@
  * local nicknames / notes / favourites), suggestions, sorting, the add-friend input and the lookalike guard.
  * No network, no DOM: unit-tested in model.test.ts.
  */
-import { lookalikes } from '../names/names';
+import { lookalikes, OPNS_KEY_UNVERIFIED, opnsKeyUnverified, type Resolved } from '../names/names';
 import type { Contact } from '../chat/contacts';
+import { APP_NAME } from '../storeBuild';
 
 /* ── Privacy ─────────────────────────────────────────────────────────────────────────── */
 
@@ -309,6 +310,19 @@ export const parseAddInput = (raw: string): AddInput => {
 };
 
 /**
+ * The identity key a resolved name is saved under as a friend, lowercased, or throw the words to show. Never an OpNS
+ * key that only the index vouches for (b-Aware opns-indexer, round 3): the friend would be saved with whatever key a
+ * lying index named.
+ */
+export const friendKey = (r: Pick<Resolved, 'input' | 'via' | 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>): string => {
+  if (opnsKeyUnverified(r)) throw new Error(OPNS_KEY_UNVERIFIED(r.input));
+  const key = (r.pubkey || '').toLowerCase();
+  if (!/^0[23][0-9a-f]{64}$/.test(key))
+    throw new Error(`${maskEmail(r.input)} has no identity key, so it can't be saved as a friend.`);
+  return key;
+};
+
+/**
  * Collapse characters people confuse when reading a name: 0/o, 1/l/i, rn/m, vv/w, _/-/. dropped.
  * Two different names with the same skeleton are lookalikes.
  */
@@ -351,7 +365,7 @@ export const lookalikeWarnings = (
         });
     }
   }
-  if (didYouMean) out.push({ level: 'warn', text: `Not a bWalletX name. Did you mean ${didYouMean}?` });
+  if (didYouMean) out.push({ level: 'warn', text: `Not a ${APP_NAME} name. Did you mean ${didYouMean}?` });
   return out;
 };
 

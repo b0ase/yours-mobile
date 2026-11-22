@@ -371,8 +371,8 @@ describe('the last device-sync pull is recorded for the sync line', () => {
     const ext = readFileSync(new URL('../pages/BsvWallet.tsx', import.meta.url), 'utf8');
     const mobile = readFileSync(new URL('../../vite.config.mobile.ts', import.meta.url), 'utf8');
     expect(card).toContain('<BalanceTruthLines');
-    expect(ext).toContain('{balanceKnown && (\n            <BalanceTruthLines');
-    expect(mobile).toContain("'{false && balanceKnown && (\\n            <BalanceTruthLines'");
+    expect(ext).toContain('{(balanceKnown || !!restoreMessage) && (\n            <BalanceTruthLines');
+    expect(mobile).toContain("'{false && (balanceKnown || !!restoreMessage) && (\\n            <BalanceTruthLines'");
     const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
     const handler = bg.slice(bg.indexOf("case 'BALANCE_TRUTH':"), bg.indexOf("case 'BALANCE_TRUTH':") + 900);
     expect(handler).toContain('await ensureWallet(true);');

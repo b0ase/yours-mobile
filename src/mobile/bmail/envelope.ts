@@ -31,7 +31,15 @@ export type Postage = {
   beef: string;
   derivationPrefix: string;
   derivationSuffix: string;
+  /**
+   * The stamp was made for this letter only: derivationPrefix is stampPrefix(envelope id), so the key it pays is
+   * derived from the letter's id and it cannot pay for another letter. Wallets from before 15 Nov 2026 do not set it;
+   * their stamps are held to one letter by the receiver's record of used stamps (client.ts).
+   */
+  bound?: true;
 };
+/** The BRC-29 derivation prefix of a stamp bound to the letter `id` (base64, as BRC-29 wants). */
+export const stampPrefix = (id: string): string => btoa(`bmail ${id}`);
 
 export type Envelope = {
   t: 'bmail';
@@ -164,6 +172,7 @@ export const parsePostage = (raw: unknown): Postage | undefined => {
     beef: r.beef,
     derivationPrefix: r.derivationPrefix,
     derivationSuffix: r.derivationSuffix,
+    ...(r.bound === true ? { bound: true as const } : {}),
   };
 };
 

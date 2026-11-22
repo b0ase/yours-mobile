@@ -10,6 +10,7 @@
 import { ChatApiError, type BchatClient } from './api';
 import type { ChatMessage, ChatRoom } from './messages';
 import { isDirectRoom } from './messages';
+import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 export type BDraftKind = 'agreement' | 'terms_summary';
 
@@ -103,7 +104,9 @@ export const bDraftErrorText = (e: unknown): string => {
     case 409:
       return /proposal is/i.test(msg)
         ? `This draft can no longer be accepted (${msg.replace(/^This proposal is /i, '')}).`
-        : 'b only drafts in partnership rooms, not token rooms.';
+        : TOKEN_ROOMS_ENABLED
+          ? 'b only drafts in partnership rooms, not token rooms.'
+          : 'b only drafts in partnership rooms.';
     case 400:
       return msg
         ? `b couldn't use that: ${msg}`

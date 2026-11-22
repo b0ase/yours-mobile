@@ -16,6 +16,7 @@ import { fetchBackup, uploadBackup } from './passkeyServer';
 import { sendRestoredPing } from './openHere';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { markBackedUp } from '../backup/backupState';
+import { APP_NAME } from '../storeBuild';
 
 const linkStyle = { background: 'none', border: 'none', cursor: 'pointer' } as const;
 
@@ -88,7 +89,7 @@ export const PasskeyBackupButton = ({
     setState('busy');
     try {
       const rpId = currentRpId();
-      const { credentialId, prf } = await createPasskeyWithPrf(rpId, `bWalletX · ${label}`);
+      const { credentialId, prf } = await createPasskeyWithPrf(rpId, `${APP_NAME} · ${label}`);
       const b = await sealSeed(words.join(' '), prf, { rpId, credentialId, label });
       saveLocalBackup(b);
       setBlob(b);
@@ -193,7 +194,7 @@ export const PasskeyRestoreRow = ({ onPhrase }: { onPhrase: (mnemonic: string, p
   };
   const openWith = async (blob: SeedBackupBlob) => {
     if (blob.rpId !== currentRpId())
-      throw new Error(`This backup was made on ${blob.rpId}. Open bWalletX there to restore it.`);
+      throw new Error(`This backup was made on ${blob.rpId}. Open ${APP_NAME} there to restore it.`);
     const { prf } = await getPrf(blob.rpId, blob.credentialId);
     onPhrase(opened(await openSeed(blob, prf)), { rpId: blob.rpId, credentialId: blob.credentialId, prf });
   };

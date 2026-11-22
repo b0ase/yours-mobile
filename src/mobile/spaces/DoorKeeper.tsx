@@ -14,7 +14,7 @@ import { gateOfRoom } from '../chat/tokenRooms';
 import { fmtUsd, usdToSats, useBsvUsd } from '../money/money';
 import { parsePage } from './invite';
 import { parseSpaceState } from './model';
-import { doorPriceUsd, loadLedger, needsHandCheck, runDoor } from './door';
+import { doorPriceUsd, loadLedger, needsHandCheck, paymentsDropped, runDoor } from './door';
 import { guardedSendBsv21 } from '../../services/tokenSpendGuard';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -32,6 +32,7 @@ export const DoorKeeper = ({ client, ticker, me }: { client: BchatClient; ticker
   const [hostKey, setHostKey] = useState('');
   const [admitted, setAdmitted] = useState(0);
   const [check, setCheck] = useState<string[]>([]);
+  const [dropped, setDropped] = useState<string[]>([]);
   const [note, setNote] = useState('');
   const [open, setOpen] = useState(false);
 
@@ -94,6 +95,7 @@ export const DoorKeeper = ({ client, ticker, me }: { client: BchatClient; ticker
         if (r.admitted) setAdmitted((n) => n + r.admitted);
         if (r.lastNote) setNote(r.lastNote);
         if (r.check) setCheck(needsHandCheck(loadLedger(hostKey), t).map((c) => c.txid));
+        setDropped(paymentsDropped(loadLedger(hostKey), t).map((c) => c.txid));
       } catch (e) {
         setNote(e instanceof Error ? e.message.slice(0, 120) : 'Door offline');
       } finally {
@@ -125,6 +127,11 @@ export const DoorKeeper = ({ client, ticker, me }: { client: BchatClient; ticker
           {check.map((txid) => (
             <p key={txid} className="mt-1 break-all opacity-90">
               Paid, ticket not confirmed. Check Activity, then send by hand if needed: {txid.slice(0, 12)}…
+            </p>
+          ))}
+          {dropped.map((txid) => (
+            <p key={txid} className="mt-1 break-all opacity-90">
+              Ticket sent, but the payment did not go through on the network: {txid.slice(0, 12)}…
             </p>
           ))}
         </div>

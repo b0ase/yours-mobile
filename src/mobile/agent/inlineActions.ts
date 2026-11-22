@@ -9,6 +9,8 @@
  * are dropped except a room ticker, so b can't pre-fill an amount or an address. Anything else (https://,
  * javascript:, //host, a screen not listed) is dropped and its label left as words. Pure: renderer + tests.
  */
+import { MARKET_ENABLED } from '../storeBuild';
+
 export interface InlineAction {
   label: string;
   href: string;
@@ -17,18 +19,21 @@ export interface InlineAction {
 const TOKEN = /\[\[([^[\]|]{1,40})\|([^[\]\s]{1,300})\]\]/g;
 export const MAX_ACTIONS = 4;
 
-/** Screens a button may open (first path segment under /m/). Read/browse screens; none spends on open. */
+/**
+ * Screens a button may open (first path segment under /m/). Read/browse screens; none spends on open. Tickets and
+ * the Market are bWalletX only (MARKET_ENABLED), so a store build never lists or opens them (round A8, S2).
+ */
 export const SAFE_SCREENS = [
   'home',
   'chat',
   'feed',
   'settings',
   'ask-b',
-  'tickets',
+  ...(MARKET_ENABLED ? (['tickets'] as const) : []),
   'names',
   'my-names',
   'nfts',
-  'market',
+  ...(MARKET_ENABLED ? (['market'] as const) : []),
   'apps',
   'reports',
   'you',
@@ -89,7 +94,14 @@ export function parseInlineActions(text: string): { text: string; actions: Inlin
 export const INLINE_ACTIONS_PROMPT = [
   '\n\nBUTTONS: when a reply points to a screen the person can open next, add up to 3 buttons on their own line,',
   'written exactly as [[Label|/m/screen]] (a short label, 1–4 words). Only these screens:',
-  '/m/home, /m/chat (or /m/chat?room=TICKER for a room), /m/feed, /m/settings, /m/tickets, /m/names, /m/nfts,',
-  '/m/market, /m/apps, /m/you. A button only opens the screen; it never sends, pays or signs, so never',
+  ...(MARKET_ENABLED
+    ? [
+        '/m/home, /m/chat (or /m/chat?room=TICKER for a room), /m/feed, /m/settings, /m/tickets, /m/names, /m/nfts,',
+        '/m/market, /m/apps, /m/you. A button only opens the screen; it never sends, pays or signs, so never',
+      ]
+    : [
+        '/m/home, /m/chat (or /m/chat?room=TICKER for a room), /m/feed, /m/settings, /m/names, /m/nfts,',
+        '/m/apps, /m/you. A button only opens the screen; it never sends, pays or signs, so never',
+      ]),
   'promise that it will. Never put a full https:// address in a button. Add them only when there is a clear next step.',
 ].join(' ');

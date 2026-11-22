@@ -3,18 +3,46 @@
  * (plaintext copy, since the sealed copy is only readable by the recipient… and us, but we keep it simple),
  * read marks, contacts (people I wrote to) and my price to reach me.
  */
+import { Hash, Utils } from '@bsv/sdk';
 import type { Envelope, Sealed, SealedOrdinal } from './envelope';
 import { PENNY_POST_USD, type MailMeta } from './route';
 
 export type Received = MailMeta & {
   env: Envelope;
-  /** Relay message id (for acknowledge). */
+  /** Relay message id (to clear it from the relay once this device erased the letter). */
   relayId?: string;
   verifyNote?: string;
+  /**
+   * The postage could not be checked yet (wallet or chain lookup unavailable): first and last try, unix ms. The letter
+   * counts as unstamped meanwhile; client.ts recheckPostage tries again and settles it (paid, or unpaid for good).
+   */
+  recheck?: {
+    first: number;
+    /** The last check against the network (0: none yet). */
+    last: number;
+    /** Checks the wallet and the network answered without settling it. */
+    tries: number;
+    /** The wallet has found that the stamp pays this account (no network asked yet). */
+    mine?: true;
+    /** When a check first said "unpaid" on an answer that one look does not settle (client.ts StampCheck.confirm). */
+    doubt?: number;
+  };
+  /**
+   * The stamp was given up on without a refusal (no answer in time): unix ms of the last look. The letter is unpaid,
+   * and checked again when it is opened (client.ts recheckLetter).
+   */
+  stampOpen?: number;
+  /**
+   * Paid by a stamp that was not in a block yet: when it was found paid, the last look for a confirmation, and when
+   * a look first found the network without it (client.ts settleConfirmations).
+   */
+  settling?: { since: number; last: number; doubt?: number };
+  /** The account's record of this letter's stamp is in the wallet (or cannot be): client.ts recordOldStamps. */
+  stampRecorded?: true;
   read?: boolean;
   /** Decrypted on open; kept locally so it opens instantly next time. */
   opened?: Sealed;
-  /** Swipe-to-organise flags (local only: the relay has no per-message state after acknowledge). */
+  /** Swipe-to-organise flags (local only: the relay has no per-message state). */
   archived?: boolean;
   /** Soft delete: kept (hidden) so a refresh can't bring it back and Undo can restore it. */
   deleted?: boolean;
@@ -95,9 +123,77 @@ export const subscribeMail = (l: () => void) => {
   };
 };
 
+/** At most this many received letters are stored. */
+export const RECEIVED_MAX = 1000;
+/** This many of the newest letters from senders the user has no dealings with are kept as any other mail is. */
+export const STRANGERS_KEPT = 200;
+/**
+ * The line: at most this many stamped letters from senders the user has no dealings with wait, stored, for an answer
+ * about their stamp (client.ts fetchMail takes no more from the relay while the line is full).
+ */
+export const WAITING_MAX = 100;
+/**
+ * A stamped letter no check has answered for yet: not looked at, or looked at while the wallet or the network could
+ * not answer (an outage). Its coin may be real.
+ */
+export const isWaiting = (r: Received): boolean =>
+  !!r.recheck && r.recheck.tries === 0 && r.recheck.doubt === undefined;
+const dealtWith = (s: MailState, from: string) => s.contacts.includes(from) || (s.trusted ?? []).includes(from);
+/** A letter in the line (WAITING_MAX): waiting, from a sender the user has no dealings with and has not blocked. */
+export const inLine = (s: MailState, r: Received): boolean =>
+  isWaiting(r) && !dealtWith(s, r.from) && !isBlockedSender(s, r.from);
+/**
+ * A sender the user blocked: their mail is stored for Quarantine, and that is all. It waits for nothing: its stamps
+ * are not checked (client.ts recheckPostage; unblocking the sender starts the checks) and it holds no place in the
+ * line.
+ */
+export const isBlockedSender = (s: MailState, from: string): boolean => (s.blocked ?? []).includes(from);
+/**
+ * Keep the store within RECEIVED_MAX without losing the user's own mail to a flood.
+ *
+ * The line is kept apart: its oldest WAITING_MAX letters are stored on top of RECEIVED_MAX, so a letter waiting for
+ * its stamp to be checked is never dropped and never pushes anything out. Letters in the line beyond that (there are
+ * none while fetchMail holds the line) go first of all, newest first, so the oldest waiting keep their place.
+ *
+ * Then, of everything else, what goes first, oldest first:
+ *  1. unread, unpaid letters from senders the user has no dealings with, neither pinned nor archived, beyond the
+ *     newest STRANGERS_KEPT of them: what a flood is made of;
+ *  2. deleted letters (the Bin, erased tombstones);
+ *  3. letters whose stamp a check has already answered for and found wanting, but not yet for good;
+ *  4. everything else: a full store still shows new mail and drops its oldest.
+ * A dropped letter cannot come back as new: the relay ledger still knows its relay message (loadRelaySeen).
+ */
+export const trimReceived = (s: MailState): Received[] => {
+  const line = s.received.filter((r) => inLine(s, r));
+  // received is newest first: the oldest WAITING_MAX of the line keep their place.
+  const kept = new Set(line.slice(-WAITING_MAX));
+  const drop = new Set<Received>(line.filter((r) => !kept.has(r)));
+  let over = s.received.length - kept.size - drop.size - RECEIVED_MAX;
+  if (over <= 0 && !drop.size) return s.received;
+  let strangers = 0;
+  const rank = new Map<Received, number>();
+  for (const r of s.received) {
+    if (kept.has(r) || drop.has(r)) continue;
+    const mine = r.read || r.pinned || r.archived || r.verifiedSats > 0 || r.replyCredit;
+    // A blocked sender's unopened mail counts with the strangers' flood, stamped or not.
+    if (isBlockedSender(s, r.from) && !mine && !r.deleted) rank.set(r, ++strangers > STRANGERS_KEPT ? 0 : 3);
+    else if (r.recheck) rank.set(r, isWaiting(r) ? 3 : 2);
+    else if (r.deleted) rank.set(r, 1);
+    else if (mine || dealtWith(s, r.from)) rank.set(r, 3);
+    else rank.set(r, ++strangers > STRANGERS_KEPT ? 0 : 3);
+  }
+  for (const level of [0, 1, 2, 3])
+    for (let i = s.received.length - 1; i >= 0 && over > 0; i--)
+      if (rank.get(s.received[i]) === level) {
+        drop.add(s.received[i]);
+        over--;
+      }
+  return s.received.filter((r) => !drop.has(r));
+};
+
 export const saveMail = (me: string, s: MailState, st: Store | null = ls()) => {
   try {
-    st?.setItem(key(me), JSON.stringify({ ...s, received: s.received.slice(0, 1000), sent: s.sent.slice(0, 1000) }));
+    st?.setItem(key(me), JSON.stringify({ ...s, received: trimReceived(s), sent: s.sent.slice(0, 1000) }));
   } catch {
     /* storage full: still works this session */
   }
@@ -234,6 +330,75 @@ export const savePending = (me: string, ids: string[], st: Store | null = ls()) 
   }
   listeners.forEach((l) => l());
 };
+
+/**
+ * Mail stays on the relay this long after it arrived, so the user's other devices (phone, extension, web) can fetch
+ * it too; only then does this device clear it from the relay (client.ts fetchMail).
+ */
+export const RELAY_KEEP_DAYS = 30;
+export const RELAY_KEEP_MS = RELAY_KEEP_DAYS * 24 * 60 * 60 * 1000;
+/** A message is cleared only when two refreshes at least this far apart both found it old enough. */
+export const RELAY_CONFIRM_MS = 24 * 60 * 60 * 1000;
+/**
+ * The ledger keeps an entry for every message the relay lists, so nothing it lists is ever taken twice; this cap only
+ * guards the storage quota (about 30 bytes an entry). Over it, the longest-known entries are the ones kept.
+ */
+export const RELAY_SEEN_MAX = 20_000;
+/**
+ * The ledger's key for a relay message id: 96 bits of its SHA-256. The sender chooses the id (up to 256 bytes); the
+ * key is short, fixed in size and safe as a map key whatever the id is.
+ */
+export const relayKey = (messageId: string): string =>
+  Utils.toBase64(Hash.sha256(Utils.toArray(String(messageId), 'utf8')).slice(0, 12));
+/** `first`: when this device first saw the message. `due`: when it first found it old enough to clear (0: not yet). */
+export type RelaySeen = Map<string, { first: number; due: number }>;
+/**
+ * Relay messages this device has already dealt with (stored, or refused), by relayKey. A listed message found here
+ * is skipped without decoding or checking anything again. Only messages the relay still lists are kept, so it empties
+ * as mail is cleared. Stored as [key, first, due] in whole minutes.
+ */
+const relaySeenKey = (me: string) => `bw-bmail-relay:${me}`;
+const MIN = 60_000;
+export const loadRelaySeen = (me: string, st: Store | null = ls()): RelaySeen => {
+  const out: RelaySeen = new Map();
+  try {
+    const j = JSON.parse(st?.getItem(relaySeenKey(me)) ?? '[]') as unknown;
+    for (const x of Array.isArray(j) ? j : []) {
+      if (!Array.isArray(x) || typeof x[0] !== 'string' || !Number.isFinite(x[1]) || !Number.isFinite(x[2])) continue;
+      out.set(x[0], { first: x[1] * MIN, due: x[2] * MIN });
+    }
+  } catch {
+    /* an unreadable ledger is an empty one: stored letters are still known by their own ids */
+  }
+  return out;
+};
+export const saveRelaySeen = (me: string, seen: RelaySeen, st: Store | null = ls()) => {
+  try {
+    const rows = [...seen]
+      .sort((a, z) => a[1].first - z[1].first)
+      .slice(0, RELAY_SEEN_MAX)
+      // Rounded so that neither time moves later: a rounded-up `due` could look like a clock that went back.
+      .map(([k, v]) => [k, Math.floor(v.first / MIN), Math.floor(v.due / MIN)]);
+    st?.setItem(relaySeenKey(me), JSON.stringify(rows));
+  } catch {
+    /* ignore */
+  }
+};
+
+/**
+ * Stamps that paid for a letter stored on this device: stamp outpoint ("txid.vout") → that letter's id. A shortcut
+ * only (a later letter showing the same stamp is unstamped without asking anyone): the record that counts is the
+ * account's, in the wallet (client.ts stampRecord).
+ */
+export const usedStamps = (s: MailState): Map<string, string> => {
+  const used = new Map<string, string>();
+  for (const r of [...s.received].reverse())
+    if (r.env.postage && r.verifiedSats > 0 && !used.has(stampOutpoint(r.env.postage)))
+      used.set(stampOutpoint(r.env.postage), r.id);
+  return used;
+};
+/** The outpoint a letter's stamp claims. */
+export const stampOutpoint = (p: { txid: string; outputIndex: number }) => `${p.txid}.${p.outputIndex}`;
 
 /** Event the notifier / notification taps use to open the bMail screen. */
 export const OPEN_BMAIL_EVENT = 'bw-open-bmail';

@@ -189,3 +189,11 @@ export async function fetchProviders(f: typeof fetch = fetch): Promise<ProviderS
     return { ...DEFAULT_PROVIDERS, ebay: await ebay };
   }
 }
+
+/**
+ * Whether the welcome screen's "Link an account" panel will show provider buttons, and so needs fetchProviders (our
+ * sign-in service, and bMarketX for eBay). Not on Desktop or in a store build (no panel), nor after Skip, nor while
+ * a started link is waiting: those asked both servers for an answer nobody used.
+ */
+export const signupPanelAsks = (s: { enabled: boolean; desktop: boolean; hidden: boolean; pending: boolean }) =>
+  s.enabled && !s.desktop && !s.hidden && !s.pending;

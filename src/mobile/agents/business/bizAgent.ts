@@ -7,7 +7,7 @@
  * always gives the same agent account and the owner can recover its coins from the seed alone. Our server never
  * sees it. Storage keeps only { ticker, address, cap, stopped } and the activity log.
  *
- * ⚠ Every agent payment goes through `bizAgentPay`, which checks Stop and the daily cap BEFORE fetching coins and
+ * ⚠ Every agent payment goes through `bizAgentPay`, which checks Stop, the daily cap and the operator spending pause BEFORE fetching coins and
  * AGAIN immediately before signing, and books the spend (as 'pending') before broadcasting, so a Stop pressed
  * mid-payment or two payments racing can never go past the cap.
  */
@@ -24,6 +24,7 @@ import {
   type WalletInterface,
 } from '@bsv/sdk';
 import { allAgentsStopped } from '../agentAccounts';
+import { assertNotPaused } from '../../config/killSwitch';
 
 export const BIZ_AGENT_PROTOCOL: [2, string] = [2, 'bwalletx business agent'];
 export const DEFAULT_DAILY_CAP_USD = 10;
@@ -32,6 +33,8 @@ const FEE_SATS_PER_KB = 100;
 const KEY = 'bwallet.bizAgent';
 const LOG = (t: string) => `bwallet.bizAgentLog.${t}`;
 const LOG_MAX = 300;
+/** The day's spend, kept apart from the log so the log's size can't reset the cap (b-Aware row 212). */
+const SPEND = (t: string) => `bwallet.bizAgentSpend.${t}`;
 const EVENT = 'bwallet:bizagent';
 
 export type BizAgentState = {
@@ -119,8 +122,36 @@ const saveState = (a: BizAgentState, s: KV | null) =>
 
 export const getBizLog = (ticker: string, s: KV | null = kv()): BizLogEntry[] =>
   readJson<BizLogEntry[]>(s, LOG(normTicker(ticker)), []);
+/** Trim to LOG_MAX dropping the oldest zero-dollar lines first, so refusals can't push payments out of the log. */
+const trim = (log: BizLogEntry[]): BizLogEntry[] => {
+  if (log.length <= LOG_MAX) return log;
+  let drop = log.length - LOG_MAX;
+  const keep = log.map(() => true);
+  for (let i = log.length - 1; i >= 0 && drop > 0; i--)
+    if (!(log[i].usd > 0)) {
+      keep[i] = false;
+      drop--;
+    }
+  return log.filter((_, i) => keep[i]).slice(0, LOG_MAX);
+};
 const appendLog = (ticker: string, e: BizLogEntry, s: KV | null) =>
-  writeJson(s, LOG(normTicker(ticker)), [e, ...getBizLog(ticker, s)].slice(0, LOG_MAX));
+  writeJson(s, LOG(normTicker(ticker)), trim([e, ...getBizLog(ticker, s)]));
+
+type SpendDay = { day: number; usd: number; ids: string[] };
+/** Dollars booked today (UTC) per the spend ledger: every payment signed today, whatever the log still holds. */
+export const bizLedgerSpentToday = (ticker: string, s: KV | null = kv(), now = Date.now()): number => {
+  const l = readJson<SpendDay | null>(s, SPEND(normTicker(ticker)), null);
+  return l && l.day === dayStart(now) && l.usd > 0 ? l.usd : 0;
+};
+/** Book a payment on the day ledger once (by its id), before it is broadcast. */
+const bookSpend = (ticker: string, id: string, usd: number, at: number, s: KV | null) => {
+  const t = normTicker(ticker);
+  const day = dayStart(at);
+  const l = readJson<SpendDay | null>(s, SPEND(t), null);
+  const cur = l && l.day === day ? l : { day, usd: 0, ids: [] };
+  if (cur.ids.includes(id)) return;
+  writeJson(s, SPEND(t), { day, usd: cur.usd + usd, ids: [...cur.ids, id] } satisfies SpendDay);
+};
 const replaceLog = (ticker: string, id: string, e: BizLogEntry, s: KV | null) =>
   writeJson(
     s,
@@ -199,19 +230,28 @@ export const bizSpendAllowed = (
   log: BizLogEntry[],
   usd: number,
   now = Date.now(),
+  /** Today's spend per the ledger (bizLedgerSpentToday): the cap reads the larger of it and the log. */
+  ledgerUsd = 0,
 ): BizCheck => {
   if (!a) return { ok: false, reason: 'No agent account for this room' };
   if (stopAll) return { ok: false, reason: 'All agents are stopped' };
   if (a.stopped) return { ok: false, reason: 'The agent account is stopped' };
   if (!(usd > 0) || !Number.isFinite(usd)) return { ok: false, reason: 'Unknown amount' };
-  const left = a.dailyCapUsd - bizSpentToday(log, now);
+  const left = a.dailyCapUsd - Math.max(bizSpentToday(log, now), ledgerUsd);
   if (usd > left + 1e-9)
     return { ok: false, reason: `Over today's limit ($${Math.max(0, left).toFixed(2)} left of $${a.dailyCapUsd})` };
   return { ok: true };
 };
 
 export const checkBizSpend = (ticker: string, usd: number, s: KV | null = kv(), now = Date.now()) =>
-  bizSpendAllowed(getBizAgent(ticker, s), allAgentsStopped(), getBizLog(ticker, s), usd, now);
+  bizSpendAllowed(
+    getBizAgent(ticker, s),
+    allAgentsStopped(),
+    getBizLog(ticker, s),
+    usd,
+    now,
+    bizLedgerSpentToday(ticker, s, now),
+  );
 
 // ── paying ───────────────────────────────────────────────────────────────────
 export type BizCoin = { txid: string; vout: number; sats: number; sourceTx: Transaction };
@@ -261,13 +301,19 @@ export async function bizAgentPay(p: BizPayment, d: BizPayDeps): Promise<BizPayR
   if (!P2PKH_ADDR.test(p.address)) return refuse('Bad address');
   if (!(d.usdPerBsv > 0)) return refuse('No BSV price, so the limit cannot be checked');
   const usd = usdOf(p.sats, d.usdPerBsv);
-  const gate = () => bizSpendAllowed(getBizAgent(t, s), stopAll(), getBizLog(t, s), usd, now());
+  const gate = () => {
+    const at = now();
+    return bizSpendAllowed(getBizAgent(t, s), stopAll(), getBizLog(t, s), usd, at, bizLedgerSpentToday(t, s, at));
+  };
 
   const first = gate();
   if (!first.ok) return refuse(first.reason);
   if (inFlight.has(t)) return refuse('Another agent payment is in progress');
   inFlight.add(t);
   try {
+    // Operator pause: this key signs outside createAction/signAction, so the wallet's guard never sees it.
+    // A FeaturePausedError lands in the catch below and is logged as a refused payment.
+    await assertNotPaused('spending');
     const a = getBizAgent(t, s)!;
     const key = await deriveBizAgentKey(d.wallet, t);
     if (key.toAddress() !== a.address) return refuse('Agent key does not match this wallet');
@@ -290,14 +336,18 @@ export async function bizAgentPay(p: BizPayment, d: BizPayDeps): Promise<BizPayR
     if (added < p.sats + 50) return refuse('Not enough in the agent account');
     await tx.fee(new SatoshisPerKilobyte(FEE_SATS_PER_KB));
 
-    // Stop / cap again, right before signing: a Stop pressed while coins were fetched wins.
+    // Stop / cap / operator pause again, right before signing: one that arrived while coins were fetched wins.
     const last = gate();
     if (!last.ok) return refuse(last.reason);
+    await assertNotPaused('spending');
     await tx.sign();
     const txid = tx.id('hex') as string;
     const id = txid;
-    // Booked before broadcast: counts toward the cap even if the app dies here.
-    appendLog(t, { at: now(), action: 'pending', detail: p.detail, usd, txid, id }, s);
+    // Booked before broadcast: counts toward the cap even if the app dies here, and on the day ledger, which the
+    // log's size can't reset.
+    const at = now();
+    bookSpend(t, id, usd, at, s);
+    appendLog(t, { at, action: 'pending', detail: p.detail, usd, txid, id }, s);
     try {
       await d.broadcast(tx.toHex());
     } catch (e) {

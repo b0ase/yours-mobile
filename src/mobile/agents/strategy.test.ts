@@ -6,6 +6,7 @@ import {
   exampleStrategy,
   getPaperBook,
   loadStrategy,
+  unloadStrategy,
   paperFill,
   parseStrategy,
   STRATEGY_FORMAT,
@@ -239,7 +240,7 @@ describe('strategy spend ledger (b-Aware: refusal floods must not reset strategy
     expect(checkAgentAction('1L', buy(1), {}, tomorrow + 1)).toMatchObject({ ok: false, rule: 'maxTotalUsd' });
   });
 
-  test('reloading a strategy resets the ledger', () => {
+  test('reloading a strategy does NOT reset the ledger (b-Aware 315); unloading does', () => {
     markAgentAccount('1R', [], NOW);
     load('1R', NOW);
     spend('1R', 5, NOW + 1);
@@ -247,6 +248,9 @@ describe('strategy spend ledger (b-Aware: refusal floods must not reset strategy
     expect(checkAgentAction('1R', buy(1), {}, NOW + 2)).toMatchObject({ ok: false, rule: 'maxPerDayUsd' });
     const later = NOW + 86_400_000;
     load('1R', later);
-    expect(checkAgentAction('1R', buy(5), {}, later + 1)).toEqual({ ok: true, paper: false });
+    expect(checkAgentAction('1R', buy(5), {}, later + 1)).toMatchObject({ ok: false, rule: 'maxTotalUsd' });
+    unloadStrategy('1R', later + 2);
+    load('1R', later + 3);
+    expect(checkAgentAction('1R', buy(5), {}, later + 4)).toEqual({ ok: true, paper: false });
   });
 });

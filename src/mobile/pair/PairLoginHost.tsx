@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { LogIn } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { answerLogin, currentLogin, onLoginAsk } from './pairLogin';
+import { APP_NAME } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -35,7 +36,7 @@ function Sheet({ host, handle, proven }: { host: string; handle: string; proven:
         </p>
         {!proven && (
           <p className="mt-2 text-xs" style={{ color: AMBER }}>
-            bWalletX can&apos;t confirm this site. Only sign in if you started it on that site yourself.
+            {APP_NAME} can&apos;t confirm this site. Only sign in if you started it on that site yourself.
           </p>
         )}
         <p className="mt-3 text-sm" style={{ color: MUTED }}>

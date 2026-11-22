@@ -18,6 +18,7 @@ import {
   tokensWithTicker,
   type TokenFacts,
 } from './tokenIdentity';
+import { MARKET_ENABLED } from '../storeBuild';
 
 const MUTED = '#98A2B3';
 const AMBER = '#e0a030';
@@ -139,7 +140,8 @@ export const TokenIdentity = ({
       {links && (
         <div className="flex flex-wrap gap-1.5">
           {[
-            ['1sat.market', links.market],
+            // The token's market page: bWalletX only (a store build links to no market, MARKET_ENABLED).
+            ...(MARKET_ENABLED ? [['1sat.market', links.market]] : []),
             ['Deploy tx', links.deployTx],
           ].map(([label, url]) => (
             <button

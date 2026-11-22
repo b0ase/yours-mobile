@@ -17,6 +17,7 @@ import {
   type ServerSetupFee,
 } from './roomSetup';
 import { money, moneyWithSats, useBsvUsd } from '../money/money';
+import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
 
 /**
  * The shared "Set up $X's room" flow (roomSetup.ts) for the Wallet card, Settings › My tokens and
@@ -86,12 +87,28 @@ export const useRoomSetup = (
     try {
       const r = await payRoomSetup(apiContext, tokenId, ticker, status, t.feeSats);
       setDone(true);
-      setMsg(`Done. $${ticker} will show in wallets and its room within a minute (tx ${r.txid.slice(0, 8)}…).`);
-      if (oneTap) addSnackbar(`Paid ${moneyWithSats(t.totalSats, rate)} to set up $${ticker}'s room`, 'success');
+      setMsg(
+        TOKEN_ROOMS_ENABLED
+          ? `Done. $${ticker} will show in wallets and its room within a minute (tx ${r.txid.slice(0, 8)}…).`
+          : `Done. $${ticker} will show in other wallets within a minute (tx ${r.txid.slice(0, 8)}…).`,
+      );
+      if (oneTap)
+        addSnackbar(
+          TOKEN_ROOMS_ENABLED
+            ? `Paid ${moneyWithSats(t.totalSats, rate)} to set up $${ticker}'s room`
+            : `Paid ${moneyWithSats(t.totalSats, rate)} to index $${ticker}`,
+          'success',
+        );
       markIndexingPaid(tokenId);
       onDone?.();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Could not send the room setup payment');
+      setMsg(
+        e instanceof Error
+          ? e.message
+          : TOKEN_ROOMS_ENABLED
+            ? 'Could not send the room setup payment'
+            : 'Could not send the indexing payment',
+      );
     } finally {
       setBusy(false);
       setConfirming(false);
@@ -135,5 +152,5 @@ export const useRoomSetup = (
 };
 
 /** "Set up · $1.93" */
-export const setupLabel = (totalSats: number, rate: number, prefix = 'Set up') =>
+export const setupLabel = (totalSats: number, rate: number, prefix = TOKEN_ROOMS_ENABLED ? 'Set up' : 'Index') =>
   `${prefix} · ${money(totalSats, rate)}`;

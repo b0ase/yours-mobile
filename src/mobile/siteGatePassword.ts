@@ -6,10 +6,15 @@
  * against this device's encrypted keys by the storage service and never leaves the page.
  */
 import { ChromeStorageService } from '../services/ChromeStorage.service';
+import type { PasswordOutcome } from './siteGate';
 
-export const askWalletPassword = (reason: string, host: string): Promise<boolean> =>
+/**
+ * The wallet password sheet: 'ok', 'cancelled' (its Cancel button) or 'locked' (five wrong passwords, or no page to
+ * show it on). siteGate.ts answers 'locked' with ERR_WALLET_LOCKED, never the person's No.
+ */
+export const askWalletPasswordResult = (reason: string, host: string): Promise<PasswordOutcome> =>
   new Promise((resolve) => {
-    if (typeof document === 'undefined') return resolve(false);
+    if (typeof document === 'undefined') return resolve('locked');
     const wrap = document.createElement('div');
     wrap.setAttribute('role', 'dialog');
     wrap.setAttribute('aria-modal', 'true');
@@ -47,11 +52,11 @@ export const askWalletPassword = (reason: string, host: string): Promise<boolean
     row.append(cancel, ok);
     card.append(h, sub, input, err, row);
     wrap.append(card);
-    const close = (v: boolean) => {
+    const close = (v: PasswordOutcome) => {
       wrap.remove();
       resolve(v);
     };
-    cancel.onclick = () => close(false);
+    cancel.onclick = () => close('cancelled');
     let tries = 0;
     card.onsubmit = async (e) => {
       e.preventDefault();
@@ -62,12 +67,16 @@ export const askWalletPassword = (reason: string, host: string): Promise<boolean
         .then(() => cs.verifyPassword(input.value))
         .catch(() => false);
       ok.disabled = false;
-      if (good) return close(true);
+      if (good) return close('ok');
       tries += 1;
       input.value = '';
       err.textContent = tries >= 5 ? 'Too many tries.' : 'Wrong password.';
-      if (tries >= 5) close(false);
+      if (tries >= 5) close('locked');
     };
     document.body.append(wrap);
     input.focus();
   });
+
+/** True only for the right password (the seal approval's yes/no, chat/sealApproval.ts). */
+export const askWalletPassword = (reason: string, host: string): Promise<boolean> =>
+  askWalletPasswordResult(reason, host).then((r) => r === 'ok');

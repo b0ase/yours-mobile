@@ -25,6 +25,7 @@
  */
 import { Hash, Utils } from '@bsv/sdk';
 import { permissionSite } from './permissionSite';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export type Recipient = { to: string; satoshis: number };
 
@@ -36,8 +37,7 @@ const SERVICE_CHARGE = 'Storage service charge';
 export const SPEND_RUN_HOLD_MS = 180_000;
 
 /** background.ts: a paying sheet always lists its payees; a payment the wallet cannot tie to its outputs is refused. */
-export const NO_PAYEES_REFUSAL =
-  "bWalletX couldn't read where this payment goes, so it was not shown or paid. Ask the site to try again.";
+export const NO_PAYEES_REFUSAL = `${APP_NAME} couldn't read where this payment goes, so it was not shown or paid. Ask the site to try again.`;
 
 export const RECIPIENTS_REFUSAL =
   'Two payments from this site are waiting with the same amounts but different payees, so the wallet cannot show ' +

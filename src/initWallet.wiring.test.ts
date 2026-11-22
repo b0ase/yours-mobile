@@ -15,6 +15,7 @@ import { getKeys } from './utils/keys';
 import { encrypt } from './utils/crypto';
 import { CHROME_STORAGE_OBJECT_VERSION, ACCOUNT_DATA_VERSION } from './utils/constants';
 import { HELD_ASSET_REFUSAL } from './services/pModuleSpendGate';
+import { RESERVED_LABEL_REFUSAL } from './services/reservedLabels';
 import { MODULE_PROBE_ANSWER, P_MODULE_PROTOCOL_REFUSAL } from './services/reservedProtocols';
 import {
   NO_VERIFIER,
@@ -23,6 +24,7 @@ import {
   admissionListFor,
 } from './services/inboundSync';
 import { outpointStates } from './services/heldOutpoints';
+import { OUR_BACKUP_REBUILDING_REFUSAL } from './services/spendableFirstWiring';
 
 type Store = Record<string, unknown>;
 const local: Store = {};
@@ -131,6 +133,54 @@ describe('the real initWallet wiring', () => {
     await expect(ctx.wallet.createAction(pay(['p 1sat input id abc123']) as never, SITE)).rejects.toThrow(
       HELD_ASSET_REFUSAL,
     );
+  });
+
+  // bMail review 15 Nov 2026 (N1): bMail's record of what a stamp paid for is kept as "bmail …" labels.
+  test("the wallet's own action labels: no site can write or list by one, through every guard; the wallet can", async () => {
+    const stamp = `bmail stamp ${'ab'.repeat(32)}.0`;
+    const paid = `BMAIL Paid ${'ab'.repeat(32)}.0 ${'cd'.repeat(20)} `;
+    for (const originator of [SITE, undefined, '']) {
+      await expect(ctx.wallet.createAction(pay(['game', paid]) as never, originator)).rejects.toThrow(
+        RESERVED_LABEL_REFUSAL,
+      );
+      await expect(
+        ctx.wallet.internalizeAction(
+          { tx: [1, 2, 3], outputs: [], description: 'a site call', labels: [stamp, paid] } as never,
+          originator,
+        ),
+      ).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(
+        ctx.wallet.listActions({ labels: [stamp], includeLabels: true } as never, originator),
+      ).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+    }
+    const { ADMIN_ORIGINATOR } = await import('./initWallet');
+    const mine = await ctx.wallet.listActions({ labels: [stamp], includeLabels: true } as never, ADMIN_ORIGINATOR);
+    expect(mine.actions).toEqual([]);
+  });
+
+  // Review 15 Nov 2026: the toolbox reads a 64-hex label as a command; this one, with 'abort', aborts every held action.
+  test('a special-operation name is refused to a site as a label, a tag or a basket, and so is a name that is not ASCII', async () => {
+    const NOSEND = 'ac6b20a3bb320adafecd637b25c84b792ad828d3aa510d05dc841481f664277d';
+    const BALANCE = '893b7646de0e1c9f741bd6e9169b76a8847ae34adef7bef1e6a285371206d2e8';
+    for (const originator of [SITE, undefined]) {
+      await expect(ctx.wallet.listActions({ labels: [NOSEND, 'abort'] } as never, originator)).rejects.toThrow(
+        RESERVED_LABEL_REFUSAL,
+      );
+      await expect(
+        ctx.wallet.listActions({ labels: [` ${NOSEND.toUpperCase()} `, 'abort'] } as never, originator),
+      ).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(ctx.wallet.createAction(pay([NOSEND]) as never, originator)).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+      await expect(ctx.wallet.listOutputs({ basket: 'my app', tags: [BALANCE] } as never, originator)).rejects.toThrow(
+        RESERVED_LABEL_REFUSAL,
+      );
+      await expect(ctx.wallet.listOutputs({ basket: BALANCE } as never, originator)).rejects.toThrow(/reserved/);
+      await expect(ctx.wallet.listOutputs({ basket: 'd\u00e9fault' } as never, originator)).rejects.toThrow(/reserved/);
+      await expect(ctx.wallet.createAction(pay(['d\u00e9fault']) as never, originator)).rejects.toThrow(/plain ASCII/);
+    }
+    // The wallet itself may still run the operation (its own held-action review does).
+    const { ADMIN_ORIGINATOR } = await import('./initWallet');
+    const own = await ctx.wallet.listActions({ labels: [NOSEND] } as never, ADMIN_ORIGINATOR);
+    expect(own.actions).toEqual([]);
   });
 
   test('G2 holds on the real wallet, and the 1sat module probe answers with the fixed key', async () => {
@@ -383,6 +433,19 @@ describe('the real initWallet wiring', () => {
     expect(src).toMatch(/writeAhead\?\.stop\(\);/);
   });
 
+  test('the push before a broadcast is skipped only for a marked restore backlog (task 71 review, A1)', () => {
+    const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
+    // The check is the restore mark's, never "any pass from the start or under way" (weekly, daily, heal, when:null).
+    expect(src).toMatch(
+      /backlog: async \(\) => \{\s*if \(!restoreMarked\(\)\) return false;[\s\S]*?return restoreBacklog\(await syncStateFor\(/,
+    );
+    expect(src).not.toMatch(/passFromStart\(row\) \|\| passUnderWay\(row\)/);
+    // A store's first pull marks its first pass; a pull that caught up ends it; a closed wallet forgets it.
+    expect(src).toMatch(/if \(never\) markRestore\(\);/);
+    expect(src).toMatch(/if \(report\?\.caughtUp\) restoreCaughtUp\(\);/);
+    expect(src).toMatch(/writeAhead\?\.stop\(\);\s*clearRestoreMark\(\);/);
+  });
+
   test('a heal leaves a pass from the start to the device-sync pulls, and a failed one asks for a full pass (review 23, M2)', () => {
     const src = readFileSync(new URL('./initWallet.ts', import.meta.url), 'utf8');
     const heal = src.slice(src.indexOf('    setDeviceActive: async () => {'), src.indexOf('  if (!keepActive)'));
@@ -399,8 +462,10 @@ describe('the real initWallet wiring', () => {
     expect(ask).toContain('Checking your whole wallet over mobile data, about ${mb} MB');
     const bg = readFileSync(new URL('./background.ts', import.meta.url), 'utf8');
     expect(bg).toMatch(/notice: \(message\) =>[\s\S]*status: 'progress'[\s\S]*message/);
-    // A restore's merges run whole (re-check N2).
-    expect(bg).toMatch(/setActiveStorage: \(target\) => asRestore\(\(\) => ctx\.setActiveStorage\(target\)\)/);
+    // A restore's merges run whole (re-check N2), and its switch never makes our server active unrepaired (a95a1ff0, 1).
+    expect(bg).toMatch(
+      /setActiveStorage: \(target\) =>\s*asRestore\(async \(\) => \{[\s\S]*?await ourControls\.guardSetActive\(\(t\) => ctx\.setActiveStorage\(t\)\)\(target\);/,
+    );
     expect(bg).toMatch(/asRestore\(\(\) => ctx\.storage\.syncFromReader\(identityKey, store as never\)\)/);
   });
 
@@ -462,4 +527,74 @@ describe('the real initWallet wiring', () => {
     ctx.receiveWatch.foreground(false);
     expect(allAsked.slice(before).filter((u) => u.includes('/1sat/owner/sync'))).toEqual([]);
   });
+});
+
+/**
+ * Our storage server held out for its one-time repair, through the REAL initWallet (reviews of b936a98c 3/6/7,
+ * f42df01f 1, 6888544a 5): run in a process of its own (src/testing/initWalletHeldOut.child.ts), so nothing it leaves
+ * running touches this file's stubs or another file's, whatever the order or load; and with every fetch and DNS lookup
+ * refused there, so it provably makes no network call.
+ */
+/** The child's time limit; the test's own is a little longer, so the kill comes first. */
+const CHILD_MS = 90_000;
+describe('initWallet: our server held out for its repair (own process)', () => {
+  test(
+    'held out with no repaired record, honest Store refusal, one stable key corrected once, no network',
+    async () => {
+      // Killed if it runs past its time (review of a95a1ff0, 3): a hung child never outlives this test.
+      const child = Bun.spawn(
+        [process.execPath, new URL('./testing/initWalletHeldOut.child.ts', import.meta.url).pathname],
+        {
+          cwd: new URL('..', import.meta.url).pathname,
+          stdout: 'pipe',
+          stderr: 'pipe',
+          timeout: CHILD_MS,
+          killSignal: 'SIGKILL',
+        },
+      );
+      let out = '';
+      let err = '';
+      let code: number | null = null;
+      try {
+        [out, err, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ]);
+      } finally {
+        if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+      }
+      expect(child.signalCode).toBeNull(); // not killed by the timeout
+      const line = out.split('\n').find((l) => l.startsWith('RESULT '));
+      if (!line || code !== 0) console.error(out.slice(-4000), err.slice(-4000));
+      const r = JSON.parse(line!.slice('RESULT '.length)) as Record<string, unknown>;
+      expect(r.error).toBeUndefined();
+      expect(code).toBe(0);
+      // No 'repaired' record: our server held out, never connected; the unreachable backup was skipped.
+      expect(r.heldOut).toBe(true);
+      expect(r.connectedBackups).toBe(0);
+      // Configured backups count (fail closed): the Store payment gets the honest line, without a push or a reconnect.
+      expect(r.backupConfigured).toBe(true);
+      expect(r.storePayment).toEqual({ ok: false, error: OUR_BACKUP_REBUILDING_REFUSAL });
+      expect(r.fetchedDuringPayment).toEqual([]);
+      // One stable key, the device store's own: a stale top-level key is corrected at open and read back through the
+      // account object, where the repair's record (written with the device store's key) is found.
+      expect([r.deviceKey, r.keyCorrected, r.keyRead]).toEqual([true, true, true]);
+      expect([r.heldOutNoRecord, r.heldOutRepaired]).toEqual([true, false]);
+      // Whatever the active store; never when our server IS it; any spelling of our server.
+      expect([r.heldOutRemoteActive, r.heldOutOursActive, r.heldOutSpelled, r.heldOutRemoteActiveRepaired]).toEqual([
+        true,
+        false,
+        true,
+        false,
+      ]);
+      // No network: nothing reached our server; the backup's connect went through the refused fetch (so the storage
+      // transport uses the replaced fetch, not a real one), and no DNS lookup was made at all.
+      const fetched = r.fetched as string[];
+      expect(fetched.some((u) => u.includes('storage.bwalletx.com'))).toBe(false);
+      expect(fetched.some((u) => u.startsWith('https://backup.invalid/'))).toBe(true);
+      expect(r.lookedUp).toEqual([]);
+    },
+    CHILD_MS + 10_000,
+  );
 });

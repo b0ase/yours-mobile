@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+// `import.meta.env?.`: this file also runs under plain node / tsx (scripts/), where import.meta.env is undefined.
 import { NetWork } from '../services/types/provider.types';
 import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
 
@@ -10,7 +12,13 @@ export const INACTIVITY_LIMIT = 10 * 60 * 1000; // 10 minutes
 export const SNACKBAR_TIMEOUT = 3 * 1000; // 2.5 seconds
 export const HOSTED_YOURS_IMAGE = 'https://i.ibb.co/zGcthBv/yours-org-light.png';
 export const YOURS_DEV_WALLET = '1MtzWXQEYGp89bQ9U2nfrnuChFv37j6pV6';
-export const ONE_SAT_MARKET_URL = 'https://1sat.market/market';
+// A store build links to no marketplace (mobile/storeBuild.ts MARKET_ENABLED): the address is not in its bundle.
+export const ONE_SAT_MARKET_URL =
+  import.meta.env?.VITE_STORE_BUILD === '1' ||
+  import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env?.VITE_CHANNEL === 'android-play'
+    ? ''
+    : 'https://1sat.market/market';
 export const MESSAGEBOX_URL = 'https://messagebox.1sat.app';
 export const GENERIC_TOKEN_ICON =
   'https://static-00.iconduck.com/assets.00/generic-cryptocurrency-icon-2048x2029-vzaeox5w.png';
@@ -48,7 +56,14 @@ export const ACCOUNT_DATA_VERSION = 2;
 export const DEFAULT_STORAGE_REMOTE_URL = 'https://wallet.1sat.app';
 
 /** bWalletX support (Settings > Support). */
-export const SUPPORT_EMAIL_URL = 'mailto:support@bwalletx.com?subject=bWalletX%20support';
+// The app's name in the subject: mobile/storeBuild.ts APP_NAME, written out here with the optional chain (see the top).
+const SUPPORT_APP_NAME =
+  import.meta.env?.VITE_STORE_BUILD === '1' ||
+  import.meta.env?.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env?.VITE_CHANNEL === 'android-play'
+    ? 'bWallet'
+    : 'bWalletX';
+export const SUPPORT_EMAIL_URL = `mailto:support@bwalletx.com?subject=${SUPPORT_APP_NAME}%20support`;
 
 /** Account service (`/account/status`) for the default storage provider. */
 export const DEFAULT_ACCOUNT_URL = 'https://accounts.1sat.app';

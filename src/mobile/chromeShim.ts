@@ -157,7 +157,15 @@ export const createChromeShim = (opts: ShimOptions) => {
       const periodMs = (info.periodInMinutes ?? info.delayInMinutes ?? 1) * 60_000;
       const fire = () => onAlarm.listeners.forEach((fn) => fn({ name, scheduledTime: Date.now() }));
       if (info.periodInMinutes) alarmTimers.set(name, opts.timers.setInterval(fire, periodMs));
-      else opts.timers.setTimeout(fire, periodMs);
+      else {
+        // A one-shot alarm replaces one of the same name and can be cleared, as in Chrome (clearInterval clears a
+        // timeout too: the timers share one list).
+        const id = opts.timers.setTimeout(() => {
+          if (alarmTimers.get(name) === id) alarmTimers.delete(name);
+          fire();
+        }, periodMs);
+        alarmTimers.set(name, id);
+      }
     },
     clear: async (name: string) => {
       const timer = alarmTimers.get(name);

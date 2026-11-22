@@ -67,6 +67,73 @@ export async function checkBinding(alias: string, pubkey: string | undefined, b:
   }
 }
 
+/**
+ * A forward the typed name's owner signed (b-Aware 312, 18 Nov 2026): "from -> to, until expiresAt". The signer is the
+ * key bound to the TYPED name, shown by that name's own signed binding (`fromBinding`) riding with the forward, so a
+ * host can't make one up and an attacker's own key can't speak for someone else's name. Returns the target alias only
+ * when all of it checks out and it hasn't expired; anything else is no forward.
+ *
+ * `expiresAt` formats accepted (the server, bit-sign, must send one of these and sign the same string):
+ * - null, absent or "" = no expiry; signed as "".
+ * - a number = Unix time in MILLISECONDS (not seconds); signed as String(n), e.g. "1795000000000".
+ * - a string = an ISO 8601 date (Date.parse), e.g. "2026-12-01T00:00:00.000Z"; signed exactly as sent.
+ * Anything else, or a time not in the future, is no forward.
+ *
+ * After a followed forward, confirm() (or the key-change override) saves the TARGET's key under the typed name, and
+ * the forward's signer beside it (trustForwardSigner). So the signer passes when:
+ * - nothing is remembered for the typed name (first use, as with any first payment), or
+ * - the remembered key is the signer (or a valid handover from it), or
+ * - the signer is the one remembered for this name's last confirmed forward. A binding is self-signed, so any other
+ *   key is refused here (re-review, 19 Nov 2026). The owner re-forwarding to a new name and key is followed, and the
+ *   payment then stops as a key change with the payer's "I've checked with them" override (second re-review).
+ * resolvePaymail still runs keyChange on the served key itself. Returns the target alias and the verified signer.
+ */
+export async function checkForward(
+  alias: string,
+  fw: unknown,
+  shape: (alias: string, fw: unknown) => string | undefined,
+  now = Date.now(),
+): Promise<{ to: string; signer: string } | undefined> {
+  const to = shape(alias, fw);
+  if (!to) return undefined;
+  const f = fw as {
+    from?: unknown;
+    expiresAt?: unknown;
+    identityKey?: unknown;
+    timestamp?: unknown;
+    signature?: unknown;
+    fromBinding?: unknown;
+  };
+  const key = typeof f.identityKey === 'string' ? f.identityKey : '';
+  if (!key || typeof f.signature !== 'string' || !f.signature || !['string', 'number'].includes(typeof f.timestamp))
+    return undefined;
+  const noExpiry = f.expiresAt === null || f.expiresAt === undefined || f.expiresAt === '';
+  if (!noExpiry) {
+    const at = typeof f.expiresAt === 'number' ? f.expiresAt : Date.parse(String(f.expiresAt));
+    if (!Number.isFinite(at) || at <= now) return undefined;
+  }
+  try {
+    // The signer must be the key the typed name is bound to, and not a key change this wallet hasn't accepted.
+    const binding = f.fromBinding as { handover?: Handover; seq?: number } | undefined;
+    if ((await checkBinding(alias, key, binding)) !== 'signed') return undefined;
+    if (
+      keyChange(alias, key, 'signed', binding?.handover?.from, binding?.seq) !== 'signed' &&
+      readSigners()[alias.toLowerCase()] !== key.toLowerCase()
+    )
+      return undefined;
+    const fields = {
+      from: String(f.from).split('@')[0].toLowerCase(),
+      to,
+      expiresAt: noExpiry ? '' : String(f.expiresAt),
+      identityKey: key,
+      timestamp: String(f.timestamp),
+    };
+    return (await verifyBy(key, 'forward', fields, f.signature)) ? { to, signer: key.toLowerCase() } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const SEEN_KEY = 'bwallet.names.seenKeys';
 const readSeen = (): Record<string, string> => {
   try {
@@ -75,10 +142,48 @@ const readSeen = (): Record<string, string> => {
     return {};
   }
 };
-/** Remember this key for the name: when the payer confirms a payment to it, or deliberately trusts a new key. */
-export const trustCurrentKey = (alias: string, key: string) => {
+/** The key this wallet remembers for the name (the one the payer last confirmed), lowercase; undefined if none. */
+export const trustedKeyFor = (alias: string): string | undefined => readSeen()[alias.toLowerCase()];
+
+// The binding version (seq) of the remembered key, so a replayed older binding can't pass as a handover (b-Aware 136).
+const SEEN_SEQ = 'bwallet.names.seenSeqs';
+const readSeqs = (): Record<string, number> => {
   try {
-    localStorage.setItem(SEEN_KEY, JSON.stringify({ ...readSeen(), [alias.toLowerCase()]: key.toLowerCase() }));
+    return JSON.parse(localStorage.getItem(SEEN_SEQ) ?? '{}') as Record<string, number>;
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Remember this key for the name: when the payer confirms a payment to it, or deliberately trusts a new key. `seq` is
+ * the version of the signed binding it was served with (omitted when there was none, e.g. a forward's target).
+ */
+export const trustCurrentKey = (alias: string, key: string, seq?: number) => {
+  const a = alias.toLowerCase();
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify({ ...readSeen(), [a]: key.toLowerCase() }));
+    const seqs = readSeqs();
+    if (Number.isInteger(seq)) seqs[a] = seq as number;
+    else delete seqs[a];
+    localStorage.setItem(SEEN_SEQ, JSON.stringify(seqs));
+  } catch {
+    /* private mode: nothing remembered */
+  }
+};
+
+const SIGNER_KEY = 'bwallet.names.forwardSigners';
+const readSigners = (): Record<string, string> => {
+  try {
+    return JSON.parse(localStorage.getItem(SIGNER_KEY) ?? '{}') as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+/** Remember who signed the forward the payer confirmed for this typed name (checkForward accepts only them again). */
+export const trustForwardSigner = (alias: string, key: string) => {
+  try {
+    localStorage.setItem(SIGNER_KEY, JSON.stringify({ ...readSigners(), [alias.toLowerCase()]: key.toLowerCase() }));
   } catch {
     /* private mode: nothing remembered */
   }
@@ -86,12 +191,22 @@ export const trustCurrentKey = (alias: string, key: string) => {
 
 /**
  * BRC-169 4.4: never silently accept a new key for a name this wallet has paid before. A change is fine only
- * with a valid two-party handover from the key we knew; otherwise it's 'changed' and Send stops.
+ * with a valid two-party handover from the key we knew, at a newer binding version (`seq`) than the one we paid;
+ * otherwise it's 'changed' and Send stops. An old handover replayed by the host (lower or equal seq) is a change.
  */
-export function keyChange(alias: string, pubkey: string, status: BindingStatus, handoverFrom?: string): BindingStatus {
+export function keyChange(
+  alias: string,
+  pubkey: string,
+  status: BindingStatus,
+  handoverFrom?: string,
+  seq?: number,
+): BindingStatus {
   const a = alias.toLowerCase();
   const key = pubkey.toLowerCase();
   const seen = readSeen()[a];
-  if (seen && seen !== key && !(status === 'signed' && handoverFrom?.toLowerCase() === seen)) return 'changed';
+  if (!seen || seen === key) return status;
+  if (!(status === 'signed' && handoverFrom?.toLowerCase() === seen)) return 'changed';
+  const seenSeq = readSeqs()[a];
+  if (Number.isInteger(seenSeq) && !(Number.isInteger(seq) && (seq as number) > seenSeq)) return 'changed';
   return status;
 }

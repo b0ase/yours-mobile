@@ -18,19 +18,26 @@ import {
   sessionWalletClaim,
   claimDigestSync,
   isAllowedRelay,
-  verifyPairProofs,
   type HelloFrame,
   type PairLink,
   type PairMessage,
   type RelayFrame,
 } from '../../pair/protocol';
 import { inOrder } from '../../pair/in-order';
-import { claimRid, planReturn, type ReturnPlan } from '../../pair/returnTo';
+import {
+  claimRid,
+  planReturn,
+  returnIsFoldable,
+  type ReturnExtra,
+  type ReturnPlan,
+  type ReturnPlatform,
+} from '../../pair/returnTo';
+import { returnPlatform } from './openReturn';
 import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
 import { legacyPairedOrigin, pairedOrigin } from '../../services/originKey';
-import { pairedKeyHost, setProvenPairingCheck } from '../../services/crossSiteSignGuard';
-import { appNameFor } from '../storeBuild';
+import { setProvenPairingCheck } from '../../services/crossSiteSignGuard';
+import { APP_NAME } from '../storeBuild';
 import type { OneSatContext } from '@1sat/actions';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { AgentCallError, CLI_ORIGIN, handleAgentCall, type AgentGrant } from './agentPairing';
@@ -39,21 +46,32 @@ import { handleBitsignCall, isBitsignAction } from './bitsign';
 import { handleTwetchCall, isTwetchAction, type TwetchWallet } from '../twetch/twetchCalls';
 import type { TwetchStore } from '../twetch/twetchLink';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
+import { isRefusalCode } from '../../services/refusalCodes';
 import { PAIR_MIRROR_KEY, toPairMirror } from '../../services/pairedPromptGuard';
-import { closeConnectCardsFor, forgetLogin, handlePairLoginCall, watchConnectCard } from './pairLogin';
+import {
+  closeConnectCardsFor,
+  foldedLoginRequest,
+  forgetLogin,
+  handlePairLoginCall,
+  signFoldedLogin,
+  watchConnectCard,
+} from './pairLogin';
 import { accountNamesFor } from '../names/accountNames';
+import { dropProposalFromSession } from '../agents/strategyProposal';
 
 /**
  * The pairing itself has ended (24 h idle, agent grant expired, disconnected, or bound to another account), so the
  * site must show its QR again. Distinct from ERR_PERMISSION_DENIED, which only ever means the user said no.
  * Sent as a call's error `{ code: 'REPAIR_NEEDED', message }` and as the reason of the phone's close frame.
  */
-export const CLI_ONLY_FROM_SETTINGS =
-  'To pair the bWalletX CLI, open Agents › Pair the CLI (or Settings › Paired websites) and scan from there. Only do this if you just ran `bwalletx login` on your own computer.';
+export const CLI_ONLY_FROM_SETTINGS = `To pair the ${APP_NAME} CLI, open Agents › Pair the CLI (or Settings › Paired websites) and scan from there. Only do this if you just ran \`bwalletx login\` on your own computer.`;
 export const REPAIR_NEEDED_CODE = 'REPAIR_NEEDED';
 export const REPAIR_NEEDED_MESSAGE = 'This pairing has ended. Scan the QR code on the site again to reconnect.';
 /** The relay refused the join: someone else already joined with this QR, or it expired. */
 export const PAIR_CODE_USED_MESSAGE = 'This code has expired or was already used.';
+export const PAIR_CODE_EXPIRED_MESSAGE = 'This code has expired. Ask the site for a new one.';
+export const PAIR_ACCOUNT_CHANGED_MESSAGE =
+  'You switched accounts, so nothing was connected. Open the link on the site again to connect this account.';
 export const PAIR_UNREACHABLE_MESSAGE = 'Could not reach the pairing service. Check your connection and try again.';
 /** The site sent a sealed close before Connect: on the site, the user said the codes didn't match. */
 export const SITE_SAID_NO_MESSAGE =
@@ -138,6 +156,13 @@ const defaultRevoke: Revoke = async (originator) => {
 };
 let revoke: Revoke = defaultRevoke;
 /** Tests only. */
+/** The shell the return opens in (openReturn.ts), overridable for tests. */
+let platformOverride: ReturnPlatform | null = null;
+const returnPlatformNow = (): ReturnPlatform => platformOverride ?? returnPlatform();
+/** Tests: pretend to be the iOS or Android app (null: the real shell). */
+export const setReturnPlatform = (p: ReturnPlatform | null) => {
+  platformOverride = p;
+};
 export const setPairRevoker = (fn: Revoke) => {
   revoke = fn;
 };
@@ -251,7 +276,19 @@ export type PendingPair = {
    */
   returnPlan: ReturnPlan;
   takeReturn: () => ReturnPlan;
-  confirm: (agent?: AgentGrant) => void;
+  /**
+   * The link carries the site's sign-in challenge (@bwalletx/connect 0.9.0) and it can be signed: Connect signs in too
+   * (the card says so). P0 22 Nov 2026: on one phone a separate sign-in request would arrive while bWallet is in the
+   * background, after the user has gone back to the browser, so the sign-in never happened.
+   */
+  signIn: boolean;
+  /** The account that signs in on this card ("$b0asex"), or '' when it has no name. Shown on the card (review 22 Nov). */
+  signInAs: string;
+  /**
+   * Resolves, once `ready` is sealed, with what a same-phone return carries (the wallet's pairing key and that sealed
+   * ready), or null (a gone card, a CLI pairing).
+   */
+  confirm: (agent?: AgentGrant) => Promise<ReturnExtra | null>;
   cancel: () => void;
   /**
    * Called once if the card is no longer wanted before Connect or Cancel: the site closed its QR (its socket left the
@@ -259,20 +296,16 @@ export type PendingPair = {
    * when the user should see why: the site ended the pairing itself (its user said the codes didn't match).
    */
   onGone: (f: (message?: string) => void) => void;
+  /** Why the card ended without connecting (expired, account changed), or undefined. */
+  goneReason: () => string | undefined;
 };
 
 /**
- * The sign guard names a paired session's site only when that pairing proved its origin (b-Aware 25 Oct 2026).
- * Registered here because the sessions (and their `proven` flag) live in this module.
+ * The sign guard names a paired session's site only when that pairing proved its origin (b-Aware 25 Oct 2026). Review 3
+ * (22 Nov 2026): origin proofs are no longer trusted (a site's proof route signs for any caller that sets an Origin
+ * header, which a script can), so no pairing counts as proven, including ones stored with `proven` before.
  */
-setProvenPairingCheck((originator) => {
-  const want = pairedKeyHost(originator);
-  try {
-    return load().some((s) => !!s.proven && pairedKeyHost(keyOf(s)) === want);
-  } catch {
-    return false;
-  }
-});
+setProvenPairingCheck(() => false);
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -301,6 +334,11 @@ const isCurrent = (s: StoredSession, now = Date.now()) =>
 const revokedGen = new Map<string, number>();
 const revokeChannel = (c: string) => revokedGen.set(c, (revokedGen.get(c) ?? 0) + 1);
 
+/** A pairing that ended takes its waiting strategy proposal with it (b-Aware 315 review): nothing outlives the pairing. */
+const dropProposalsOf = (s: StoredSession | undefined) => {
+  if (s?.agent) dropProposalFromSession(s.agent.agentId, s.c);
+};
+
 /**
  * A session that lapses (24 h idle, agent grant expired, unpinned relay) is dropped like a Disconnect: its socket
  * closes and the paired key's grants are queued for revocation (b-Aware report, 23 Oct 2026), unless another
@@ -313,6 +351,7 @@ const dropLapsed = (dropped: StoredSession[], kept: StoredSession[]) => {
   if (origins.length) writeQueue([...readQueue(), ...origins]);
   for (const s of dropped) {
     revokeChannel(s.c);
+    dropProposalsOf(s);
     replies.forget(s.c);
     const l = live.get(s.c);
     if (!l) continue;
@@ -466,8 +505,20 @@ const claimTry = new Map<string, number>();
  * That is how a v1 session upgrades (review 13 Nov 2026): the relay never lets a v1 claim bind on its own, because
  * whoever saw the QR holds the same claim. Older sites ignore both fields.
  */
-const readyFor = (l: Live): PairMessage =>
+const readyFor = (l: Live): Extract<PairMessage, { t: 'ready' }> =>
   l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session) } : { t: 'ready' };
+
+/**
+ * Our hello again (plaintext, as at pairing). P0 22 Nov 2026: a site tab that slept through the pairing (iOS freezes
+ * it while the user is in bWallet) may have lost the first hello with its frozen socket, or come back in a new tab, so
+ * it can't open `ready` without our pairing key. Sites that already have it ignore a second hello.
+ */
+const helloFor = (stored: StoredSession): string =>
+  JSON.stringify({
+    t: 'hello',
+    k: PrivateKey.fromHex(stored.phoneKey).toPublicKey().toString(),
+    info: { name: APP_NAME, rdns: 'space.bwallet.mobile' },
+  } satisfies HelloFrame);
 
 const update = (c: string, patch: Partial<StoredSession>) =>
   save(loadAll().map((s) => (s.c === c ? { ...s, ...patch } : s)));
@@ -528,13 +579,26 @@ export const pairingLiveCheck = (c: string, grant: AgentGrant, ctx: OneSatContex
   };
 };
 
+/**
+ * Is `c` still the pairing that sent a strategy proposal for agent account `agentId`? For Approve: the stored session
+ * exists, holds the same agent grant (that account, the same expiry, so a re-pair on the channel doesn't count) with the
+ * `strategy` scope, and has not lapsed or moved to an unpinned relay. Read only (peek).
+ */
+export const isAgentSessionLive = (c: string, agentId: string, expiresAt: number, now = Date.now()) => {
+  const s = peek(c);
+  if (!s?.agent || s.agent.agentId !== agentId || s.agent.expiresAt !== expiresAt) return false;
+  if (!s.agent.scopes.includes('strategy') || !isCurrent(s, now)) return false;
+  return dropUntrustedRelays([s]).length === 1;
+};
+
 async function onAgentRequest(l: Live, grant: AgentGrant, id: string, action: string, params: unknown) {
   try {
-    if (!agentDeps.ctx) throw new AgentCallError('LOCKED', `${appNameFor()} is locked. Unlock it on your phone.`);
+    if (!agentDeps.ctx) throw new AgentCallError('LOCKED', `${APP_NAME} is locked. Unlock it on your phone.`);
     const result = await handleAgentCall(grant, action, params, {
       ctx: agentDeps.ctx,
       currentId: agentDeps.currentId,
       isLive: pairingLiveCheck(l.stored.c, grant, agentDeps.ctx),
+      session: { id: l.stored.c },
       bsvUsd,
       feeRate: agentDeps.feeRate,
       saveGrant: (g) => {
@@ -568,7 +632,7 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
         store: agentDeps.twetch,
         wallet: agentDeps.ctx?.wallet as unknown as TwetchWallet | undefined,
         bsvUsd,
-        proven: !!l.stored.proven,
+        proven: false, // review 3 (22 Nov 2026): origin proofs are not trusted
       })),
     });
   try {
@@ -577,7 +641,7 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
     const login = await handlePairLoginCall(l.stored.c, l.stored.origin, action, params, {
       wallet: agentDeps.ctx?.wallet as never,
       handle: () => accountNamesFor(agentDeps.currentId).payable,
-      proven: !!l.stored.proven,
+      proven: false, // review 3 (22 Nov 2026): origin proofs are not trusted
       onSignedIn: closeConnectCardsFor,
     });
     if (login) return reply(l, { t: 'res', id, ...login });
@@ -597,8 +661,8 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
     // The user declined on the phone: the standard code (services/userDenied.ts), not the generic REJECTED.
     else if (r?.code === USER_DENIED_CODE || isUserDenied(r?.error))
       await reply(l, { t: 'res', id, error: { code: USER_DENIED_CODE, message: USER_DENIED_MESSAGE } });
-    // wallet.mintPrivate refusals keep their own code (services/mintPrivateAction.ts).
-    else if (isMintPrivateCode(r?.code))
+    // wallet.mintPrivate refusals, and the wallet's own refusals (services/refusalCodes.ts), keep their own code.
+    else if (isMintPrivateCode(r?.code) || isRefusalCode(r?.code))
       await reply(l, { t: 'res', id, error: { code: r!.code!, message: r?.error || 'Request refused' } });
     else await reply(l, { t: 'res', id, error: { code: 'REJECTED', message: r?.error || 'Request refused' } });
   } catch (e) {
@@ -623,8 +687,11 @@ function attach(l: Live) {
         if (l.upgrade && l.session) onUpgradeAnswer(l, l.session, rf.wcv === 2);
       }
       // The site's tab came back (iOS kills its socket while the user is in bWallet, e.g. after a return-to-site):
-      // say `ready` again so it resumes and resends, without relying on the relay's 60 s queue.
-      if (rf.peer === 'joined' && rf.role === 'site') void reply(l, readyFor(l));
+      // say hello and `ready` again so it resumes and resends, without relying on the relay's 60 s queue.
+      if (rf.peer === 'joined' && rf.role === 'site') {
+        if (ws.readyState === WebSocket.OPEN) ws.send(helloFor(stored));
+        void reply(l, readyFor(l));
+      }
       return;
     }
     if (!isSealed(f)) return;
@@ -745,6 +812,7 @@ function connect(c: string) {
 /** Disconnect a site: tell it, forget the key, and withdraw every grant and allowance the pairing was given. */
 export function forget(c: string, notify = true) {
   revokeChannel(c); // first: a spend queued for this channel must not sign from here on
+  dropProposalsOf(peek(c)); // peek, not load(): a parked pairing's proposal goes too
   forgetLogin(c);
   const stored = load().find((s) => s.c === c);
   const l = live.get(c);
@@ -809,6 +877,8 @@ function connectPairing(
       void relayReachable(link.r).then((up) => fail(up ? PAIR_CODE_USED_MESSAGE : PAIR_UNREACHABLE_MESSAGE));
     };
     ws.onclose = (ev) => !settled && !probing && fail(ev.code === 1006 ? PAIR_CODE_USED_MESSAGE : 'Pairing closed.');
+    const samePhone = !!(link.ret && link.rid);
+    let helloSent = '';
     // After the card is up (settled) and until Connect or Cancel: the site leaving, or the channel closing, ends it.
     let open = false;
     let goneFns: ((message?: string) => void)[] = [];
@@ -817,8 +887,10 @@ function connectPairing(
     let unwatch = () => {};
     // Made with the key once the hello is out; Connect hands it to the live session so the counters carry on.
     let sealer: Sealer | null = null;
+    let expireTimer: ReturnType<typeof setTimeout> | undefined;
     const end = () => {
       open = false;
+      clearTimeout(expireTimer);
       unwatch();
     };
     const supersede = (message?: string) => {
@@ -838,7 +910,13 @@ function connectPairing(
     ws.onmessage = inOrder(async (ev: MessageEvent) => {
       const f = JSON.parse(String(ev.data)) as RelayFrame;
       if (settled) {
-        if (f.t === 'relay' && f.peer === 'left' && f.role === 'site') supersede();
+        // Same phone (the link has a return): the site's tab is ASLEEP, not gone. iOS freezes it and kills its socket
+        // as soon as the user opens bWallet, so a 'left' says nothing about the QR; the card stays (P0 22 Nov 2026).
+        if (f.t === 'relay' && f.peer === 'left' && f.role === 'site') {
+          if (!samePhone) supersede();
+        }
+        // The tab woke and rejoined before Connect: it may have lost our hello with its frozen socket.
+        else if (f.t === 'relay' && f.peer === 'joined' && f.role === 'site' && open && helloSent) ws.send(helloSent);
         // The site ended it before Connect (its user said the codes didn't match): end the card and say so.
         else if (open && sealer && isSealed(f)) {
           const msg = await sealer.open(f);
@@ -858,21 +936,32 @@ function connectPairing(
       const hello: HelloFrame = {
         t: 'hello',
         k: P.toPublicKey().toString(),
-        info: { name: appNameFor(), rdns: 'space.bwallet.mobile' },
+        info: { name: APP_NAME, rdns: 'space.bwallet.mobile' },
         ...(link.cd === 8 && { cd: 8 as const }),
         ...(v2 && { wcv: 2 as const }),
       };
-      ws.send(JSON.stringify(hello));
+      helloSent = JSON.stringify(hello);
+      ws.send(helloSent);
       const { key, code } = await deriveSession(P, link.k, link.c, link.cd ?? 4);
       sealer = new Sealer(key, 'wallet');
-      // The relay's origin is only a header; the host is shown plainly only when the site proves it (B3).
-      const proofs =
-        (link.s || link.s2) && f.verifiedOrigin !== CLI_ORIGIN
-          ? await verifyPairProofs(link)
-          : { v1: false, v2: false };
-      const proven = proofs.v1 || proofs.v2;
-      const returnPlan = f.verifiedOrigin === CLI_ORIGIN ? null : planReturn(link, f.verifiedOrigin, proofs.v2);
+      // The relay's origin is only a header, and origin proofs (s, s2) are ignored (review 3, 22 Nov 2026: a site's proof
+      // route can't tell a browser from a script). The host is always shown as "a site that claims to be", and the
+      // return always goes to the ROOT of the relay-seen origin.
+      const proven = false;
+      const returnPlan = f.verifiedOrigin === CLI_ORIGIN ? null : planReturn(link, f.verifiedOrigin);
       let returnTaken = false;
+      // The site's sign-in, folded into Connect, only when the wallet can return: the signature travels ONLY in the
+      // return (the fragment the wallet opens in this phone's browser at the exact relay-seen origin), never over the
+      // relay (CTO 22 Nov 2026), so whoever holds the site end of the channel never sees it. No return (a desktop QR,
+      // no ret): no fold; the site asks over the relay and gets the separate sheet. Never for the CLI.
+      // Review 4 (L3, CTO 22 Nov 2026): and only when that return reaches nothing but the site: plain https, or an
+      // Android explicit-package intent to a browser in our own table. Never an iOS custom scheme.
+      const loginReq =
+        f.verifiedOrigin === CLI_ORIGIN || !returnPlan || !returnIsFoldable(returnPlan, returnPlatformNow())
+          ? null
+          : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
+      // The account this card opened under: Connect signs with it, or not at all (review 2, 22 Nov 2026).
+      const cardAccount = agentDeps.currentId;
       // A new pairing starts with nothing. Its key names its own channel, so it never shares another pairing's grants
       // (b-Aware 24 Oct 2026); still withdraw anything left under that key unless this channel is being resumed.
       // Bounded: right after launch the wallet may still be loading, and the revoke waited for it, so the sheet sat on
@@ -888,12 +977,21 @@ function connectPairing(
       ws.onclose = () => supersede();
       ws.onerror = null;
       unwatch = watchConnectCard(f.verifiedOrigin, supersede);
+      // Review 22 Nov 2026: a card can stay up (the same-phone tab's 'left' no longer closes it), so it closes when the
+      // code expires, and Connect re-checks.
+      expireTimer = setTimeout(() => supersede(PAIR_CODE_EXPIRED_MESSAGE), Math.max(0, link.e * 1000 - Date.now()));
+      (expireTimer as { unref?: () => void } | undefined)?.unref?.(); // tests: never keeps the process up
       resolve({
         origin: f.verifiedOrigin,
         code,
         cli: f.verifiedOrigin === CLI_ORIGIN && !!opts.allowCli,
         proven,
         returnPlan,
+        signIn: !!loginReq,
+        signInAs: (() => {
+          const raw = (accountNamesFor(agentDeps.currentId).payable ?? '').trim();
+          return raw ? (raw.startsWith('$') ? raw : `$${raw}`) : '';
+        })(),
         takeReturn: () => {
           if (!returnPlan || returnTaken) return null;
           returnTaken = true;
@@ -903,12 +1001,49 @@ function connectPairing(
           if (gone) g(goneMessage);
           else goneFns.push(g);
         },
-        confirm: (agent?: AgentGrant) => {
-          if (gone) return;
+        goneReason: () => (gone ? goneMessage : undefined),
+        confirm: async (agent?: AgentGrant): Promise<ReturnExtra | null> => {
+          if (gone) return null;
+          if (Date.now() > link.e * 1000) {
+            supersede(PAIR_CODE_EXPIRED_MESSAGE);
+            return null;
+          }
+          if (agentDeps.currentId !== cardAccount) {
+            supersede(PAIR_ACCOUNT_CHANGED_MESSAGE);
+            return null;
+          }
           end();
           ws.onclose = null;
-          if (f.verifiedOrigin === CLI_ORIGIN && (!agent || !opts.allowCli)) return ws.close(); // a CLI must be bound to an agent account
-          if (agent && f.verifiedOrigin !== CLI_ORIGIN) return ws.close(); // only a CLI pairing carries an agent grant
+          // A CLI must be bound to an agent account; only a CLI pairing carries an agent grant.
+          if (
+            (f.verifiedOrigin === CLI_ORIGIN && (!agent || !opts.allowCli)) ||
+            (agent && f.verifiedOrigin !== CLI_ORIGIN)
+          ) {
+            ws.close();
+            return null;
+          }
+          // Connect and sign in (the card said so). A failure here is a plain Connect: the site then asks as usual.
+          // Checked again now: the challenge may have expired while the card was up.
+          const freshReq = loginReq && !agent ? foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin!) : null;
+          // Review 4 (L6): the wallet that signs must be the card's account (its identity key's address), not just the
+          // open account id: refuse with a plain line otherwise.
+          const signed = freshReq
+            ? await signFoldedLogin(link.c, freshReq, agentDeps.ctx?.wallet as never, Date.now(), cardAccount).catch(
+                () => null,
+              )
+            : null;
+          if (signed === 'wrong-account') {
+            // The card is already closed for Connect (end()), so say why directly rather than through supersede.
+            gone = true;
+            goneMessage = PAIR_ACCOUNT_CHANGED_MESSAGE;
+            ws.onclose = null;
+            ws.close();
+            goneFns.forEach((g) => g(goneMessage));
+            goneFns = [];
+            return null;
+          }
+          const login = signed;
+          if (login) closeConnectCardsFor(f.verifiedOrigin!);
           const stored: StoredSession = {
             c: link.c,
             r: link.r,
@@ -923,17 +1058,42 @@ function connectPairing(
             ...(agentDeps.currentId && { account: agentDeps.currentId }),
             // v2: the QR claim is spent at the relay; rejoin with the session claim. An older relay kept the QR claim.
             ...(v2 ? { claim: sessionClaim, wcv: 2 as const } : { claim }),
-            ...(proven && { proven: true }),
           };
+          // A re-pair on a channel the CLI chose again starts clean: the old pairing's strategy proposal goes with it.
+          dropProposalsOf(peek(link.c));
+          if (agent) dropProposalFromSession(agent.agentId, link.c);
           save([...loadAll().filter((s) => s.c !== link.c), stored]);
-          const l: Live = { ws, sealer: sealer!, stored, relayed: true, session: sessionClaim };
+          const l: Live = {
+            ws,
+            sealer: sealer!,
+            stored,
+            relayed: true,
+            session: sessionClaim,
+          };
           attach(l);
-          void reply(l, readyFor(l));
+          // Over the relay: "paired" and, when Connect signed in, only `ls: 1` ("signed in, see the return"). The
+          // signature goes ONLY in the return's frame (CTO 22 Nov 2026): whoever holds the site end of this channel
+          // (a script can, with a link it got signed) never sees it. That frame is sealed AFTER the relay's, so it has
+          // the higher counter and opens after the relay ready on the same tab.
+          const relayFrame = await sealer!.seal(login ? { ...readyFor(l), ls: 1 } : readyFor(l));
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(relayFrame));
+            update(link.c, { ...sealer!.counters });
+          }
+          const frame = login ? await sealer!.seal({ ...readyFor(l), login }) : relayFrame;
+          return { wk: P.toPublicKey().toString(), frame };
         },
         cancel: () => {
           end();
           ws.onclose = null;
-          ws.close();
+          // Tell the site (its pairing would otherwise wait on the code until it expires: the "loop" in the P0).
+          const bye = sealer ? sealer.seal({ t: 'close', reason: 'declined' }) : null;
+          void Promise.resolve(bye)
+            .then((fr) => {
+              if (fr && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(fr));
+            })
+            .catch(() => undefined)
+            .finally(() => ws.close());
         },
       });
     });
@@ -998,7 +1158,11 @@ export function initPairing() {
 export function closeAllPairings() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? '[]') as StoredSession[];
-    if (Array.isArray(raw)) for (const s of raw) revokeChannel(s.c);
+    if (Array.isArray(raw))
+      for (const s of raw) {
+        revokeChannel(s.c);
+        dropProposalsOf(s);
+      }
   } catch {
     /* storage unavailable: the live channels below are still revoked */
   }

@@ -11,7 +11,7 @@
  * an agent account, can be acted on: its keys are the only ones unlocked. Paper mode fills on the paper
  * book; live mode buys the cheapest listing or sends BSV.
  */
-import { MARKET_ENABLED } from '../storeBuild';
+import { APP_NAME, MARKET_ENABLED } from '../storeBuild';
 import { buyBsv21, type OneSatContext } from '@1sat/actions';
 import { sendBsv } from '../../utils/guardedSendBsv';
 import { assertOrdLockV2 } from '../market/ordlockVersion';
@@ -228,7 +228,7 @@ export const runAgentAction = async (
         const s = checkAgentSpend(id, usd);
         if (!s.ok) why = s.reason;
         else if (getLoadedStrategy(id)?.mode === 'paper') why = 'The strategy was switched to paper mode';
-        else if (await io.spendingPaused().catch(() => true)) why = 'Spending is paused in bWalletX right now';
+        else if (await io.spendingPaused().catch(() => true)) why = `Spending is paused in ${APP_NAME} right now`;
       }
     } catch (e) {
       why = e instanceof Error && e.message ? e.message : 'The last check before signing failed';

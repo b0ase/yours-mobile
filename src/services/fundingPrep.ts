@@ -17,6 +17,7 @@
  * the error names where the money is instead of the raw toolbox message.
  */
 import { DEPOSIT_BASKET, isDepositHeld } from '@1sat/types';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export interface DepositOutput {
   satoshis: number;
@@ -166,7 +167,7 @@ export function insufficientFundsMessage(err: unknown, snap: FundingSnapshot): s
   ];
   if (snap.arriving > 0)
     parts.push(
-      `${snap.arriving} sats have arrived at your address but the wallet has not finished adding them; open bWalletX, tap refresh, and try again.`,
+      `${snap.arriving} sats have arrived at your address but the wallet has not finished adding them; open ${APP_NAME}, tap refresh, and try again.`,
     );
   if (snap.sweepable + snap.held > 0)
     parts.push(
@@ -176,6 +177,6 @@ export function insufficientFundsMessage(err: unknown, snap: FundingSnapshot): s
     parts.push(
       `${snap.unsweepable} sats of received payments can't be moved automatically; please email support@bwalletx.com so we can recover them.`,
     );
-  if (parts.length === 1) parts.push('Add funds to bWalletX and try again.');
+  if (parts.length === 1) parts.push(`Add funds to ${APP_NAME} and try again.`);
   return parts.join(' ');
 }

@@ -12,7 +12,7 @@ import {
   marketTradingEnabled,
   marketLabel,
   isBWalletX,
-  appNameFor,
+  APP_NAME,
   mintChoicesFor,
   ownerAppsFor,
   paidFeaturesEnabled,
@@ -73,15 +73,16 @@ describe('storeBuild', () => {
     expect(tokenRoomsEnabled(false)).toBe(true);
     expect(paidFeaturesEnabled(true)).toBe(false);
     expect(paidFeaturesEnabled(false)).toBe(true);
-    expect(mintChoicesFor(true)).toEqual(['token', 'media']);
+    // S8 (CTO + CEO, 16 Nov 2026): no fungible token minting in a store build.
+    expect(mintChoicesFor(true)).toEqual(['media']);
     expect(mintChoicesFor(false)).toEqual(['ticket', 'token', 'media']);
   });
 
   test('bWalletX branding outside the store build', () => {
     expect(isBWalletX(true)).toBe(false);
     expect(isBWalletX(false)).toBe(true);
-    expect(appNameFor(true)).toBe('bWallet');
-    expect(appNameFor(false)).toBe('bWalletX');
+    // The name itself is a literal build constant now (storeGatesA9.test.ts checks it in every env).
+    expect(APP_NAME).toBe('bWalletX');
   });
   test('marketLabel: Exchange in bWalletX, Market in the store app', () => {
     expect(marketLabel(false)).toBe('Exchange');
@@ -581,13 +582,11 @@ describe('Free Spaces in the store edition (owner, 10 Oct 2026)', () => {
     for (const r of [token, openButGated]) expect(roomSpacesAllowed(r, true)).toBe(false);
     for (const r of [lounge, open, token]) expect(roomSpacesAllowed(r, false)).toBe(true);
   });
-  test('token rooms point store users to bWalletX or bchatx.com', async () => {
+  test('token rooms say only "Not available in this edition" in a store build, naming no app or site (S9)', async () => {
     const { storeTokenSpaceNote, STORE_ROOM_NOTE } = await import('./storeBuild');
-    expect(storeTokenSpaceNote('SATOSHI')).toBe(
-      'This room is for $SATOSHI holders. Open it in bWalletX or on bchatx.com.',
-    );
-    expect(storeTokenSpaceNote()).toContain('token holders');
-    expect(STORE_ROOM_NOTE).toContain('bchatx.com');
+    expect(storeTokenSpaceNote('SATOSHI')).toBe('Not available in this edition');
+    expect(storeTokenSpaceNote()).toBe('Not available in this edition');
+    expect(STORE_ROOM_NOTE).toBe('Not available in this edition');
   });
 });
 
@@ -863,5 +862,1556 @@ describe('TWETCH_POST_ENABLED: Post to Twetch is bWalletX only', () => {
     expect(src('./twetch/twetchCalls.ts')).toContain('deps.enabled ?? TWETCH_POST_ENABLED');
     expect(src('./phone/PhoneShell.tsx')).toContain('TWETCH_POST_ENABLED && <TwetchHost />');
     expect(src('./settings/FeedSettings.tsx')).toContain("TWETCH_POST_ENABLED && screen === 'twetch'");
+  });
+});
+
+// ── Store gates of 16 Nov 2026 (CEO rulings): market targets, catalogue wording, the PNEEs row, games ──────────
+/** The catalogues as a build of the given env sees them (a fresh process, so the literal env checks apply). */
+const catalogues = (env: Record<string, string>) => {
+  const code = `
+    const b = await import('./src/mobile/bapps.ts'); const r = await import('./src/mobile/radarApps.ts');
+    const s = await import('./src/mobile/storeBuild.ts'); const st = await import('./src/mobile/bappStandard.ts');
+    const g = await import('./src/mobile/games/gamesCatalog.ts'); const o = await import('./src/mobile/ownerApps.ts');
+    const cards = await import('./src/mobile/feed/reels/bappsCards.ts');
+    const bapps = b.BAPP_GROUPS.flatMap((x) => b.bappsIn(x.id)).filter((a) => s.appsTileShown(a.name));
+    const std = st.visibleApps([...st.BX_APPS, ...st.COMMERCIAL_APPS], s.STORE_BUILD);
+    const groups = r.RADAR_GROUPS.filter((x) => s.radarGroupShown(x.id));
+    const radar = r.RADAR_APPS.filter((a) => s.radarGroupShown(a.group));
+    console.log(JSON.stringify({
+      store: s.STORE_BUILD, gamesOn: s.GAMES_ENABLED,
+      bapps: bapps.map((a) => [a.name, a.verb, a.url]), coming: b.COMING_BAPPS.map((a) => [a.name, a.verb]),
+      std: std.map((a) => [a.name, a.verb, a.category, a.url]),
+      groups: groups.map((x) => x.label), radar: radar.map((a) => [a.name, a.desc, a.url]),
+      owner: o.OWNER_APPS.map((a) => a.name), allRadar: r.RADAR_APPS.map((a) => a.name),
+      games: g.GAMES.map((a) => [a.name, a.desc, a.url, a.source]), shownGames: g.gamesFor().map((a) => a.name),
+      gameSources: g.GAME_SOURCES.map((x) => x.label), about: cards.BAPP_ABOUT,
+    }));`;
+  const r = Bun.spawnSync(['bun', '-e', code], {
+    env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+  });
+  return JSON.parse(r.stdout.toString()) as {
+    store: boolean;
+    gamesOn: boolean;
+    bapps: string[][];
+    coming: string[][];
+    std: string[][];
+    groups: string[];
+    radar: string[][];
+    owner: string[];
+    allRadar: string[];
+    games: string[][];
+    shownGames: string[];
+    gameSources: string[];
+    about: Record<string, string>;
+  };
+};
+const STORE_ENVS = [{ VITE_STORE_BUILD: '1' }, { VITE_CHANNEL: 'ios-store' }, { VITE_CHANNEL: 'android-play' }];
+const srcOf = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+describe('gate (a): no market, exchange or token-sale target in a store build', () => {
+  const X_ONLY_OWNER = [
+    'BUDZ',
+    'BUDGIRLS',
+    'Zanaadu',
+    'GZONE.ROCKS',
+    'GMEHL.ROCKS',
+    'UWUTV',
+    'TWETCH.ROCKS',
+    'AIGF',
+    '1satsocial',
+    'Zero Dice',
+    'Ninja Punk Girls',
+  ];
+  const X_ONLY_RADAR = ['ZedVibe', 'ToDo', 'DXS'];
+  const X_ONLY_BAPPS = ['bMoviesX', 'bMusicX', 'bDNS', 'bGames', 'bExchange'];
+  const X_ONLY_STD = ['bMoviesX', 'bMusicX', 'bDojoX', 'bStoreX', 'Ninja Punk Girls'];
+  test('store build: the token sites, trading platforms and exchange-like bApps are not in the data', () => {
+    for (const env of STORE_ENVS) {
+      const c = catalogues(env);
+      expect(c.store).toBe(true);
+      for (const n of [...X_ONLY_OWNER, ...X_ONLY_RADAR]) expect(c.allRadar).not.toContain(n);
+      expect(c.owner).toEqual(['TankScope', 'VexVoid']);
+      for (const n of X_ONLY_BAPPS) expect(c.bapps.map((a) => a[0])).not.toContain(n);
+      for (const n of X_ONLY_STD) expect(c.std.map((a) => a[0])).not.toContain(n);
+      // What stays.
+      for (const n of ['bChatX', 'bMintX', 'bWriterX', 'bMailX', 'bSheets', 'bDriveX', 'bPhotos', 'bMaps'])
+        expect(c.bapps.map((a) => a[0])).toContain(n);
+      for (const n of ['HandCash', 'WhatsOnChain', 'Tempo']) expect(c.allRadar).toContain(n);
+    }
+  });
+  test('bWalletX build: every one of them is still listed', () => {
+    const c = catalogues({});
+    expect(c.store).toBe(false);
+    for (const n of [...X_ONLY_OWNER, ...X_ONLY_RADAR]) expect(c.allRadar).toContain(n);
+    expect(c.owner.slice(0, 11)).toEqual(X_ONLY_OWNER);
+    for (const n of X_ONLY_BAPPS) expect(c.bapps.map((a) => a[0])).toContain(n);
+    for (const n of X_ONLY_STD) expect(c.std.map((a) => a[0])).toContain(n);
+    expect(c.bapps.slice(0, 4).map((a) => a[0])).toEqual(['bChatX', 'bMoviesX', 'bMusicX', 'bMintX']);
+  });
+  test('Apps › More apps: 1Sat Market and 1satsocial are data only behind MARKET_ENABLED', () => {
+    const p = srcOf('./BrowserPage.tsx');
+    expect(p).toMatch(
+      /\.\.\.\(MARKET_ENABLED\s*\? \[\{ name: '1Sat Market', link: 'https:\/\/1sat\.market\/'[^\]]*\]\s*: \[\]\)/,
+    );
+    expect(p).toMatch(/\.\.\.\(MARKET_ENABLED \? \[\{ name: '1satsocial', [^\]]*\] : \[\]\)/);
+    // Nowhere else in the file as a tile, and the address-bar hint names it only in bWalletX.
+    expect(p.match(/name: '1Sat Market'/g)).toHaveLength(1);
+    expect(p).toContain(
+      "MARKET_ENABLED ? 'Enter a web address, like 1sat.market' : 'Enter a web address, like whatsonchain.com'",
+    );
+    expect(p).toContain('.filter((a) => storeLinkShown(a.link))');
+    // The token panel's link to the token's market page too.
+    expect(srcOf('./tokens/TokenIdPanel.tsx')).toContain("...(MARKET_ENABLED ? [['1sat.market', links.market]] : []),");
+  });
+  test('inherited featured apps: the marketplace and the prize arcade are hidden by address in a store build only', async () => {
+    const { storeLinkShown, STORE_HIDDEN_LINK_HOSTS } = await import('./storeBuild');
+    const { featuredApps } = await import('../utils/constants');
+    const links = featuredApps.map((a: { link: string }) => a.link);
+    expect(links.some((l: string) => /takeitnft\.com/.test(l))).toBe(true);
+    for (const l of links) expect(storeLinkShown(l, false)).toBe(true);
+    const store = links.filter((l: string) => storeLinkShown(l, true));
+    expect(store.join(' ')).not.toMatch(/takeitnft|hastearcade|market/i);
+    expect(storeLinkShown('https://www.takeitnft.com/marketplace/global', true)).toBe(false);
+    expect(storeLinkShown('https://hastearcade.com', true)).toBe(false);
+    expect(storeLinkShown('https://whatsonchain.com', true)).toBe(true);
+    expect(storeLinkShown('not a url', true)).toBe(false);
+    expect(STORE_HIDDEN_LINK_HOSTS).toEqual(['hastearcade.com', 'takeitnft.com']);
+  });
+});
+
+describe('gate (b): store catalogue wording names no trading, stakes, backing or tokenising', () => {
+  const X_VERBS: [string, string][] = [
+    ['bChatX', 'Chat rooms, Spaces and feeds for every token'],
+    ['bMoviesX', 'Watch and back tokenised films'],
+    ['bMusicX', 'Tokenise your music; fans who hold it make the video with you'],
+    ['bMintX', 'Design, stamp and mint tokens, currency and media on-chain'],
+    ['bDNS', 'Register and trade names on Bitcoin'],
+    ['bPhotos', 'Turn photos into tradable NFTs'],
+    ['bGames', 'Play games with real stakes'],
+  ];
+  test('the word list catches the wording it is for, and leaves ordinary wording alone', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const [, verb] of X_VERBS)
+      expect(storeBannedWord(verb) ?? (verb.includes('currency') ? 'ok' : null)).not.toBeNull();
+    for (const t of [
+      'Earn Bitcoins on Brokerless Trading Platform',
+      'Buy and sell coins',
+      'Swap into BSV',
+      'A launchpad for coins',
+      'gamified rev share',
+      'hold her ticker',
+      'back her token',
+      'Token rooms for holders',
+      'An exchange',
+      'Markets & collectibles',
+      'Win prizes',
+      'with a reward',
+    ])
+      expect(storeBannedWord(t)).not.toBeNull();
+    for (const t of [
+      'Store and share files on-chain',
+      'Email that pays and gets paid',
+      'Mint tokens and media on-chain',
+      'Find places that take Bitcoin',
+      'Turn photos into NFTs',
+      'A marketing tool',
+      'Go back to the wallet',
+      'Traditional payments',
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+  });
+  test('store build: every string the catalogue can show passes the word list, and none names bWalletX', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const env of STORE_ENVS) {
+      const c = catalogues(env);
+      const strings = [
+        ...c.bapps.map((a) => `${a[0]}: ${a[1]}`),
+        ...c.coming.map((a) => `${a[0]}: ${a[1]}`),
+        ...c.std.map((a) => `${a[0]}: ${a[1]} [${a[2]}]`),
+        ...c.groups,
+        ...c.radar.map((a) => `${a[0]}: ${a[1]}`),
+        ...c.games.map((a) => `${a[0]}: ${a[1]}`),
+        ...c.gameSources,
+        // Feed › bApps: one card per catalogue app, with this line on it.
+        ...Object.entries(c.about).map(([k, v]) => `${k}: ${v}`),
+      ];
+      for (const a of c.bapps) expect(c.about[a[0]]?.length ?? 0).toBeGreaterThan(10);
+      for (const n of ['bMoviesX', 'bMusicX', 'bDNS', 'bGames', 'bExchange']) expect(c.about[n]).toBeUndefined();
+      expect(c.about.bChatX).toBe('Group chats, open rooms and feeds.');
+      expect(strings.length).toBeGreaterThan(120);
+      const bad = strings.map((t) => [t, storeBannedWord(t)]).filter((x) => x[1]);
+      expect(bad).toEqual([]);
+      expect(strings.filter((t) => /bWalletX/.test(t))).toEqual([]);
+      // Addresses too: no tile opens a market, exchange, swap or launchpad address.
+      const urls = [...c.bapps.map((a) => a[2]), ...c.std.map((a) => a[3]), ...c.radar.map((a) => a[2])];
+      expect(urls.filter((u) => /exchang|market|swap|launchpad/i.test(u))).toEqual([]);
+      const verbs = Object.fromEntries(c.bapps.map((a) => [a[0], a[1]]));
+      expect(verbs.bChatX).toBe('Chat with friends, groups and open rooms');
+      expect(verbs.bMintX).toBe('Mint tokens and media on-chain');
+      expect(verbs.bPhotos).toBe('Turn photos into NFTs');
+      const std = Object.fromEntries(c.std.map((a) => [a[0], `${a[1]} [${a[2]}]`]));
+      expect(std.bChatX).toBe('Chat with friends, groups and open rooms [Talk]');
+      expect(std.bMintX).toBe('Mint your art, media and archives on-chain [Make & own]');
+      expect(std.bCalX).toBe('Shared calendars and bookings [Work]');
+      expect(std.bSocialX).toBe('Public Spaces and posts [Talk]');
+    }
+  });
+  test('bWalletX build: the wording is what it was', () => {
+    const c = catalogues({});
+    const verbs = Object.fromEntries(c.bapps.map((a) => [a[0], a[1]]));
+    for (const [name, verb] of X_VERBS) expect(verbs[name]).toBe(verb);
+    const std = Object.fromEntries(c.std.map((a) => [a[0], `${a[1]} [${a[2]}]`]));
+    expect(std.bChatX).toBe('Rooms, Spaces and feeds for every token [Talk]');
+    expect(std.bSocialX).toBe('Spaces for every brand and token, in public [Talk]');
+    expect(std.bMintX).toBe('Mint anything: art, media, coins and archives [Own & trade]');
+    expect(std.bCalX).toBe('Paid bookings and shared calendars [Work]');
+    expect(std.bMoviesX).toBe('Watch and back tokenised films [Watch & make]');
+    expect(std.bDojoX).toBe('Train, compete and earn your belts [Watch & make]');
+    expect(c.about.bChatX).toBe('Group chats, live audio Spaces and feeds, with a room for every token.');
+    expect(c.about.bMoviesX).toBe('A feed of films and trailers you can watch, and back by buying their tokens.');
+    expect(c.about.bMintX).toBe('Design and mint your own tokens, notes and media on Bitcoin.');
+    expect(c.about.bDNS).toBe('Register names on Bitcoin and trade them.');
+    expect(c.about.bPhotos).toBe('Turn your photos into NFTs that can be traded.');
+    expect(c.about.bGames).toBe('Play games where you can stake BSV.');
+    expect(Object.keys(c.about)).toHaveLength(30);
+  });
+  test('the store wording and the gated entries are behind literal env checks, so a store bundle has neither', () => {
+    for (const f of ['./bapps.ts', './bappStandard.ts', './ownerApps.ts', './radarApps.ts']) {
+      const t = srcOf(f);
+      // Each banned line of data sits inside a literal-env conditional (a spread or a ternary), never a plain entry.
+      expect(t).toMatch(/import\.meta\.env\.VITE_STORE_BUILD === '1'/);
+    }
+    expect(srcOf('./bapps.ts')).toMatch(
+      /android-play'\s*\? 'Turn photos into NFTs'\s*: 'Turn photos into tradable NFTs'/,
+    );
+  });
+});
+
+describe('gate (c): the PNEEs default row is not in a store build; a held balance always shows', () => {
+  test('pneeRowShown, both editions', async () => {
+    const { pneeRowShown } = await import('./storeBuild');
+    // bWalletX: always, at zero too.
+    expect(pneeRowShown(0, false)).toBe(true);
+    expect(pneeRowShown(12.5, false)).toBe(true);
+    // Store build: only someone who holds PNEEs (indexed or still indexing).
+    expect(pneeRowShown(0, true)).toBe(false);
+    expect(pneeRowShown(0.01, true)).toBe(true);
+    expect(pneeRowShown(500, true)).toBe(true);
+  });
+  test('the Wallet uses it for the PNEEs row only; the balance is still published and MNEE has no such gate', () => {
+    const t = srcOf('./wallet/DefaultTokenCards.tsx');
+    expect(t).toMatch(/\{pneeRowShown\(pnee\) && \(\s*<CoinRow id="pnee">/);
+    expect(t.match(/pneeRowShown\(/g)).toHaveLength(1);
+    // `pnee` is the indexed balance, else what is still indexing: both count as held.
+    expect(t).toContain('const pnee = indexed > 0 ? indexed : pending;');
+    expect(t).toContain("useEffect(() => publishBalance('pnee', pnee, 'PNEEs'), [pnee]);");
+    const w = readFileSync(new URL('../pages/BsvWallet.tsx', import.meta.url), 'utf8');
+    expect(w).toContain('ticker="MNEE USD"');
+    expect(w).not.toMatch(/pneeRowShown|mneeRowShown/);
+    expect(w).toContain('onGetMneeClick={BUY_CRYPTO_ENABLED ?');
+  });
+});
+
+describe('gate (d): no games in a store build (third-party games out entirely; none of ours is marked storeSafe)', () => {
+  test('GAMES_ENABLED is the inverse of STORE_BUILD, from the same literal env', () => {
+    for (const env of STORE_ENVS) expect(catalogues(env).gamesOn).toBe(false);
+    expect(catalogues({}).gamesOn).toBe(true);
+    expect(srcOf('./storeBuild.ts')).toMatch(
+      /export const GAMES_ENABLED: boolean = !\(\s*import\.meta\.env\.VITE_STORE_BUILD === '1' \|\|/,
+    );
+  });
+  test('store build: no game data, no Games group, screen, page, route or tile', async () => {
+    const { STORE_HIDDEN_SCREENS, STORE_HIDDEN_RADAR_GROUPS, screenShown, radarGroupShown } =
+      await import('./storeBuild');
+    for (const env of STORE_ENVS) {
+      const c = catalogues(env);
+      expect(c.games).toEqual([]);
+      expect(c.shownGames).toEqual([]);
+      expect(c.groups).not.toContain('Games');
+      expect(c.bapps.map((a) => a[0])).not.toContain('bGames');
+      expect(JSON.stringify(c)).not.toMatch(/real stakes|Paiybit arcade|PixelWar|Midnight Pass/);
+    }
+    expect(STORE_HIDDEN_SCREENS).toContain('games');
+    expect(STORE_HIDDEN_RADAR_GROUPS).toContain('games');
+    expect(screenShown('games', true)).toBe(false);
+    expect(radarGroupShown('games', true)).toBe(false);
+    const p = srcOf('./BrowserPage.tsx');
+    expect(p).toMatch(
+      /const PAGES: readonly string\[\] = GAMES_ENABLED\s*\? \['Home', 'bApps', 'Other apps', 'Games'\]\s*: \['Home', 'bApps', 'Other apps'\];/,
+    );
+    expect(p).toContain('if (GAMES_ENABLED && i === 3) {');
+    expect(p).toContain("GAMES_ENABLED && only === 'games' ? (");
+    expect(p).toContain('{GAMES_ENABLED && /^games$/i.test(screenTitle(x, i).trim()) && <BGamesHero top={false} />}');
+    expect(srcOf('./tabs/MobileRoutes.tsx')).toMatch(
+      /path="games"\s*element=\{GAMES_ENABLED \? <BrowserPage only="games" \/> : <Navigate to="\/m\/apps" replace \/>\}/,
+    );
+    expect(srcOf('./wide/WideShell.tsx')).toContain("to: '/m/games', hidden: !GAMES_ENABLED }");
+    expect(srcOf('./games/gamesCatalog.ts')).toMatch(/export const GAMES: Game\[\] = !GAMES_ENABLED\s*\? \[\]/);
+  });
+  test('bWalletX build: the games, the Games group and screen, and the bGames tile are all still there', async () => {
+    const { screenShown, radarGroupShown } = await import('./storeBuild');
+    const c = catalogues({});
+    const names = c.games.map((a) => a[0]);
+    for (const n of [
+      'Snake',
+      '2048',
+      'Ninja Punk Girls',
+      'Satoshi Pong',
+      'Haste Arcade',
+      'Midnight Pass',
+      'PixelWar',
+      'PeerJump',
+    ])
+      expect(names).toContain(n);
+    expect(c.shownGames).toEqual(names);
+    expect(c.games.filter((a) => a[3] === 'tokenblaster')).toHaveLength(18);
+    expect(c.groups).toContain('Games');
+    expect(c.gameSources).toEqual(['bGames', 'TokenBlaster arcade', 'More BSV games']);
+    expect(c.bapps.find((a) => a[0] === 'bGames')?.[1]).toBe('Play games with real stakes');
+    expect(screenShown('games', false)).toBe(true);
+    expect(radarGroupShown('games', false)).toBe(true);
+  });
+});
+
+// ── Store gates, second round (16 Nov 2026): priced names, the domain mint step, the marketplace address ───────
+describe('priced names are bWalletX only: a store build offers free handles and never pays for a name', () => {
+  test('paidNameBlocked / paidNamesEnabled, both editions', async () => {
+    const { paidNameBlocked, paidNamesEnabled, STORE_NAME_NOTE } = await import('./storeBuild');
+    const fee = { address: '1FeeAddress', usd: 10 };
+    expect(paidNamesEnabled(true)).toBe(false);
+    expect(paidNamesEnabled(false)).toBe(true);
+    // Store build: a name with a price is off; a free one (no fee) is fine.
+    expect(paidNameBlocked(fee, true)).toBe(true);
+    expect(paidNameBlocked(null, true)).toBe(false);
+    expect(paidNameBlocked(undefined, true)).toBe(false);
+    // bWalletX: nothing is blocked.
+    expect(paidNameBlocked(fee, false)).toBe(false);
+    expect(paidNameBlocked(null, false)).toBe(false);
+    expect(STORE_NAME_NOTE).toBe('Not available in this edition');
+  });
+  test('which names carry a fee is the server price list: 5+ characters free, shorter ones priced', async () => {
+    const { nameFeeFor } = await import('./names/paymail');
+    const { paidNameBlocked } = await import('./storeBuild');
+    const prices = { address: '1FeeAddress', tiers: { '1': 1000, '2': 1000, '3': 100, '4': 10 } };
+    for (const n of ['a', 'ab', 'abc', 'abcd']) {
+      expect(paidNameBlocked(nameFeeFor(prices, n), true)).toBe(true);
+      expect(paidNameBlocked(nameFeeFor(prices, n), false)).toBe(false);
+    }
+    for (const n of ['alice', 'richard', 'a-long-name'])
+      expect(paidNameBlocked(nameFeeFor(prices, n), true)).toBe(false);
+  });
+  test('payNameFee and addExtraName refuse in a store build before anything is priced or sent', async () => {
+    const { payNameFee } = await import('./names/nameFee');
+    const { addExtraName } = await import('./names/extraNames');
+    let touched = 0;
+    const trap = new Proxy({}, { get: () => ((touched += 1), () => Promise.reject(new Error('reached the wallet'))) });
+    const ctx = { wallet: trap } as never;
+    const f = (() => ((touched += 1), Promise.reject(new Error('reached the network')))) as never;
+    const fee = { address: '1FeeAddress', usd: 10 };
+    await expect(payNameFee(ctx, fee, 'abcd', true)).rejects.toThrow('Not available in this edition');
+    await expect(
+      addExtraName(ctx, f, 'abcd', { pence: 0, sats: 5000, to: '1FeeAddress', usd: 10, direct: true }, true),
+    ).rejects.toThrow('Not available in this edition');
+    await expect(addExtraName(ctx, f, 'abcd', { sats: 5000, to: '1FeeAddress' }, true)).rejects.toThrow(
+      'Not available in this edition',
+    );
+    expect(touched).toBe(0);
+    // bWalletX: the same calls go on to the wallet / the network (and fail there, in this test).
+    await expect(payNameFee(ctx, fee, 'abcd', false)).rejects.not.toThrow('Not available in this edition');
+    await expect(
+      addExtraName(ctx, f, 'abcd', { pence: 0, sats: 5000, to: '1FeeAddress', usd: 10, direct: true }, false),
+    ).rejects.not.toThrow('Not available in this edition');
+  });
+  test('every claim screen checks it before the fee sheet, and shows no price for a blocked name', () => {
+    const g = srcOf('./names/GetYourName.tsx');
+    expect(g).toMatch(
+      /if \(!ownPaymail && paidNameBlocked\(nameFee\)\) return setMsg\(STORE_NAME_NOTE\);\s*if \(nameFee && !ownPaymail && !paid\) return setFeeConfirm\(true\);/,
+    );
+    const h = srcOf('./names/HandleFlow.tsx');
+    expect(h).toContain('const feeOff = (n: string) => paidNameBlocked(feeFor(n));');
+    expect(h).toMatch(
+      /if \(feeOff\(order\[0\]\)\) setMsg\(STORE_NAME_NOTE\);\s*else if \(feeFor\(order\[0\]\)\) setFeeConfirm\(true\);/,
+    );
+    expect(h).toMatch(
+      /if \(!fee\) return claim\(\{\}, name\);\s*if \(feeOff\(name\)\) return setMsg\(STORE_NAME_NOTE\);/,
+    );
+    expect(h).toContain(
+      "feeOff(alias) ? STORE_NAME_NOTE : nameFee ? `${usdText(nameFee.usd)} · instant` : 'Free · instant'",
+    );
+    expect(h).toContain('feeOff(alias) ? setMsg(STORE_NAME_NOTE) : nameFee ? setFeeConfirm(true) : void claim()');
+    // No price in a label for a blocked name: every usdText(nameFee.usd) is behind feeOff.
+    expect(h.match(/usdText\(nameFee\.usd\)/g)).toHaveLength(3);
+    expect(h.match(/nameFee && !feeOff\(alias\) \? ` · \$\{usdText\(nameFee\.usd\)\}` : ''/g)).toHaveLength(2);
+    const w = srcOf('./settings/WalletNames.tsx');
+    expect(w).toMatch(
+      /if \(paidNameBlocked\(fee\)\) return setError\(STORE_NAME_NOTE\);\s*setNameFee\(fee\);\s*if \(fee\) return setFeeConfirm\(true\);/,
+    );
+    // The only callers of payNameFee are those two screens.
+    expect(g.match(/payNameFee\(/g)).toHaveLength(1);
+    expect(h.match(/payNameFee\(/g)).toHaveLength(1);
+  });
+});
+
+describe('store wording and data, second round', () => {
+  const textsOf = (env: Record<string, string>) => {
+    const code = `
+      const s = await import('./src/mobile/storeBuild.ts'); const r = await import('./src/mobile/chat/bappRooms.ts');
+      const st = await import('./src/mobile/bappStandard.ts'); const c = await import('./src/utils/constants.ts');
+      const i = await import('./src/mobile/brand/bappIcons/registry.ts'); const h = await import('./src/mobile/wallet/historyEvents.ts');
+      const m = await import('./src/mobile/mint/mintCatalog.ts');
+      console.log(JSON.stringify({
+        domain: s.DOMAIN_MINT_ENABLED, marketApp: s.MARKET_APP_NAME, venues: s.LISTING_VENUES, url: c.ONE_SAT_MARKET_URL,
+        purposes: r.BAPPS.map((b) => b.name + ': ' + b.purpose),
+        std: [...st.BX_APPS, ...st.COMMERCIAL_APPS].map((a) => [a.name, a.verb, a.category]),
+        icons: Object.values(i.BAPP_ICONS).map((d) => d.label ?? d.name ?? ''),
+        history: h.inWalletAppOf({ description: 'Purchase 5 tokens for 100 sats' }),
+        mint: JSON.stringify(m),
+      }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as {
+      domain: boolean;
+      marketApp: string;
+      venues: string;
+      url: string;
+      purposes: string[];
+      std: string[][];
+      icons: string[];
+      history: string;
+      mint: string;
+    };
+  };
+  test('store build: no marketplace address, no bExchange label, no dice, no "tokenise", safe room purposes', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const env of STORE_ENVS) {
+      const t = textsOf(env);
+      expect(t.domain).toBe(false);
+      expect(t.marketApp).toBe('Marketplace');
+      expect(t.history).toBe('Marketplace');
+      expect(t.venues).toBe('the Market');
+      expect(t.url).toBe('');
+      expect(JSON.stringify(t)).not.toMatch(/1sat\.market|bExchange|Provably fair|Zero Dice|Tokenise|tokenise it/);
+      // bApp room purposes are shown only where rooms are (BSPACES_ENABLED); the store bundle's copies are plain.
+      expect(t.purposes.map((p) => [p, storeBannedWord(p)]).filter((x) => x[1])).toEqual([]);
+      expect(t.purposes.filter((p) => /bWalletX/.test(p))).toEqual([]);
+      expect(t.std.find((a) => a[0] === 'VexVoid')?.[2]).toBe('Music & art');
+      expect(t.std.map((a) => a[2]).filter((c) => /game/i.test(c))).toEqual([]);
+    }
+  });
+  test('bWalletX build: all of it is as it was', () => {
+    const t = textsOf({});
+    expect(t.domain).toBe(true);
+    expect(t.marketApp).toBe('1sat.market');
+    expect(t.history).toBe('1sat.market');
+    expect(t.venues).toBe('the Market and 1sat.market');
+    expect(t.url).toBe('https://1sat.market/market');
+    expect(t.icons).toContain('bExchange');
+    expect(t.purposes).toContain('bMail: Tokenised mail, price-to-reach and inbox tips.');
+    expect(t.purposes).toContain('bStore: Themes, icons and packs for bWalletX, and their makers.');
+    const zero = t.std.find((a) => a[0] === 'Zero Dice');
+    expect(zero?.[1]).toBe('Provably fair dice with a zero house edge');
+    expect(t.std.find((a) => a[0] === 'VexVoid')?.[2]).toBe('Games & collectibles');
+    expect(t.mint).toContain('Prove it, then tokenise it');
+    expect(t.mint).toContain('or prove you own a web domain and tokenise it.');
+    expect(t.mint).toContain('A name or a domain');
+  });
+  test('Mint › A domain: the step, its title and both chooser rows are behind DOMAIN_MINT_ENABLED', () => {
+    const m = srcOf('./mint/MintButton.tsx');
+    expect(m).toMatch(/DOMAIN_MINT_ENABLED && step === 'domain'\s*\? 'Tokenise a domain'/);
+    expect(m).toContain("{DOMAIN_MINT_ENABLED && step === 'domain' && CHOICES.has('token') && (");
+    expect(m).toMatch(/\.\.\.\(DOMAIN_MINT_ENABLED\s*\? \[\s*\{\s*id: 'domain',/);
+    expect(m.match(/Tokenise|tokenise/g)).toHaveLength(2);
+    expect(srcOf('./mint/mintCatalog.ts')).toMatch(/\.\.\.\(DOMAIN_MINT_ENABLED\s*\? \[\s*\{\s*id: 'domain',/);
+    expect(srcOf('./storeBuild.ts')).toMatch(
+      /export const DOMAIN_MINT_ENABLED: boolean = !\(\s*import\.meta\.env\.VITE_STORE_BUILD === '1'/,
+    );
+  });
+  test('the bApp room cards and menu are bWalletX only, so a store user never sees a room purpose', () => {
+    expect(srcOf('./tabs/ChatPage.tsx')).toContain("const bappsView = BSPACES_ENABLED && roomFilter === 'bapps';");
+    expect(srcOf('./wide/WideShell.tsx')).toMatch(
+      /items: BAPP_ROOMS\.map\(\(b\) => \(\{.{0,400}?hidden: !BSPACES_ENABLED,/s,
+    );
+  });
+  test('Home: every module a store build can show has plain wording; the Store showcase is not one of them', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    const h = srcOf('./home/HomeModules.tsx');
+    const mods = [
+      ...h.matchAll(/id: '(\w+)',\s*title: '([^']*)',\s*blurb: ("[^"]*"|'[^']*'),[^}]*?store: (true|false),/g),
+    ];
+    expect(mods.length).toBe(9);
+    const store = mods.filter((m) => m[4] === 'true');
+    expect(store.map((m) => m[1])).toEqual([
+      'card',
+      'askB',
+      'history',
+      'priceChart',
+      'pots',
+      'notifications',
+      'holdings',
+      'music',
+    ]);
+    for (const m of store) expect(storeBannedWord(`${m[2]} ${m[3]}`)).toBeNull();
+    expect(mods.find((m) => m[1] === 'showcase')?.[4]).toBe('false');
+  });
+});
+
+describe('every fee to bCorp goes through bcorpFeeAddress, so a store build charges none', () => {
+  test('the OpNS per-name service fee: no address in a store build, whatever the env says', async () => {
+    const { opnsFeeAddress, serviceFeeUsd } = await import('./names/opnsBatch');
+    expect(opnsFeeAddress('1FeeAddress', true)).toBe('');
+    expect(opnsFeeAddress('1FeeAddress', false)).toBe('1FeeAddress');
+    expect(opnsFeeAddress('', false)).toBe('');
+    expect(serviceFeeUsd(3, opnsFeeAddress('1FeeAddress', true))).toBe(0);
+    expect(serviceFeeUsd(3, opnsFeeAddress('1FeeAddress', false))).toBe(3);
+    expect(srcOf('./names/opnsBatch.ts')).toContain(
+      "export const OPNS_FEE_ADDRESS: string = opnsFeeAddress(import.meta.env?.VITE_OPNS_FEE_ADDRESS ?? '');",
+    );
+  });
+  test('the build-time fee addresses (mint, market, sell, room setup) are all read through bcorpFeeAddress', () => {
+    expect(srcOf('./mint/mint.ts')).toMatch(/const configured = bcorpFeeAddress\(typeof __MINT_FEE_ADDRESS__/);
+    expect(srcOf('./market/fee.ts')).toMatch(/const configured = bcorpFeeAddress\(typeof __MARKET_FEE_ADDRESS__/);
+    expect(srcOf('./sell/sell.ts')).toMatch(/const feeAddress = bcorpFeeAddress\(typeof __MARKET_FEE_ADDRESS__/);
+    expect(srcOf('./tokens/roomSetup.ts')).toContain('const a = bcorpFeeAddress(address, store);');
+    // The only other reader of a fee define: our own service payees, data only behind SUBSCRIPTIONS_ENABLED.
+    expect(srcOf('./pots/pots.ts')).toMatch(
+      /ownServicePayees = \(\): readonly ServicePayee\[\] =>\s*SUBSCRIPTIONS_ENABLED\s*\?/,
+    );
+    // No other file reads a *_FEE_ADDRESS define.
+    const readers = ['./mint/mint.ts', './market/fee.ts', './sell/sell.ts', './tokens/roomSetup.ts', './pots/pots.ts'];
+    for (const f of readers) expect(srcOf(f)).toMatch(/__[A-Z_]+_FEE_ADDRESS__/);
+  });
+  test('a room charges per message only where token rooms are (not in a store build)', () => {
+    const c = srcOf('./tabs/ChatPage.tsx');
+    expect(c).toContain('const ROOMS = tokenRoomsEnabled();');
+    expect(c).toMatch(/const loadCharge = useCallback\(\(\) => \{\s*if \(!ROOMS \|\| !entryKey\) return;/);
+  });
+});
+
+// ── Third round (16 Nov 2026): launch curves and example strategies are not in a store bundle ──────────────────
+describe('launch curves and example trading strategies are bWalletX only', () => {
+  const read = (env: Record<string, string>) => {
+    const code = `
+      const c = await import('./src/lib/curves/curves.ts'); const t = await import('./src/mobile/tokens/token.ts');
+      const s = await import('./src/mobile/storeBuild.ts');
+      console.log(JSON.stringify({ curves: s.CURVE_COINS_ENABLED, blurbs: Object.values(c.PRESETS).map((p) => p.blurb),
+        labels: Object.values(c.PRESETS).map((p) => p.label), copy: t.TOKEN_COPY }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as { curves: boolean; blurbs: string[]; labels: string[]; copy: string };
+  };
+  test('store build: no curve coins, no preset wording, no promise of a room', () => {
+    for (const env of STORE_ENVS) {
+      const t = read(env);
+      expect(t.curves).toBe(false);
+      expect(t.blurbs).toEqual(['', '', '']);
+      expect(t.copy).toBe('Create a BSV-21 token.');
+    }
+  });
+  test('bWalletX build: the presets and the token line are what they were', () => {
+    const t = read({});
+    expect(t.curves).toBe(true);
+    expect(t.blurbs).toEqual([
+      '1¢ to 19¢. $100M if all sell.',
+      '1¢ to $1.99. $1B if all sell.',
+      '1¢ to $19.99. $10B if all sell.',
+    ]);
+    expect(t.labels).toEqual(['Standard', 'Big', 'Huge']);
+    expect(t.copy).toBe('Create a BSV-21 token. Every token has a room for its holders.');
+  });
+  test('Mint a token: a store build shows no curve picker, checks no curve, and deploys with no curve', () => {
+    const m = srcOf('./tokens/TokenMint.tsx');
+    expect(m).toMatch(/\{CURVE_COINS_ENABLED && \(\s*<CurvePicker/);
+    expect(m).toContain('(CURVE_COINS_ENABLED ? curveProblem(curve, curveOk, supplyNum) : null);');
+    expect(m).toContain('curve: curveForDeploy(curve),');
+    expect(m).toContain('curve={CURVE_COINS_ENABLED ? curve : null}');
+    expect(m).toMatch(/\.\.\.\(CURVE_COINS_ENABLED\s*\? \[\{ address: 'Curve \(fixed\)'/);
+    expect(m).toContain(
+      "{STORE_BUILD ? '' : ' Its room and Market listing can be set up later (Settings › My tokens).'}",
+    );
+    // The picker is used nowhere else a store build reaches without the flag.
+    expect(m.match(/<CurvePicker/g)).toHaveLength(1);
+  });
+  test('the picker and the example strategies are swapped for empty stand-ins in store builds', async () => {
+    const v = readFileSync(new URL('../../vite.config.mobile.ts', import.meta.url), 'utf8');
+    expect(v).toMatch(
+      /MOBILE_SWAPS\[resolve\(__dirname, 'src\/mobile\/curves\/CurvePicker\.tsx'\)\] = resolve\(\s*__dirname,\s*'src\/mobile\/curves\/CurvePicker\.store\.tsx'/,
+    );
+    expect(v).toMatch(
+      /MOBILE_SWAPS\[resolve\(__dirname, 'src\/mobile\/strategies\/examples\/index\.ts'\)\] = resolve\(\s*__dirname,\s*'src\/mobile\/strategies\/examples\/index\.store\.ts'/,
+    );
+    const picker = srcOf('./curves/CurvePicker.store.tsx');
+    expect(picker).not.toMatch(/Fair launch|if all sell|\$\d|permanent/i);
+    expect(picker).toContain('export const CurvePicker = (');
+    expect(picker.match(/\}\) => null;/g)).toHaveLength(2);
+    expect(picker).toContain('export const CurveChart = (');
+    const st = await import('./strategies/examples/index.store');
+    expect(st.EXAMPLE_STRATEGIES).toEqual([]);
+    expect(st.EXAMPLE_FILES).toEqual({});
+    expect(srcOf('./strategies/examples/index.store.ts')).not.toMatch(/\.json|Buy|MNEE/);
+    // bWalletX keeps the real ones: the full picker and all eight examples.
+    expect(srcOf('./curves/CurvePicker.tsx')).toContain('Fair launch: max');
+    const real = await import('./strategies/examples');
+    expect(real.EXAMPLE_STRATEGIES).toHaveLength(8);
+    expect(JSON.stringify(real.EXAMPLE_FILES)).toContain('Buy MNEE in $5 steps');
+    // Same exports, so the stand-ins type-check wherever the real files are imported.
+    expect(Object.keys(st).sort()).toEqual(Object.keys(real).sort());
+  });
+});
+
+// ── Fourth round (16 Nov 2026): the last store-bundle leftovers ───────────────────────────────────────────────
+describe('store leftovers: sell-price wording, the room after a token mint, launch curve wording', () => {
+  const read = (env: Record<string, string>) => {
+    const code = `
+      const s = await import('./src/mobile/storeBuild.ts'); const c = await import('./src/mobile/curves/curveChoice.ts');
+      const l = await import('./src/lib/curves/curves.ts'); const curve = l.standardCurve();
+      console.log(JSON.stringify({ rooms: s.TOKEN_ROOMS_ENABLED, roomsFn: s.tokenRoomsEnabled(), note: c.PERMANENT_NOTE,
+        wrongSupply: c.curveProblem(curve, true, 5), notAccepted: c.curveProblem(curve, false, curve.supply),
+        fine: c.curveProblem(curve, true, curve.supply) }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as {
+      rooms: boolean;
+      roomsFn: boolean;
+      note: string;
+      wrongSupply: string | null;
+      notAccepted: string | null;
+      fine: string | null;
+    };
+  };
+  test('store build: no token rooms flag, no curve wording, no curve problem ever', () => {
+    for (const env of STORE_ENVS) {
+      const t = read(env);
+      expect(t.rooms).toBe(false);
+      expect(t.roomsFn).toBe(false);
+      expect(t.note).toBe('');
+      expect([t.wrongSupply, t.notAccepted, t.fine]).toEqual([null, null, null]);
+    }
+  });
+  test('bWalletX build: the flag is on and the curve wording and checks are what they were', () => {
+    const t = read({});
+    expect(t.rooms).toBe(true);
+    expect(t.roomsFn).toBe(true);
+    expect(t.note).toBe('This curve is permanent once you launch. Nobody, you included, can change it later.');
+    expect(t.wrongSupply).toBe('Every launch is 1,000,000,000 tokens, all on the curve. Set the supply to that.');
+    expect(t.notAccepted).toBe('Tick "permanent" under the launch curve to go on.');
+    expect(t.fine).toBeNull();
+  });
+  test('Mint a token, done screen: a store build opens no room, offers no room button and names no Market', () => {
+    const m = srcOf('./tokens/TokenMint.tsx');
+    expect(m).toContain('void openRoomAfterMint(apiContext, token);');
+    expect(m).toContain('if (!TOKEN_ROOMS_ENABLED) return setDone({ token, room: null });');
+    expect(m).toMatch(
+      /\{TOKEN_ROOMS_ENABLED && \(\s*<button\s+type="button"\s+onClick=\{\(\) => go\('chat', token\)\}/,
+    );
+    expect(m).toMatch(/\{!TOKEN_ROOMS_ENABLED\s*\? ''\s*: done\.room/);
+    // Every call that opens a room is behind the flag; "View in wallet" stays for both editions.
+    // No direct call to open a room is left in the screen: both go through openRoomAfterMint.
+    expect(m).not.toMatch(/openTokenRoom\(/);
+    expect(m.match(/openRoomAfterMint\(apiContext, token\)/g)).toHaveLength(2);
+    expect(m).toContain("onClick={() => go('bsv')}");
+    // Listing after a mint renders nothing where there is no trading.
+    expect(srcOf('./sell/ListAfterMint.tsx')).toContain('if (!SELL_ENABLED || !marketTradingEnabled()) return null;');
+    expect(marketTradingEnabled(true)).toBe(false);
+    expect(marketTradingEnabled(false)).toBe(true);
+  });
+  test('the asking-price message for selling a name is worded only where names can be sold', () => {
+    const n = srcOf('./names/store/NameStorePage.tsx');
+    expect(n).toContain("return setMsg(MARKET_ENABLED ? 'Choose a price between $0.01 and $100,000.' : '');");
+    expect(n.match(/Choose a price between/g)).toHaveLength(1);
+  });
+});
+
+// ── Fifth round (16 Nov 2026): the independent review's findings F1 to F5 ─────────────────────────────────────
+describe('Mint a token: the store decisions, called for real (review: not source regexes)', () => {
+  const token = {
+    tokenId: 'a'.repeat(64) + '_0',
+    ticker: 'TEST',
+    name: 'Test',
+    supply: '10',
+    decimals: 0,
+    description: '',
+    min: '1',
+  };
+  test('curveForDeploy: the chosen curve in bWalletX, none in a store build', async () => {
+    const { curveForDeploy } = await import('./tokens/mintToken');
+    const { standardCurve } = await import('../lib/curves');
+    const curve = standardCurve();
+    expect(curveForDeploy(curve, true)).toBe(curve);
+    expect(curveForDeploy(curve, false)).toBeNull();
+  });
+  test('openRoomAfterMint: a store build opens no room and touches neither the wallet nor the server', async () => {
+    const { openRoomAfterMint } = await import('./tokens/mintToken');
+    let touched = 0;
+    const trap = new Proxy(
+      {},
+      { get: () => ((touched += 1), () => Promise.reject(new Error('reached the wallet'))) },
+    ) as never;
+    let opened = 0;
+    const open = async () => ((opened += 1), 'TEST');
+    // Store build.
+    expect(await openRoomAfterMint(trap, token, false, open)).toBeNull();
+    expect(opened).toBe(0);
+    expect(touched).toBe(0);
+    // bWalletX: the room is opened and its ticker returned; a failed open is null, as before.
+    expect(await openRoomAfterMint(trap, token, true, open)).toBe('TEST');
+    expect(opened).toBe(1);
+    expect(await openRoomAfterMint(trap, token, true, async () => Promise.reject(new Error('down')))).toBeNull();
+  });
+  test('deployToken hands deployBsv21 exactly the curve it was given (null in a store build)', () => {
+    // deployToken itself needs a wallet; what it forwards is one line, pinned here.
+    expect(srcOf('./tokens/mintToken.ts')).toContain('curve: opts.curve ?? null,');
+  });
+});
+
+describe('F1: token indexing in a store build is worded as indexing only (no room, no Market)', () => {
+  const read = (env: Record<string, string>) => {
+    const code = `
+      const s = await import('./src/mobile/storeBuild.ts'); const r = await import('./src/mobile/tokens/roomSetup.ts');
+      const u = await import('./src/mobile/tokens/useRoomSetup.tsx');
+      const free = { reason: 'free-first-1000', freeRemaining: 900, feeUsd: 0 };
+      console.log(JSON.stringify({ rooms: s.TOKEN_ROOMS_ENABLED, label: u.setupLabel(150000, 50), free: r.freeRoomNote(free),
+        fee: r.setupFeeSats(1, 50), desc: s.MY_TOKENS_DESC, note: s.MY_TOKENS_NOTE, indexing: s.indexingEnabled() }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as Record<string, string | number | boolean>;
+  };
+  // Round A6 (owner, 16 Nov 2026, A8): no paid indexing at all in a store build, so no indexing wording either.
+  test('store build: indexing off, no free-room note, no fee to us, no My tokens wording', () => {
+    for (const env of STORE_ENVS) {
+      const t = read(env);
+      expect(t.rooms).toBe(false);
+      expect(t.indexing).toBe(false);
+      expect(t.free).toBe('');
+      expect(t.fee).toBe(0);
+      expect(t.desc).toBe('');
+      expect(t.note).toBe('');
+    }
+  });
+  test('bWalletX build: the room set-up wording is what it was', () => {
+    const t = read({});
+    expect(String(t.label)).toMatch(/^Set up · /);
+    expect(t.free).toBe('Free: one of the first 1,000 rooms (900 left)');
+    expect(String(t.note)).toContain('lists it in other wallets and the Market and opens its chat room');
+  });
+  test('every set-up string on the Wallet card, snackbar, notification and Settings has a store wording', () => {
+    const w = srcOf('./tokens/WalletIndexing.tsx');
+    expect(w).toMatch(
+      /const text = !TOKEN_ROOMS_ENABLED\s*\? list\.length === 1\s*\? `Index \$\$\{list\[0\]\.ticker\} so other wallets can see it\.`/,
+    );
+    expect(w).toContain("notifyIfPermitted(TOKEN_ROOMS_ENABLED ? 'Set up your token room' : 'Index your token', text)");
+    const f = srcOf('./tokens/FinishIndexing.tsx');
+    expect(f).toContain("{TOKEN_ROOMS_ENABLED ? `Set up $${ticker}'s room` : `Index $${ticker}`}");
+    expect(f).toContain(': `Indexing lets other wallets see $${ticker}.`}');
+    expect(srcOf('./settings/FeedSettings.tsx')).toMatch(/: !TOKEN_ROOMS_ENABLED\s*\? s\.open\s*\? 'Indexed'/);
+  });
+});
+
+describe('F2: a store build never shows or buys a listed name', () => {
+  const taken = (listed: boolean) =>
+    (async (url: string) => {
+      const body =
+        /opns\/origin|origin/i.test(url) && !/latest/.test(url)
+          ? { outpoint: 'ab'.repeat(32) + '_0' }
+          : /latest/.test(url)
+            ? { outpoint: 'cd'.repeat(32) + '_0', owner: '1Owner', data: listed ? { list: { price: 5000 } } : {} }
+            : { owner: '1Owner' };
+      return { ok: true, status: 200, json: async () => body } as never;
+    }) as never;
+  test('checkOpnsAvailability: the listing is reported in bWalletX and left out in a store build', async () => {
+    const { checkOpnsAvailability } = await import('./names/names');
+    const x = await checkOpnsAvailability(taken(true), 'alice', false);
+    expect(x.status).toBe('taken');
+    expect((x as { listing?: { price: number } }).listing?.price).toBe(5000);
+    const s = await checkOpnsAvailability(taken(true), 'alice', true);
+    expect(s.status).toBe('taken');
+    expect((s as { listing?: unknown }).listing).toBeUndefined();
+    expect(
+      ((await checkOpnsAvailability(taken(false), 'alice', false)) as { listing?: unknown }).listing,
+    ).toBeUndefined();
+  });
+  test('buyOpnsListing refuses in a store build before any network or wallet call', async () => {
+    const { buyOpnsListing } = await import('./names/opnsBuy');
+    let touched = 0;
+    const trap = new Proxy({}, { get: () => ((touched += 1), () => Promise.reject(new Error('reached'))) }) as never;
+    await expect(buyOpnsListing(trap, 'ab'.repeat(32) + '.0', 'alice', 5000, true)).rejects.toThrow(
+      'Not available in this edition',
+    );
+    expect(touched).toBe(0);
+    await expect(buyOpnsListing(trap, 'ab'.repeat(32) + '.0', 'alice', 5000, false)).rejects.not.toThrow(
+      'Not available in this edition',
+    );
+  });
+  test('Settings › Identity: the price, the Buy button and the buy branch are behind MARKET_ENABLED', () => {
+    const g = srcOf('./names/GetYourName.tsx');
+    expect(g).toContain("{MARKET_ENABLED && result.listing ? ` For sale: ${moneyNow(result.listing.price)}.` : ''}");
+    expect(g).toContain('{MARKET_ENABLED && result.listing && !owned.some((o) => o.name === result.name) && (');
+    expect(g).toMatch(/else if \(MARKET_ENABLED\) \{\s*await buyOpnsListing\(/);
+  });
+});
+
+describe('F3, F5: Mint catalogue wording and bWalletX-only pages', () => {
+  test('store build: every Mint catalogue string passes the word list; names are claimed, not bought', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    const code = `const m = await import('./src/mobile/mint/mintCatalog.ts'); console.log(JSON.stringify(m));`;
+    for (const env of STORE_ENVS) {
+      const r = Bun.spawnSync(['bun', '-e', code], {
+        env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+      });
+      const strings: string[] = [];
+      const walk = (v: unknown) => {
+        if (typeof v === 'string') strings.push(v);
+        else if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+      };
+      walk(JSON.parse(r.stdout.toString()));
+      expect(strings.length).toBeGreaterThan(40);
+      expect(strings).toContain('Search for one and claim it');
+      expect(strings.map((s) => [s, storeBannedWord(s)]).filter((x) => x[1])).toEqual([]);
+      expect(strings.filter((s) => /From \$|\bbuy\b/i.test(s))).toEqual([]);
+    }
+  });
+  test('bWalletX build: the Mint catalogue line is what it was', () => {
+    const code = `const m = await import('./src/mobile/mint/mintCatalog.ts'); console.log(JSON.stringify(m));`;
+    const r = Bun.spawnSync(['bun', '-e', code], { env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '' } });
+    expect(r.stdout.toString()).toContain('Search, buy or claim one. From $1');
+  });
+  test('/m/tickets lands on the wallet in a store build; the names page does not say "sell it" there', () => {
+    expect(srcOf('./tabs/MobileRoutes.tsx')).toMatch(
+      /path="tickets"\s*element=\{TOKEN_ROOMS_ENABLED \? <TicketsPage \/> : <Navigate to="\/bsv-wallet" replace \/>\}/,
+    );
+    const k = srcOf('./wide/WalletKindPages.tsx');
+    expect(k).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Names this wallet holds:[^']*sell it or give it away\.'\s*: 'Names this wallet holds:[^']*Bind a name to your identity or give it away\.'\}/,
+    );
+    expect(k).toMatch(/\{TOKEN_ROOMS_ENABLED\s*\? 'Tickets are tokens that get you into a room/);
+  });
+});
+
+describe('F4: shared modules load where import.meta.env is undefined (plain tsx / node)', () => {
+  test('src/utils/constants.ts and src/lib/curves/curves.ts import under tsx, with the bWalletX values', () => {
+    const tsx = new URL('../../node_modules/.bin/tsx', import.meta.url).pathname;
+    const code =
+      "Promise.all([import('./src/utils/constants.ts'), import('./src/lib/curves/curves.ts')]).then(([c, l]) => " +
+      'console.log(JSON.stringify({ url: c.ONE_SAT_MARKET_URL, blurb: l.PRESETS.standard.blurb })))';
+    const r = Bun.spawnSync([tsx, '-e', code], { cwd: new URL('../..', import.meta.url).pathname });
+    expect(r.stderr.toString()).not.toMatch(/TypeError|Cannot read properties/);
+    const out = JSON.parse(r.stdout.toString().trim().split('\n').pop() ?? '{}');
+    expect(out).toEqual({ url: 'https://1sat.market/market', blurb: '1¢ to 19¢. $100M if all sell.' });
+  }, 60_000);
+  test('neither file reads import.meta.env without the optional chain', () => {
+    for (const f of ['../utils/constants.ts', '../lib/curves/curves.ts']) {
+      const t = readFileSync(new URL(f, import.meta.url), 'utf8');
+      expect(t).toMatch(/import\.meta\.env\?\.VITE_STORE_BUILD === '1'/);
+      expect(t).not.toMatch(/import\.meta\.env\.VITE_/);
+    }
+  });
+});
+
+// ── Sixth round (16 Nov 2026): the review of round five, findings A1 to A7 ────────────────────────────────────
+describe('A1: Settings › Identity mints no personal token and opens no room in a store build', () => {
+  const link = {
+    name: 'alice',
+    ticker: 'ALICE',
+    tokenId: 'b'.repeat(64) + '_0',
+    supply: '1000000',
+    roomTicker: null,
+  } as never;
+  const trap = () => {
+    const hit = { n: 0 };
+    const p = new Proxy({}, { get: () => ((hit.n += 1), () => Promise.reject(new Error('reached'))) }) as never;
+    return { hit, p };
+  };
+  test('bindMintsToken: never in a store build; in bWalletX exactly the old tick / token-only rule', async () => {
+    const { bindMintsToken } = await import('./names/claimPersonal');
+    for (const tokenOnly of [undefined, false, true])
+      for (const withToken of [false, true])
+        for (const linked of [false, true])
+          for (const name of ['alice', ''])
+            expect(bindMintsToken({ tokenOnly, withToken, linked, name }, false)).toBe(false);
+    // bWalletX: the tick (no link yet, a name that makes a ticker) or the token-only button.
+    expect(bindMintsToken({ withToken: true, linked: false, name: 'alice' }, true)).toBe(true);
+    expect(bindMintsToken({ withToken: true, linked: true, name: 'alice' }, true)).toBe(false);
+    expect(bindMintsToken({ withToken: false, linked: false, name: 'alice' }, true)).toBe(false);
+    expect(bindMintsToken({ withToken: true, linked: false, name: '' }, true)).toBe(false);
+    expect(bindMintsToken({ tokenOnly: true, withToken: false, linked: true, name: '' }, true)).toBe(true);
+  });
+  test('openPersonalRoom / retryPersonalRoom: a store build returns null before the wallet or the server', async () => {
+    const { openPersonalRoom, retryPersonalRoom } = await import('./names/claimPersonal');
+    const ctx = trap();
+    const client = trap();
+    expect(await openPersonalRoom(ctx.p, '1Id', link, client.p, false)).toBeNull();
+    expect(await retryPersonalRoom(ctx.p, '1Id', client.p, false)).toBeNull();
+    expect(ctx.hit.n + client.hit.n).toBe(0);
+    // bWalletX: the room is opened on the server (startTokenRoom) and its ticker returned, as before.
+    const asked: unknown[] = [];
+    const fake = { handle: undefined, startTokenRoom: async (...a: unknown[]) => (asked.push(a), 'ALICE') } as never;
+    expect(await openPersonalRoom(ctx.p, '1IdX', link, fake, true)).toBe('ALICE');
+    expect(asked).toHaveLength(1);
+    expect((asked[0] as unknown[])[0]).toBe(`bsv21:${'b'.repeat(64)}_0`);
+  });
+  test('the defaults follow the build: off in every store env, on in bWalletX', () => {
+    const code = `
+      const c = await import('./src/mobile/names/claimPersonal.ts');
+      const trap = new Proxy({}, { get: () => { throw new Error('reached'); } });
+      const room = await c.openPersonalRoom(trap, '1Id', { name: 'alice', ticker: 'ALICE', tokenId: 'x_0' }, trap)
+        .catch((e) => 'threw:' + e.message);
+      console.log(JSON.stringify({ mint: c.bindMintsToken({ withToken: true, linked: false, name: 'alice' }), room }));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as { mint: boolean; room: unknown };
+    for (const env of STORE_ENVS) expect(run(env)).toEqual({ mint: false, room: null });
+    const x = run({});
+    expect(x.mint).toBe(true);
+    expect(String(x.room)).toMatch(/^threw:/); // bWalletX goes on to the server (the trap)
+  }, 60_000);
+  test('the tick, the approval line, the room messages and Chat’s retry sit behind literal flags', () => {
+    const g = srcOf('./names/GetYourName.tsx');
+    expect(g).toContain('{PAID_FEATURES_ENABLED && !link && !NRT_ENABLED && (');
+    expect(g).toContain('if (PAID_FEATURES_ENABLED && t && mintsToken(p.name, p.tokenOnly)) {');
+    expect(g).toContain('if (mintsToken(n.name, n.tokenOnly)) await mintPersonal(n.name);');
+    expect(g).toContain('bindMintsToken({ tokenOnly, withToken, linked: !!link, name })');
+    expect(g).toMatch(
+      /if \(TOKEN_ROOMS_ENABLED\) \{\s*setMsg\(`\$\$\{l\.ticker\} minted — [^`]*Opening your room…`\);/,
+    );
+    expect(g).toContain('{PAID_FEATURES_ENABLED && handleName && personalTicker(handleName) && (');
+    // Every other mint-and-open path: no bare check left.
+    expect(g).not.toMatch(/withToken && !link && !!personalTicker/);
+    const c = srcOf('./tabs/ChatPage.tsx');
+    expect(c).toMatch(/if \(TOKEN_ROOMS_ENABLED && identityAddress\)\s*void retryPersonalRoom\(/);
+    expect(c.match(/retryPersonalRoom\(/g)).toHaveLength(2); // the other one is inside {ROOMS && …}
+    // The Wallet home "Launch your tokens" card (PersonalTokenLauncher) only opens behind PAID_FEATURES_ENABLED.
+    expect(srcOf('./names/HandleOnboarding.tsx')).toMatch(/PAID_FEATURES_ENABLED && !hasRoom \? \(/);
+  });
+});
+
+describe('A2: Ask b describes the store edition as it is', () => {
+  const read = (env: Record<string, string>) => {
+    const code = `
+      const g = await import('./src/mobile/agent/guide.ts'); const t = await import('./src/mobile/tabs/tabs.ts');
+      const d = await import('./src/mobile/phone/dockModel.ts'); const sc = await import('./src/mobile/phone/screens.ts');
+      const label = (id) => sc.SCREENS.find((s) => s.id === id).label;
+      const dock = d.DEFAULT_DOCK.map((i) => label(i.id)); dock.splice(d.DOCK_LEFT, 0, 'b');
+      const classic = { bsv: 'Wallet', market: 'Market', browser: 'Apps', feed: 'Feed', chat: 'Chat' };
+      console.log(JSON.stringify({ guide: g.BWALLET_GUIDE, dock: dock.join(' · '), strip: sc.STRIP.map((s) => s.label).join(' · '),
+        classic: t.TAB_ORDER.map((id) => classic[id]).join(' · ') }));`;
+    const r = Bun.spawnSync(['bun', '-e', code], {
+      env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+    });
+    return JSON.parse(r.stdout.toString()) as { guide: string; dock: string; strip: string; classic: string };
+  };
+  test('store build: the bar, pages and classic bar b names are the ones the build shows', () => {
+    for (const env of STORE_ENVS) {
+      const t = read(env);
+      expect(t.dock).toBe('Wallet · bApps · b · Feed · Chat');
+      expect(t.strip).toBe('Wallet · Home · bApps · People · Feed · Chat');
+      expect(t.classic).toBe('Wallet · Apps · Feed · Chat');
+      expect(t.guide).toContain(`Bottom bar, left to right: ${t.dock}.`);
+      expect(t.guide).toContain(`Swipe sideways between the pages ${t.strip}.`);
+      expect(t.guide).toContain(`the bottom bar is ${t.classic} and`);
+    }
+  }, 60_000);
+  test('store build: no Market tab, tickets, token or personal rooms, or "send the room’s token"', () => {
+    for (const env of STORE_ENVS) {
+      const g = read(env).guide;
+      for (const bad of [
+        /Market ·|· Market/,
+        /ticket/i,
+        /token rooms?/i,
+        /personal (?:token|room)/i,
+        /room's token|send (?:them|someone) (?:one|1|the)/i,
+        /Start a room/,
+        /for sale|\bsell tickets\b/i,
+        /bWallet's own b|b agent messages/,
+        /Launch your own coin|Exchange ›/,
+      ])
+        expect(g).not.toMatch(bad);
+      expect(g).toContain(
+        'This edition is a wallet: it does not buy, sell or trade, and it has no Market or Exchange.',
+      );
+      expect(g).toContain('Chat: Chatrooms, DMs and Calls.');
+      // S8: NFTs only in a store build.
+      expect(g).toContain(
+        '- Mint: the Mint button creates an NFT from a photo, video, song or document. The cost is shown before you confirm.',
+      );
+      expect(g).not.toMatch(/fixed supply/);
+      expect(g).toContain('b agent: use your own AI provider key');
+      expect(g).toContain("say there's no charge to talk to b");
+    }
+  }, 60_000);
+  test('bWalletX build: every line the store edition swaps is word for word what it was', () => {
+    const g = read({}).guide;
+    for (const line of [
+      "Bottom bar, left to right: Apps · Market · Wallet · Feed · Chat. Wallet (centre) is the home tab. The top bar's account picture opens the account drawer (switch or add accounts, Settings). The centre b in the top bar opens this assistant.\n",
+      '- NFTs: your 1Sat ordinals shown as a media library (music, video, images).\n- Tickets: tokens that get you into a room. Send one ticket to invite someone. Sell tickets you hold',
+      '- Mint: the Mint button creates an NFT from a photo, video, song or document, or "Start a room" mints a ticket token (name, supply, optional event date and price). The cost (network fee, plus any clearly labelled mint fee) is shown before confirming.\n\nNames and handles:',
+      'and a personal token $NAME that opens your personal room in Chat. Hold the $NAME token to enter that room; send someone one $NAME token to invite them.',
+      "Chat: token rooms. You get a room for each token or ticket you hold at or above the room minimum; it goes away if you no longer hold enough. To invite someone, send them the room's token. Rooms can have bounties and calls.\n",
+      '- Never give investment, tax or legal advice. Tickets and personal tokens are access/utility, not investments.\n',
+      'small paying actions (tips, locks, b agent messages) under',
+      "- b agent: bWallet's own b, or use your own AI provider key (Anthropic, OpenAI, OpenRouter) stored only on this device. Bug reports",
+    ])
+      expect(g).toContain(line);
+    expect(g).not.toContain('Wallet · bApps · b · Feed · Chat');
+  }, 60_000);
+});
+
+describe('A5, A6: no selling words or listing on the names screens in a store build', () => {
+  test('listOpnsName refuses in a store build before the wallet is asked; bWalletX lists as before', async () => {
+    const { listOpnsName } = await import('./names/opnsBuy');
+    let touched = 0;
+    const trap = new Proxy({}, { get: () => ((touched += 1), () => Promise.reject(new Error('reached'))) }) as never;
+    await expect(listOpnsName(trap, 'id1', 5000, true)).rejects.toThrow('Not available in this edition');
+    expect(touched).toBe(0);
+    // bWalletX goes on to sellOpns (which this trap context cannot finish): not the store refusal.
+    await expect(listOpnsName(trap, 'id1', 5000, false)).rejects.not.toThrow('Not available in this edition');
+  });
+  test('the default follows the build: refused in every store env, attempted in bWalletX', () => {
+    const code = `
+      const o = await import('./src/mobile/names/opnsBuy.ts');
+      const r = await o.listOpnsName({}, 'id1', 5000).then(() => 'listed', (e) => String(e?.message ?? e));
+      console.log(JSON.stringify(r));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as string;
+    for (const env of STORE_ENVS) expect(run(env)).toBe('Not available in this edition');
+    expect(run({})).not.toBe('Not available in this edition');
+  }, 60_000);
+  test('"Give it away" row, "For sale" badge, the rail sub and "On sale" pick their words with MARKET_ENABLED', () => {
+    const a = srcOf('./names/OpnsNameActions.tsx');
+    expect(a).toMatch(
+      /sub=\{\s*MARKET_ENABLED\s*\? canAdopt\s*\? 'Selling works for names in your Names list\. Use Add to my Names above, then sell it from Wallet › Names\.'\s*: 'Selling works for names in your Names list\. A name received/,
+    );
+    expect(a).toContain(
+      ": canAdopt\n                    ? 'Giving works for names in your Names list. Use Add to my Names above, then give it from Wallet › Names.'",
+    );
+    expect(a.match(/Selling works for names/g)).toHaveLength(2); // both inside the MARKET_ENABLED branch
+    expect(srcOf('./wallet/NamesSection.tsx')).toContain('{MARKET_ENABLED && n.listedSats != null && (');
+    const n = srcOf('./names/store/NameStorePage.tsx');
+    expect(n).toContain(`sub={MARKET_ENABLED ? 'tap to sell or give' : 'tap to give'}`);
+    expect(n).toContain('{MARKET_ENABLED && owned.get(n)?.listedSats');
+    expect(srcOf('./names/opnsBuy.ts')).toMatch(
+      /export const listOpnsName = async \([^)]*store: boolean = STORE_BUILD,\s*\): Promise<string> => \{[^}]*if \(store\) throw new Error\(STORE_NAME_NOTE\);/,
+    );
+  });
+});
+
+describe('A7: a launch curve never reaches a store deploy', () => {
+  test('curveMapScript refuses without curves; with them it is the same MAP script as before', async () => {
+    const { curveMapScript, curveMapFields } = await import('./curves/curveMap');
+    const { standardCurve } = await import('../lib/curves');
+    const curve = standardCurve();
+    expect(() => curveMapScript(curve, false)).toThrow('Not available in this edition');
+    const s = curveMapScript(curve, true);
+    expect(s.toASM().startsWith('OP_0 OP_RETURN')).toBe(true);
+    expect(s.chunks).toHaveLength(2 + 2 + curveMapFields(curve).length);
+    expect(curveMapScript(curve).toHex()).toBe(s.toHex()); // the default in this (bWalletX) test env
+  });
+  test('the default follows the build: refused in every store env, built in bWalletX', () => {
+    const code = `
+      const m = await import('./src/mobile/curves/curveMap.ts'); const l = await import('./src/lib/curves/curves.ts');
+      let r; try { r = m.curveMapScript(l.standardCurve()).toHex().slice(0, 4); } catch (e) { r = e.message; }
+      console.log(JSON.stringify(r));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as string;
+    for (const env of STORE_ENVS) expect(run(env)).toBe('Not available in this edition');
+    expect(run({})).toBe('006a');
+  }, 60_000);
+  test('both deploy paths build the curve output through curveMapScript, before the wallet call', () => {
+    expect(srcOf('./tickets/mintTicket.ts')).toContain(
+      'const withCurve = opts.curve ? withMapOutput(withFee, curveMapScript(opts.curve), CURVE_MAP_DESCRIPTION) : withFee;',
+    );
+    expect(srcOf('./names/claimPersonal.ts')).toContain(
+      'input.curve ? withMapOutput(ctx, curveMapScript(input.curve), CURVE_MAP_DESCRIPTION) : ctx',
+    );
+  });
+});
+
+describe('A1, A5 leftovers the strengthened bundle check found', () => {
+  test('"Launch your tokens" mints nothing and opens no room in a store build (room text behind a literal flag)', () => {
+    const l = srcOf('./names/PersonalTokenLauncher.tsx');
+    expect(l).toMatch(
+      /const mintToken = async \(name = tokenName\) => \{\s*\/\/[^\n]*\n\s*if \(!PAID_FEATURES_ENABLED\) return;/,
+    );
+    expect(l).toMatch(
+      /if \(!TOKEN_ROOMS_ENABLED\) \{\s*setTokenMsg\(`\$\$\{l\.ticker\} minted\.`\);\s*return;\s*\}\s*setTokenMsg\(`\$\$\{l\.ticker\} minted\. Opening your room…`\);/,
+    );
+    expect(paidFeaturesEnabled(true)).toBe(false);
+    expect(tokenRoomsEnabled(true)).toBe(false);
+    expect(paidFeaturesEnabled(false)).toBe(true);
+    expect(tokenRoomsEnabled(false)).toBe(true);
+  });
+  test('the "not in Wallet › NFTs yet" note says selling only where names can be sold', () => {
+    const a = srcOf('./names/OpnsNameActions.tsx');
+    expect(a).toMatch(
+      /\{MARKET_ENABLED\s*\? 'It’s at your address\. Linking, selling and sending unlock once it shows in Wallet › NFTs\.'\s*: 'It’s at your address\. Linking and sending unlock once it shows in Wallet › NFTs\.'\}/,
+    );
+  });
+});
+
+describe('A8 (owner, 16 Nov 2026): no paid indexing anywhere in a store build', () => {
+  const trap = () => {
+    const hit = { n: 0 };
+    const p = new Proxy({}, { get: () => ((hit.n += 1), () => Promise.reject(new Error('reached'))) }) as never;
+    return { hit, p };
+  };
+  const tokenId = 'c'.repeat(64) + '_0';
+  const status = {
+    feeAddress: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT',
+    feePerOutput: 1000,
+    isActive: false,
+    balance: 0,
+    minFunding: 0,
+  };
+  test('indexingEnabled: off in a store build, on in bWalletX', async () => {
+    const { indexingEnabled } = await import('./storeBuild');
+    expect(indexingEnabled(true)).toBe(false);
+    expect(indexingEnabled(false)).toBe(true);
+  });
+  test('fundIndexing and payRoomSetup refuse in a store build before the indexer or the wallet is asked', async () => {
+    const { fundIndexing } = await import('./tokens/indexFund');
+    const { payRoomSetup } = await import('./tokens/roomSetup');
+    const ctx = trap();
+    await expect(fundIndexing(ctx.p, tokenId, 'TEST', { status, sats: 2000 }, true)).rejects.toThrow(
+      'Not available in this edition',
+    );
+    await expect(payRoomSetup(ctx.p, tokenId, 'TEST', status, 0, '', true)).rejects.toThrow(
+      'Not available in this edition',
+    );
+    expect(ctx.hit.n).toBe(0);
+    // bWalletX: both go on to the wallet (which this trap context cannot finish), not the store refusal.
+    const x = trap();
+    await expect(fundIndexing(x.p, tokenId, 'TEST', { status, sats: 2000 }, false)).rejects.not.toThrow(
+      'Not available in this edition',
+    );
+    await expect(payRoomSetup(x.p, tokenId, 'TEST', status, 0, '', false)).rejects.not.toThrow(
+      'Not available in this edition',
+    );
+    expect(x.hit.n).toBeGreaterThan(0);
+  });
+  test('the defaults follow the build: refused in every store env, attempted in bWalletX', () => {
+    const code = `
+      const s = await import('./src/mobile/storeBuild.ts'); const f = await import('./src/mobile/tokens/indexFund.ts');
+      const status = { feeAddress: '1BoatSLRHtKNngkdXEeobR76b53LETtpyT', feePerOutput: 1000, isActive: false, balance: 0, minFunding: 0 };
+      const r = await f.fundIndexing({}, 'c'.repeat(64) + '_0', 'TEST', { status, sats: 2000 }).then(() => 'paid', (e) => String(e?.message ?? e));
+      console.log(JSON.stringify({ flag: s.INDEXING_ENABLED, fn: s.indexingEnabled(), r }));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as { flag: boolean; fn: boolean; r: string };
+    for (const env of STORE_ENVS)
+      expect(run(env)).toEqual({ flag: false, fn: false, r: 'Not available in this edition' });
+    const x = run({});
+    expect([x.flag, x.fn]).toEqual([true, true]);
+    expect(x.r).not.toBe('Not available in this edition');
+  }, 60_000);
+  test('INDEXING_ENABLED is the inverse of STORE_BUILD, from the same literal env', async () => {
+    const { INDEXING_ENABLED } = await import('./storeBuild');
+    expect(INDEXING_ENABLED).toBe(!STORE_BUILD);
+    const s = srcOf('./storeBuild.ts');
+    const cond = (name: string) =>
+      (new RegExp(`export const ${name}: boolean =\\s*!?\\(?([^;]*?)\\)?;`, 's').exec(s)?.[1] ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    expect(cond('INDEXING_ENABLED')).toBe(cond('STORE_BUILD'));
+  });
+  test('every place that offers or starts a paid index sits behind the literal flag', () => {
+    expect(srcOf('./tokens/FinishIndexing.tsx')).toContain(
+      'export const FinishIndexing = (props: Props) => (INDEXING_ENABLED ? <FinishIndexingInner {...props} /> : null);',
+    );
+    expect(srcOf('./tokens/WalletIndexing.tsx')).toContain(
+      'INDEXING_ENABLED ? <WalletIndexingInner {...props} /> : null;',
+    );
+    expect(srcOf('./tokens/TokenIndexButton.tsx')).toContain('INDEXING_ENABLED ? <Inner {...props} /> : null;');
+    expect(srcOf('./tabs/ChatPage.tsx')).toMatch(
+      /\{INDEXING_ENABLED &&\s*ROOMS &&\s*!bappsView &&\s*ownTokens\(identityAddress\)\.map/,
+    );
+    const f = srcOf('./settings/FeedSettings.tsx');
+    expect(f).toContain('{INDEXING_ENABLED && acct && (');
+    expect(f).toContain("{INDEXING_ENABLED && screen === 'indexing' && (");
+    expect(f).toContain(
+      "{INDEXING_ENABLED && screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}",
+    );
+    expect(f).toMatch(
+      /\{INDEXING_ENABLED && \(\s*<>\s*<Divider \/>\s*<Row\s+icon=\{<Coins size=\{16\} \/>\}\s+label="Token indexing"/,
+    );
+    expect(f.match(/\.\.\.\(INDEXING_ENABLED\s*\?/g)).toHaveLength(2); // the two search entries
+    // The Wallet tab badges count pending indexing only where it is offered.
+    expect(srcOf('./tabs/BottomMenu.tsx')).toContain("t.id === 'bsv' && pending && indexingEnabled()");
+    expect(srcOf('./phone/PhoneShell.tsx')).toContain(
+      "'screen:wallet': pending && indexingEnabled() ? String(pending) : undefined",
+    );
+    // The other fundIndexing callers are Exchange-only (no Exchange in a store build) and refused by fundIndexing too.
+    expect(srcOf('./exchange/TradeView.tsx')).toContain('<IndexerFundPanel tokenId={id} ticker={sym} />');
+  });
+  test('Ask b: no Token indexing line in a store build; bWalletX keeps it word for word', () => {
+    const code = `const g = await import('./src/mobile/agent/guide.ts'); console.log(JSON.stringify(g.BWALLET_GUIDE));`;
+    const run = (env: Record<string, string>) =>
+      JSON.parse(
+        Bun.spawnSync(['bun', '-e', code], {
+          env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+        }).stdout.toString(),
+      ) as string;
+    for (const env of STORE_ENVS) expect(run(env)).not.toMatch(/index/i);
+    expect(run({})).toContain(
+      "Anything above the limit always asks.\n- Token indexing: one-tap limit for your own tokens' indexing fee.\n- Privacy:",
+    );
+  }, 60_000);
+});
+
+/**
+ * Round A7 (CTO decisions, 16 Nov 2026): the store build's wording for the A6 follow-ups. bWalletX keeps its words and
+ * behaviour; each test runs the store envs and bWalletX in child processes (the literal flags are read at import).
+ */
+const runA7 = <T>(code: string, env: Record<string, string>): T => {
+  const r = Bun.spawnSync(['bun', '-e', code], {
+    env: { ...process.env, VITE_STORE_BUILD: '', VITE_CHANNEL: '', ...env },
+  });
+  const out = r.stdout.toString().trim().split('\n').pop() ?? '';
+  if (!out) throw new Error(r.stderr.toString());
+  return JSON.parse(out) as T;
+};
+
+describe('A7.1: chat commissions say "payment" in a store build, and the form is not there', () => {
+  const code = `
+    const React = await import('react'); const { renderToStaticMarkup } = await import('react-dom/server');
+    const c = await import('./src/mobile/chat/CommissionCard.tsx'); const m = await import('./src/mobile/chat/commissions.ts');
+    const html = renderToStaticMarkup(React.createElement(c.CommissionComposer, { ticker: 'T', client: {}, initial: { assignee: null, draft: 'x' }, onClose() {}, onPosted() {}, createEnabled: true }));
+    const d = { commission: { status: 'draft', created_by: 'alice', assignee: null }, escrow: null, proposals: [], entries: [] };
+    console.log(JSON.stringify({ html, wait: m.cardAction(d, 'bob', 0, new Date(), true) }));`;
+  test('store: /commission shows only the pause line even when creating is on; the card waits for a "payment"', () => {
+    for (const env of STORE_ENVS) {
+      const r = runA7<{ html: string; wait: { label?: string } }>(code, env);
+      expect(r.html).toContain('data-commissions-paused');
+      expect(r.html).not.toMatch(/reward/i);
+      expect(r.wait).toEqual({ kind: 'wait', label: 'Waiting for the poster to lock the payment' });
+    }
+  }, 60_000);
+  test('bWalletX: the form and its words are unchanged', () => {
+    const r = runA7<{ html: string; wait: { label?: string } }>(code, {});
+    expect(r.html).toContain('placeholder="Reward, e.g. 10M"');
+    expect(r.html).not.toContain('data-commissions-paused');
+    expect(r.wait).toEqual({ kind: 'wait', label: 'Waiting for the poster to lock the reward' });
+  }, 60_000);
+  test('the form sits behind the literal TOKEN_ROOMS_ENABLED, so Rollup drops it from a store bundle', () => {
+    const s = srcOf('./chat/CommissionCard.tsx');
+    expect(s).toContain(
+      'if (TOKEN_ROOMS_ENABLED && (props.createEnabled ?? COMMISSIONS_CREATE_ENABLED))\n    return <CommissionForm {...props} createEnabled />;',
+    );
+    expect(s.match(/<CommissionForm\b/g)).toHaveLength(1);
+    expect(s).not.toMatch(/export function CommissionForm/);
+  });
+});
+
+describe('A7.2: Feed lock is "Lock BSV on this post" in a store build, with no backing words', () => {
+  const f = () => srcOf('./feed/FeedPage.tsx');
+  test('the title, button label, intro and note pick their words with the literal MARKET_ENABLED', () => {
+    const s = f();
+    expect(s).toContain("const LOCK_TITLE = MARKET_ENABLED ? 'Lock BSV to back this post' : 'Lock BSV on this post';");
+    expect(s).toContain('aria-label={LOCK_TITLE}');
+    expect(s).toContain('<Sheet title={LOCK_TITLE} onClose={onClose}>');
+    expect(s.match(/Lock BSV to back this post/g)).toHaveLength(1); // only in the bWalletX branch
+    // The note: bWalletX's sentence unchanged; the store says the coins stay yours and locking shows support.
+    expect(s).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Locking backs a post; it earns nothing\.'\s*: 'Locking shows support for the post\. The coins stay yours\.'\}/,
+    );
+    // The intro: bWalletX "Back <name>'s post with your own coins", the store "Lock your own coins on <name>'s post".
+    const intro =
+      /\{MARKET_ENABLED \? \(\s*<p[^>]*>\s*Back <AuthorName[\s\S]*?<\/p>\s*\) : \(\s*<p[^>]*>([\s\S]*?)<\/p>\s*\)\}/.exec(
+        s,
+      );
+    expect(intro).not.toBeNull();
+    const store = intro![1].replace(/\s+/g, ' ');
+    expect(store).toContain('Lock your own coins on <AuthorName name={post.author.name} className="" /> \'s post.');
+    expect(store).not.toMatch(/\bback/i);
+  });
+  test('the store words pass the store word list; the bWalletX words are the ones the A6 check flagged', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Lock BSV on this post',
+      'Locking shows support for the post. The coins stay yours.',
+      "Lock your own coins on … 's post. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows how much is locked on it.",
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+    expect(storeBannedWord('Lock BSV to back this post')).toBe('back this');
+    expect(storeBannedWord('Locking backs a post; it earns nothing.')).toBe('earns');
+  });
+});
+
+describe('A7.3, A7.4: bMint says "keep it or send it" and Media "mint or receive" in a store build', () => {
+  test('both lines pick their words with the literal MARKET_ENABLED; bWalletX keeps its words', () => {
+    expect(srcOf('./bmint/Studio.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'It sits in your vault as yours: keep it, send it or sell it\.'\s*: 'It sits in your vault as yours: keep it or send it\.'\}/,
+    );
+    expect(srcOf('./media/MediaSection.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Music, video and pictures you buy or mint live here and play from here\.'\s*: 'Music, video and pictures you mint or receive live here and play from here\.'\}/,
+    );
+  });
+  test('the store lines pass the store word list; the bWalletX lines are the ones the A6 check flagged', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    expect(storeBannedWord('It sits in your vault as yours: keep it or send it.')).toBeNull();
+    expect(storeBannedWord('Music, video and pictures you mint or receive live here and play from here.')).toBeNull();
+    expect(storeBannedWord('It sits in your vault as yours: keep it, send it or sell it.')).toBe('sell');
+    expect(storeBannedWord('Music, video and pictures you buy or mint live here and play from here.')).toBe('buy');
+  });
+  test('the literal flag gives the store line in every store env and the bWalletX line otherwise', () => {
+    const code = `const s = await import('./src/mobile/storeBuild.ts');
+      console.log(JSON.stringify(s.MARKET_ENABLED ? 'keep it, send it or sell it' : 'keep it or send it'));`;
+    for (const env of STORE_ENVS) expect(runA7<string>(code, env)).toBe('keep it or send it');
+    expect(runA7<string>(code, {})).toBe('keep it, send it or sell it');
+  }, 60_000);
+});
+
+describe('A7.5: listings made elsewhere on the same seed read as state in a store build', () => {
+  test('RelayX recovery: the listed group is "Listed on RelayX" in a store build, word for word in bWalletX', () => {
+    const code = `const r = await import('./src/sweep/relayxRecover.ts');
+      console.log(JSON.stringify(r.groupFound([{ title: 'NPG #1', collection: '', listed: { price: 1 } }]).map((g) => g.title)));`;
+    for (const env of STORE_ENVS) expect(runA7<string[]>(code, env)).toEqual(['Listed on RelayX']);
+    expect(runA7<string[]>(code, {})).toEqual(['Listed for sale on RelayX']);
+  }, 60_000);
+  test('RelayX card, RelayX empty note, NFT library chip and OrdLock v1 note pick their words with MARKET_ENABLED', () => {
+    const r = srcOf('./sweep/RelayxRecoverScreen.tsx');
+    expect(r).toContain(
+      "{MARKET_ENABLED ? 'Listed for sale on RelayX' : 'Listed on RelayX'} at {bsv(f.listed.price)} BSV",
+    );
+    expect(r).toMatch(
+      /\{MARKET_ENABLED\s*\? "Check these are your RelayX words, not another wallet's\. NFTs listed for sale on RelayX show here while their listing's cancel output is still at these words\."\s*: "Check these are your RelayX words, not another wallet's\. NFTs listed on RelayX show here while their listing's cancel output is still at these words\."\}/,
+    );
+    expect(r.match(/for sale/g)).toHaveLength(2); // both in bWalletX branches
+    const n = srcOf('./nfts/NftLibraryPage.tsx');
+    expect(n).toContain("{MARKET_ENABLED ? 'Listed for sale' : 'Listed elsewhere'} {listedCount}");
+    expect(n).toMatch(
+      /\{MARKET_ENABLED\s*\? 'This NFT sits in an old OrdLock v1 listing\. 1Sat withdrew that contract, so it isn’t for sale and can’t be sent from here\.'\s*: 'This NFT sits in an old OrdLock v1 listing\. 1Sat withdrew that contract, so it can’t be sent from here\.'\}/,
+    );
+    expect(n.match(/for sale/g)).toHaveLength(2);
+  });
+  test('History: a listing of ours that ended reads "listing ended" in a store build; bWalletX says sold / cancelled', () => {
+    const code = `
+      const { default: fixtures } = await import('./src/mobile/wallet/fixtures/marketTxs.json');
+      const h = await import('./src/mobile/wallet/historyEvents.ts');
+      const t = await import('./src/mobile/wallet/txHistory.ts'); const f = await import('./src/mobile/wallet/txHistoryFetch.ts');
+      const tx = (p) => f.toRawTx(Object.values(fixtures).find((x) => x.txid.startsWith(p)));
+      const LIST = tx('f49e09fa'), BUY = tx('7cac90cb'); const seller = LIST.vout[3].addresses[0];
+      const fund = [...new Set(LIST.vin.map((i) => i.txid))].map((txid) => ({ txid, time: 1700000000, confirmations: 100,
+        vin: [{ txid: '0'.repeat(64), vout: 0 }],
+        vout: Array.from({ length: Math.max(...LIST.vin.filter((i) => i.txid === txid).map((i) => i.vout)) + 1 }, (_, n) => ({ n,
+          sats: LIST.vin.some((i) => i.txid === txid && i.vout === n) ? 33000000 : 0,
+          addresses: LIST.vin.some((i) => i.txid === txid && i.vout === n) ? [seller] : [] })) }));
+      const txs = [LIST, BUY, ...fund]; const own = new Set([seller]); const local = new Map();
+      const rows = t.buildRows(txs, own, local, 0); const byId = new Map(txs.map((x) => [x.txid, x]));
+      const prev = t.ownOutputs([...byId.values()], own);
+      const ctx = { own, prev, listings: h.findListings([...byId.values()], prev) };
+      const sale = rows.map((r) => h.classifyEvent(r, byId.get(r.txid), undefined, ctx)).find((r) => r.txid === BUY.txid);
+      console.log(JSON.stringify({ type: sale.type, label: sale.label, amountSats: sale.amountSats }));`;
+    for (const env of STORE_ENVS)
+      expect(runA7(code, env)).toEqual({ type: 'sell', label: 'token listing ended', amountSats: 20_400_000 });
+    expect(runA7(code, {})).toEqual({ type: 'sell', label: 'token sold', amountSats: 20_400_000 });
+    expect(srcOf('./wallet/historyEvents.ts')).toMatch(
+      /label: MARKET_ENABLED\s*\? `\$\{asset\.kind === 'nft' \? 'NFT' : 'token'\} \$\{back \? 'listing cancelled' : 'sold'\}`\s*: `\$\{asset\.kind === 'nft' \? 'NFT' : 'token'\} listing ended`,/,
+    );
+  }, 60_000);
+  test('Notifications: no Sales row in a store build; a taken listing still notifies, under Incoming payments', () => {
+    const code = `const n = await import('./src/mobile/notify/notify.ts');
+      const fmt = (s) => s + ' sats'; const item = { id: 'sale:x', kind: 'sale', title: '', body: '', at: 0, read: false };
+      const on = Object.fromEntries(n.CATEGORIES.map((c) => [c, true]));
+      console.log(JSON.stringify({ cats: n.CATEGORIES, cat: n.KIND_CATEGORY.sale, labels: n.CATEGORIES.map((c) => n.CATEGORY_LABELS[c].label),
+        priced: n.saleNotice(5000, fmt), unpriced: n.saleNotice(0, fmt),
+        shown: n.allowed([item], on).length, offWithPayments: n.allowed([item], { ...on, payments: false }).length }));`;
+    for (const env of STORE_ENVS) {
+      const r = runA7<Record<string, unknown>>(code, env);
+      expect(r.cats).not.toContain('sales');
+      expect(r.labels).not.toContain('Sales');
+      expect(r.cat).toBe('payments');
+      expect(r.priced).toEqual({
+        title: 'An item you listed elsewhere has left your wallet',
+        body: 'It was listed at 5000 sats',
+      });
+      expect(r.unpriced).toEqual({
+        title: 'An item you listed elsewhere has left your wallet',
+        body: 'It left through a listing made elsewhere',
+      });
+      expect([r.shown, r.offWithPayments]).toEqual([1, 0]);
+    }
+    const x = runA7<Record<string, unknown>>(code, {});
+    expect(x.cats).toEqual(['bmail', 'social', 'mentions', 'chat', 'calls', 'payments', 'sales']);
+    expect(x.cat).toBe('sales');
+    expect(x.priced).toEqual({ title: 'Your listing sold', body: 'Sold for 5000 sats' });
+    expect(x.unpriced).toEqual({ title: 'Your listing sold', body: 'A buyer took your listing' });
+    expect(x.shown).toBe(1);
+    expect(srcOf('./notify/engine.ts')).toContain("kind: 'sale',\n          ...saleNotice(price, formatSatsShort),");
+  }, 60_000);
+  test('every store line passes the store word list', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Listed on RelayX',
+      'Listed elsewhere',
+      "Check these are your RelayX words, not another wallet's. NFTs listed on RelayX show here while their listing's cancel output is still at these words.",
+      'This NFT sits in an old OrdLock v1 listing. 1Sat withdrew that contract, so it can’t be sent from here.',
+      'NFT listing ended',
+      'An item you listed elsewhere has left your wallet',
+      'It was listed at 1,000 sats',
+      'It left through a listing made elsewhere',
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+  });
+});
+
+describe('A7.6: the Ask b "Exchange search" add-on is not offered in a store build, and a stored "on" is ignored', () => {
+  const code = `const b = await import('./src/mobile/bweb/bweb.ts');
+    const s = b.parseBWeb({ addOns: { names: true, exchange: true, bmail: false, feed: false } });
+    console.log(JSON.stringify({ ids: b.ADD_ON_IDS, labels: b.ADD_ONS.map((a) => a.label), on: b.enabledAddOns(s), ctx: b.bwebContext(s) }));`;
+  type R = { ids: string[]; labels: string[]; on: string[]; ctx: string };
+  test('store: not listed, not enabled, not in b instructions', () => {
+    for (const env of STORE_ENVS) {
+      const r = runA7<R>(code, env);
+      expect(r.ids).toEqual(['names', 'bmail', 'feed']);
+      expect(r.labels.join(' ')).not.toMatch(/exchange/i);
+      expect(r.on).toEqual(['names']);
+      expect(r.ctx).toContain('- Names:');
+      expect(r.ctx).not.toMatch(/exchange/i);
+    }
+  }, 60_000);
+  test('bWalletX: the add-on, its words and its place in the list are unchanged', () => {
+    const r = runA7<R>(code, {});
+    expect(r.ids).toEqual(['names', 'exchange', 'bmail', 'feed']);
+    expect(r.labels).toEqual(['Names', 'Exchange search', 'bMail drafting', 'Feed summaries']);
+    expect(r.on).toEqual(['names', 'exchange']);
+    expect(r.ctx).toContain(
+      '- Exchange search: help the user find tokens, apps and strategies on the Exchange (/m/exchange).',
+    );
+  }, 60_000);
+});
+
+describe('A7.8, A7.9, A7.11: pairing, site token balance and prove-holdings sheets in a store build', () => {
+  test('site token balance sheet: reading the balance only in a store build; bWalletX word for word', () => {
+    const code = `const t = await import('./src/services/siteTokens.ts'); console.log(JSON.stringify(t.balanceAccessText('example.com', '$TEST')));`;
+    for (const env of STORE_ENVS)
+      expect(runA7<string>(code, env)).toBe(
+        'example.com wants to see your $TEST balance. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+      );
+    expect(runA7<string>(code, {})).toBe(
+      'example.com wants to see your $TEST balance, so it can offer to sell them for you. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+    );
+    expect(srcOf('../services/siteTokens.ts')).toContain('description: balanceAccessText(site, name),');
+  }, 60_000);
+  test('prove holdings: "so the site can check what you hold" in a store build; bWalletX keeps rooms and swaps', () => {
+    const code = `const React = await import('react'); const { renderToStaticMarkup } = await import('react-dom/server');
+      const p = await import('./src/pages/requests/ProveHoldingsRequest.tsx');
+      const { ThemeProvider } = await import('./src/contexts/providers/ThemeProvider.tsx');
+      const page = React.createElement(p.ProveHoldingsRequestPage, { request: { originator: 'bchatx.com', requestID: 'r1' }, onResponse() {} });
+      console.log(JSON.stringify(renderToStaticMarkup(React.createElement(ThemeProvider, null, page))));`;
+    for (const env of STORE_ENVS) {
+      const html = runA7<string>(code, env);
+      expect(html).toContain(
+        'bchatx.com can then see which wallet addresses hold your tokens, so the site can check what you hold. Your wallet signs a message for each one. Nothing is spent.',
+      );
+      expect(html).not.toMatch(/swap|rooms/i);
+    }
+    expect(runA7<string>(code, {})).toContain(
+      'bchatx.com can then see which wallet addresses hold your tokens, so your rooms and swaps work. Your wallet signs a message for each one. Nothing is spent.',
+    );
+  }, 60_000);
+  test('CLI pairing: "Sending needs an agent account" in a store build, by the literal MARKET_ENABLED', () => {
+    expect(srcOf('./pair/CliPairConfirm.tsx')).toMatch(
+      /\{MARKET_ENABLED\s*\? 'Trading and sending need an agent account \(Settings › Agents\)\. Turn on Mint NFTs to pair this account for minting only\.'\s*: 'Sending needs an agent account \(Settings › Agents\)\. Turn on Mint NFTs to pair this account for minting only\.'\}/,
+    );
+  });
+  test('the store lines pass the store word list', async () => {
+    const { storeBannedWord } = await import('./storeBuild');
+    for (const t of [
+      'Sending needs an agent account (Settings › Agents). Turn on Mint NFTs to pair this account for minting only.',
+      'x wants to see your $T balance. It sees how many you hold and where, nothing else. It cannot move them without asking you.',
+      'x can then see which wallet addresses hold your tokens, so the site can check what you hold.',
+    ])
+      expect(storeBannedWord(t)).toBeNull();
+  });
+});
+
+describe('A7.10: p2p swaps (and prove holdings) cannot reach the wallet in a store build', () => {
+  // A store build is only the phone app (channel-build.sh: STORE=1 for ios-store / android-play, both `build:mobile`).
+  // On the phone a site reaches the wallet only through handleSiteCall (dApp browser, bApp frames, paired sessions),
+  // which admits BRC-100 calls and mintPrivate only. window.CWI.swap / proveHoldings exist only in the Chrome
+  // extension's content script (content.ts), which no store build ships.
+  const code = `const d = await import('./src/mobile/dappBrowser.ts'); const reached = [];
+    d.initDappBrowser(() => ({ runtime: { sendMessage: (m) => (reached.push(m.action), Promise.resolve({ success: true })) } }));
+    const out = {};
+    for (const a of ['bwxSwapOffer', 'bwxSwapAccept', 'bwxSwapRelease', 'bwxProveHoldings'])
+      out[a] = await d.handleSiteCall('https://www.bchatx.com', 'https://www.bchatx.com/room/X', a, {}).then(() => 'reached', (e) => String(e?.message ?? e));
+    console.log(JSON.stringify({ out, reached }));`;
+  type R = { out: Record<string, string>; reached: string[] };
+  test('handleSiteCall refuses every swap and prove-holdings call from bChatX before the wallet is asked', () => {
+    for (const env of [...STORE_ENVS, {}]) {
+      const r = runA7<R>(code, env);
+      expect(r.reached).toEqual([]);
+      for (const [a, msg] of Object.entries(r.out)) expect(msg).toBe(`Unsupported request: ${a}`);
+    }
+  }, 60_000);
+  test('the gate, the call sites and the store channels are as the allowlist reason says', () => {
+    expect(srcOf('./dappBrowser.ts')).toContain(
+      'if (!isCWIEventName(type) && !isMintPrivateAction(type)) throw new Error(`Unsupported request: ${type}`);',
+    );
+    const callers = ['./dappBrowser.ts', './bappFrame/BappFrameHost.tsx', './pair/sessions.ts'];
+    for (const f of callers) expect(srcOf(f)).toContain('handleSiteCall(');
+    expect(srcOf('../content.ts')).toContain('isSwapAction(type)');
+    const ch = readFileSync(new URL('../../scripts/channel-build.sh', import.meta.url), 'utf8');
+    expect(ch).toContain('ios-store | android-play) STORE=1 ;;');
+    expect(ch).toContain('VITE_CHANNEL=$CH VITE_STORE_BUILD=${STORE:+1} pnpm build:mobile');
+  });
+  test('the allowlist keeps the two swap descriptions with that gate as the reason', () => {
+    const allow = JSON.parse(readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8'))
+      .allow as { chunk: string; match?: string; reason: string }[];
+    for (const m of ['Swap offer closed', 'Swap ${']) {
+      const e = allow.find((a) => a.chunk === 'background' && a.match === m);
+      expect(e?.reason).toContain('Unreachable in a store build');
+      expect(e?.reason).toContain('handleSiteCall');
+    }
+  });
+});
+
+describe('A7.7: Portfolio "vs market" is price data, kept in both editions (CTO, 16 Nov)', () => {
+  test('the screen reads BSV / BTC prices only and links to no marketplace', () => {
+    const m = srcOf('./portfolio/market.ts');
+    expect(m).toContain("const CG = 'https://api.coingecko.com/api/v3/coins';");
+    expect(m).toContain("const WOC = 'https://api.whatsonchain.com/v1/bsv/main/exchangerate/historical';");
+    expect(m.match(/https:\/\/[^'"`\s]+/g)?.every((u) => /coingecko\.com|whatsonchain\.com/.test(u))).toBe(true);
+    const p = srcOf('./portfolio/PortfolioScreen.tsx');
+    expect(p).not.toMatch(/\/m\/(exchange|market)|MarketPage|marketTradingEnabled/);
+    for (const t of [
+      'Portfolio vs market',
+      "'vs market'",
+      "Market prices aren't reachable",
+      'with no market price here',
+    ])
+      expect(p).toContain(t);
+  });
+  test('its three allowlist entries say why', () => {
+    const allow = JSON.parse(readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8'))
+      .allow as { chunk: string; match?: string; reason: string }[];
+    for (const m of ['vs market', 'Market prices', 'with no market price here'])
+      expect(allow.find((a) => a.chunk === 'PortfolioScreen' && a.match === m)?.reason).toContain(
+        'price data, not a marketplace (CTO, 16 Nov)',
+      );
+  });
+});
+
+describe('A7: no allowlist entry is left as a FOLLOW-UP', () => {
+  test('every reason is a checked fact', () => {
+    const raw = readFileSync(new URL('../../scripts/store-bundle-allow.json', import.meta.url), 'utf8');
+    expect(raw).not.toMatch(/follow-up/i);
   });
 });

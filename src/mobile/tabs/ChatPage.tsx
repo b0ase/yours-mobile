@@ -157,6 +157,7 @@ import {
   APP_NAME,
   BSPACES_ENABLED,
   BUREAU_ENABLED,
+  INDEXING_ENABLED,
   XINVITES_ENABLED,
   roomSpacesAllowed,
   MARKET_ENABLED,
@@ -165,6 +166,7 @@ import {
   STORE_ROOM_NOTE,
   marketLabel,
   tokenRoomsEnabled,
+  TOKEN_ROOMS_ENABLED,
 } from '../storeBuild';
 import { LiveBanner } from '../spaces/LiveBanner';
 import { LoungeCard } from '../chat/LoungeCard';
@@ -292,6 +294,7 @@ import {
 } from '../chat/openRooms';
 import { memberRooms } from '../chat/memberRooms';
 import PendingDocBanner from '../chat/PendingDocBanner';
+import StoreSignNotice from '../chat/StoreSignNotice';
 import DocSignButton from '../chat/DocSignButton';
 import { cardFileNames, docForMessage, signableDocs } from '../chat/signableDocs';
 import { MessageMenu, NewRoomSheet, OpenRoomSheet } from '../chat/OpenRoomSheets';
@@ -954,7 +957,7 @@ const Conversation = ({
               <Info size={20} color={GOLD} />
             </button>
           )}
-          {onMarket && (
+          {MARKET_ENABLED && onMarket && (
             <button
               onClick={onMarket}
               className="p-2 rounded-full active:opacity-60"
@@ -1046,7 +1049,9 @@ const Conversation = ({
             peer
               ? 'Direct message'
               : entry
-                ? 'Token room'
+                ? TOKEN_ROOMS_ENABLED
+                  ? 'Token room'
+                  : 'Room'
                 : openRoom
                   ? `${openRoom.visibility === 'public' ? 'Public' : 'Invite-only'} room${openRoom.closed ? ' · closed' : ''}`
                   : `Room · $${room.ticker}`
@@ -1090,6 +1095,7 @@ const Conversation = ({
         />
       )}
       {BUREAU_ENABLED && !peer && <PendingDocBanner room={room} inChat={(id) => roomDocs.byId.has(id)} />}
+      {!BUREAU_ENABLED && !peer && <StoreSignNotice room={room} />}
       <div
         ref={scroller}
         onScroll={onScroll}
@@ -2537,7 +2543,10 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
           <Lock size={12} color={MUTED} className="shrink-0" />
         </div>
         <div className="text-[13px] line-clamp-2" style={{ color: MUTED }}>
-          {s.msg || 'Not open yet. Setting up lists it in other wallets and the Market and opens this room.'}
+          {s.msg ||
+            (TOKEN_ROOMS_ENABLED
+              ? 'Not open yet. Setting up lists it in other wallets and the Market and opens this room.'
+              : '')}
         </div>
         {s.needs && s.freeNote && (
           <div className="text-[12px] font-semibold" style={{ color: GOLD }}>
@@ -2552,7 +2561,7 @@ const SetupRoomRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }
           className="shrink-0 rounded-full px-3 py-1.5 text-xs font-bold disabled:opacity-40"
           style={{ background: GOLD, color: '#1a1300' }}
         >
-          {setupLabel(s.total.totalSats, s.rate, 'Set up your room')}
+          {setupLabel(s.total.totalSats, s.rate, TOKEN_ROOMS_ENABLED ? 'Set up your room' : undefined)}
         </button>
       )}
       {s.sheet}
@@ -2778,7 +2787,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
     setAccepted(loadInviteList(handle, 'accepted'));
     return afterPaint(() => {
       void syncBlocks(client);
-      if (identityAddress) void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
+      // No token rooms in a store build, so no personal room to finish (storeBuild.ts TOKEN_ROOMS_ENABLED).
+      if (TOKEN_ROOMS_ENABLED && identityAddress)
+        void retryPersonalRoom(apiContext, identityAddress, client).then((t) => t && refresh());
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle, identityAddress]);
@@ -3553,7 +3564,9 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
               </p>
             )}
             <ul className="w-full">
-              {ROOMS &&
+              {/* Room set-up is paid indexing: bWalletX only (INDEXING_ENABLED literal, so a store bundle drops it). */}
+              {INDEXING_ENABLED &&
+                ROOMS &&
                 !bappsView &&
                 ownTokens(identityAddress).map((t) => (
                   <SetupRoomRow
@@ -3659,7 +3672,7 @@ const RoomsPage = ({ header }: { header: React.ReactNode }) => {
             </ul>
 
             {/* Token rooms: full build only. The store build hides the section entirely (storeBuild.ts). */}
-            {ROOMS && !bappsView && (
+            {TOKEN_ROOMS_ENABLED && ROOMS && !bappsView && (
               <>
                 <ListLabel>Token rooms</ListLabel>
                 {entries === null && <SkeletonRows count={3} label="Loading token rooms" />}

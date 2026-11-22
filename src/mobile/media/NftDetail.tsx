@@ -36,6 +36,7 @@ import {
   nftSendButton,
   PENDING_CARD_TEXT,
   PENDING_SEND_TEXT,
+  recipientKeys,
   shortAddr,
 } from './nftSend';
 import { txidOf, walletTxStates } from './unbroadcast';
@@ -391,7 +392,7 @@ export const NftDetail = ({
               onStatus={(st, r) => {
                 setStatus(st);
                 setToName(r ? (r.displayName ?? r.input) : undefined);
-                setToKeys(r ? { pubkey: r.pubkey, ordAddress: r.ordAddress } : {});
+                setToKeys(r ? recipientKeys(r) : {});
                 const k = r?.via === 'pubkey' && r.rawKey && r.pubkey ? r : null;
                 setToKey((prev) =>
                   k && prev?.raw === k.rawKey

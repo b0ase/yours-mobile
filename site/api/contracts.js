@@ -1,6 +1,7 @@
 // Exchange › Contracts catalogue (lib/contracts.js; chain checks shared with strategies in lib/strategyKeys.js).
 //   GET  /api/contracts                    → { contracts: [{ origin, envelope, sold, createdAt }] }
-//   GET  /api/contracts?origin=<origin>    → { contract: { origin, envelope, sold, createdAt } }
+//   GET  /api/contracts?origin=<origin>    → { contract: { origin, envelope, sold, createdAt } }, or 404 with `reason`
+//        when the listing exists but isn't served (refused, or an earlier listing of it by another author)
 //   POST { action:'publish', outpoint, message, pubkey_hex, signature }   the author's freshly minted copy
 //        A paid contract must be signed by its author (lib/contracts.js envelopeRefusal), and a contract listed
 //        earlier on chain by another author is refused (servedListings).
@@ -10,7 +11,14 @@
 // later copy of an earlier author's contract, is never shown or counted (fail closed).
 // Env (Vercel only): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 const K = require('../lib/strategyKeys');
-const { CONTRACT_TYPE, envelopeRefusal, judgeListings, parseContractEnvelope } = require('../lib/contracts');
+const {
+  CONTRACT_TYPE,
+  envelopeRefusal,
+  formProblem,
+  judgeListings,
+  normaliseSource,
+  parseContractEnvelope,
+} = require('../lib/contracts');
 
 const WINDOW_MS = 10 * 60 * 1000;
 const hits = new Map();
@@ -82,30 +90,53 @@ const enc = (s) => {
     return encodeURIComponent(s.replace(/[\ud800-\udfff]/g, '\ufffd'));
   }
 };
-/** Every listing of a contract with this name (servedListings picks the same contract), earliest first. */
-const sameName = (name) => rows(`${LISTING}&envelope->contract->>name=eq.${enc(name)}&order=created_at.asc&limit=500`);
+const quote = (v) => `"${String(v).replace(/["\\]/g, '\\$&')}"`;
 /**
- * Every listing of contracts with these names, so a page of the catalogue is judged against older listings too.
- * Earliest first, so if a name ever has more rows than the limit, the ones cut are the latest, never an original.
- * (A later migration could store a hash of descriptor + description and look up by that instead of by name.)
+ * Every listing that may be the same contract as these (lib/contracts.js contractKeys): by name, and by source, since
+ * the identity leaves the name out and a copier can rename. The source is asked in its normalised form only: since the
+ * final review of row 352 (F1) a new listing must be stored in that form (formProblem), so a copy that only re-spaces
+ * or re-cases the code meets the original. Rows listed before that check whose source isn't normalised can be missed
+ * (scripts/contractsUnnormalised.js lists them; migrations-proposed/ has the identity-key column that ends this). A
+ * listing with no source (free only) is found by name. Earliest first, so if there are ever more rows than the limit,
+ * the ones cut are the latest, never an original.
  */
-async function sameNames(names) {
-  const quoted = [...new Set(names)].map((n) => `"${n.replace(/["\\]/g, '\\$&')}"`);
-  const out = [];
-  for (let i = 0; i < quoted.length; i += 25)
-    out.push(
-      ...(await rows(
-        `${LISTING}&envelope->contract->>name=in.${enc(`(${quoted.slice(i, i + 25).join(',')})`)}&order=created_at.asc&limit=2000`,
-      )),
-    );
-  return out;
+async function sameBehaviour(contracts) {
+  const by = (f, forms) => [
+    ...new Set(
+      contracts
+        .map((c) => c?.[f])
+        .filter((v) => typeof v === 'string' && v !== '')
+        .flatMap(forms)
+        .filter((v) => v !== ''),
+    ),
+  ];
+  const out = new Map();
+  for (const [col, values] of [
+    ['name', by('name', (v) => [v, v.normalize('NFKC').trim()])],
+    ['source', by('source', (v) => [normaliseSource(v)])],
+  ])
+    for (let i = 0; i < values.length; i += 25) {
+      const list = `(${values
+        .slice(i, i + 25)
+        .map(quote)
+        .join(',')})`;
+      for (const r of await rows(
+        `${LISTING}&envelope->contract->>${col}=in.${enc(list)}&order=created_at.asc&limit=2000`,
+      ))
+        out.set(r.origin, r);
+    }
+  return [...out.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 }
-/** Is the listing at `origin` (with envelope `env`) one the catalogue serves? true, false, or 'unchecked'. */
-async function served(origin, env) {
-  if (typeof env?.contract?.name !== 'string') return false;
-  const j = await judgeListings(await sameName(env.contract.name), position);
-  return j.unchecked.has(origin) ? 'unchecked' : j.served.has(origin);
+/**
+ * Is the listing at `origin` (with envelope `env`) one the catalogue serves? `is`: true, false, or 'unchecked'; when
+ * false, `reason` says why (judgeListings reasons), so the author asking for it by origin can see it.
+ */
+async function judgeOne(origin, env) {
+  if (typeof env?.contract?.name !== 'string') return { is: false };
+  const j = await judgeListings(await sameBehaviour([env.contract]), position);
+  return j.unchecked.has(origin) ? { is: 'unchecked' } : { is: j.served.has(origin), reason: j.reasons.get(origin) };
 }
+const served = async (origin, env) => (await judgeOne(origin, env)).is;
 
 async function list(req, res) {
   const origin = K.normOutpoint(new URL(req.url, 'http://x').searchParams.get('origin'));
@@ -118,13 +149,15 @@ async function list(req, res) {
   const sold = new Map();
   for (const c of copies) sold.set(c.contract_origin, (sold.get(c.contract_origin) || 0) + 1);
   let ok;
+  let reason;
   if (origin) {
-    const is = all[0] ? await served(all[0].origin, all[0].envelope) : false;
-    if (is === 'unchecked') return send(res, 503, { error: NO_CHAIN });
-    ok = new Set(is ? [all[0].origin] : []);
+    const one = all[0] ? await judgeOne(all[0].origin, all[0].envelope) : { is: false };
+    if (one.is === 'unchecked') return send(res, 503, { error: NO_CHAIN });
+    ok = new Set(one.is ? [all[0].origin] : []);
+    reason = one.reason;
   } else {
-    const names = all.map((c) => c.envelope?.contract?.name).filter((n) => typeof n === 'string');
-    ok = (await judgeListings(await sameNames(names), position)).served;
+    const contracts = all.map((c) => c.envelope?.contract).filter((c) => typeof c?.name === 'string');
+    ok = (await judgeListings(await sameBehaviour(contracts), position)).served;
   }
   // `body` = the exact inscribed text: buyers inscribe it byte for byte, so their copy's hash matches.
   const out = all
@@ -136,7 +169,11 @@ async function list(req, res) {
       sold: sold.get(c.origin) || 0,
       createdAt: c.created_at,
     }));
-  if (origin) return out[0] ? send(res, 200, { contract: out[0] }) : send(res, 404, { error: 'Not found' });
+  // A listing that isn't served says why, so its author can see it (round 4 of the row 352 review).
+  if (origin)
+    return out[0]
+      ? send(res, 200, { contract: out[0] })
+      : send(res, 404, reason ? { error: `This contract isn’t listed: ${reason}`, reason } : { error: 'Not found' });
   return send(res, 200, { contracts: out });
 }
 
@@ -159,8 +196,10 @@ async function publish(b, res) {
   if (!a) return send(res, 400, { error: 'That output isn’t a contract inscription' });
   const refused = await envelopeRefusal(a.env);
   if (refused) return send(res, refused[0], { error: refused[1] });
+  const form = formProblem(a.env.contract);
+  if (form) return send(res, 400, { error: form });
   // The earliest listing on chain stays: refused if an earlier one of this contract is by another author.
-  const others = (await sameName(a.env.contract.name)).filter((e) => e.origin !== p.outpoint);
+  const others = (await sameBehaviour([a.env.contract])).filter((e) => e.origin !== p.outpoint);
   // Not in the catalogue yet: among unconfirmed (or same-block) listings it ranks last.
   const mine = { origin: p.outpoint, envelope: a.env, created_at: null };
   const j = await judgeListings([...others, mine], position);

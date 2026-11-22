@@ -195,6 +195,8 @@ describe('what the site receives (background reply → content forward → windo
     expect(e.message).toContain(WALLET_SETUP_TIMEOUT_CODE);
   });
   test('the background wraps every reply with the coder', () => {
-    expect(src('../background.ts')).toContain('answer(withPromptNotShownCode(withDenialCode(response)))');
+    expect(src('../background.ts')).toContain(
+      'answer(withPromptNotShownCode(withRefusalCode(withDenialCode(response))))',
+    );
   });
 });

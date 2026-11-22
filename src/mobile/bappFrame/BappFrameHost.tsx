@@ -1,4 +1,4 @@
-import { APP_NAME, appNameFor, isBWalletX } from '../storeBuild';
+import { APP_NAME, isBWalletX } from '../storeBuild';
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronLeft, Maximize2, Monitor, RotateCw, Smartphone, X } from 'lucide-react';
@@ -33,7 +33,7 @@ import bxIcon from '../../../assets/bwalletx-ext/icon128.png?inline';
 
 // One id per app run: the site's dedupe key (brand/discovery.ts).
 const ANNOUNCE = walletAnnounceMessage({
-  name: appNameFor(),
+  name: APP_NAME,
   icon: isBWalletX() ? bxIcon : bIcon,
   rdns: 'space.bwallet.mobile',
   uuid: globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`,

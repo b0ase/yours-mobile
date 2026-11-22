@@ -2,6 +2,7 @@
  * Denied microphone / camera: what to tell the user and where to send them.
  * Pure (no Capacitor import) so the platform text can be unit tested.
  */
+import { APP_NAME } from '../storeBuild';
 
 export type MediaKind = 'mic' | 'camera';
 export type MediaPlatform = 'ios' | 'android' | 'web' | 'extension';
@@ -26,7 +27,7 @@ export function deniedText(kind: MediaKind, platform: MediaPlatform): string {
   if (platform === 'android')
     return `${what} is off for bWallet. Turn it on in Android Settings › Apps › bWallet › Permissions.`;
   if (platform === 'extension')
-    return `bWalletX needs your ${what.toLowerCase()} for Spaces and calls. Chrome can only ask in a tab: tap Allow in a tab, then come back.`;
+    return `${APP_NAME} needs your ${what.toLowerCase()} for Spaces and calls. Chrome can only ask in a tab: tap Allow in a tab, then come back.`;
   return `${what} is blocked for this site. Allow it in your browser’s site settings (the lock icon next to the address).`;
 }
 

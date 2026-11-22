@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Check, Copy, ExternalLink, ScanLine, Terminal, X } from 'lucide-react';
 import { useBackClose } from '../backStack';
 import { openDappBrowser } from '../dappBrowser';
+import { APP_NAME } from '../storeBuild';
 
 const MUTED = '#98A2B3';
 const GOLD = 'var(--bw-accent)';
@@ -79,7 +80,7 @@ export const AgentToolsSheet = ({
       </div>
       <div className="flex-1 overflow-y-auto px-4 pb-10 flex flex-col gap-4">
         <p className="m-0 text-sm" style={{ color: '#D0D5DD' }}>
-          Let scripts and AI assistants (Claude, Cursor and others) use a bWalletX <b>agent account</b>. Keys stay on
+          Let scripts and AI assistants (Claude, Cursor and others) use a {APP_NAME} <b>agent account</b>. Keys stay on
           this phone: the computer asks, and this wallet approves within the limits you set when pairing.
         </p>
         <div className="flex flex-col gap-2">

@@ -1,17 +1,24 @@
 # Phone pairing: proving a site's origin
 
+> **Review 3, 22 Nov 2026: origin proofs (`s`, `s2`) are no longer trusted, and the wallet ignores them.** A site's
+> proof route signs for any caller that sets an `Origin` header, which a script outside a browser can do, so a proof
+> made a phisher's relay session look clean. Every pairing now shows "a site that claims to be <host>"; the wallet
+> returns only to the ROOT of the exact origin the relay saw (when the link asks with `ret` + `rid`); the one-tap
+> sign-in needs only that return, because its signature travels ONLY in the return fragment, never over the relay, and
+> arms no silent follow-up. The history below is kept for reference.
+
 ## Return to the site (v2), quick reference
 
 Add these four optional fields to the pairing link, next to the fields you already send. Keep `v=1` and keep `s`:
 older wallets ignore the new fields and still see your v1 proof.
 
-| Field | Value                                                                                                                                |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `ret` | The https URL to send the user back to after Allow. Same host as `o`, or a subdomain of it. At most 512 bytes. No userinfo, no port. |
-| `rid` | A one-time request id: 16 random bytes, base64url (22 chars; 16–64 `[A-Za-z0-9_-]` accepted). New for every link.                    |
-| `b`   | Browser hint: `safari`, `chrome`, `firefox`, `samsung`, `edge`, `brave` or `other`. Optional.                                        |
-| `s2`  | The v2 proof: DER signature (hex), by a key in your `/.well-known/bwalletx-pair.json`, over the UTF-8 string below.                  |
-| `cd`  | Comparison-code length: `8` (BRC-185). Optional; without it the wallet shows the legacy 4 digits.                                    |
+| Field | Value                                                                                                                                                                                                                      |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ret` | The https URL to send the user back to after Allow. Exactly the origin `o` (no subdomains, since 22 Nov 2026). At most 512 bytes. No userinfo, no port. Without a valid `s2` the wallet returns to the origin's root only. |
+| `rid` | A one-time request id: 16 random bytes, base64url (22 chars; 16–64 `[A-Za-z0-9_-]` accepted). New for every link.                                                                                                          |
+| `b`   | Browser hint: `safari`, `chrome`, `firefox`, `samsung`, `edge`, `brave` or `other`. Optional.                                                                                                                              |
+| `s2`  | The v2 proof: DER signature (hex), by a key in your `/.well-known/bwalletx-pair.json`, over the UTF-8 string below.                                                                                                        |
+| `cd`  | Comparison-code length: `8` (BRC-185). Optional; without it the wallet shows the legacy 4 digits.                                                                                                                          |
 
 ```
 bwallet-pair-v2|proof|<c>|<k lowercase>|<o>|<e>|<ret>|<rid>|<b, or empty>[|cd=<cd>]
@@ -46,6 +53,22 @@ After the user taps Connect, the wallet opens `ret` with the result in the fragm
 https://www.tokenblaster.lol/terrornode#bwx=ok&rid=Zm9vYmFyYmF6cXV4MTIzNA
 ```
 
+Since 22 Nov 2026 the fragment also carries `wk` (the wallet's pairing public key) and `f` (its sealed `ready`,
+base64url of the frame's JSON): `#bwx=ok&rid=<rid>&wk=<02…>&f=<…>`. It is a CLAIM, not proof: the link carries the
+channel, the site's pairing key and the rid, so anyone holding the link can seal their own `ready` (and their own
+sign-in) and build this fragment. A page uses it only once the relay's wallet says hello with the same `wk` (the relay
+binds one wallet to the channel). Then it saves a tab that slept through the relay (iOS freezes it while the user is
+in bWallet, often swallowing hello and ready with its frozen socket), or a NEW tab, from waiting on frames already
+spent. With `ln`/`lx` (the site's sign-in nonce and ISO expiry) on a PROVEN link (a valid `s2`; review 2, 22 Nov 2026), Connect also signs the standard sign-in
+text for the relay-verified origin, so the user is sent to the wallet once, not twice. That signature travels ONLY in
+the return's frame (CTO 22 Nov 2026); over the relay the `ready` says `ls: 1` ("signed in, see the return") and
+carries no signature, because whoever holds the site end of the channel (a script can, even with a valid `s2` it
+obtained for its own link) must never see it. No return possible: no fold, and the site asks on the separate sheet. An unproven link never gets that: its sign-in comes as the usual separate request and sheet ("a site that
+claims to be <host>"), because an unproven "site" may be a script relaying a real site's challenge. Without a valid
+`s2` the wallet returns to the origin's ROOT only (the relay's origin is the WebSocket
+`Origin` header: honest from a browser, but any other client can set it), so an unproven link can't pick a path.
+`@bwalletx/connect` 0.9.0 does all of this (`resumeReturnedPairing`, which hands back the starting page).
+
 On that page: check `rid` is the one you issued (then forget it), restore the pairing you saved before navigating
 (`restorePairing`) and carry on. Save the pairing state in **localStorage keyed by `rid`**, not only sessionStorage: the
 web wallet returns in a new tab (below). The fragment carries no secret; sign the user in with your own
@@ -54,9 +77,11 @@ challenge/verify over the relay as today.
 **When the wallet returns.** Only when all of these hold; otherwise it shows the usual "switch back to your browser"
 screen and nothing else changes:
 
-- `s2` verifies against a key at `https://<o>/.well-known/bwalletx-pair.json` (it binds `c`, `k`, `o`, `e`, `ret`,
-  `rid` and `b`, so none of them can be swapped);
-- `ret` is https, on the host of `o` or a subdomain of it (never a parent domain or a look-alike), no userinfo, no
+- the link carries no `s2`, or its `s2` verifies against a key at `https://<o>/.well-known/bwalletx-pair.json` (it
+  binds `c`, `k`, `o`, `e`, `ret`, `rid` and `b`, so none of them can be swapped). Since 22 Nov 2026 (P0: phone
+  sign-in never came back) a link without any proof returns too: sites on `@bwalletx/connect` have no well-known key,
+  and the rules below already keep the return on the site the user came from. A link whose `s2` fails never returns;
+- `ret` is https on exactly the origin `o` (no subdomains, never a parent domain or a look-alike), no userinfo, no
   port, at most 512 bytes; and the relay's origin equals `o`;
 - `rid` has not been used on that device in the last 24 hours.
 
@@ -75,7 +100,12 @@ counts as proven.
 | Web wallet            | any                                             | the https URL in a new tab, after the user taps **Return** (browsers block untapped popups); the wallet tab must stay open for your requests |
 
 Android packages: chrome `com.android.chrome`, samsung `com.sec.android.app.sbrowser`, firefox `org.mozilla.firefox`,
-edge `com.microsoft.emmx`, brave `com.brave.browser`.
+edge `com.microsoft.emmx`, brave `com.brave.browser`, opera `com.opera.browser`.
+
+**Which returns carry the one-tap sign-in** (CTO 22 Nov 2026): a plain https return, or an Android explicit-package
+`intent://` (scheme https, a package from this table, fallback on the same origin root): Android delivers it only to
+that installed browser. Never an iOS custom scheme (`googlechromes://`, `firefox://`): any app may register those, so
+on iOS Chrome/Firefox the sign-in comes as the separate sheet.
 
 **No app installed.** `www.bwallet.space/pair` (site/pair.html) on a phone offers **Open in the bWallet app**
 (`bwalletx://pair?<same params>`), **Use the web wallet**

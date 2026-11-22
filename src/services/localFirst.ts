@@ -19,11 +19,17 @@
  *     refused with a plain message, and nothing is signed.
  */
 import type { SwitchResult } from './restoreFromRemote';
+import { normalizeStoreConfig, repairSyncRemote } from './ourServer';
 
 export type StoreConfigLike = { activeRemote?: string; remotes?: string[]; localFirst?: boolean } | undefined;
 
-/** The remote this account backs up to (the active one first). */
-export const remoteUrlOf = (c: StoreConfigLike): string | undefined => c?.activeRemote || c?.remotes?.[0] || undefined;
+/**
+ * The remote this account backs up to (the active one first). Never our storage server unless it is the active store
+ * (review of a95a1ff0, 1): unknown here whether its whole fill ran on this device. The background passes its own pick
+ * (EnsureLocalDeps.pickRemote), which knows the flag and the hold-out.
+ */
+export const remoteUrlOf = (c: StoreConfigLike): string | undefined =>
+  repairSyncRemote(normalizeStoreConfig(c), true, false) || undefined;
 
 /** Is this account's active store this device's own? (No storage config at all is a device-only account.) */
 export const isOnDeviceStore = (c: StoreConfigLike): boolean => !c?.activeRemote;
@@ -89,6 +95,8 @@ export type EnsureLocalDeps = {
   /** This device's store is the active one right now. */
   isLocalActive: () => boolean;
   switchVerified: (remoteUrl: string) => Promise<SwitchResult>;
+  /** The remote to read from (the background's: flag and hold-out known). Default: remoteUrlOf. */
+  pickRemote?: (c: StoreConfigLike) => Promise<string | undefined>;
   /** The device's store, while active, holds nothing (the 14 Oct "empty after restore" state). */
   localIsEmpty: () => Promise<boolean>;
   /**
@@ -101,11 +109,17 @@ export type EnsureLocalDeps = {
   onFailed: (id: string) => Promise<void>;
   /** "Loading your wallet from backup…" status: undefined = done, null = done without the copy. */
   status?: (m: string | undefined | null) => void;
+  /**
+   * Instant restore (services/spendableFirst.ts), passed only while its flag is on: tried first on a device with
+   * nothing from the backup yet. `used`: the device store is active and holds the snapshot, and `remotes` are added to
+   * the account's backups. Not used (or a throw): the path below runs exactly as without it.
+   */
+  spendableFirst?: (remoteUrl: string) => Promise<{ used: true; remotes?: string[] } | { used: false }>;
   log?: (...a: unknown[]) => void;
 };
 
 export type EnsureLocalResult =
-  | { ok: true; how: 'switched' | 'already-local' | 'no-remote' | 'pulled' }
+  | { ok: true; how: 'switched' | 'already-local' | 'no-remote' | 'pulled' | 'snapshot' }
   /** This device stays active; pulling the backup's records into it failed (the next open or sync tries again). */
   | { ok: true; how: 'pull-failed'; reason?: string }
   | { ok: false; how: 'failed' | 'failed-this-session' | 'busy' | 'no-account'; reason?: string };
@@ -117,7 +131,7 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
     const a = d.account();
     if (!a) return d.isLocalActive() ? { ok: true, how: 'already-local' } : { ok: false, how: 'no-account' };
     const config = a.config;
-    const remoteUrl = remoteUrlOf(config);
+    const remoteUrl = d.pickRemote ? await d.pickRemote(config) : remoteUrlOf(config);
     if (!config || !remoteUrl)
       return d.isLocalActive() ? { ok: true, how: 'no-remote' } : { ok: false, how: 'no-account' };
     if (d.failedThisSession(a.id))
@@ -125,7 +139,24 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
     if (d.backupInFlight()) return d.isLocalActive() ? { ok: true, how: 'already-local' } : { ok: false, how: 'busy' };
     const remotes = config.remotes?.includes(remoteUrl) ? config.remotes : [...(config.remotes ?? []), remoteUrl];
 
+    /** The instant restore, when offered: its outcome, or undefined to carry on as before. */
+    const snapshot = async () => {
+      if (!d.spendableFirst) return undefined;
+      const r = await d.spendableFirst(remoteUrl).catch((e: unknown) => {
+        log('[localFirst] instant restore did not run:', e);
+        return { used: false as const };
+      });
+      return r.used ? r : undefined;
+    };
+    const plus = (list: string[], more: string[] = []) => [...list, ...more.filter((u) => !list.includes(u))];
+
     if (config.activeRemote || !d.isLocalActive()) {
+      const snap = await snapshot();
+      if (snap) {
+        d.status?.(undefined);
+        await d.save({ ...config, activeRemote: undefined, remotes: plus(remotes, snap.remotes), localFirst: true });
+        return { ok: true, how: 'snapshot' };
+      }
       log('[localFirst] the remote store is active: verifying the device copy, then switching to it');
       const r = await d.switchVerified(remoteUrl);
       d.status?.(r.ok ? undefined : null);
@@ -142,6 +173,13 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
     // backup's records into this device's store; it stays the active one throughout, and nothing is saved, so a slow
     // or failing backup can never put the account back on the remote (release click-through, 4 Nov 2026).
     if (!(await d.localIsEmpty())) return { ok: true, how: 'already-local' };
+    const snap = await snapshot();
+    if (snap) {
+      d.status?.(undefined);
+      const more = plus(config.remotes ?? [], snap.remotes);
+      if (more.length !== (config.remotes ?? []).length) await d.save({ ...config, remotes: more });
+      return { ok: true, how: 'snapshot' };
+    }
     log('[localFirst] this device holds nothing; pulling the backup into it (this device stays the active store)');
     try {
       await d.pullIntoLocal(remoteUrl);
@@ -160,6 +198,78 @@ export async function ensureLocalStore(d: EnsureLocalDeps): Promise<EnsureLocalR
   }
 }
 
+/** How long a send waits for the copy before it is refused with the progress message. */
+export const SEND_WAIT_MS = 2000;
+
+/** Progress of the copy and coin checks, as the background last heard it. */
+export type MoveProgress = { done: number; total: number; startedAt: number };
+
+/** "Moving your wallet to this device: N of M. You can send in about T." (no counts yet: a plain line). */
+export function movingMessage(p: MoveProgress | null | undefined, now = Date.now()): string {
+  if (!p || p.total <= 0 || p.done <= 0)
+    return 'Moving your wallet to this device. Nothing was sent. You can send when it finishes.';
+  const left = Math.max(0, p.total - p.done);
+  const perItem = (now - p.startedAt) / p.done;
+  const mins = Math.max(1, Math.ceil((left * perItem) / 60_000));
+  return `Moving your wallet to this device: ${p.done} of ${p.total}. You can send in about ${mins} minute${mins === 1 ? '' : 's'}. Nothing was sent.`;
+}
+
+/** What one admission run settled and left (inboundSync.AdmitReport): the restore's own coin-check progress. */
+export type AdmissionCounts = { admitted: number; applied: number; refused: number; retired: number; left: number };
+
+/**
+ * The counts a refused send shows (task 70 review, B2), from the move's own progress: each admission run while a move
+ * runs adds what it settled (N) to what is still listed (M). Kept only while a move runs, and cleared when it ends,
+ * however it ends, so a failed move never leaves old counts behind.
+ */
+export function moveProgressTracker(clock: () => number = Date.now) {
+  let p: MoveProgress | null = null;
+  let running = 0;
+  return {
+    async track<T>(run: () => Promise<T>): Promise<T> {
+      if (running++ === 0) p = { done: 0, total: 0, startedAt: clock() };
+      try {
+        return await run();
+      } finally {
+        if (--running === 0) p = null;
+      }
+    },
+    admission(r: AdmissionCounts | undefined | void) {
+      if (!running || !p || !r) return;
+      const done = p.done + r.admitted + r.applied + r.refused + r.retired;
+      p = { done, total: done + r.left, startedAt: p.startedAt };
+    },
+    current: (): MoveProgress | null => (p ? { ...p } : null),
+    message: (now = clock()) => movingMessage(p, now),
+  };
+}
+
+/**
+ * Get this device's store active for a payment without ever starting a second copy: join the one running, or start
+ * one if none is. Waits at most `waitMs`; the copy carries on in the background either way. True once local is active.
+ */
+export async function joinOrStartMove(d: {
+  isLocal: () => boolean;
+  running: () => Promise<unknown> | null;
+  start: () => Promise<unknown>;
+  waitMs: number;
+}): Promise<boolean> {
+  if (d.isLocal()) return true;
+  const p = d.running() ?? d.start();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    p.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((r) => {
+      timer = setTimeout(r, d.waitMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return d.isLocal();
+}
+
 type CreateArgs = { inputs?: unknown[]; outputs?: unknown[] } | undefined;
 
 /** Does this createAction build a transaction (and so change)? A sendWith-only call builds nothing. */
@@ -174,7 +284,13 @@ export const buildsTransaction = (args: CreateArgs): boolean =>
  */
 export function requireLocalStoreForChange(
   wallet: unknown,
-  d: { isLocal: () => boolean; ensureLocal?: () => Promise<boolean>; log?: (m: string) => void },
+  d: {
+    isLocal: () => boolean;
+    ensureLocal?: () => Promise<boolean>;
+    /** The progress message to refuse with (default: the general one). */
+    refusal?: () => string;
+    log?: (m: string) => void;
+  },
 ): boolean {
   const w = wallet as { createAction?: (args: CreateArgs, originator?: string) => Promise<unknown> } | null;
   if (!w || typeof w.createAction !== 'function') return false;
@@ -186,7 +302,7 @@ export function requireLocalStoreForChange(
       const ok = d.ensureLocal ? await d.ensureLocal().catch(() => false) : false;
       if (!ok || !d.isLocal()) {
         log('[localFirst] the device store is not active: payment refused, nothing built');
-        throw new LocalStoreNeededError();
+        throw new LocalStoreNeededError(d.refusal?.());
       }
     }
     return original(args, originator);

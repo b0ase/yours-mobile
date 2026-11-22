@@ -5,11 +5,10 @@ import { walletReady } from '../../utils/walletReady';
 import { isFriend as isCallFriend } from '../calls/friends';
 import { loadMyProfile, saveMyProfile } from '../calls/bphone';
 import { usdToSats, useBsvUsd } from '../money/money';
-import { acknowledge, fetchMail, myKey, openMail, sendMail, type SendArgs } from './client';
+import { myKey, openMail, recheckLetter, sendMail, syncMail, type SendArgs } from './client';
 import { split } from './route';
 import { cachedExchangeRate } from '../../utils/wallet';
 import {
-  addReceived,
   isArchived,
   isInBin,
   isLive,
@@ -116,7 +115,8 @@ export const useBMail = () => {
   const restore = useCallback((ids: string[]) => updateMail(me, (s) => restoreFromBin(s, ids)), [me]);
   const trust = useCallback((from: string) => updateMail(me, (s) => trustSender(s, from)), [me]);
   const isTrusted = useCallback((from: string) => isTrustedSender(state, from, isFriend), [state, isFriend]);
-  // Bin: erase the content of mail deleted more than 30 days ago (local only; money untouched).
+  // Bin: erase the content of mail deleted more than 30 days ago (money untouched). The next fetch then clears it
+  // from the relay too (client.ts fetchMail, rule b).
   useEffect(() => {
     if (!me) return;
     const s = loadMail(me);
@@ -129,18 +129,7 @@ export const useBMail = () => {
     setLoading(true);
     setError('');
     try {
-      const s = loadMail(me);
-      const { items, ack } = await fetchMail(wallet, {
-        me,
-        sent: s.sent,
-        known: new Set(s.received.map((r) => r.id)),
-        // Credits already spent by a stored letter: one reply per reply-paid credit.
-        creditsUsed: new Set(
-          s.received.filter((r) => r.replyCredit && r.env.inReplyTo).map((r) => r.env.inReplyTo as string),
-        ),
-      });
-      updateMail(me, (x) => addReceived(x, items));
-      await acknowledge(wallet, ack).catch(() => undefined);
+      await syncMail(wallet, me);
     } catch (e) {
       setError(friendlyMailError(e, { whole: true }));
     } finally {
@@ -164,6 +153,8 @@ export const useBMail = () => {
   const open = useCallback(
     async (r: Received) => {
       const sealed = r.opened ?? (await openMail(wallet, r.env));
+      // A stamp that was given up on for want of an answer gets another check now (in the background).
+      if (r.stampOpen !== undefined) void recheckLetter(wallet, me, r.id).catch(() => undefined);
       updateMail(me, (s) => ({
         ...s,
         received: s.received.map((x) => (x.id === r.id ? { ...x, opened: sealed, read: true } : x)),

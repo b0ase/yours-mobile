@@ -1,6 +1,7 @@
 import { ONESAT_MAINNET_CONTENT_URL } from '@1sat/actions';
 import { isUri } from '../../utils/uri';
 import { PNEE_ICON, PNEE_TOKEN_ID } from '../notes/pnee';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * First-party tokens, pinned by EXACT token id (never by ticker: anyone can deploy another "PNEE").
@@ -10,7 +11,7 @@ import { PNEE_ICON, PNEE_TOKEN_ID } from '../notes/pnee';
 type Official = { icon: string; issuer: string };
 const norm = (id: string) => id.trim().toLowerCase().replace('.', '_');
 const OFFICIAL: Record<string, Official> = {
-  [norm(PNEE_TOKEN_ID)]: { icon: PNEE_ICON, issuer: 'bWalletX' },
+  [norm(PNEE_TOKEN_ID)]: { icon: PNEE_ICON, issuer: `${APP_NAME}` },
 };
 
 /**

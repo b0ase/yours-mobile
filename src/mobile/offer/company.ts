@@ -131,6 +131,8 @@ export type Receipt = {
     firstSeen: string;
   };
   checks?: { subscriberSigValid?: boolean };
+  /** Set when no USD/BSV rate was available at receipt (site/lib/offerReceipts.js): held, not valued. */
+  held?: 'rate_unavailable';
   allotment: null;
 };
 export const listReceipts = async (f: Fetch, wallet: Signer, alias: string): Promise<Receipt[]> => {
@@ -148,4 +150,25 @@ export const RECEIPT_STATUS_TEXT: Record<Receipt['status'], string> = {
   received_pending_allotment: 'Received, pending allotment',
   received_shortfall: 'Received, short of the amount',
   received_after_lapse: 'Received after the offer lapsed (held)',
+};
+
+const usdText = (v: string) =>
+  `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** The amount and status a receipt row shows. A receipt held for no rate shows its BSV, never a USD figure. */
+export const receiptLine = (r: Receipt): { amount: string; status: string } => {
+  if (r.held === 'rate_unavailable')
+    return {
+      amount: `${r.payment.bsv} BSV`,
+      status:
+        r.status === 'received_after_lapse'
+          ? 'Received after the offer lapsed (held), with no exchange rate when it arrived, so it is not valued yet'
+          : 'Received, held: no exchange rate when it arrived, so it is not valued yet',
+    };
+  return {
+    amount: usdText(r.payment.usdValue),
+    status:
+      RECEIPT_STATUS_TEXT[r.status] +
+      (r.status === 'received_shortfall' ? ` (short ${usdText(r.payment.shortfallUsd)})` : ''),
+  };
 };

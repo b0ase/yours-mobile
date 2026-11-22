@@ -11,6 +11,7 @@ import {
   trimPostageBeef,
 } from './delivery';
 import { friendlyMailError } from './friendlyError';
+import { decodeEnvelope, stampPrefix } from './envelope';
 import { keepGlobals } from '../../testing/stubGlobals';
 
 // bun runs every test file in one process: put back the globals this file swaps so they can't leak into the next.
@@ -131,6 +132,33 @@ describe('sendMail: pay only after the relay accepts', () => {
     expect(calls).toEqual(['sign:noSend', 'deliver', `broadcast:${child.id('hex')}`]);
     expect(sent.txid).toBe(child.id('hex'));
     expect(loadPending(ME)).toEqual([]);
+  });
+
+  test('the stamp is bound to its letter: its key is derived from the letter id, and the envelope says so', async () => {
+    const { gp, child, sign } = chain(10);
+    mined(gp);
+    await sign();
+    const w = fakeWallet(Utils.toHex(child.toAtomicBEEF()), child.id('hex'), []);
+    const keyIDs: string[] = [];
+    const real = w.getPublicKey.bind(w);
+    (w as unknown as { getPublicKey: unknown }).getPublicKey = async (a: { identityKey?: boolean; keyID?: string }) => {
+      if (a.keyID) keyIDs.push(a.keyID);
+      return real(a as never);
+    };
+    let body = '';
+    const sent = await sendMail(w, letter, {
+      limit: DEFAULT_MAX_BODY_BYTES,
+      fetchProof: null,
+      deliver: async (b) => void (body = b),
+    });
+    const env = decodeEnvelope(body)!;
+    expect(env.id).toBe(sent.id);
+    expect(env.postage?.bound).toBe(true);
+    expect(env.postage?.derivationPrefix).toBe(stampPrefix(sent.id));
+    expect(keyIDs).toEqual([`${stampPrefix(sent.id)} ${env.postage?.derivationSuffix}`]);
+    // A wallet from before this (its parsePostage drops fields it does not know) reads the same stamp, unbound.
+    const { bound: _b, ...older } = env.postage!;
+    expect(decodeEnvelope({ ...env, postage: older })?.postage).toEqual(older);
   });
 
   test('too large: never delivered or broadcast, stamp released, clear message', async () => {

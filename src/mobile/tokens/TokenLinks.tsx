@@ -10,7 +10,7 @@ import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { requestChatRoom } from '../chat/nav';
 import { tokenKey } from '../chat/tokenRooms';
-import { STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
+import { APP_NAME, STORE_BUILD, tokenRoomsEnabled } from '../storeBuild';
 import { fetchDeployJson, parseLinks, parseUtility, type LinkKind, type TokenLink } from './linkData';
 import { fetchTokenProfile } from './tokenProfile';
 
@@ -83,7 +83,7 @@ export const TokenLinks = ({
       {utility && (
         <p className="text-[11px] text-[#98A2B3] m-0 break-words">
           <span className="font-semibold text-[#D0D5DD]">Issuer says:</span> {utility}{' '}
-          <span className="text-[#667085]">(not checked by bWalletX)</span>
+          <span className="text-[#667085]">(not checked by {APP_NAME})</span>
         </p>
       )}
       <div className="flex flex-wrap gap-1.5" aria-label="Token links">
@@ -111,7 +111,7 @@ export const TokenLinks = ({
           </p>
           <p className="text-[11px] text-[#D0D5DD] m-0 break-all font-mono">{ask.url}</p>
           <p className="text-[11px] text-[#98A2B3] m-0">
-            The token&apos;s issuer set this link. It&apos;s an outside site that bWalletX hasn&apos;t checked; never
+            The token&apos;s issuer set this link. It&apos;s an outside site that {APP_NAME} hasn&apos;t checked; never
             enter your recovery phrase there.
           </p>
           <div className="flex gap-2">

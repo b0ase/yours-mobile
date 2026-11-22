@@ -4,6 +4,7 @@ import { sendBsv } from '../../utils/guardedSendBsv';
 import { fetchExchangeRate } from '../../utils/wallet';
 import { usdToSats } from '../money/money';
 import type { NameFee } from './paymail';
+import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 
 /** Matches site/lib/nameFee.js FEE_TAG / feeCommitData. */
 const FEE_TAG = 'bwalletx-name-fee';
@@ -22,12 +23,15 @@ export const nameFeeRequests = (fee: NameFee, sats: number, identityKey: string,
 /**
  * Pay the fee for a priced paymail name with the normal wallet send, bound to this wallet's key and `alias`.
  * Call only after the user confirmed the claim sheet. Returns what claimPaymail sends to the server.
+ * Never in a store build (storeBuild.ts paidNamesEnabled): it refuses before anything is priced or sent.
  */
 export const payNameFee = async (
   ctx: OneSatContext,
   fee: NameFee,
   alias: string,
+  store: boolean = STORE_BUILD,
 ): Promise<{ feeTxid: string; feeTx?: string }> => {
+  if (store) throw new Error(STORE_NAME_NOTE);
   const sats = usdToSats(fee.usd, await fetchExchangeRate('main'));
   if (!sats) throw new Error("Couldn't get the BSV price. Try again in a minute.");
   const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });

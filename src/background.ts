@@ -99,7 +99,7 @@ import type { TwetchAsk, TwetchWallet } from './mobile/twetch/twetchCalls';
 import { isMintPrivateAction, runSiteMintPrivate, type Kv as MintKv } from './services/mintPrivateSite';
 import { createContext, type OneSatContext } from '@1sat/actions';
 import { ALLOWANCES_ENABLED } from './services/allowanceFlag';
-import { ENVELOPES_ENABLED } from './mobile/storeBuild';
+import { APP_NAME, ENVELOPES_ENABLED } from './mobile/storeBuild';
 import {
   DEFAULT_ENVELOPE_USD,
   ENVELOPE_PRESETS_USD,
@@ -125,8 +125,34 @@ import { foundHeadline, restoredLine, scanNote, type ScanReport } from './servic
 import { paymailRestoreSummary } from './mobile/names/paymail';
 import { isEmpty, outpointsOnDevice, summarizeActive, switchToLocalVerified, type SwitchDeps } from './services/restoreFromRemote';
 import { asRestore } from './services/fullPass';
+import {
+  PREVIEW_CALL_MS,
+  PREVIEW_PAGE,
+  boundCopyRequests,
+  clearRestoreView,
+  getRestoreView,
+  noteRestoreProgress,
+  setRestoreView,
+  withTimeout,
+} from './services/restoreProgress';
 import { isUncheckedPage } from './services/inboundSync';
-import { ensureLocalStore, type EnsureLocalResult } from './services/localFirst';
+import {
+  SEND_WAIT_MS,
+  ensureLocalStore,
+  joinOrStartMove,
+  moveProgressTracker,
+  type EnsureLocalResult,
+} from './services/localFirst';
+import {
+  SNAPSHOT_SEND_WAIT,
+  addRemoteRefusal,
+  isOurServer,
+  normalizeStoreConfig,
+  spendableFirstOn,
+  withSnapshotRemote,
+} from './services/spendableFirst';
+import { ourBackupAttempt, ourBackupRetryTimer } from './services/spendableFirstWiring';
+import { ourServerControls, signOutStores } from './services/ourServerControls';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
@@ -155,6 +181,15 @@ import { recordCall, recordPayment, requestedSats, updateConnectionLog } from '.
 import { CWIEventName } from './cwi';
 import { describeWalletError } from './brand/walletError';
 import { userDeniedError, withDenialCode } from './services/userDenied';
+import {
+  internalRefusal,
+  pairingEndedError,
+  promptStaleError,
+  sealNotCoveredError,
+  sheetBuildRefusal,
+  siteBlockedError,
+  withRefusalCode,
+} from './services/refusalCodes';
 import { HANDOFF_ENABLED } from './mobile/passkey/extHandoff';
 import { HANDOFF_ALARM, handleExternalHandoff, sweepExpiredHandoff } from './mobile/passkey/extHandoffStore';
 import { isInvalidTxReview, resyncMessage, resyncSpent, type HealReport } from './services/invalidSendHeal';
@@ -247,7 +282,6 @@ import {
   PermissionBundler,
   TRUST_SITE_BASKET,
   BLOCK_SITE_BASKET,
-  BLOCKED_SITE_REFUSAL,
   blockActive,
   trustCovers,
   trustedBasketsFrom,
@@ -262,8 +296,15 @@ import { withDefaultExpiry } from './services/grantExpiry';
 import { markPayeeMismatch, parsePayees, payeesAllowed } from './services/allowanceGuard';
 import { ADMIN_ORIGINATOR, initWallet, lastCloseSteps, openAccountStorageForBackup, type AccountContext } from './initWallet';
 import { isExtensionSender, reservedOriginatorRefusal } from './services/adminOriginator';
+import { answerFeedAuthorRelay, FEED_AUTHOR_RELAY_ACTION } from './services/feedAuthorRelay';
 import { ROOM_PLAYING_ACTION, ROOM_QUERY_ACTION, ROOM_TAB_ACTION, parseRoomPlaying, roomTabOrigin } from './mobile/chat/gameRoomLive';
 import { isReservedBasket, RESERVED_BASKET_REFUSAL, revokeBasketGrantsForOriginator } from './services/reservedBaskets';
+import {
+  isReservedLabelProtocol,
+  reservedLabelRefusal,
+  RESERVED_LABEL_REFUSAL,
+  withoutReservedLabels,
+} from './services/reservedLabels';
 import { pinnedProtocol, pinnedProtocolRefusal, PINNED_PROTOCOLS_VERSION, versionWithPins } from './services/pinnedProtocols';
 import {
   DeferredEncrypts,
@@ -277,7 +318,6 @@ import { oneUseGrant } from './services/oneShotGrant';
 import { answerWithoutSheet, type SheetlessRequest } from './services/sheetlessAnswer';
 import { isOneUseRequestID } from './services/sharedKeySigning';
 import {
-  SEAL_BUSY_REFUSAL,
   SEAL_PROTOCOL,
   SEAL_REQUEST_PREFIX,
   SealPasses,
@@ -348,6 +388,13 @@ const isInServiceWorker = self?.document === undefined;
 
 // Account context - null if locked or not initialized
 let accountContext: AccountContext | null = null;
+/** Our storage server's rules for store switches, remote picks, Settings › Storage and sign-out. */
+const ourControls = ourServerControls({
+  flagOn: () => spendableFirstOn(chrome.storage?.local as never),
+  kv: { get: (k) => chrome.storage.local.get(k) as Promise<Record<string, unknown>> },
+  identityAddress: () => chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
+  ctx: () => accountContext,
+});
 
 /** chrome.storage.local, where the automatic coin check keeps its throttle and cleared list (autoCoinResync.ts). */
 const autoResyncKV = {
@@ -870,6 +917,10 @@ const runInitializeWallet = async (): Promise<WalletInterface | null> => {
     startSyncsAfter: heavyWorkMayStart,
     // No payment builds change on the remote store: this device's store first (services/localFirst.ts, P0 3 Nov 2026).
     ensureLocalStore: () => ensureLocalForPayment(),
+    // An instant restore's first pages are still coming in: a short wait, never "Retry moving…" (spendableFirst.ts).
+    refusal: () => (accountContext?.snapshotLoading() ? SNAPSHOT_SEND_WAIT : moveProgress.message()),
+    // The restore's own coin checks: "N of M" on a send refused while the move runs (task 70 review, B2).
+    onAdmitReport: (r) => moveProgress.admission(r),
     // One line on the balance card's sync label (a full re-pull over mobile data: services/fullPass.ts).
     notice: (message) => {
       chrome.runtime
@@ -1022,15 +1073,22 @@ const recoverAfterFailedSwitch = async (ctx: NonNullable<typeof accountContext>,
  * services/localFirst.ts). An account still on the remote store, whatever its old localFirst flag, gets its device copy
  * verified (or created) and switched to; an already-local account with an empty device store is pulled in.
  */
-const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<EnsureLocalResult> => {
+const settleLocalStore = async (ctx: NonNullable<typeof accountContext>): Promise<EnsureLocalResult> => {
   const { account } = chromeStorageService.getCurrentAccountObject();
   const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
+  // Instant restore (services/spendableFirst.ts): offered only with its flag on; off, the call below is as before.
+  const instant = (await spendableFirstOn(chrome.storage?.local as never))
+    ? { spendableFirst: (remoteUrl: string) => ctx.spendableFirst(remoteUrl) }
+    : {};
   return ensureLocalStore({
+    ...instant,
     account: () => (account ? { id: account.addresses.identityAddress, config } : null),
     // Backoff, not a lockout: the next open, payment or the user's Retry tries again (review F4).
     failedThisSession: (id) => moveInBackoff(id),
     backupInFlight: () => masterBackupInFlight,
     isLocalActive: () => ctx.storage.isActiveStorageProvider(),
+    // Never our server unless the flag, the hold-out and the active store allow it (review of a95a1ff0, 1).
+    pickRemote: (c) => ourControls.pickRemote(c as StorageConfig | undefined),
     switchVerified: (remoteUrl) => {
       console.log('[background] storage: switching active to this device after a verified copy of the backup');
       return switchToLocalVerified(restoreDeps(ctx, remoteUrl)).then((r) => {
@@ -1054,16 +1112,85 @@ const settleLocalStore = (ctx: NonNullable<typeof accountContext>): Promise<Ensu
   });
 };
 
-const preferLocalStorage = async (ctx: NonNullable<typeof accountContext>) => {
+const preferLocalStorage = (ctx: NonNullable<typeof accountContext>) =>
+  moveProgress.track(() => preferLocalStorageOnce(ctx));
+const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) => {
   const r = await settleLocalStore(ctx);
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   if (r.ok && id) moveFailures.delete(id);
+  // In the background: our server's first fill can take a while, and nothing here waits for it.
+  if (r.ok) void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
   if (!r.ok) {
     console.warn('[background] storage: this device is not the active store yet:', r);
     const entry = id ? moveFailures.get(id) : undefined;
     if (entry && r.reason) entry.reason = r.reason;
   }
 };
+
+/**
+ * With the instant-restore flag on, our storage server is a BACKUP beside 1Sat for an account on this device (README
+ * Phase 1). Its user row is pointed here, it is filled (services/backupFill.ts: the bulk outside the storage locks) and
+ * registered for this session; only then is it saved in the account's remotes, so a later open never connects a
+ * half-filled one whose first ordinary push would send everything inside the locks. Flag off: nothing.
+ */
+const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
+  if (!(await spendableFirstOn(chrome.storage?.local as never))) return;
+  if (!ctx.storage.isActiveStorageProvider()) return;
+  const before = chromeStorageService.getCurrentAccountObject().account;
+  const config = normalizeStoreConfig(before?.storageConfig as StorageConfig | undefined);
+  if (!before || !config) return;
+  if (withSnapshotRemote(config, true) === config) {
+    // Our server saved as a backup but left out of this session at init: the once-per-device check (and any repair)
+    // runs, then it joins (spendableFirstWiring ensureOurBackup). A repair that didn't finish arms the retry alarm.
+    if (!config.activeRemote && config.remotes?.some(isOurServer))
+      await ourBackupAttempt({
+        add: () => ctx.ensureOurBackup(),
+        timer: ourBackupTimer,
+        log: (...a) => console.warn('[background]', ...a),
+      })();
+    return;
+  }
+  const tryAdd = ourBackupAttempt({
+    add: () => ctx.addOurBackup(),
+    timer: ourBackupTimer,
+    log: (...a) => console.warn('[background]', ...a),
+  });
+  if (!(await tryAdd())) return;
+  // Read again: the account may have changed while the fill ran.
+  const account = chromeStorageService.getCurrentAccountObject().account;
+  if (account?.addresses.identityAddress !== before.addresses.identityAddress) return;
+  const saved = normalizeStoreConfig(account.storageConfig as StorageConfig | undefined);
+  const next = withSnapshotRemote(saved, true);
+  if (!next || next === saved) return;
+  await chromeStorageService.updateNested('accounts', {
+    [account.addresses.identityAddress]: { storageConfig: next } as unknown as Account,
+  });
+};
+
+/**
+ * Our server's first fill didn't finish (refused, stalled or failed; mainnet 1p test, 22 Nov 2026): try again once its
+ * back-off (or the server's Retry-After) is over, from where it stopped. A chrome.alarms alarm, not a setTimeout: the
+ * extension's service worker sleeps long before a minute-plus timer would fire (review of f2de21bd, 4); the alarm wakes
+ * it. A worker woken with no open wallet does nothing, and the next open tries anyway (preferLocalStorage). One alarm;
+ * never sooner than the first back-off step (ourBackupRetryTimer).
+ */
+const OUR_BACKUP_RETRY_ALARM = 'bwx-our-backup-retry';
+const retryOurBackupNow = () => {
+  const ctx = accountContext;
+  if (ctx) void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
+};
+const ourBackupTimer = ourBackupRetryTimer({
+  retryAt: () => accountContext?.ourBackupRetryAt(),
+  run: retryOurBackupNow,
+  setTimer: (_run, ms) => {
+    void chrome.alarms.create(OUR_BACKUP_RETRY_ALARM, { delayInMinutes: ms / 60_000 });
+    return OUR_BACKUP_RETRY_ALARM;
+  },
+  clearTimer: () => void chrome.alarms.clear(OUR_BACKUP_RETRY_ALARM),
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === OUR_BACKUP_RETRY_ALARM) retryOurBackupNow();
+});
 
 /** Where the move to this device stands, for the "Retry moving this account to this device" notice. */
 const moveStatus = () => {
@@ -1080,6 +1207,8 @@ const moveStatus = () => {
   };
   return {
     onDevice: !!ctx?.storage.isActiveStorageProvider(),
+    // An instant restore is loading: the notice stays hidden (no "Retry moving…" while it runs).
+    snapshotLoading: !!ctx?.snapshotLoading(),
     moving: !!storageSwitch,
     failures: f?.failures ?? 0,
     nextRetryAt: f?.nextAt ?? 0,
@@ -1093,23 +1222,30 @@ const moveStatus = () => {
  * A payment would build change while the remote store is active: make this device's store active first, joining a
  * switch already running (services/localFirst.ts). True once it is; the payment is refused otherwise.
  */
-const ensureLocalForPayment = async (): Promise<boolean> => {
+const ensureLocalForPayment = async (waitMs = SEND_WAIT_MS): Promise<boolean> => {
   const ctx = accountContext;
   if (!ctx) return false;
-  const local = () => ctx.storage.isActiveStorageProvider();
-  if (local()) return true;
-  const within = (p: Promise<unknown>) =>
-    Promise.race([p.then(() => undefined), new Promise<void>((r) => setTimeout(r, 90_000))]);
-  if (storageSwitch) await within(storageSwitch).catch(() => undefined);
-  if (local() || accountContext !== ctx) return local();
-  const run = preferLocalStorage(ctx);
-  storageSwitch = run;
-  void run.finally(() => {
-    if (storageSwitch === run) storageSwitch = null;
+  // Join the copy already running; never start a second one beside it.
+  return joinOrStartMove({
+    isLocal: () => ctx.storage.isActiveStorageProvider(),
+    running: () => storageSwitch,
+    start: () => {
+      const run = preferLocalStorage(ctx);
+      storageSwitch = run;
+      void run.finally(() => {
+        if (storageSwitch === run) storageSwitch = null;
+      });
+      return run;
+    },
+    waitMs,
   });
-  await within(run).catch(() => undefined);
-  return local();
 };
+
+/**
+ * How far the move and its coin checks have got, for the message a refused send shows. Counts come from the admission
+ * runs while a move runs (onAdmitReport) and are cleared when it ends, however it ends.
+ */
+const moveProgress = moveProgressTracker();
 
 /**
  * Move this account to this device now, whatever the backoff says: "Retry moving this account to this device" and
@@ -1121,7 +1257,7 @@ const moveToDeviceNow = async (): Promise<boolean> => {
     const f = moveFailures.get(id);
     if (f) f.nextAt = 0;
   }
-  return ensureLocalForPayment();
+  return ensureLocalForPayment(90_000);
 };
 
 /** "Loading your wallet from backup…" on the balance card; undefined = done, null = done without the copy. */
@@ -1139,10 +1275,43 @@ const restoreDeps = (ctx: NonNullable<typeof accountContext>, remoteUrl: string)
   const activeRemoteUrl = () => ctx.storage.getStores().find((s) => s.isActive && !s.isConflicting)?.endpointURL;
   return {
     remoteUrl,
+    // One switch at a time for this account's store, whoever asks (restoreFromRemote.ts, task 70 review B1).
+    key: ctx.storage,
     activeRemoteUrl,
     // A restore's merges run whole, whatever re-pull is under way (services/fullPass.ts, re-check N2).
-    setActiveStorage: (target) => asRestore(() => ctx.setActiveStorage(target)),
+    setActiveStorage: (target) =>
+      asRestore(async () => {
+        // The copy to this device asks the backup for small pages, each with a deadline, and counts them for the card.
+        const remote = (
+          ctx.storage as unknown as { _stores: { storage: { endpointUrl?: string } }[] }
+        )._stores.find((s) => s.storage.endpointUrl === remoteUrl)?.storage;
+        const unbound =
+          target === 'local' && remote
+            ? boundCopyRequests(remote as never, { onRows: (n) => noteRestoreProgress((getRestoreView()?.done ?? 0) + n) })
+            : () => undefined;
+        try {
+          // Never our server unless its whole fill ran here (review of a95a1ff0, 1): a failed restore would leave it active.
+          await ourControls.guardSetActive((t) => ctx.setActiveStorage(t))(target);
+        } finally {
+          unbound();
+        }
+      }),
     summarize: () => summarizeActive(ctx.baseWallet as never),
+    // The backup's first read: small pages, a deadline on each request (shown on the card before the copy starts).
+    summarizeBackup: () =>
+      summarizeActive(ctx.baseWallet as never, { callMs: PREVIEW_CALL_MS, pageSize: PREVIEW_PAGE }),
+    onPreview: (r) =>
+      setRestoreView({
+        phase: 'copying',
+        arrivingSats: r.spendableSats,
+        done: 0,
+        total: r.outputs + r.actions,
+      }),
+    onChecking: () => {
+      const v = getRestoreView();
+      if (v) setRestoreView({ ...v, phase: 'checking', done: v.total });
+    },
+    onFinished: () => clearRestoreView(),
     pullRemote: async () => {
       const store = (
         ctx.storage as unknown as { _stores: { storage: { endpointUrl?: string } }[] }
@@ -1509,7 +1678,8 @@ const sealPasses: SealPasses | null = !(
   import.meta.env.VITE_CHANNEL === 'ios-store' ||
   import.meta.env.VITE_CHANNEL === 'android-play'
 )
-  ? new SealPasses()
+  ? // Every seal payment the pass does not cover is logged with its reason ([bwx-seal], services/sealPass.ts).
+    new SealPasses(Date.now, (line) => console.log(line))
   : null;
 let sealSheetCounter = 0;
 const askSealSheet = (originator: string, seal: SealSheet): Promise<void> =>
@@ -2233,16 +2403,37 @@ const bindPermissionCallbacks = (manager: LocalWalletPermissionsManager) => {
  * Show a permission prompt popup and wait for user response.
  * Returns a promise that resolves when user grants permission or rejects when denied.
  */
+/**
+ * The wallet refuses a site's permission request on its own (not the person's No): the manager's waiting call is
+ * settled with `err`, which carries its own code (services/refusalCodes.ts), never the toolbox's ERR_PERMISSION_DENIED
+ * that denyPermission would give it. One [bwx-req] line with the reason. Rejects with `err`.
+ */
+const refuseRequest = (request: { requestID: string; type?: string; originator?: string }, err: Error): Promise<never> => {
+  console.warn(
+    `[bwx-req] refused ${request.type ?? 'request'} host=${siteHost(request.originator ?? '')} ` +
+      `code=${String((err as { code?: unknown }).code)} reason=${err.message}`,
+  );
+  const wallet = accountContext?.wallet;
+  if (wallet) rejectManagerRequest(wallet, request.requestID, err).catch(() => undefined);
+  return Promise.reject(err);
+};
+
 const showPermissionPrompt = (request: PermissionRequest & { requestID: string }): Promise<void> => {
   console.log('[background] showPermissionPrompt called, requestID:', request.requestID, 'type:', request.type);
   if (request.type === 'protocol' && isReservedProtocol(request.protocolID) && request.originator !== ADMIN_ORIGINATOR) {
-    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-    return Promise.reject(new Error(RESERVED_REFUSAL));
+    return refuseRequest(request, internalRefusal(RESERVED_REFUSAL));
+  }
+  // The wallet's own action labels (bMail's stamp record) are never offered to a site (services/reservedLabels.ts).
+  if (
+    request.type === 'protocol' &&
+    isReservedLabelProtocol(request.protocolID) &&
+    request.originator !== ADMIN_ORIGINATOR
+  ) {
+    return refuseRequest(request, internalRefusal(RESERVED_LABEL_REFUSAL));
   }
   // The wallet's own baskets (coins, ordinals, tokens, locks, names) are never offered to a site.
   if (request.type === 'basket' && isReservedBasket(request.basket) && request.originator !== ADMIN_ORIGINATOR) {
-    accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-    return Promise.reject(new Error(RESERVED_BASKET_REFUSAL));
+    return refuseRequest(request, internalRefusal(RESERVED_BASKET_REFUSAL));
   }
   // A pinned site's paid action (services/pinnedMint.ts): its self-encrypts, and its own label while its
   // createAction runs, go through for that one request only (oneUseGrant: nothing stored, so a decrypt, signature or
@@ -2305,8 +2496,7 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           return;
         }
         if (blocked) {
-          accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-          reject(new Error(BLOCKED_SITE_REFUSAL));
+          refuseRequest(request, siteBlockedError()).catch(reject);
           return;
         }
         if (sealCovered && accountContext?.wallet) {
@@ -2354,8 +2544,8 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
           // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
         } catch (error) {
-          accountContext?.wallet.denyPermission(request.requestID).catch(() => undefined);
-          reject(error instanceof Error ? error : new Error(String(error)));
+          // The wallet could not put this sheet together (payees unreadable, queue full…): its own code, never "denied".
+          refuseRequest(request, sheetBuildRefusal(error)).catch(reject);
           return;
         }
         pendingPermissionRequests.set(request.requestID, { request, resolve, reject });
@@ -2497,8 +2687,7 @@ const revokeBasketGrantsFor = async (originator: string): Promise<void> => {
 
 const showGroupedPermissionPrompt = async (request: GroupedPermissionRequest): Promise<void> => {
   if (await siteBlocked(request.originator)) {
-    accountContext?.wallet.denyGroupedPermission(request.requestID).catch(() => undefined);
-    throw new Error(BLOCKED_SITE_REFUSAL);
+    return refuseRequest({ ...request, type: 'grouped' }, siteBlockedError());
   }
   return new Promise((resolve, reject) => {
     pendingGroupedPermissionRequests.set(request.requestID, { request, resolve, reject });
@@ -2513,8 +2702,7 @@ const showGroupedPermissionPrompt = async (request: GroupedPermissionRequest): P
 
 const showCounterpartyPermissionPrompt = async (request: CounterpartyPermissionRequest): Promise<void> => {
   if (await siteBlocked(request.originator)) {
-    accountContext?.wallet.denyCounterpartyPermission(request.requestID).catch(() => undefined);
-    throw new Error(BLOCKED_SITE_REFUSAL);
+    return refuseRequest({ ...request, type: 'counterparty' }, siteBlockedError());
   }
   return new Promise((resolve, reject) => {
     pendingCounterpartyPermissionRequests.set(request.requestID, { request, resolve, reject });
@@ -2541,11 +2729,15 @@ if (isInServiceWorker) {
     console.log('All IndexedDB databases deleted.');
   };
 
-  const signOut = async () => {
-    dropWalletContext('signOut');
-    await chromeStorageService.clearPassKey();
-    await deleteAllIDBDatabases();
-  };
+  const signOut = async () =>
+    // The stores are deleted: so are the install's key and the repair records made for them (review of 6888544a, 3).
+    signOutStores({
+      dropWallet: () => dropWalletContext('signOut'),
+      clearPassKey: () => chromeStorageService.clearPassKey(),
+      deleteDatabases: deleteAllIDBDatabases,
+      area: chrome.storage.local as never,
+      cache: () => chromeStorageService.storage,
+    });
 
   const switchAccount = async () => {
     console.log('[background] switchAccount: starting');
@@ -2554,8 +2746,11 @@ if (isInServiceWorker) {
         // An envelope sheet asked under the old account must not be answered on the new one.
         failPendingStreamGrants();
         dropWalletContext('switchAccount');
-        chromeStorageService = new ChromeStorageService();
-        await chromeStorageService.getAndSetStorage();
+        // Loaded before it replaces the old one: a message handled while this read is in flight used to meet a service
+        // with no storage yet and throw "Storage is not initialized." (seen on the web wallet's Enter, 16 Nov 2026).
+        const loaded = new ChromeStorageService();
+        await loaded.getAndSetStorage();
+        chromeStorageService = loaded;
         console.log('[background] switchAccount: storage loaded, initializing wallet');
         await initializeWallet();
         console.log('[background] switchAccount: wallet initialized successfully');
@@ -2670,7 +2865,7 @@ if (isInServiceWorker) {
       chrome.notifications?.create('bwalletx-approval', {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
-        title: 'bWalletX needs your approval',
+        title: `${APP_NAME} needs your approval`,
         message: 'A site is waiting for you to approve a request.',
       });
     } catch {
@@ -2911,7 +3106,7 @@ if (isInServiceWorker) {
   chrome.runtime.onMessage.addListener(function onRuntimeMessage(message: any, sender, answer: CallbackResponse) {
     // Every refusal by the user carries code ERR_PERMISSION_DENIED (services/userDenied.ts), so a site can tell
     // "declined" from "failed" on every path (extension, phone dApp browser, bApp frames, pairing).
-    const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withDenialCode(response)));
+    const sendResponse: CallbackResponse = (response) => answer(withPromptNotShownCode(withRefusalCode(withDenialCode(response))));
     console.log(
       '[background] Received message:',
       message.action,
@@ -2939,6 +3134,14 @@ if (isInServiceWorker) {
       const f = sender.id === chrome.runtime.id ? framePolicy(sender) : undefined;
       answer({ ok: !!f && f.ok && f.framed } as unknown as Parameters<CallbackResponse>[0]);
       return false;
+    }
+    // Feed-author binding (services/feedAuthorRelay.ts): the panel's signed claim is sent from here, because bChatX's
+    // CORS doesn't allow chrome-extension://. Only for the wallet's own pages, only to that one URL.
+    if (message?.action === FEED_AUTHOR_RELAY_ACTION) {
+      void answerFeedAuthorRelay(message, isExtensionSender(sender, chrome.runtime.id)).then((a) =>
+        answer(a as unknown as Parameters<CallbackResponse>[0]),
+      );
+      return true;
     }
     // Connected-site theme (mobile/theme/connectTheme.ts): the id comes from the page, the origin from Chrome.
     if (message?.action === 'bwxSiteTheme') {
@@ -3086,6 +3289,8 @@ if (!(
     if (!isFromExtension && message?.originator !== ADMIN_ORIGINATOR) {
       const refusal =
         reservedProtocolRefusal(String(message?.action ?? ''), message?.params) ??
+        // The wallet's own action labels (services/reservedLabels.ts): refused the same way, before any sheet.
+        reservedLabelRefusal(String(message?.action ?? ''), message?.params) ??
         // Protocols pinned to their home site (services/pinnedProtocols.ts): a user's private archive keys.
         pinnedProtocolRefusal(
           String(message?.action ?? ''),
@@ -3278,10 +3483,11 @@ if (!(
       void (async () => {
         const ctx = accountContext;
         if (!ctx) throw new Error('Unlock your wallet first');
-        const m = message as { txid?: string; how?: 'send' | 'cancel' };
+        const m = message as { txid?: string; how?: 'send' | 'cancel'; confirmed?: boolean };
         if (!m.txid) return { queued: await ctx.listUnsent() };
         if (m.how !== 'send' && m.how !== 'cancel') throw new Error('Say send or cancel');
-        const out = await ctx.resolveUnsent(m.txid, m.how);
+        // `confirmed`: a held payment's Send now after the wallet's confirmation sheet (components/HeldPayments.tsx).
+        const out = await ctx.resolveUnsent(m.txid, m.how, { confirmed: m.confirmed === true });
         if (out.ok && out.result === 'cancelled') notifyBalanceUpdate();
         if (out.ok && out.result === 'still-queued') sendRetry.arm();
         return out;
@@ -3790,7 +3996,17 @@ if (!(
               await ensureWallet(true);
               const ctx = accountContext;
               if (!ctx) throw new Error('Wallet not initialized');
-              sendResponse({ type: 'BALANCE_TRUTH', success: true, data: await ctx.balanceTruth() });
+              // The card's own line while a restored wallet moves to this device: from memory, so it never waits behind
+              // the copy's storage lock. The wallet's own reads get a few seconds, then the line stands alone.
+              const restore = getRestoreView();
+              const truth = restore
+                ? await withTimeout(ctx.balanceTruth(), 3_000, 'the wallet').catch(() => ({
+                    held: [],
+                    arrivingSats: 0,
+                    syncApplies: false,
+                  }))
+                : await ctx.balanceTruth();
+              sendResponse({ type: 'BALANCE_TRUTH', success: true, data: { ...truth, restore } });
             } catch (error) {
               sendResponse({
                 type: 'BALANCE_TRUTH',
@@ -3959,7 +4175,13 @@ if (!(
           return true;
         // Connections: which sites may see which token balances (services/siteTokens.ts), and revoking that alone.
         case 'SITE_TOKEN_CONSENT_LIST':
-          chromeConsentStore()
+          // The active account's answers only (the same id initWallet files them under).
+          chromeConsentStore(
+            undefined,
+            chromeStorageService.getCurrentAccountObject().selectedAccount ||
+              chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ||
+              'no-account',
+          )
             .list()
             .then((data) => sendResponse({ type: message.action, success: true, data }))
             .catch((e: unknown) => sendResponse({ type: message.action, success: false, error: String(e) }));
@@ -3970,6 +4192,7 @@ if (!(
             sendResponse({ type: message.action, success: false, error: 'No site' });
             return true;
           }
+          // No account id: Revoke drops the site's answers on every account (it must ask again everywhere).
           chromeConsentStore()
             .forget(normalizeOriginator(o))
             .then(() => sendResponse({ type: message.action, success: true }))
@@ -4277,9 +4500,11 @@ if (!(
         // Surface the persisted per-account config so the UI can render
         // from the same source of truth used at init time.
         const { account } = chromeStorageService.getCurrentAccountObject();
-        const storageConfig: StorageConfig = account?.storageConfig ?? {
+        const storageConfig: StorageConfig = normalizeStoreConfig(account?.storageConfig) ?? {
           remotes: [],
         };
+        // Remotes whose "Make active" is refused (our server not whole on this device): the row shows why instead.
+        const refusedActive = await ourControls.refusedActive(storageConfig);
 
         let outputCount = 0;
         let transactionCount = 0;
@@ -4333,6 +4558,7 @@ if (!(
             outputCount,
             transactionCount,
             syncStates,
+            refusedActive,
             storageConfig,
           },
         });
@@ -4536,14 +4762,14 @@ if (!(
       if (report.skipped) {
         const { account } = chromeStorageService.getCurrentAccountObject();
         const config = account?.storageConfig as (StorageConfig & { localFirst?: boolean }) | undefined;
-        const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+        const remoteUrl = await ourControls.pickRemote(config);
         if (account && config && remoteUrl) {
           say('Copying your backup to this device…');
           const r = await timedStep(
             'switch to device',
             90_000,
             'Copying the backup to this device took too long',
-            () => switchToLocalVerified(restoreDeps(ctx, remoteUrl)),
+            () => moveProgress.track(() => switchToLocalVerified(restoreDeps(ctx, remoteUrl))),
           ).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
           console.log('[STORAGE_RECOVER_MINED] verified switch', r);
           if (r.ok) {
@@ -4602,11 +4828,11 @@ if (!(
       if (!ctx) throw new Error('Wallet not initialized');
       const { account } = chromeStorageService.getCurrentAccountObject();
       const config = account?.storageConfig;
-      const remoteUrl = config?.activeRemote || config?.remotes?.[0];
+      const remoteUrl = await ourControls.pickRemote(config);
       const parts: string[] = [];
       let ok = true;
       if (remoteUrl) {
-        const r = await switchToLocalVerified(restoreDeps(ctx, remoteUrl));
+        const r = await moveProgress.track(() => switchToLocalVerified(restoreDeps(ctx, remoteUrl)));
         sendRestoreStatus(r.ok ? undefined : null);
         console.log('[STORAGE_RESTORE_BACKUP] store', r);
         if (r.ok) {
@@ -4657,8 +4883,9 @@ if (!(
 
     try {
       const { account } = chromeStorageService.getCurrentAccountObject();
-      const config: StorageConfig = account?.storageConfig ?? { remotes: [] };
-      const remoteUrl = config.activeRemote || config.remotes?.[0];
+      const config: StorageConfig = normalizeStoreConfig(account?.storageConfig) ?? { remotes: [] };
+      // Never our server while it is held out of the session for its one-time repair.
+      const remoteUrl = await ourControls.pickRemote(config);
       // After the reconcile (or alone, with no remote): token outputs on chain
       // that no store recorded, searched over the wider window too. Then a final
       // pass relinquishes token outputs the overlay or chain reports spent: the
@@ -4798,7 +5025,8 @@ if (!(
     const { account } = chromeStorageService.getCurrentAccountObject();
     if (!account) throw new Error('No account loaded');
     const identityAddress = account.addresses.identityAddress;
-    const existing: StorageConfig = account.storageConfig ?? { remotes: [] };
+    // Our server in any spelling as its one URL (review of 6888544a, 2): saved that way from here on.
+    const existing: StorageConfig = normalizeStoreConfig(account.storageConfig) ?? { remotes: [] };
     const next = patch(existing);
     await chromeStorageService.updateNested('accounts', {
       [identityAddress]: { storageConfig: next } as unknown as Account,
@@ -4807,8 +5035,11 @@ if (!(
   };
 
   /** Make `target` the active store (toolbox merge-then-flip) and persist it in the account's storageConfig. */
+  /** Settings › Storage "Make active" for `url`: why it can't be (our server not whole here), else undefined. */
   const switchActiveStorage = async (ctx: AccountContext, target: 'local' | string): Promise<StorageConfig> => {
-    await ctx.setActiveStorage(target);
+    // Never our server unless its whole fill ran on this device (review of 6888544a, 1): the toolbox's switch copies
+    // only from the last sync point, so a half-filled server would become the account's store.
+    await ourControls.guardSetActive((t) => ctx.setActiveStorage(t))(target);
     return updateStorageConfig((current) => {
       if (target === 'local') {
         return { ...current, activeRemote: undefined, remotes: current.remotes ?? [] };
@@ -4856,6 +5087,12 @@ if (!(
   };
 
   const processStorageAddRemote = async (url: string, sendResponse: CallbackResponse) => {
+    // Our server joins only through its fill and hold-out (spendableFirstWiring), never by hand (review of f42df01f, 3).
+    const refused = addRemoteRefusal(url);
+    if (refused) {
+      sendResponse({ type: 'STORAGE_ADD_REMOTE', success: false, error: refused });
+      return;
+    }
     try {
       await ensureWallet(true);
     } catch (err) {
@@ -5089,8 +5326,9 @@ if (!(
 
     // A paired originator is granted only while its pairing is current (checked at approve time).
     if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
-      accountContext?.wallet.denyPermission(response.requestID).catch(console.error);
-      pending.reject(new Error('This pairing has ended'));
+      const err = pairingEndedError();
+      refuseRequest(pending.request, err).catch(() => undefined);
+      pending.reject(err);
       closeDappPopupIfNoUi();
       return true;
     }
@@ -5098,8 +5336,9 @@ if (!(
     // A payment's answer pays only the outputs its sheet listed (services/spendRecipients.ts, review of 0xrard).
     if (response.granted && !spendApprovalMatches(pending.request as BundleRequest)) {
       console.warn(`[bwx-req] payment list no longer its own action host=${siteHost(pending.request.originator)}`);
-      accountContext?.wallet.denyPermission(response.requestID).catch(console.error);
-      pending.reject(new Error('This request changed while you were answering, so nothing was allowed. Ask the site to try again.'));
+      const err = promptStaleError();
+      refuseRequest(pending.request, err).catch(() => undefined);
+      pending.reject(err);
       closeDappPopupIfNoUi();
       return true;
     }
@@ -5780,8 +6019,10 @@ if (!(
       for (const r of [...result.granted, ...result.denied]) {
         const pending = pendingPermissionRequests.get(r.requestID);
         pendingPermissionRequests.delete(r.requestID);
-        accountContext?.wallet.denyPermission(r.requestID).catch(console.error);
-        pending?.reject(new Error('This pairing has ended'));
+        const err = pairingEndedError();
+        if (isReconnectRequestId(r.requestID) || isSealRequestId(r.requestID)) console.warn(`[bwx-req] refused ${r.requestID}: ${err.message}`);
+        else refuseRequest(r, err).catch(() => undefined);
+        pending?.reject(err);
       }
       sendResponse({ type: 'BUNDLE_PERMISSION_RESPONSE', success: false, error: 'This pairing has ended' });
       closeDappPopupIfNoUi();
@@ -5902,7 +6143,13 @@ if (!(
           pendingPermissionRequests.delete(r.requestID);
           if (!pending) return;
           if (isReconnectRequestId(r.requestID)) return pending.reject(new Error('Permission denied by user'));
-          if (isSealRequestId(r.requestID)) return pending.reject(userDeniedError());
+          // Refused because the sheet changed under the tap (not the person's No): ERR_PROMPT_STALE.
+          if (isSealRequestId(r.requestID)) return pending.reject(result.stale ? promptStaleError() : userDeniedError());
+          if (result.stale) {
+            const err = promptStaleError();
+            await refuseRequest(r, err).catch(() => undefined);
+            return pending.reject(err);
+          }
           // A blocked sheet is handled by the block itself; a plain No to a basket read stands for the session, and
           // to a one-signature request for 10 minutes.
           if (!response.block) {
@@ -5988,8 +6235,9 @@ if (!(
     pendingGroupedPermissionRequests.delete(response.requestID);
 
     if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
-      accountContext?.wallet.denyGroupedPermission(response.requestID).catch(console.error);
-      pending.reject(new Error('This pairing has ended'));
+      const err = pairingEndedError();
+      refuseRequest(pending.request, err).catch(() => undefined);
+      pending.reject(err);
       closeDappPopupIfNoUi();
       return true;
     }
@@ -6003,7 +6251,9 @@ if (!(
             response.granted.protocolPermissions
               ? {
                   ...response.granted,
-                  protocolPermissions: withoutReservedProtocols(response.granted.protocolPermissions),
+                  protocolPermissions: withoutReservedLabels(
+                    withoutReservedProtocols(response.granted.protocolPermissions),
+                  ),
                 }
               : response.granted,
           ),
@@ -6044,8 +6294,9 @@ if (!(
     pendingCounterpartyPermissionRequests.delete(response.requestID);
 
     if (response.granted && !pairedGrantAllowed(pending.request.originator)) {
-      accountContext?.wallet.denyCounterpartyPermission(response.requestID).catch(console.error);
-      pending.reject(new Error('This pairing has ended'));
+      const err = pairingEndedError();
+      refuseRequest(pending.request, err).catch(() => undefined);
+      pending.reject(err);
       closeDappPopupIfNoUi();
       return true;
     }
@@ -6875,7 +7126,7 @@ if (!(
         isSealProtocol(message.params?.protocolID) &&
         sealPasses?.signing(sealSite)
       )
-        throw new Error(SEAL_BUSY_REFUSAL);
+        throw sealNotCoveredError();
       // Store builds: no Seal sheet (storeBuild.ts NATIVE_SEAL_ENABLED written out, literal env, review 24 S1); the
       // sign asks as before.
       const seal =
@@ -7883,7 +8134,7 @@ chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: 'Pairing link received',
-      message: 'Open bWalletX (toolbar icon) to check the code and pair.',
+      message: `Open ${APP_NAME} (toolbar icon) to check the code and pair.`,
     });
   if (sp?.open) Promise.resolve(sp.open({ tabId, windowId: tab.windowId })).catch(nudge);
   else nudge();
@@ -7916,7 +8167,7 @@ chrome.tabs?.onUpdated?.addListener((tabId, info, tab) => {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: 'Sign-in request',
-      message: 'Open bWalletX (toolbar icon) to approve.',
+      message: `Open ${APP_NAME} (toolbar icon) to approve.`,
     });
   if (sp?.open) Promise.resolve(sp.open({ tabId, windowId: tab.windowId })).catch(nudge);
   else nudge();

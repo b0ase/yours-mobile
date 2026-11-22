@@ -9,6 +9,7 @@
  * It only helps while the page's JavaScript still runs: a WebView whose web process stops responding cannot fire
  * this timer (that needs a native watchdog).
  */
+import { APP_NAME } from './storeBuild';
 
 export const BOOT_TRACE_KEY = 'bwallet.bootTrace';
 export const BOOT_TRACE_PREV_KEY = 'bwallet.bootTrace.prev';
@@ -97,7 +98,7 @@ const showNotice = () => {
       'justify-content:center;gap:16px;padding:24px;background:#010101;color:#fff;text-align:center;' +
       'font:16px/1.4 Inter,system-ui,-apple-system,sans-serif';
     const title = document.createElement('div');
-    title.textContent = 'bWalletX is taking longer than usual to open.';
+    title.textContent = `${APP_NAME} is taking longer than usual to open.`;
     title.style.cssText = 'font-weight:600;max-width:320px';
     const button = document.createElement('button');
     button.type = 'button';

@@ -357,6 +357,244 @@ describe('store: pots, orders, pause/resume, pay-on-open', () => {
     expect((await agent).ok).toBe(false);
   });
 
+  test('a waiting payment is cap-checked and broadcast inside the spend queue (b-Aware row 338)', async () => {
+    // Cap $20, $10 already logged today, a $10 payment signed earlier and waiting to broadcast (slow), and a
+    // concurrent $10 spend that is check → broadcast → log. Together they must not pass $20.
+    const s = setup({ start: NOW - 1000 }); // one $10 period due
+    setAgentDailyCap('1Pot', 20);
+    const { appendAgentLog, checkAgentSpend } = await import('../agents/agentAccounts');
+    const { serialSpend } = await import('../agents/spendQueue');
+    appendAgentLog('1Pot', { at: NOW, action: 'sub-pay', detail: 'earlier', usd: 10 });
+    // Run 1 signs and records the pending payment, then the broadcast fails: the record stays.
+    const failing = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => ({ rawTx: 'RAWP', txid: 'TXP' }),
+      broadcast: async () => {
+        throw new Error('network down');
+      },
+    };
+    expect((await payDue(failing, NOW))[0].ok).toBe(false);
+    expect(getPending(s.id)?.usd).toBe(10);
+    // Run 2 broadcasts it slowly while another spend arrives.
+    const slowDeps = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => ({ rawTx: 'RAWX', txid: 'TXX' }),
+      broadcast: () => new Promise<void>((r) => setTimeout(r, 300)),
+    };
+    const paying = payDue(slowDeps, NOW + 1);
+    await new Promise((r) => setTimeout(r, 50)); // payDue is now at its slow broadcast
+    const other = serialSpend(async () => {
+      const gate = checkAgentSpend('1Pot', 10, NOW + 1);
+      if (!gate.ok) return gate;
+      await new Promise((r) => setTimeout(r, 10)); // stub broadcast
+      appendAgentLog('1Pot', { at: NOW + 1, action: 'agent-pay', detail: 'other', usd: 10 });
+      return gate;
+    });
+    expect((await paying)[0].ok).toBe(true);
+    const second = await other;
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.reason).toMatch(/Over today.s cap/);
+    const total = getAgentLog('1Pot').reduce((t, l) => t + (l.usd ?? 0), 0);
+    expect(total).toBeLessThanOrEqual(20);
+  });
+
+  test('moveSub while a payment is waiting: the old pot (the one the tx spends) is capped and logged', async () => {
+    const s = setup({ start: NOW - 1000 }); // one $10 period due
+    makePot('1NewPot', 'New');
+    setAgentDailyCap('1Pot', 20);
+    const { appendAgentLog } = await import('../agents/agentAccounts');
+    const { moveSub } = await import('./pots');
+    const failing = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => ({ rawTx: 'RAWM', txid: 'TXM' }),
+      broadcast: async () => {
+        throw new Error('network down');
+      },
+    };
+    expect((await payDue(failing, NOW))[0].ok).toBe(false);
+    expect(getPending(s.id)?.potId).toBe('1Pot');
+    moveSub(s.id, '1NewPot', NOW);
+    const newLogBefore = getAgentLog('1NewPot').length;
+    const sent: string[] = [];
+    const ok = { ...failing, broadcast: async (raw: string) => void sent.push(raw) };
+    // The old pot already spent $15 today: this $10 payment would pass $20, so it must be held back.
+    appendAgentLog('1Pot', { at: NOW, action: 'sub-pay', detail: 'earlier', usd: 15 });
+    const held = (await payDue(ok, NOW + 1))[0];
+    expect(held.ok).toBe(false);
+    if (!held.ok) expect(held.reason).toMatch(/Over today.s cap/);
+    expect(sent).toEqual([]);
+    expect(getPending(s.id)?.rawTx).toBe('RAWM');
+    // Under the cap it goes out, and the log lands on the old pot only.
+    setAgentDailyCap('1Pot', 100);
+    expect((await payDue(ok, NOW + 2))[0].ok).toBe(true);
+    expect(sent).toEqual(['RAWM']);
+    expect(getAgentLog('1Pot').some((l) => l.action === 'sub-pay' && l.txid === 'TXM')).toBe(true);
+    expect(getAgentLog('1NewPot').filter((l) => l.action === 'sub-pay')).toEqual([]);
+    expect(getAgentLog('1NewPot').length).toBe(newLogBefore);
+  });
+
+  test('a broadcast that never answers: the queue is freed at the timeout, the record stays, others can spend', async () => {
+    const s = setup({ start: NOW - 1000 });
+    const { checkAgentSpend } = await import('../agents/agentAccounts');
+    const { serialSpend } = await import('../agents/spendQueue');
+    const hung = {
+      bsvUsd: 50,
+      resolve: async () => '1L',
+      sign: async () => ({ rawTx: 'RAWH', txid: 'TXH' }),
+      broadcast: () => new Promise<void>(() => {}),
+      broadcastTimeoutMs: 100,
+    };
+    const paying = payDue(hung, NOW);
+    await new Promise((r) => setTimeout(r, 20));
+    let other = false;
+    const agent = serialSpend(async () => {
+      other = checkAgentSpend('1Pot', 1, NOW).ok;
+    });
+    const t0 = Date.now();
+    const r = (await paying)[0];
+    await agent;
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(r.ok).toBe(false);
+    expect(other).toBe(true);
+    expect(getPending(s.id)?.rawTx).toBe('RAWH'); // kept; nothing new signed, not marked paid
+    expect(getSub(s.id)?.periodIndex).toBe(0);
+    // Next run re-posts the same tx.
+    const sent: string[] = [];
+    const again = await payDue({ ...hung, broadcast: async (raw: string) => void sent.push(raw) }, NOW + 1000);
+    expect(again[0].ok).toBe(true);
+    expect(sent).toEqual(['RAWH']);
+  });
+
+  test('broadcastRaw has no timeout of its own: only the pot path bounds it (payDue keeps the record)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./potSend.ts', import.meta.url), 'utf8');
+    const body = src.slice(src.indexOf('export const broadcastRaw'));
+    expect(body.slice(0, body.indexOf('\n};'))).not.toMatch(/setTimeout|Promise\.race|BROADCAST_TIMEOUT_MS/);
+    expect(src).not.toMatch(/from '\.\/payDue'/);
+  });
+
+  test('a waiting tx already mined, answered REJECTED on a re-post: settled as paid by its status, not stuck', async () => {
+    const s = setup({ start: NOW - 1000 });
+    const posted: string[] = [];
+    const refusedRepost = async (raw: string) => {
+      posted.push(raw);
+      throw new Error('Payment refused by the network (REJECTED: txn-mempool-conflict)');
+    };
+    const base = { bsvUsd: 50, resolve: async () => '1L', sign: async () => ({ rawTx: 'RAWK', txid: 'TXK' }) };
+    // Run 1: posted, no answer we can trust (it was mined after all).
+    expect((await payDue({ ...base, broadcast: refusedRepost }, NOW))[0].ok).toBe(false);
+    expect(getPending(s.id)?.txid).toBe('TXK');
+    // Run 2: the status says mined: paid, without posting it again (a re-post would be refused).
+    const r = await payDue({ ...base, broadcast: refusedRepost, txKnown: async (t: string) => t === 'TXK' }, NOW + 1);
+    expect(r).toEqual([{ id: s.id, ok: true, count: 1, txid: 'TXK' }]);
+    expect(posted).toEqual(['RAWK']);
+    expect(getPending(s.id)).toBeNull();
+    expect(getSub(s.id)?.periodIndex).toBe(1);
+  });
+
+  test('a waiting tx whose status is unknown (or the lookup fails) is posted again, the same signed tx', async () => {
+    const s = setup({ start: NOW - 1000 });
+    const posted: string[] = [];
+    const base = { bsvUsd: 50, resolve: async () => '1L', sign: async () => ({ rawTx: 'RAWU', txid: 'TXU' }) };
+    await payDue({ ...base, broadcast: async () => Promise.reject(new Error('timeout')) }, NOW);
+    const r = await payDue(
+      {
+        ...base,
+        txKnown: async () => Promise.reject(new Error('status down')),
+        broadcast: async (raw: string) => void posted.push(raw),
+      },
+      NOW + 1,
+    );
+    expect(r[0].ok).toBe(true);
+    expect(posted).toEqual(['RAWU']);
+    expect(getPending(s.id)).toBeNull();
+  });
+
+  test('a refused broadcast whose extra info says "already" is not taken as paid (no text is read)', async () => {
+    const s = setup({ start: NOW - 1000 });
+    const r = await payDue(
+      {
+        bsvUsd: 50,
+        resolve: async () => '1L',
+        sign: async () => ({ rawTx: 'RAWR', txid: 'TXR' }),
+        broadcast: async () => {
+          throw new Error('Payment refused by the network (DOUBLE_SPEND_ATTEMPTED: input already spent)');
+        },
+      },
+      NOW,
+    );
+    expect(r[0].ok).toBe(false);
+    expect(getPending(s.id)?.rawTx).toBe('RAWR');
+    expect(getSub(s.id)?.periodIndex).toBe(0);
+  });
+
+  test('after an unsure broadcast, nothing more is signed from that pot in the same run (its coins may be in flight)', async () => {
+    const a = setup({ start: NOW - 1000 }); // one $10 period due
+    setAgentDailyCap('1Pot', null);
+    const b = addSubscription(
+      {
+        potId: '1Pot',
+        payee: { name: 'Gym', address: '1Gym' },
+        amount: { value: 5, currency: 'USD' },
+        period: 'day',
+        start: NOW - 1000,
+        maxCount: null,
+      },
+      50,
+      NOW,
+    );
+    const signed: string[] = [];
+    const deps = (broadcast: (raw: string) => Promise<void>) => ({
+      bsvUsd: 50,
+      resolve: async (p: { address?: string }) => p.address ?? '1L',
+      sign: async (_pot: string, outs: { address: string }[]) => {
+        signed.push(outs[0].address);
+        return { rawTx: `RAW-${outs[0].address}`, txid: `TX-${outs[0].address}` };
+      },
+      broadcast,
+      broadcastTimeoutMs: 30,
+    });
+    // Run 1: the first order's broadcast never answers (unsure): the second order is left for the next run.
+    const r1 = await payDue(
+      deps(() => new Promise<void>(() => undefined)),
+      NOW,
+    );
+    expect(signed.length).toBe(1);
+    const first = signed[0];
+    const firstSub = first === '1Landlord' ? a : b;
+    const secondSub = first === '1Landlord' ? b : a;
+    expect(getPending(firstSub.id)?.rawTx).toBe(`RAW-${first}`);
+    expect(getPending(secondSub.id)).toBeNull();
+    const skipped = r1.find((r) => r.id === secondSub.id);
+    expect(skipped?.ok).toBe(false);
+    if (skipped && !skipped.ok) expect(skipped.reason).toMatch(/earlier payment from this pot/);
+    expect(getSub(secondSub.id)?.lastError).toBeUndefined(); // no alert: just the next run
+
+    // Run 2: the waiting payment is still unsure: it is re-posted first, and the other order still waits.
+    const posted: string[] = [];
+    await payDue(
+      deps((raw) => (posted.push(raw), Promise.reject(new Error('network down')))),
+      NOW + 1,
+    );
+    expect(posted).toEqual([`RAW-${first}`]);
+    expect(signed.length).toBe(1);
+
+    // Run 3: the waiting payment goes through, and only then the other order is signed and paid.
+    const ok: string[] = [];
+    const r3 = await payDue(
+      deps(async (raw) => void ok.push(raw)),
+      NOW + 2,
+    );
+    expect(r3.every((r) => r.ok)).toBe(true);
+    expect(ok[0]).toBe(`RAW-${first}`);
+    expect(signed.length).toBe(2);
+    expect(getPending(firstSub.id)).toBeNull();
+    expect(getPending(secondSub.id)).toBeNull();
+  });
+
   test('stopped pot and the daily cap refuse; nothing is signed', async () => {
     const s = setup();
     setAgentStopped('1Pot', true, NOW);
@@ -492,19 +730,19 @@ describe('crash safety: a payment is recorded before it is broadcast', () => {
     expect(getPending(s.id)?.dueTimes).toHaveLength(3);
     expect(getSub(s.id)?.periodIndex).toBe(0);
 
-    // Run 2: the network already has TX1 ("already known"). No new tx is signed; the periods are marked paid.
+    // Run 2: the network already has TX1 (its status says so). No new tx is signed; the periods are marked paid.
     const next = {
       bsvUsd: 50,
       resolve: async () => '1L',
       sign: async () => (signs++, { rawTx: 'RAW2', txid: 'TX2' }),
+      txKnown: async (txid: string) => txid === 'TX1',
       broadcast: async (raw: string) => {
         network.push(raw);
-        throw new Error('txn-already-known');
       },
     };
     expect(await payDue(next, NOW)).toEqual([{ id: s.id, ok: true, count: 3, txid: 'TX1' }]);
     expect(signs).toBe(1);
-    expect(network).toEqual(['RAW1', 'RAW1']);
+    expect(network).toEqual(['RAW1']);
     expect(getSub(s.id)?.periodIndex).toBe(3);
     expect(getSub(s.id)?.paidCount).toBe(3);
     expect(getPending(s.id)).toBeNull();
@@ -625,7 +863,9 @@ describe('notifications', () => {
     expect(r).toHaveLength(1);
     expect(r[0].at).toBe(T('2026-03-04T09:00:00Z'));
     expect(r[0].id).toBe(reminderId('s1'));
-    expect(plannedReminders([s], () => 'Rent', T('2026-03-04T10:00:00Z'))).toHaveLength(0);
+    // Past the usual time, payment still ahead: reminded 15 minutes before it (b-Aware row 268). Due or past: none.
+    expect(plannedReminders([s], () => 'Rent', T('2026-03-04T10:00:00Z'))[0].at).toBe(T('2026-03-05T08:45:00Z'));
+    expect(plannedReminders([s], () => 'Rent', T('2026-03-05T08:50:00Z'))).toHaveLength(0);
   });
 });
 

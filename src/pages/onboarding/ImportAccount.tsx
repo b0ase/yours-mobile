@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { enterWalletNow } from './enterWallet';
 import { AccountNameField } from '../../components/AccountNameField';
 import { accountNameError, cleanAccountName, suggestAccountName } from '../../utils/accountNameRules';
 import { BetaGate } from '../../mobile/sweep/BetaGate';
@@ -329,7 +330,7 @@ const ImportAccountInner = ({ onNavigateBack, newWallet = false }: ImportAccount
           label="Enter"
           onClick={() => {
             acceptTerms();
-            window.location.reload();
+            enterWalletNow(newWallet);
           }}
         />
       </motion.div>

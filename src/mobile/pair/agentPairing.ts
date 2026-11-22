@@ -11,11 +11,14 @@ import { listOrdinals, type OneSatContext } from '@1sat/actions';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { checkSize, estimateCost, isMintableType, notifyMinted, validateForm, type Collection } from '../mint/mint';
 import { mintMedia } from '../mint/mintMedia';
+import { APP_NAME, STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 import {
   checkMintBudget,
   MintLimitError,
-  recordMint,
+  releaseMint,
   remaining,
+  reserveMint,
+  settleMint,
   UPLOAD_CHUNK_BYTES,
   UploadStore,
   type MintLimits,
@@ -31,10 +34,12 @@ import {
 import { isPaused, PAUSED_MESSAGE } from '../config/killSwitch';
 import { runAgentAction, type AgentActionHooks } from '../agents/agentTrade';
 import { serialSpend } from '../agents/spendQueue';
-import { getLoadedStrategy, getPaperBook, loadStrategy, parseStrategy } from '../agents/strategy';
+import { getLoadedStrategy, getPaperBook, parseStrategy } from '../agents/strategy';
+import { proposeStrategy } from '../agents/strategyProposal';
 
 export const CLI_ORIGIN = 'https://cli.bwalletx.com';
-export type AgentScope = 'read' | 'trade' | 'send' | 'mint';
+/** `strategy` lets a computer PROPOSE a strategy (the owner approves it in the app); it is not part of `trade`. */
+export type AgentScope = 'read' | 'trade' | 'strategy' | 'send' | 'mint';
 export const MAX_GRANT_DAYS = 30;
 
 /** `mint` is set exactly when the scopes include 'mint': the limits chosen at pairing and what's used. */
@@ -66,7 +71,7 @@ const NEEDS: Record<string, AgentScope> = {
   balance: 'read',
   log: 'read',
   strategy_show: 'read',
-  strategy_load: 'trade',
+  strategy_load: 'strategy',
   buy: 'trade',
   send: 'send',
   mint_quote: 'mint',
@@ -94,7 +99,7 @@ export const checkGrant = (grant: AgentGrant, action: string, currentId: string 
   if (!(mintOnly(grant) && grant.mint) && !isPairableAgent(grant.agentId))
     throw new AgentCallError('NOT_AGENT', `${grant.name} is no longer an agent account.`);
   if (currentId !== grant.agentId)
-    throw new AgentCallError('NOT_OPEN', `bWalletX is open on another account. Switch to ${grant.name} in the app.`);
+    throw new AgentCallError('NOT_OPEN', `${APP_NAME} is open on another account. Switch to ${grant.name} in the app.`);
 };
 
 type P = Record<string, unknown>;
@@ -118,11 +123,13 @@ export type AgentDeps = {
    * before signing (b-Aware report, 13 Nov 2026). Missing = live (direct callers and tests with no session).
    */
   isLive?: () => boolean;
+  /** The pairing session this call came from (its channel id), recorded on strategy proposals. */
+  session?: { id: string };
   /** Swappable for tests: the trade run's own outside calls (agentTrade.ts AgentTradeIo). */
   tradeIo?: AgentActionHooks['io'];
 };
 
-const NOT_PAIRED = 'This computer is no longer paired with bWalletX. Run `bwalletx login` again.';
+const NOT_PAIRED = `This computer is no longer paired with ${APP_NAME}. Run \`bwalletx login\` again.`;
 
 /** Refuse when the pairing was removed (or the account switched) since the request came in. Fails closed. */
 const assertLive = (deps: AgentDeps) => {
@@ -140,9 +147,9 @@ const assertLive = (deps: AgentDeps) => {
  * pause is on. Checked before anything is assembled or signed, for agent and mint-only pairings alike.
  */
 const assertMaySpend = async (grant: AgentGrant, deps: AgentDeps) => {
-  if (allAgentsStopped()) throw new AgentCallError('STOPPED', 'All agents are stopped in bWalletX.');
+  if (allAgentsStopped()) throw new AgentCallError('STOPPED', `All agents are stopped in ${APP_NAME}.`);
   if (getAgentAccount(grant.agentId)?.stopped)
-    throw new AgentCallError('STOPPED', `${grant.name} is stopped in bWalletX.`);
+    throw new AgentCallError('STOPPED', `${grant.name} is stopped in ${APP_NAME}.`);
   const paused = deps.spendingPaused ?? (() => isPaused('spending'));
   if (await paused().catch(() => true)) throw new AgentCallError('PAUSED', PAUSED_MESSAGE);
 };
@@ -169,13 +176,20 @@ const asCollection = (v: unknown): Collection => {
   return { kind: 'none' };
 };
 
+/** Agent actions a store build refuses outright: buying tokens and loading trading strategies (round A8, S6). */
+export const STORE_REFUSED_AGENT_ACTIONS: readonly string[] = ['buy', 'strategy_load'];
+
 /** Run one paired-CLI call on the phone. */
 export async function handleAgentCall(
   grant: AgentGrant,
   action: string,
   params: unknown,
   deps: AgentDeps,
+  store = STORE_BUILD,
 ): Promise<unknown> {
+  // A store build has no trading: refused before the grant, the account or the wallet is read. (CliPairConfirm also
+  // offers no trade scope there, so checkGrant would refuse these with SCOPE; this does not depend on that.)
+  if (store && STORE_REFUSED_AGENT_ACTIONS.includes(action)) throw new AgentCallError('SCOPE', STORE_NAME_NOTE);
   checkGrant(grant, action, deps.currentId);
   const p = (params && typeof params === 'object' ? params : {}) as P;
   const id = grant.agentId;
@@ -216,11 +230,23 @@ export async function handleAgentCall(
     case 'strategy_show':
       return getLoadedStrategy(id);
     case 'strategy_load': {
-      // From a computer, strategies load on paper only; going live is a tap in the app.
+      // From a computer a strategy is only a proposal: the owner approves it (with a diff) in the app, and it then
+      // loads on paper. Nothing active, and no spend ledger, changes here (b-Aware 315).
       const r = parseStrategy(p.strategy);
       if (!r.ok) throw new AgentCallError('INVALID', r.errors.join('; '));
-      loadStrategy(id, r.strategy, 'paper');
-      return { loaded: r.strategy.name, version: r.strategy.version, mode: 'paper' };
+      // Named by the pairing (grant.name, chosen by the owner when pairing), never by the host the computer reports.
+      // No session (direct callers): 'unknown', which approval refuses as not a live pairing.
+      const from = { computer: grant.name, session: deps.session?.id ?? 'unknown', expiresAt: grant.expiresAt };
+      if (!proposeStrategy(id, r.strategy, from))
+        throw new AgentCallError(
+          'RATE_LIMITED',
+          'One strategy proposal every 5 seconds: the owner is looking at your last one. Wait and send it again.',
+        );
+      return {
+        proposed: r.strategy.name,
+        version: r.strategy.version,
+        status: 'waiting for the owner to approve it in the app',
+      };
     }
     case 'buy':
     case 'send': {
@@ -356,18 +382,40 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
   await assertSpendJob(grant, 'mint', deps);
   assertAgentCap(grant, cost.usd ?? 0);
 
-  const r = await (deps.mintMedia ?? mintMedia)(deps.ctx, {
-    base64Content,
-    contentType,
-    ...form,
-    feeSats: cost.feeSats,
-  });
+  // Hold the budget before signing, saved with the pairing: an app killed after the broadcast but before the record
+  // below still has this mint counted (b-Aware row 245). Settled on the actual cost after; given back only when
+  // nothing was sent.
+  const hold = { id: `hold-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now() };
+  const held: AgentGrant = {
+    ...grant,
+    mint: reserveMint(grant.mint!, { ...hold, name: form.title.trim(), usd: cost.usd ?? 0 }),
+  };
+  grant.mint = held.mint;
+  deps.saveGrant?.(held);
+  const watch = watchSends(deps.ctx);
+  let r: Awaited<ReturnType<typeof mintMedia>>;
+  try {
+    r = await (deps.mintMedia ?? mintMedia)(watch.ctx, {
+      base64Content,
+      contentType,
+      ...form,
+      feeSats: cost.feeSats,
+    });
+  } catch (e) {
+    // A tx that may be out (a new collection minted before the item failed) keeps its hold on the budget.
+    if (!watch.sent()) {
+      const back: AgentGrant = { ...grant, mint: releaseMint(grant.mint!, hold.id) };
+      grant.mint = back.mint;
+      deps.saveGrant?.(back);
+    }
+    throw e;
+  }
   const spentSats = r.networkSats === null ? cost.totalSats : r.networkSats + cost.feeSats;
   const usd = rate > 0 ? (spentSats / 1e8) * rate : (cost.usd ?? 0);
   // The grant may have been replaced while minting; record on the latest copy.
   const next: AgentGrant = {
     ...grant,
-    mint: recordMint(grant.mint!, {
+    mint: settleMint(grant.mint!, hold.id, {
       at: Date.now(),
       name: form.title.trim(),
       txid: r.txid,
@@ -398,6 +446,41 @@ async function runMint(grant: AgentGrant, p: P, deps: AgentDeps) {
     mint: remainingOf(next.mint!),
   };
 }
+
+/**
+ * The wallet context a mint runs on, watched: sent() is true once a tx may be on the network. That is as soon as
+ * signAction is called (the @1sat/actions path: createAction with signAndProcess:false only builds, signAction signs
+ * and broadcasts, and can throw after broadcasting), or a createAction that signs and processes itself is called (it
+ * too can broadcast and then throw), or any createAction comes back with a tx. A createAction with
+ * signAndProcess:false that throws or returns only a signableTransaction has sent nothing. A context with no wallet
+ * (tests with a stub mint) is passed as it is.
+ */
+const watchSends = (ctx: OneSatContext) => {
+  let sent = false;
+  const w = (ctx as { wallet?: object }).wallet;
+  if (!w) return { ctx, sent: () => sent };
+  const wallet = new Proxy(w, {
+    get(target, prop, recv) {
+      const v = Reflect.get(target, prop, recv) as unknown;
+      if ((prop !== 'createAction' && prop !== 'signAction') || typeof v !== 'function')
+        return typeof v === 'function' ? v.bind(target) : v;
+      return async (...args: unknown[]) => {
+        if (prop === 'signAction') sent = true;
+        else {
+          const opts = (args[0] as { options?: { signAndProcess?: boolean } } | undefined)?.options;
+          if (opts?.signAndProcess !== false) sent = true;
+        }
+        const res = (await (v as (...a: unknown[]) => Promise<unknown>).apply(target, args)) as {
+          txid?: string;
+          tx?: unknown;
+        } | null;
+        if (res?.txid || res?.tx) sent = true;
+        return res;
+      };
+    },
+  });
+  return { ctx: { ...ctx, wallet } as OneSatContext, sent: () => sent };
+};
 
 const wrapLimitAsync = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {

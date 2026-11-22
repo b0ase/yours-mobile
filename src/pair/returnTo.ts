@@ -11,9 +11,13 @@
  *
  * Pure apart from the default nonce store (localStorage), so every rule is unit-tested in returnTo.test.ts.
  */
-import { RET_MAX_BYTES, RID_RE, type BrowserHint, type PairLink } from './protocol';
+import { RET_MAX_BYTES, RID_RE, type BrowserHint, type PairLink, type SealedFrame } from './protocol';
 
-/** True when `ret` may be used as the return for a pairing proven to come from `origin`. */
+/**
+ * True when `ret` may be used as the return for a pairing from `origin`: https, no userinfo, and EXACTLY that origin
+ * (scheme, host and port). Review 22 Nov 2026: no subdomains. The relay's origin is the WebSocket Origin header, which
+ * any non-browser client can set (relay.mjs), so "a subdomain of the claimed origin" could be one the claimant runs.
+ */
 export function isAllowedReturn(ret: string, origin: string): boolean {
   if (!ret || ret.length > RET_MAX_BYTES) return false;
   try {
@@ -22,9 +26,7 @@ export function isAllowedReturn(ret: string, origin: string): boolean {
     if (o.protocol !== 'https:' || r.protocol !== 'https:') return false;
     if (r.username || r.password || r.port) return false;
     if (o.port) return false; // proven origins with a port are dev setups; no automatic return there
-    const host = r.hostname.toLowerCase();
-    const base = o.hostname.toLowerCase();
-    return host === base || host.endsWith(`.${base}`);
+    return r.origin === o.origin;
   } catch {
     return false;
   }
@@ -81,17 +83,42 @@ export const resetRidMemory = () => memory.clear();
 
 /** The decision taken when the pairing is checked: return to `ret` (still subject to the rid) or not at all. */
 export type ReturnPlan = { ret: string; rid: string; b?: BrowserHint } | null;
-export function planReturn(link: PairLink, origin: string, v2Proven: boolean): ReturnPlan {
-  if (!v2Proven || !link.ret || !link.rid) return null;
+/**
+ * Where to send the user after Connect, or null. Review 3 (22 Nov 2026): always the ROOT of the exact origin the relay
+ * saw, and only when the link asks for a return (`ret` on that origin, and a one-time `rid`). Origin proofs (`s`, `s2`)
+ * are ignored, so no link chooses a path; the site keeps the page it started on and goes back to it itself
+ * (@bwalletx/connect 0.9.0). The fragment's frame is sealed to the site's pairing key; `rid` stays one-time.
+ */
+export function planReturn(link: PairLink, origin: string): ReturnPlan {
+  if (!link.ret || !link.rid) return null;
   if (origin !== link.o) return null;
   if (!isAllowedReturn(link.ret, link.o)) return null;
-  return { ret: link.ret, rid: link.rid, ...(link.b && { b: link.b }) };
+  return { ret: `${new URL(link.o).origin}/`, rid: link.rid, ...(link.b && { b: link.b }) };
 }
 
-/** `ret` with the result in the fragment (never sent to the server): `#bwx=ok&rid=<rid>`. */
-export const returnTarget = (ret: string, rid: string) => {
+/**
+ * What a same-phone return may carry besides the rid (@bwalletx/connect 0.9.0): the wallet's pairing public key and
+ * its sealed `ready` (which holds the folded sign-in). Only the tab with the site's pairing key can open the frame. On a
+ * phone the site's tab was asleep, its relay socket may have swallowed hello and ready, and iOS/Android usually open
+ * the return in a NEW tab, so this is how that tab finishes without the relay.
+ */
+export type ReturnExtra = { wk: string; frame: SealedFrame };
+
+const b64url = (bytes: Uint8Array) => {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+
+/** `ret` with the result in the fragment (never sent to the server): `#bwx=ok&rid=<rid>[&wk=<key>&f=<frame>]`. */
+export const returnTarget = (ret: string, rid: string, extra?: ReturnExtra) => {
   const u = new URL(ret);
-  u.hash = `bwx=ok&rid=${encodeURIComponent(rid)}`;
+  const q = new URLSearchParams({ bwx: 'ok', rid });
+  if (extra) {
+    q.set('wk', extra.wk);
+    q.set('f', b64url(new TextEncoder().encode(JSON.stringify(extra.frame))));
+  }
+  u.hash = q.toString();
   return u.toString();
 };
 
@@ -102,7 +129,62 @@ export const ANDROID_BROWSERS: Partial<Record<BrowserHint, string>> = {
   firefox: 'org.mozilla.firefox',
   edge: 'com.microsoft.emmx',
   brave: 'com.brave.browser',
+  opera: 'com.opera.browser',
 };
+
+/**
+ * May this return URL carry a folded sign-in (review 4 L3, CTO 22 Nov 2026)? Only when it can reach nothing but the
+ * site, in the browser the user came from:
+ * - a plain https URL on exactly the return's origin;
+ * - an Android `intent://` with scheme=https, an exact package from ANDROID_BROWSERS (our table, never the link's), the
+ *   same origin as its target, and, if present, a browser_fallback_url on that same origin root. Android delivers an
+ *   explicit-package intent only to that installed package, and package names are unique on the device.
+ * Never an iOS custom scheme (googlechromes://, firefox://): any app may register those.
+ */
+export function isFoldableReturnUrl(url: string, ret: string): boolean {
+  let root: URL;
+  try {
+    root = new URL(ret);
+  } catch {
+    return false;
+  }
+  if (root.protocol !== 'https:' || root.pathname !== '/') return false;
+  const sameRoot = (u: string) => {
+    try {
+      const x = new URL(u);
+      return x.protocol === 'https:' && x.origin === root.origin;
+    } catch {
+      return false;
+    }
+  };
+  if (url.startsWith('https://')) return sameRoot(url);
+  if (!url.startsWith('intent://')) return false;
+  const at = url.lastIndexOf('#Intent;');
+  if (at < 0 || !url.endsWith(';end')) return false;
+  if (!sameRoot(`https://${url.slice('intent://'.length, at)}`)) return false;
+  const params = new Map<string, string>();
+  for (const part of url.slice(at + '#Intent;'.length, -';end'.length).split(';')) {
+    const eq = part.indexOf('=');
+    if (eq > 0) params.set(part.slice(0, eq), part.slice(eq + 1));
+  }
+  if (params.get('scheme') !== 'https') return false;
+  if (!(Object.values(ANDROID_BROWSERS) as string[]).includes(params.get('package') ?? '')) return false;
+  const fallback = params.get('S.browser_fallback_url');
+  if (fallback !== undefined) {
+    let f: URL;
+    try {
+      f = new URL(decodeURIComponent(fallback));
+    } catch {
+      return false;
+    }
+    if (f.protocol !== 'https:' || f.origin !== root.origin || f.pathname !== '/') return false;
+  }
+  return true;
+}
+
+/** Whether this plan's return, as this shell would open it, may carry a folded sign-in (isFoldableReturnUrl). */
+export const returnIsFoldable = (plan: NonNullable<ReturnPlan>, platform: ReturnPlatform) =>
+  isFoldableReturnUrl(returnUrlFor(returnTarget(plan.ret, plan.rid), plan.b, platform), plan.ret);
 
 export type ReturnPlatform = 'ios' | 'android' | 'web';
 

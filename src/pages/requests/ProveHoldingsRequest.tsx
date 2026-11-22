@@ -4,6 +4,7 @@ import { Button } from '../../components/Button';
 import { useTheme } from '../../hooks/useTheme';
 import type { ProveHoldingsPrompt } from '../../promptProtocol';
 import { sendMessage } from '../../utils/chromeHelpers';
+import { TOKEN_ROOMS_ENABLED } from '../../mobile/storeBuild';
 
 export type ProveHoldingsRequestProps = {
   request: ProveHoldingsPrompt;
@@ -34,8 +35,10 @@ export const ProveHoldingsRequestPage = ({ request, onResponse }: ProveHoldingsR
         Show your tokens in bChatX?
       </h2>
       <p className="m-0 text-xs leading-relaxed" style={{ color: gray, maxWidth: '18rem' }}>
-        {request.originator} can then see which wallet addresses hold your tokens, so your rooms and swaps work. Your
-        wallet signs a message for each one. Nothing is spent.
+        {/* Store wording (CTO decision 11, 16 Nov 2026): token rooms and swaps are off in the store edition. */}
+        {TOKEN_ROOMS_ENABLED
+          ? `${request.originator} can then see which wallet addresses hold your tokens, so your rooms and swaps work. Your wallet signs a message for each one. Nothing is spent.`
+          : `${request.originator} can then see which wallet addresses hold your tokens, so the site can check what you hold. Your wallet signs a message for each one. Nothing is spent.`}
       </p>
       <div className="flex flex-col gap-2 w-full mt-2" style={{ maxWidth: '18rem' }}>
         <Button theme={theme} type="primary" label="Allow" disabled={busy} onClick={() => respond(true)} />

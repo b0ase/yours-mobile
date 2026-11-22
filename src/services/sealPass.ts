@@ -212,50 +212,57 @@ const ALLOWED_TOP = new Set(['description', 'outputs', 'options', 'labels']);
 const SEAL_PAYLOAD_KEYS = 'docHash,fields,key,origHash,protocol,recordHash,ref,svgHash,ts,type,version';
 const ALLOWED_OPTIONS = new Set(['acceptDelayedBroadcast', 'randomizeOutputs']);
 
-/** Is this createAction exactly the seal of `seal`? Pure; no clock. */
-export const sealActionMatches = (seal: SealSign, args: unknown): boolean => {
-  if (!args || typeof args !== 'object') return false;
+/**
+ * Why this createAction is NOT exactly the seal of `seal`, in a few words (which check failed), or null when it is.
+ * Pure; no clock. The reason is logged (background.ts), never shown to a site.
+ */
+export const sealActionMismatch = (seal: SealSign, args: unknown): string | null => {
+  if (!args || typeof args !== 'object') return 'no action arguments';
   const a = args as Record<string, unknown>;
-  for (const k of Object.keys(a)) if (a[k] !== undefined && !ALLOWED_TOP.has(k)) return false; // no inputs, inputBEEF…
-  if (a.labels !== undefined && !(Array.isArray(a.labels) && a.labels.length === 0)) return false;
+  for (const k of Object.keys(a)) if (a[k] !== undefined && !ALLOWED_TOP.has(k)) return `has ${k}`; // inputs, inputBEEF…
+  if (a.labels !== undefined && !(Array.isArray(a.labels) && a.labels.length === 0)) return 'has labels';
   if (a.options !== undefined) {
-    if (!a.options || typeof a.options !== 'object') return false;
+    if (!a.options || typeof a.options !== 'object') return 'options not an object';
     for (const [k, v] of Object.entries(a.options as Record<string, unknown>))
-      if (v !== undefined && (!ALLOWED_OPTIONS.has(k) || typeof v !== 'boolean')) return false;
+      if (v !== undefined && (!ALLOWED_OPTIONS.has(k) || typeof v !== 'boolean')) return `option ${k}`;
   }
-  if (!Array.isArray(a.outputs) || a.outputs.length !== 1) return false;
+  if (!Array.isArray(a.outputs)) return 'no outputs';
+  if (a.outputs.length !== 1) return `${a.outputs.length} outputs (a seal has exactly 1)`;
   const out = a.outputs[0] as Record<string, unknown> | null;
-  if (!out || typeof out !== 'object' || out.satoshis !== 0) return false;
-  if (out.basket !== undefined || out.customInstructions !== undefined || out.tags !== undefined) return false;
+  if (!out || typeof out !== 'object') return 'output not an object';
+  if (out.satoshis !== 0) return `output pays ${String(out.satoshis)} sats (a seal output is 0)`;
+  if (out.basket !== undefined || out.customInstructions !== undefined || out.tags !== undefined)
+    return 'output has basket, tags or instructions';
   const data = opReturnData(out.lockingScript);
-  if (!data) return false;
+  if (!data) return 'output is not one OP_FALSE OP_RETURN push';
   let p: Record<string, unknown>;
   try {
     p = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(data)) as Record<string, unknown>;
   } catch {
-    return false;
+    return 'payload is not JSON';
   }
-  if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
-  if (Object.keys(p).sort().join(',') !== SEAL_PAYLOAD_KEYS) return false;
-  return (
-    p.protocol === 'b0ase-bitsign' &&
-    p.version === '2.0' &&
-    p.type === 'nds_field_seal' &&
-    p.recordHash === seal.recordHash &&
-    p.origHash === seal.doc &&
-    p.svgHash === seal.svg &&
-    p.key === seal.key &&
-    p.ref === seal.ref &&
-    p.ts === seal.ts &&
-    typeof p.docHash === 'string' &&
-    HEX64.test(p.docHash) &&
-    p.fields ===
-      seal.fields
-        .map((f) => f.id)
-        .sort()
-        .join(',')
-  );
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return 'payload is not an object';
+  const keys = Object.keys(p).sort().join(',');
+  if (keys !== SEAL_PAYLOAD_KEYS) return `payload keys ${keys}`;
+  if (p.protocol !== 'b0ase-bitsign' || p.version !== '2.0' || p.type !== 'nds_field_seal')
+    return 'payload protocol, version or type';
+  if (p.recordHash !== seal.recordHash) return 'recordHash is not the record signed';
+  if (p.origHash !== seal.doc) return 'origHash is not the record doc';
+  if (p.svgHash !== seal.svg) return 'svgHash is not the record svg';
+  if (p.key !== seal.key) return 'key is not the record key';
+  if (p.ref !== seal.ref) return 'ref is not the record ref';
+  if (p.ts !== seal.ts) return 'ts is not the record ts';
+  if (typeof p.docHash !== 'string' || !HEX64.test(p.docHash)) return 'docHash is not a sha256';
+  const fields = seal.fields
+    .map((f) => f.id)
+    .sort()
+    .join(',');
+  if (p.fields !== fields) return `fields "${String(p.fields)}" are not the record's "${fields}"`;
+  return null;
 };
+
+/** Is this createAction exactly the seal of `seal`? Pure; no clock. */
+export const sealActionMatches = (seal: SealSign, args: unknown): boolean => sealActionMismatch(seal, args) === null;
 
 /** The fields of a toolbox PermissionRequest read here. `originator` must already be normalised. */
 export type SealPermissionRequest = {
@@ -291,7 +298,11 @@ type Pass = {
  */
 export class SealPasses {
   private passes = new Map<string, Pass>();
-  constructor(private readonly now: () => number = Date.now) {}
+  /** `log`: one `[bwx-seal]` line for every seal payment the pass does not cover, with the reason. */
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly log: (line: string) => void = () => undefined,
+  ) {}
 
   private live(site: string): Pass | undefined {
     const p = this.passes.get(site);
@@ -343,7 +354,9 @@ export class SealPasses {
   beginAction(site: string, args: unknown): boolean {
     const p = this.live(site);
     if (!p || p.state !== 'signed') return false;
-    if (!sealActionMatches(p.seal, args)) {
+    const miss = sealActionMismatch(p.seal, args);
+    if (miss) {
+      this.log(`[bwx-seal] next payment is not the approved seal (${miss}): it asks site=${site}`);
       this.passes.delete(site); // the next payment was something else: it asks, and so does everything after it
       return false;
     }
@@ -352,22 +365,36 @@ export class SealPasses {
     return true;
   }
 
-  coversSpend(req: SealPermissionRequest, paymentsInFlight: number): boolean {
+  /**
+   * Why the pass does not cover this spend (which amount, count or state fell outside it), or null when it does.
+   * Pure: changes nothing.
+   */
+  whyNotSpend(req: SealPermissionRequest, paymentsInFlight: number): string | null {
+    if (req.type !== 'spending') return `not a spend (${req.type})`;
     const p = req.originator ? this.live(req.originator) : undefined;
+    if (!p) return 'no seal pass for this site (none approved, or it expired)';
+    if (p.state !== 'paying')
+      return p.state === 'signed'
+        ? 'the seal is signed but its createAction has not started'
+        : 'the seal is not signed yet';
+    if (p.spent) return 'the pass already paid for this seal';
+    if (paymentsInFlight !== 1) return `${paymentsInFlight} payments from this site in flight (a seal is the only one)`;
     const sats = req.spending?.satoshis;
-    if (
-      !p ||
-      p.state !== 'paying' ||
-      p.spent ||
-      req.type !== 'spending' ||
-      paymentsInFlight !== 1 ||
-      typeof sats !== 'number' ||
-      !Number.isInteger(sats) ||
-      sats < 0 ||
-      sats > SEAL_MAX_SATS
-    )
+    if (typeof sats !== 'number' || !Number.isInteger(sats) || sats < 0)
+      return `spend amount ${String(sats)} unreadable`;
+    if (sats > SEAL_MAX_SATS) return `spend ${sats} sats is over the seal cap of ${SEAL_MAX_SATS} sats`;
+    return null;
+  }
+
+  coversSpend(req: SealPermissionRequest, paymentsInFlight: number): boolean {
+    const why = this.whyNotSpend(req, paymentsInFlight);
+    if (why) {
+      // Only worth a line when a seal pass exists for the site: every other payment never had one.
+      if (req.originator && this.live(req.originator))
+        this.log(`[bwx-seal] seal pass does not cover this spend: ${why} site=${req.originator}`);
       return false;
-    p.spent = true;
+    }
+    this.live(req.originator as string)!.spent = true;
     return true;
   }
 

@@ -5,6 +5,7 @@
  */
 import { useState } from 'react';
 import { MEDIA_GRANTED } from './extensionMedia';
+import { APP_NAME } from '../storeBuild';
 
 const kinds = new URLSearchParams(location.search).get('kinds')?.split(',') ?? ['mic'];
 const wantCam = kinds.includes('camera');
@@ -37,7 +38,9 @@ export const PermissionsTab = () => {
       }}
     >
       <div style={{ maxWidth: 420, textAlign: 'center' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700 }}>bWalletX needs your {what}</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700 }}>
+          {APP_NAME} needs your {what}
+        </h1>
         <p style={{ color: '#98A2B3', marginTop: 8 }}>
           For Spaces and calls. Chrome can only ask in a tab, so tap Allow and choose Allow when Chrome asks.
         </p>

@@ -725,3 +725,32 @@ test('x-real-ip is believed only from a trusted proxy', () => {
   assert.equal(clientIp(req('198.51.100.7')), '198.51.100.7');
   assert.equal(clientIp(req('10.0.0.2', '203.0.113.9'), ['10.0.0.2']), '203.0.113.9');
 });
+
+test('review 22 Nov: frames queued for the site by a wallet that lost the role are dropped when a new wallet takes it', async () => {
+  const { base, done } = await boot({ legacyUntil: Date.now() + 60_000 });
+  const socks = [];
+  try {
+    const site = await open(`${base}/v1/c/${C}?role=site&e=${exp()}&claim=${SITE}&wc=${digest(QRW)}`, 'https://a.lol');
+    site.ws.close(); // the site's tab is asleep
+    await new Promise((r) => setTimeout(r, 50));
+    // During the window a squatter can take the empty wallet role and queue frames for the site…
+    const squat = await open(`${base}/v1/c/${C}?role=wallet&claim=squattersquattersquat1`);
+    squat.ws.send(JSON.stringify({ s: 1, n: 'n', d: 'from-the-squatter' }));
+    await new Promise((r) => setTimeout(r, 50));
+    // …then the phone that scanned the QR evicts it and says its own hello.
+    const phone = await open(`${base}/v1/c/${C}?role=wallet&claim=${QRW}`);
+    await until(() => squat.ws.readyState === 3);
+    phone.ws.send(JSON.stringify({ t: 'hello', k: '02aa', info: { name: 'phone', rdns: 'x' } }));
+    await new Promise((r) => setTimeout(r, 50));
+    const back = await open(`${base}/v1/c/${C}?role=site&claim=${SITE}`, 'https://a.lol');
+    await until(() => back.inbox.some((f) => f.t === 'hello'));
+    socks.push(phone, back, squat, site);
+    assert.equal(
+      back.inbox.some((f) => f.d === 'from-the-squatter'),
+      false,
+    );
+  } finally {
+    for (const x of socks) x.ws.close();
+    await done();
+  }
+});

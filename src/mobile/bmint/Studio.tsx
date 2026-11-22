@@ -15,6 +15,7 @@ import type { Found } from '../../sweep/relayxRecover';
 import { coverOf, groupVault, PRIVATE_ID, runCollection, type SubVault, type VaultPiece } from './lib/vaultGroups';
 import { RevealSheet, usePrivateMedia, type PrivatePiece } from '../private/PrivateVault';
 import { DROP_ACCEPT, DROP_UNSUPPORTED, handOff, TILE_LABEL, tileForFile, type DropTile } from './lib/drop';
+import { MARKET_ENABLED } from '../storeBuild';
 
 /**
  * The bMint studio (owner, 19 Oct 2026: "needs dramatically improving"): the bmintx.com look inside the wallet.
@@ -143,7 +144,12 @@ export const DropHero = ({ name }: { name: string }) => {
           </li>
           <li>
             <b>Keep it</b>
-            <span>It sits in your vault as yours: keep it, send it or sell it.</span>
+            {/* Store wording (CTO decision 3, 16 Nov 2026): no selling in the store edition. */}
+            <span>
+              {MARKET_ENABLED
+                ? 'It sits in your vault as yours: keep it, send it or sell it.'
+                : 'It sits in your vault as yours: keep it or send it.'}
+            </span>
           </li>
         </ol>
       </div>

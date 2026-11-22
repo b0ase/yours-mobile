@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { enterWalletNow } from './enterWallet';
 import { AccountNameField } from '../../components/AccountNameField';
 import { accountNameError, cleanAccountName, suggestAccountName } from '../../utils/accountNameRules';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -502,7 +503,7 @@ export const CreateAccount = ({ onNavigateBack, newWallet = false }: CreateAccou
           label="Enter"
           onClick={() => {
             acceptTerms();
-            window.location.reload();
+            enterWalletNow(newWallet);
           }}
         />
       </motion.div>

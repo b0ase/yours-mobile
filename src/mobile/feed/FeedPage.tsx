@@ -107,10 +107,16 @@ import {
   fetchTwetchPost,
   fetchThread,
   lockToPost,
+  oneAtATime,
   publish,
+  postAfterPaidSteps,
   PostCancelledError,
   setIdentitySetupHandler,
 } from './feedApi';
+import { assertNameToPost, ensureFeedAuthorBinding, NameNeededError, needsNameToPost } from './authorBinding';
+import { isAgentAccount } from '../agents/agentAccounts';
+import { HandleFlow } from '../names/HandleFlow';
+import { useAccountNames } from '../names/accountNames';
 import {
   BLOCKS_PER_DAY,
   formatLocked,
@@ -127,13 +133,13 @@ import { loadPrefs, initialFeed, savePrefs } from '../settings/prefs';
 import {
   homeShareFor,
   payDestination,
-  planPayment,
   TIP_MIN_SATS,
   TIP_PRESETS_SATS,
   TIP_PRESETS_USD,
   validateAmount,
   type PayKind,
 } from './tip';
+import { checkedPayment } from './authorCheck';
 import { oneClick } from '../settings/oneClick';
 import { isMe, rankPeople, rankPosts, TIMEFRAMES, cutoff, type LeaderboardData, type Timeframe } from './leaderboard';
 import { cachedExchangeRate, fetchExchangeRate } from '../../utils/wallet';
@@ -178,6 +184,7 @@ import {
   destSummary,
   TIP_MESSAGE_MAX,
   tipDestinations,
+  replyByName,
   tipMailBody,
   toggleDest,
   validateTipMessage,
@@ -212,7 +219,7 @@ import {
   movePin,
   type FeedId,
 } from './feeds';
-import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+import { BEX_REEL_ENABLED, BMOVIES_FEED_ENABLED, MARKET_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 
 // bWalletX only: the store build has no bMovies reel, not even as code (storeBuild.ts).
 const BmoviesReel = BMOVIES_FEED_ENABLED ? lazy(() => import('./bmovies/BmoviesReel')) : null;
@@ -731,7 +738,7 @@ const PostCardBody = ({
                   onClick={() => a.onLock(post)}
                   className={cls}
                   style={{ color: locked?.total ? GOLD : MUTED }}
-                  aria-label="Lock BSV to back this post"
+                  aria-label={LOCK_TITLE}
                 >
                   <Lock size={16} /> {locked?.total ? '' : 'Lock'}
                 </button>
@@ -893,6 +900,28 @@ const Composer = ({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  // A post or a reply needs a $name (authorBinding.ts needsNameToPost): without one, the Post button is the way to
+  // get one. publish() refuses too, so this is the friendly half of the rule, not the rule.
+  const composerIdentity = chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
+  const { paymail } = useAccountNames(composerIdentity, '', '', false);
+  const needsName = needsNameToPost(paymail);
+  // No name cached is not yet "no name": the server is asked (assertNameToPost), and only its definite answer takes
+  // the Post button away. A name it finds goes back in the cache; "couldn't tell" leaves posting open.
+  const [noName, setNoName] = useState(false);
+  useEffect(() => {
+    if (!needsName) return setNoName(false);
+    let live = true;
+    assertNameToPost(apiContext).then(
+      () => live && setNoName(false),
+      (e) => live && setNoName(e instanceof NameNeededError),
+    );
+    return () => {
+      live = false;
+    };
+  }, [needsName, apiContext, composerIdentity]);
+  // An agent account or a pot is never linked to a name (authorBinding.ts), so it isn't steered to claim one.
+  const agentOrPot = isAgentAccount(composerIdentity);
+  const [naming, setNaming] = useState(false);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   useEffect(() => () => itemsRef.current.forEach((i) => URL.revokeObjectURL(i.preview)), []);
@@ -975,46 +1004,67 @@ const Composer = ({
       return list.filter((i) => i.id !== id);
     });
 
-  const send = async () => {
-    setError('');
-    if (invalid) return setError(invalid);
-    if (safety().check({ texts: [text, ...items.map((i) => i.name)] }).blocked)
-      return setError("This can't be posted from bWallet.");
-    try {
-      // 1. Large video / audio → 1Sat ordinals (one wallet approval each), through the Mint inscribe path.
-      const refs: { outpoint: string; mime: string }[] = [];
-      for (const [n, i] of inscribed.entries()) {
-        setBusy(`Inscribing ${i.kind} ${n + 1}/${inscribed.length}…`);
-        const res = await inscribe.execute(apiContext, {
-          base64Content: fileToBase64(await i.file!.arrayBuffer()),
-          contentType: i.mime,
-          map: { app: FEED_APP, type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
-        });
-        if (!res.txid || res.error) throw new Error(res.error || 'Inscribing the media failed');
-        refs.push({ outpoint: `${res.txid}_0`, mime: i.mime });
+  // One send at a time, from its first statement (feedApi.oneAtATime): the name check is awaited before anything
+  // shows as busy on screen, and a double tap in that gap paid for the media twice and posted twice.
+  const sending = useRef({ running: false });
+  const send = () =>
+    oneAtATime(sending.current, async () => {
+      setError('');
+      if (noName) return;
+      if (invalid) return setError(invalid);
+      if (safety().check({ texts: [text, ...items.map((i) => i.name)] }).blocked)
+        return setError("This can't be posted from bWallet.");
+      setBusy('Checking…');
+      try {
+        const tags = [
+          'app:bWallet',
+          'type:post',
+          ...(input.quote ? [`quote:${input.quote}`] : []),
+          ...(input.replyTo ? [`context:tx`, `contextValue:${input.replyTo}`] : []),
+        ];
+        // The name is checked first, with the wallet that will sign, before any media is paid for; publish() gets
+        // the pass and does not check again (feedApi.postAfterPaidSteps).
+        const txid = await postAfterPaidSteps(
+          apiContext,
+          async () => {
+            // 1. Large video / audio → 1Sat ordinals (one wallet approval each), through the Mint inscribe path.
+            const refs: { outpoint: string; mime: string }[] = [];
+            for (const [n, i] of inscribed.entries()) {
+              setBusy(`Inscribing ${i.kind} ${n + 1}/${inscribed.length}…`);
+              const res = await inscribe.execute(apiContext, {
+                base64Content: fileToBase64(await i.file!.arrayBuffer()),
+                contentType: i.mime,
+                map: { app: FEED_APP, type: 'ord', name: i.name.slice(0, 100), context: 'feed' },
+              });
+              if (!res.txid || res.error) throw new Error(res.error || 'Inscribing the media failed');
+              refs.push({ outpoint: `${res.txid}_0`, mime: i.mime });
+            }
+            return refs;
+          },
+          (refs, nameChecked) => {
+            // 2. The post: text, inline parts, and the ordinals by outpoint.
+            setBusy('Posting…');
+            return publish(
+              apiContext,
+              buildPostScript({ ...input, refs }),
+              replyTo ? 'Feed reply' : quote ? 'Feed quote' : 'Feed post',
+              tags,
+              undefined,
+              undefined,
+              nameChecked,
+            );
+          },
+        );
+        onPosted(txid);
+      } catch (e) {
+        if (e instanceof PostCancelledError) return;
+        // Nothing was signed or paid: show the way to a name in place of an error.
+        if (e instanceof NameNeededError) return setNoName(true);
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy('');
       }
-      // 2. The post: text, inline parts, and the ordinals by outpoint.
-      setBusy('Posting…');
-      const tags = [
-        'app:bWallet',
-        'type:post',
-        ...(input.quote ? [`quote:${input.quote}`] : []),
-        ...(input.replyTo ? [`context:tx`, `contextValue:${input.replyTo}`] : []),
-      ];
-      const txid = await publish(
-        apiContext,
-        buildPostScript({ ...input, refs }),
-        replyTo ? 'Feed reply' : quote ? 'Feed quote' : 'Feed post',
-        tags,
-      );
-      onPosted(txid);
-    } catch (e) {
-      if (e instanceof PostCancelledError) return;
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy('');
-    }
-  };
+    });
 
   return (
     <Sheet
@@ -1113,14 +1163,34 @@ const Composer = ({
           <ErrorActions message={String(error)} />
         </div>
       )}
-      <button
-        onClick={() => void send()}
-        disabled={!!busy || !!invalid}
-        className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
-        style={{ background: GOLD, color: '#1a1300' }}
-      >
-        {busy || (replyTo ? 'Reply' : quote ? 'Quote' : link ? 'Post to thread' : 'Post')}
-      </button>
+      {noName && agentOrPot ? (
+        <p data-post-agent-no-name className="text-xs mt-3" style={{ color: MUTED }}>
+          Agent accounts and pots without a $name can’t post to the Feed.
+        </p>
+      ) : noName ? (
+        <div data-post-needs-name>
+          <p className="text-xs mt-3" style={{ color: MUTED }}>
+            {replyTo ? 'Choose your $name to reply.' : 'Choose your $name to post.'} It’s how people find you.
+          </p>
+          <button
+            onClick={() => setNaming(true)}
+            className="mt-2 w-full rounded-2xl py-3 text-sm font-bold"
+            style={{ background: GOLD, color: '#1a1300' }}
+          >
+            Get your $name
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => void send()}
+          disabled={!!busy || !!invalid}
+          className="mt-3 w-full rounded-2xl py-3 text-sm font-bold disabled:opacity-40"
+          style={{ background: GOLD, color: '#1a1300' }}
+        >
+          {busy || (replyTo ? 'Reply' : quote ? 'Quote' : link ? 'Post to thread' : 'Post')}
+        </button>
+      )}
+      {naming && <HandleFlow onClose={() => setNaming(false)} />}
     </Sheet>
   );
 };
@@ -1129,7 +1199,8 @@ type ApiCtx = ReturnType<typeof useServiceContext>['apiContext'];
 /**
  * Tip or paid like (BCHAT-PROTOCOL-v2 §5): MAP `type tip` / `type like … paid 1`, signed by the
  * posting identity, and the payment to the author in the SAME transaction. planPayment refuses
- * Treechat (shared relay signer) and anything without a payable author address.
+ * Treechat (shared relay signer) and anything without a payable author address; checkedPayment
+ * also refuses an address the post's own AIP signature doesn't prove (b-Aware row 111).
  */
 const sendPayment = async (
   apiContext: ApiCtx,
@@ -1137,7 +1208,7 @@ const sendPayment = async (
   sats: number,
   kind: PayKind = 'tip',
 ): Promise<string> => {
-  const plan = planPayment(kind, post, sats);
+  const plan = await checkedPayment(kind, post, sats);
   return publish(
     apiContext,
     plan.script,
@@ -1160,7 +1231,7 @@ const TipSheet = ({
   onClose: () => void;
   onLiked: (p: FeedPost) => void;
 }) => {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const { addSnackbar } = useSnackbar();
   const rate = useBsvUsd();
   const presets = tipPresets(rate);
@@ -1174,7 +1245,19 @@ const TipSheet = ({
   const likeSats = loadPrefs().paidLikeSats;
   // Optional message with the tip, and where it goes (tipMessage.ts).
   const [message, setMessage] = useState('');
-  const [dests, setDests] = useState(() => tipDestinations(post));
+  // A reply under the post is a post of your own, so it needs a $name (authorBinding.ts); the tip itself does not.
+  const { paymail: myPaymail } = useAccountNames(
+    chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress,
+    '',
+    '',
+    false,
+  );
+  const tipNeedsName = needsNameToPost(myPaymail);
+  const [dests, setDests] = useState(() => replyByName(tipDestinations(post), tipDestinations(post), tipNeedsName));
+  // The name can arrive after the sheet opens (the name sync, a claim): "Under their post" follows it.
+  useEffect(() => {
+    setDests((d) => replyByName(d, tipDestinations(post), tipNeedsName));
+  }, [tipNeedsName, post]);
   const msgError = validateTipMessage(message);
   const sendingMessage = willSendMessage(message, dests);
   /** Deliver the message after the tip landed. Returns what failed (the tip itself already went). */
@@ -1408,6 +1491,12 @@ const TipSheet = ({
   );
 };
 
+/**
+ * The lock sheet's title and the Lock button's label. Store wording (CTO decision 2, 16 Nov 2026): locking is "on" a
+ * post, never "backing" it (MARKET_ENABLED is a literal, so the bWalletX words are not in a store bundle).
+ */
+const LOCK_TITLE = MARKET_ENABLED ? 'Lock BSV to back this post' : 'Lock BSV on this post';
+
 const LockSheet = ({
   post,
   height,
@@ -1451,12 +1540,20 @@ const LockSheet = ({
   const pill = (on: boolean) =>
     on ? { background: GOLD, color: '#1a1300' } : { background: PANEL, color: 'white', border: `1px solid ${LINE}` };
   return (
-    <Sheet title="Lock BSV to back this post" onClose={onClose}>
-      <p className="text-xs mb-3" style={{ color: MUTED }}>
-        Back <AuthorName name={post.author.name} className="" />
-        's post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows how
-        much is locked behind it.
-      </p>
+    <Sheet title={LOCK_TITLE} onClose={onClose}>
+      {MARKET_ENABLED ? (
+        <p className="text-xs mb-3" style={{ color: MUTED }}>
+          Back <AuthorName name={post.author.name} className="" />
+          's post with your own coins. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows
+          how much is locked behind it.
+        </p>
+      ) : (
+        <p className="text-xs mb-3" style={{ color: MUTED }}>
+          Lock your own coins on <AuthorName name={post.author.name} className="" />
+          's post. Nothing is sent to anyone: the BSV is locked in your wallet, and the post shows how much is locked on
+          it.
+        </p>
+      )}
       <p className="text-[12px] font-semibold text-white mb-1">Amount</p>
       <div className="flex gap-2">
         {LOCK_AMOUNTS.map((v) => (
@@ -1526,8 +1623,10 @@ const LockSheet = ({
         Your BSV stays yours. It's locked until {date}, then you can unlock it.
         <span className="block mt-1" style={{ color: MUTED }}>
           {blocks.toLocaleString()} blocks{height ? `, until block ${(height + blocks).toLocaleString()}` : ''}. The
-          date is an estimate (about 10 minutes a block). Locked coins can't be spent early. Locking backs a post; it
-          earns nothing.
+          date is an estimate (about 10 minutes a block). Locked coins can't be spent early.{' '}
+          {MARKET_ENABLED
+            ? 'Locking backs a post; it earns nothing.'
+            : 'Locking shows support for the post. The coins stay yours.'}
         </span>
       </div>
       {error && (
@@ -1721,6 +1820,12 @@ export const FeedPage = ({ header }: { header?: ReactNode }) => {
     setIdentitySetupHandler(() => new Promise<boolean>((resolve) => setSettingUp(() => resolve)));
     return () => setIdentitySetupHandler(null);
   }, []);
+  // Accounts that have already posted: link the posting address to the $name on Feed open (authorBinding.ts). An
+  // account that has never posted sends nothing here (it is linked after its first post), nor does an agent account,
+  // a pot, or one with no name. Silent. Waits for the identity load (the wallet is open by then).
+  useEffect(() => {
+    if (!identity.loading) void ensureFeedAuthorBinding(apiContext);
+  }, [apiContext, identity.loading, identity.isPublished]);
   const [locking, setLocking] = useState<FeedPost | null>(null);
   const [homeSort, setSort] = useState<FeedSort>(start.sort);
   const sort: FeedSort = appSource ? 'latest' : homeSort;

@@ -2,11 +2,13 @@
  * Wallet › PNEEs › lock icon (owner, 10 Oct 2026): the first sheet of Back PNEEs on the Lock screen asks how much
  * BSV to lock. Pure helpers here; the backing itself is still the existing Back PNEEs flow (BackPneeSheet).
  */
+import { MARKET_ENABLED } from '../storeBuild';
 
 /** Route that opens the Lock screen in Back PNEEs mode. */
 export const BACK_PNEE_ROUTE = '/m/lock?back=pnee';
-export const BACK_PNEE_LABEL = 'Lock BSV to back PNEEs';
-export const BACK_PNEE_QUESTION = 'How much BSV would you like to lock to back PNEEs?';
+// Backing PNEEs is bWalletX only (MARKET_ENABLED): the wording is not in a store bundle.
+export const BACK_PNEE_LABEL = MARKET_ENABLED ? 'Lock BSV to back PNEEs' : '';
+export const BACK_PNEE_QUESTION = MARKET_ENABLED ? 'How much BSV would you like to lock to back PNEEs?' : '';
 export const BACK_PNEE_EXPLAINER = 'PNEEs are backed only by BSV locked in public vaults.';
 /** Preset amounts in BSV. */
 export const BACK_PNEE_PRESETS = [0.1, 0.5, 1, 5] as const;
@@ -56,5 +58,6 @@ export const nextBackPneeStep = (step: BackPneeStep, ev: BackPneeEvent): BackPne
 };
 
 /** Text on the done card. */
-export const backPneeDoneTitle = (bsv: number) => `Locked ${bsv} BSV to back PNEEs.`;
-export const BACK_PNEE_DONE_HINT = 'Find it any time in Pots & Locks → PNEEs pot.';
+export const backPneeDoneTitle = (bsv: number) =>
+  MARKET_ENABLED ? `Locked ${bsv} BSV to back PNEEs.` : `Locked ${bsv} BSV.`;
+export const BACK_PNEE_DONE_HINT = MARKET_ENABLED ? 'Find it any time in Pots & Locks → PNEEs pot.' : '';

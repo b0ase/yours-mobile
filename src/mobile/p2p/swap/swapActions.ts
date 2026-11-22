@@ -45,6 +45,7 @@ import {
   type SwapOffer,
   type SwapTerms,
 } from './swap';
+import { APP_NAME } from '../../storeBuild';
 
 const normId = (id: string) => id.trim().toLowerCase().replace('.', '_');
 const dotted = (op: string) => normId(op).replace('_', '.');
@@ -342,7 +343,7 @@ export async function offerSwap(
   if (terms.sellerKey) {
     const { publicKey } = await ctx.wallet.getPublicKey({ identityKey: true });
     if (publicKey.toLowerCase() !== terms.sellerKey.toLowerCase())
-      throw new SwapError('the contract names a different seller wallet. Open bWalletX on the seller account');
+      throw new SwapError(`the contract names a different seller wallet. Open ${APP_NAME} on the seller account`);
   }
   if (a.reservations) {
     await releaseExpired(ctx, a.reservations, now);

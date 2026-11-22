@@ -36,7 +36,7 @@ describe('native seal: not in a store build', () => {
       expect(i).toBeGreaterThan(-1);
       return bg.slice(Math.max(0, i - 400), i + needle.length);
     };
-    expect(at('? new SealPasses()')).toMatch(LITERAL);
+    expect(at('new SealPasses(Date.now')).toMatch(LITERAL);
     expect(at('askSealSheet(message.originator, sealSheetFor(')).toMatch(LITERAL);
     expect(at('? readSealSign(')).toMatch(LITERAL);
     expect(at('sealPasses.coversProtocol(')).toMatch(LITERAL);
