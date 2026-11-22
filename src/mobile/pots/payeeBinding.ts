@@ -51,6 +51,8 @@ export const PAYEE_UNVERIFIABLE = (paymail: string) =>
   `${paymail} gives an address that nothing ties to its wallet key, so later payments can’t be checked. Subscriptions can’t pay it: use a Bitcoin address instead.`;
 export const PAYEE_REVIEW_MOVED =
   'This paymail now gives a different destination than the one shown. Nothing was approved: the new one is shown above. Check it, then approve.';
+export const PAYEE_BACK_TO_APPROVED =
+  'This paymail gives the destination you approved again. Not paying it until you approve it here.';
 export const P2P_ONLY = (paymail: string) => `${paymail} only takes P2P payments, which subscriptions can’t send yet`;
 
 /** The review card's headline (b-Aware row 73). */
@@ -139,6 +141,22 @@ export const reviewApproval = async (
 };
 
 /**
+ * Why a review card that now shows `dest` is not paying, measured against what the order approved: the same reasons
+ * payeeDestination and legacyPin give when they raise a review. Pure.
+ */
+export const reviewReason = (
+  s: Pick<Subscription, 'payee' | 'needsReview' | 'lastReceipt'>,
+  dest: PayeeDestination,
+): string => {
+  if (s.needsReview?.legacy) return PAYEE_LEGACY_CONFIRM;
+  const { pinnedKey, pinnedAddress } = s.payee;
+  if (pinnedKey && !dest.pubkey) return PAYEE_KEY_MISSING;
+  if (pinnedKey && dest.pubkey !== pinnedKey) return PAYEE_KEY_CHANGED;
+  const approved = pinnedAddress ?? s.lastReceipt?.to;
+  return approved && dest.address === approved ? PAYEE_BACK_TO_APPROVED : PAYEE_ADDRESS_CHANGED;
+};
+
+/**
  * The review card's Approve (or Check) tap. Pins the destination when the card showed it, or when `ask` (the confirm
  * showing it) says yes; returns whether it pinned. When the payee has moved on since the card was raised (payDue
  * never looks a payee up again while it waits for review), nothing is pinned: the card is updated to show the new
@@ -154,7 +172,7 @@ export const approveReview = async (
   try {
     d = await reviewApproval(s, resolve);
   } catch (e) {
-    if (e instanceof PayeeReviewMovedError) refreshPayeeReview(s.id, e.dest);
+    if (e instanceof PayeeReviewMovedError) refreshPayeeReview(s.id, e.dest, (cur) => reviewReason(cur, e.dest));
     throw e;
   }
   if (!s.needsReview?.servedAddress && !ask(d)) return false;
