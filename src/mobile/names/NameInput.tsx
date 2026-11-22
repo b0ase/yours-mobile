@@ -1,4 +1,4 @@
-import { provenByLabel, trustProofSub } from './proof';
+import { provenByLabel } from './proof';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
 import { Input } from '../../components/Input';
@@ -15,7 +15,9 @@ import {
   isOurDomain,
   opnsTrustLabel,
   parseRecipient,
+  proofKeyOverride,
   resolveRecipient,
+  trustProvenAccount,
   trustResolvedKey,
   VIA_LABEL,
   type Resolved,
@@ -99,8 +101,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     // ...and, for a followed forward, who signed it: only that key may speak for the typed name next time.
     if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad' && r.nameBinding !== 'mismatch') trustResolvedKey(r);
     // ...and which provider account proved it (a different one next time stops the payment).
-    if (r.nameProof?.status === 'proven' && r.nameProof.sub)
-      trustProofSub(r.input.replace(/^\$/, '').split('@')[0], r.nameProof.sub);
+    if (r.nameProof?.status === 'proven') trustProvenAccount(r);
   };
 
   const onType = (input: string) => {
@@ -349,6 +350,20 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       I've checked with them: trust the new wallet
                     </button>
                   )}
+                  {proofKeyOverride(r) && (
+                    // A proof signed by a provider key this wallet never saw: same deliberate override.
+                    <button
+                      type="button"
+                      className="self-start bg-transparent border-0 p-0 text-xs font-semibold underline cursor-pointer"
+                      style={{ color: fg }}
+                      onClick={() => {
+                        trustResolvedKey(r);
+                        onType(text);
+                      }}
+                    >
+                      I've checked with them: pay this wallet
+                    </button>
+                  )}
                   {r.nameProof?.status === 'sub-changed' && r.nameProof.sub && (
                     // Same deliberate override for a name now proven by a different provider account.
                     <button
@@ -356,7 +371,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       className="self-start bg-transparent border-0 p-0 text-xs font-semibold underline cursor-pointer"
                       style={{ color: fg }}
                       onClick={() => {
-                        trustProofSub(r.input.replace(/^\$/, '').split('@')[0], r.nameProof!.sub!);
+                        trustProvenAccount(r);
                         onType(text);
                       }}
                     >

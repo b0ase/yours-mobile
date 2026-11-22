@@ -6,7 +6,7 @@ import {
   trustForwardSigner,
   type BindingStatus,
 } from './binding';
-import { checkNameProof, PROOF_PROVIDERS, type ProofCheck } from './proof';
+import { checkNameProof, followProofKey, PROOF_PROVIDERS, trustProofSub, UNKNOWN_KEY, type ProofCheck } from './proof';
 import { ProtoWallet, Utils } from '@bsv/sdk';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage } from './paymail';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
@@ -114,6 +114,8 @@ export type Resolved = {
   forwardsTo?: string;
   /** The key that signed the followed forward (set only with `forwardsTo`); confirm() remembers it for the typed name. */
   forwardSigner?: string;
+  /** The version (seq) of the typed name's own signed binding; unset for a forward or an unsigned name. */
+  bindingSeq?: number;
   /** A provable name's provider-signed proof (names/proof.ts, docs PROVABLE-NAMES.md): set only for `name.gmail`. */
   nameProof?: ProofCheck;
   /** Where tokens (BSV-21 / ordinals) would go, if this name can receive them. */
@@ -339,14 +341,39 @@ export const OPNS_KEY_UNVERIFIED = (name: string) =>
  * name next time). Used by NameInput's confirm() and by its "I've checked with them: trust the new wallet" override.
  */
 export const trustResolvedKey = (
-  r: Pick<Resolved, 'input' | 'pubkey' | 'forwardsTo' | 'forwardSigner' | 'via' | 'opnsChecked' | 'opnsKeySigned'>,
+  r: Pick<
+    Resolved,
+    | 'input'
+    | 'pubkey'
+    | 'forwardsTo'
+    | 'forwardSigner'
+    | 'via'
+    | 'opnsChecked'
+    | 'opnsKeySigned'
+    | 'bindingSeq'
+    | 'nameProof'
+  >,
 ) => {
   // An OpNS key is remembered only when checked on chain and signed by that key, never on the index's word alone.
   const key = trustedKey(r);
   if (!key) return;
   const typed = r.input.replace(/^\$/, '').split('@')[0];
-  trustCurrentKey(typed, key);
+  trustCurrentKey(typed, key, r.forwardsTo ? undefined : r.bindingSeq);
   if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
+  // proofKeyOverride's stop: accept this key for the name the proof was checked for (a forward's target).
+  const p = r.nameProof;
+  // Its time floor is now: an older token for another key can't take the name back (fifth review).
+  if (p?.status === 'unchecked' && p.overridable && p.alias) followProofKey(p.alias, key, p.seq);
+};
+
+/**
+ * Remember the provider account that proves the name (on a confirmed payment, or "trust the new account"), under the
+ * name the proof was checked for: a forward's target, not the typed name.
+ */
+export const trustProvenAccount = (r: Pick<Resolved, 'input' | 'nameProof'>) => {
+  const p = r.nameProof;
+  if (!p?.sub) return;
+  trustProofSub(p.alias ?? r.input.replace(/^\$/, '').split('@')[0], p.sub);
 };
 
 /**
@@ -405,12 +432,18 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
         servedFor && servedFor !== boundTo.toLowerCase()
           ? 'mismatch'
           : await checkBinding(boundTo, r.pubkey, id?.binding);
-      const from = (id?.binding as { handover?: { from?: string } } | undefined)?.handover?.from;
+      const served = id?.binding as { handover?: { from?: string }; seq?: number } | undefined;
+      const from = served?.handover?.from;
+      // The binding's version counts only for the typed name's own binding (a forward's is the target's).
+      if (status === 'signed' && !to && Number.isInteger(served?.seq)) r.bindingSeq = served?.seq;
       // The key-change stop stays on the TYPED name: a forward never resets what this wallet remembers for it.
-      r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from);
+      r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from, r.bindingSeq);
       // Provable names: the provider's own signature says which wallet this name belongs to; checked here.
       // A forward's proof is the target's (the server serves the target row), so check it against the target.
-      r.nameProof = (await checkNameProof(f, boundTo, r.pubkey, id?.proof)) ?? undefined;
+      // Its binding version (and handover signer) goes with it, only when that binding checked out: the kept proven key
+      // follows a signed handover and never moves back to an older version.
+      const proofBinding = status === 'signed' ? { seq: served?.seq, handoverFrom: from } : {};
+      r.nameProof = (await checkNameProof(f, boundTo, r.pubkey, id?.proof, proofBinding)) ?? undefined;
     }
     // Our host only pays names it knows (pki answers with a key). Without this an unknown alias resolved as payable
     // and failed later at send time as "the paymail host answered 404" (owner, 25 Oct 2026: bwalletx@bwalletx.com).
@@ -720,9 +753,28 @@ export const proofRefusal = (r: Pick<Resolved, 'nameProof'>): string | undefined
     return `This name has no proof from ${who}, so it may not belong to who it says. Not paying it.`;
   if (p.status === 'sub-changed')
     return `This name is now proven by a different ${who} account than before. Not paying it.`;
+  if (p.status === 'unchecked' && p.reason === UNKNOWN_KEY)
+    return `This name's ${who} proof is signed with a key this wallet never saw ${who} publish, so it can't be checked. Not paying it.`;
   if (p.status === 'unchecked') return `This version of ${APP_NAME} can't check ${who} proofs. Not paying it.`;
   return `This name's proof from ${who} doesn't check out, so it may have been moved without its owner. Not paying it.`;
 };
+
+/**
+ * A name this wallet saw proven before it kept the proven wallet key (before this update), whose proof is now signed
+ * by a provider key it never saw published (e.g. one rotated out before this wallet kept its own copy): Send stops,
+ * and like a key change (BRC-169 4.4) the payer may deliberately get through after checking with the person. The
+ * override trusts the served key for the proven name (trustResolvedKey), after which it pays as unproven, with no
+ * badge. Not offered for any other stop, nor for a name whose proven key this wallet kept (second review, finding 1).
+ */
+export const proofKeyOverride = (r: Pick<Resolved, 'pubkey' | 'nameBinding' | 'nameProof'>): boolean =>
+  !!r.pubkey &&
+  r.nameProof?.status === 'unchecked' &&
+  r.nameProof.reason === UNKNOWN_KEY &&
+  !!r.nameProof.overridable &&
+  r.nameBinding !== 'bad' &&
+  r.nameBinding !== 'mismatch' &&
+  // A key change has its own override, which trusts the same key (and the proof key too: trustResolvedKey).
+  r.nameBinding !== 'changed';
 
 export const destinationFor = (
   r: Resolved,

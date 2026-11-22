@@ -114,10 +114,10 @@ export async function checkForward(
   }
   try {
     // The signer must be the key the typed name is bound to, and not a key change this wallet hasn't accepted.
-    const binding = f.fromBinding as { handover?: Handover } | undefined;
+    const binding = f.fromBinding as { handover?: Handover; seq?: number } | undefined;
     if ((await checkBinding(alias, key, binding)) !== 'signed') return undefined;
     if (
-      keyChange(alias, key, 'signed', binding?.handover?.from) !== 'signed' &&
+      keyChange(alias, key, 'signed', binding?.handover?.from, binding?.seq) !== 'signed' &&
       readSigners()[alias.toLowerCase()] !== key.toLowerCase()
     )
       return undefined;
@@ -142,10 +142,31 @@ const readSeen = (): Record<string, string> => {
     return {};
   }
 };
-/** Remember this key for the name: when the payer confirms a payment to it, or deliberately trusts a new key. */
-export const trustCurrentKey = (alias: string, key: string) => {
+/** The key this wallet remembers for the name (the one the payer last confirmed), lowercase; undefined if none. */
+export const trustedKeyFor = (alias: string): string | undefined => readSeen()[alias.toLowerCase()];
+
+// The binding version (seq) of the remembered key, so a replayed older binding can't pass as a handover (b-Aware 136).
+const SEEN_SEQ = 'bwallet.names.seenSeqs';
+const readSeqs = (): Record<string, number> => {
   try {
-    localStorage.setItem(SEEN_KEY, JSON.stringify({ ...readSeen(), [alias.toLowerCase()]: key.toLowerCase() }));
+    return JSON.parse(localStorage.getItem(SEEN_SEQ) ?? '{}') as Record<string, number>;
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Remember this key for the name: when the payer confirms a payment to it, or deliberately trusts a new key. `seq` is
+ * the version of the signed binding it was served with (omitted when there was none, e.g. a forward's target).
+ */
+export const trustCurrentKey = (alias: string, key: string, seq?: number) => {
+  const a = alias.toLowerCase();
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify({ ...readSeen(), [a]: key.toLowerCase() }));
+    const seqs = readSeqs();
+    if (Number.isInteger(seq)) seqs[a] = seq as number;
+    else delete seqs[a];
+    localStorage.setItem(SEEN_SEQ, JSON.stringify(seqs));
   } catch {
     /* private mode: nothing remembered */
   }
@@ -170,12 +191,22 @@ export const trustForwardSigner = (alias: string, key: string) => {
 
 /**
  * BRC-169 4.4: never silently accept a new key for a name this wallet has paid before. A change is fine only
- * with a valid two-party handover from the key we knew; otherwise it's 'changed' and Send stops.
+ * with a valid two-party handover from the key we knew, at a newer binding version (`seq`) than the one we paid;
+ * otherwise it's 'changed' and Send stops. An old handover replayed by the host (lower or equal seq) is a change.
  */
-export function keyChange(alias: string, pubkey: string, status: BindingStatus, handoverFrom?: string): BindingStatus {
+export function keyChange(
+  alias: string,
+  pubkey: string,
+  status: BindingStatus,
+  handoverFrom?: string,
+  seq?: number,
+): BindingStatus {
   const a = alias.toLowerCase();
   const key = pubkey.toLowerCase();
   const seen = readSeen()[a];
-  if (seen && seen !== key && !(status === 'signed' && handoverFrom?.toLowerCase() === seen)) return 'changed';
+  if (!seen || seen === key) return status;
+  if (!(status === 'signed' && handoverFrom?.toLowerCase() === seen)) return 'changed';
+  const seenSeq = readSeqs()[a];
+  if (Number.isInteger(seenSeq) && !(Number.isInteger(seq) && (seq as number) > seenSeq)) return 'changed';
   return status;
 }
