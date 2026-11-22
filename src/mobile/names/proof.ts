@@ -50,6 +50,13 @@ export type ProofCheck = {
   provider: ProofProvider | 'github';
   sub?: string;
   reason?: string;
+  /** The name the proof was checked for (lowercase): a forward's target, not the typed name. */
+  alias?: string;
+  /**
+   * Set only on an 'unchecked' stop for a proof key this wallet never saw, for a name it saw proven before it kept
+   * the proven wallet key (before this update): the payer may deliberately get through (names.ts proofKeyOverride).
+   */
+  overridable?: true;
 };
 
 const env = (v: string | undefined) => (typeof v === 'string' ? v.trim() : '');
@@ -213,6 +220,29 @@ export const trustProofSub = (alias: string, sub: string) => {
   }
 };
 
+// The wallet key each provable name was last proven for (or that the payer deliberately accepted for it), lowercase.
+// A proof this wallet can't check (unknown provider key) is payable only for this key (second review, finding 1).
+const PROOF_KEY = 'bwallet.names.proofKeys';
+const readProofKeys = (): Record<string, string> => {
+  try {
+    return JSON.parse(localStorage.getItem(PROOF_KEY) ?? '{}') as Record<string, string>;
+  } catch {
+    return {};
+  }
+};
+/** Remember the wallet key this name's proof is accepted for: on every proven check, or the payer's override. */
+export const trustProofKey = (alias: string, identityKey: string) => {
+  const a = alias.toLowerCase();
+  const k = identityKey.toLowerCase();
+  const all = readProofKeys();
+  if (all[a] === k) return;
+  try {
+    localStorage.setItem(PROOF_KEY, JSON.stringify({ ...all, [a]: k }));
+  } catch {
+    /* private mode: nothing remembered */
+  }
+};
+
 // Every key this wallet has fetched from a provider itself: provider → kid → key (b-Aware 357).
 const SEEN_PROVIDER_KEYS = 'bwallet.names.providerKeys';
 const MAX_SEEN_KEYS = 200;
@@ -279,7 +309,8 @@ export const liveProviderKeys = async (f: Fetch, provider: ProofProvider): Promi
 };
 
 /**
- * The full check for a resolved name: null when the name isn't provable. `proof` is the pki answer's `proof`.
+ * The full check for a resolved name: null when the name isn't provable. `proof` is the pki answer's `proof`. The
+ * result carries the name it was checked for (`alias`), so an override is kept for that name, even for a forward.
  */
 export async function checkNameProof(
   f: Fetch,
@@ -287,7 +318,18 @@ export async function checkNameProof(
   identityKey: string,
   proof: unknown,
 ): Promise<ProofCheck | null> {
-  if (/\.github$/i.test(alias)) return checkGistProof(f, alias, identityKey, proof);
+  const res = /\.github$/i.test(alias)
+    ? await checkGistProof(f, alias, identityKey, proof)
+    : await checkProviderProof(f, alias, identityKey, proof);
+  return res && { ...res, alias: alias.toLowerCase() };
+}
+
+async function checkProviderProof(
+  f: Fetch,
+  alias: string,
+  identityKey: string,
+  proof: unknown,
+): Promise<ProofCheck | null> {
   const provider = provableProvider(alias);
   if (!provider) return null;
   const p = proof && typeof proof === 'object' ? (proof as NameProof) : null;
@@ -306,16 +348,23 @@ export async function checkNameProof(
     archived: walletSeenProviderKeys(provider),
   });
   if (!v.ok && v.reason === UNKNOWN_KEY) {
-    // Can't check it. Never proven; a name this wallet saw proven before stops, unless the served key is the one the
-    // payer already confirmed paying (then the proof adds nothing an attacker could use).
-    if (!seen || trustedKeyFor(alias) === identityKey.toLowerCase())
-      return { status: 'unproven', provider, reason: v.reason };
-    return { status: 'unchecked', provider, reason: v.reason };
+    // Can't check it. A name never seen proven pays with no badge. One seen proven pays only for the wallet key it was
+    // proven for (then the proof adds nothing an attacker could use); any other key is a hard stop, with no override,
+    // so a hostile server can't turn a missing or bad proof into a tap-through (second review, finding 1).
+    const key = identityKey.toLowerCase();
+    if (!seen) return { status: 'unproven', provider, reason: v.reason };
+    const kept = readProofKeys()[alias.toLowerCase()];
+    if (kept) return { status: kept === key ? 'unproven' : 'unchecked', provider, reason: v.reason };
+    // Seen proven before this update kept the key: the key the payer paid, or a deliberate override.
+    if (trustedKeyFor(alias) === key) return { status: 'unproven', provider, reason: v.reason };
+    return { status: 'unchecked', provider, reason: v.reason, overridable: true };
   }
   if (!v.ok) return { status: 'bad', provider, reason: v.reason };
   if (seen && seen !== v.sub) return { status: 'sub-changed', provider, sub: v.sub };
   // First proof this wallet sees for the name: remember its account, so a later missing or swapped proof stops.
   if (!seen) trustProofSub(alias, v.sub);
+  // ...and the wallet key it proves, the only one a later proof this wallet can't check may pay.
+  trustProofKey(alias, identityKey);
   return { status: 'proven', provider, sub: v.sub };
 }
 
