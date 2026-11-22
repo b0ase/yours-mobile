@@ -21,7 +21,7 @@
 import { PublicKey } from '@bsv/sdk';
 import { destinationFor, proofRefusal, type Resolved } from '../names/names';
 import { checkPaymentOutputs } from '../../utils/guardedSendBsv';
-import type { Payee, Subscription } from './pots';
+import { confirmPayeeReview, refreshPayeeReview, type Payee, type Subscription } from './pots';
 
 /** The destination could not be verified: don't pay, ask the user to confirm it again. */
 export class PayeeReviewError extends Error {
@@ -50,7 +50,7 @@ export const PAYEE_LEGACY_CONFIRM =
 export const PAYEE_UNVERIFIABLE = (paymail: string) =>
   `${paymail} gives an address that nothing ties to its wallet key, so later payments can’t be checked. Subscriptions can’t pay it: use a Bitcoin address instead.`;
 export const PAYEE_REVIEW_MOVED =
-  'This paymail now gives a different destination than the one shown. Nothing was approved: check it again.';
+  'This paymail now gives a different destination than the one shown. Nothing was approved: the new one is shown above. Check it, then approve.';
 export const P2P_ONLY = (paymail: string) => `${paymail} only takes P2P payments, which subscriptions can’t send yet`;
 
 /** The review card's headline (b-Aware row 73). */
@@ -115,10 +115,18 @@ export const payeeDestination = (
 
 type ResolveFresh = (p: Payee, opts: { ignorePin?: boolean; fresh?: boolean }) => Promise<PayeeDestination>;
 
+/** The payee serves something other than the review card showed. `dest` passed the set-up checks: the card shows it. */
+export class PayeeReviewMovedError extends Error {
+  constructor(public readonly dest: PayeeDestination) {
+    super(PAYEE_REVIEW_MOVED);
+    this.name = 'PayeeReviewMovedError';
+  }
+}
+
 /**
  * The destination a review card's Approve tap may pin, or throw: the payee is looked up again with the set-up checks
- * (fresh), and when the card showed a destination the answer must be exactly that one. Approve never pins anything
- * the user wasn't shown, nor an address nothing ties to the payee's key.
+ * (fresh), and when the card showed a destination the answer must be exactly that one (else PayeeReviewMovedError).
+ * Approve never pins anything the user wasn't shown, nor an address nothing ties to the payee's key.
  */
 export const reviewApproval = async (
   s: Pick<Subscription, 'payee' | 'needsReview'>,
@@ -126,8 +134,32 @@ export const reviewApproval = async (
 ): Promise<PayeeDestination> => {
   const d = await resolve(s.payee, { ignorePin: true, fresh: true });
   const shown = s.needsReview?.servedAddress;
-  if (shown && (d.address !== shown || d.pubkey !== s.needsReview?.servedKey)) throw new Error(PAYEE_REVIEW_MOVED);
+  if (shown && (d.address !== shown || d.pubkey !== s.needsReview?.servedKey)) throw new PayeeReviewMovedError(d);
   return d;
+};
+
+/**
+ * The review card's Approve (or Check) tap. Pins the destination when the card showed it, or when `ask` (the confirm
+ * showing it) says yes; returns whether it pinned. When the payee has moved on since the card was raised (payDue
+ * never looks a payee up again while it waits for review), nothing is pinned: the card is updated to show the new
+ * destination, which passed the same set-up checks (a basic paymail address only when it is the served key's own),
+ * and the error is rethrown so the user checks it before tapping again. Any other refusal leaves the card as it was.
+ */
+export const approveReview = async (
+  s: Pick<Subscription, 'id' | 'payee' | 'needsReview'>,
+  resolve: ResolveFresh,
+  ask: (d: PayeeDestination) => boolean,
+): Promise<boolean> => {
+  let d: PayeeDestination;
+  try {
+    d = await reviewApproval(s, resolve);
+  } catch (e) {
+    if (e instanceof PayeeReviewMovedError) refreshPayeeReview(s.id, e.dest);
+    throw e;
+  }
+  if (!s.needsReview?.servedAddress && !ask(d)) return false;
+  confirmPayeeReview(s.id, d);
+  return true;
 };
 
 /**

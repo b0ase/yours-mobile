@@ -1,11 +1,10 @@
 import { PNEE_POTS_ENABLED } from '../storeBuild';
 import { useState } from 'react';
 import { resolvePayee } from './potSend';
-import { keyFingerprint, pointsSomewhereNew, reviewApproval } from './payeeBinding';
+import { approveReview, keyFingerprint, pointsSomewhereNew } from './payeeBinding';
 import {
   amountSats,
   cancelSub,
-  confirmPayeeReview,
   formatAmount,
   formatPeriod,
   moveSub,
@@ -184,10 +183,11 @@ const ReviewPayee = ({ sub }: { sub: Subscription }) => {
     setBusy(true);
     setErr('');
     try {
-      const d = await reviewApproval(sub, resolvePayee);
-      const who = d.pubkey ? `wallet key ${keyFingerprint(d.pubkey)}` : 'no wallet key';
-      if (served || window.confirm(`Pay ${sub.payee.paymail ?? sub.payee.name} at ${d.address} (${who}) from now on?`))
-        confirmPayeeReview(sub.id, d);
+      // When the payee moved on since this card was raised, approveReview shows the new destination here and throws.
+      await approveReview(sub, resolvePayee, (d) => {
+        const who = d.pubkey ? `wallet key ${keyFingerprint(d.pubkey)}` : 'no wallet key';
+        return window.confirm(`Pay ${sub.payee.paymail ?? sub.payee.name} at ${d.address} (${who}) from now on?`);
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {

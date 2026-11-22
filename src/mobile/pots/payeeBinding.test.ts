@@ -493,7 +493,11 @@ describe('a new destination must be tied to the key the host serves (backlog ran
     const before = getSub(s.id)?.needsReview;
     for (const r of [bob({ target: MALLORY_ADDR }), bob({ pubkey: undefined, target: MALLORY_ADDR })]) {
       await expect(
-        approveReview(getSub(s.id)!, async (p, o) => payeeDestination(p, r, o), () => true),
+        approveReview(
+          getSub(s.id)!,
+          async (p, o) => payeeDestination(p, r, o),
+          () => true,
+        ),
       ).rejects.toThrow(/nothing ties/);
       expect(getSub(s.id)?.needsReview).toEqual(before);
       expect(getSub(s.id)?.payee.pinnedAddress).toBe('1AliceAddr');
