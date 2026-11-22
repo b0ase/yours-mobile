@@ -13,7 +13,7 @@
  */
 import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { PrivateKey, ProtoWallet, PublicKey, Signature, Utils } from '@bsv/sdk';
-import { PAIR_VERSION, Sealer, deriveSession, isSealed, pairUrl, type PairLink } from '../../pair/protocol';
+import { PAIR_VERSION, Sealer, deriveSession, isSealed, pairUrl, signPairProofV2, type PairLink } from '../../pair/protocol';
 import { keepGlobals, stubGlobals } from '../../testing/stubGlobals';
 
 const realDappBrowser = { ...(await import('../dappBrowser')) };
@@ -48,7 +48,13 @@ class FakeWS {
 }
 
 const mem = new Map<string, string>();
+// The site's origin key: its public half is "published" at HOST/.well-known/bwalletx-pair.json via this fetch stub.
+const originKey = PrivateKey.fromRandom();
 stubGlobals({
+  fetch: async (url: string) =>
+    String(url) === 'https://pairtest.example/.well-known/bwalletx-pair.json'
+      ? new Response(JSON.stringify({ keys: [originKey.toPublicKey().toString()] }), { status: 200 })
+      : new Response('no', { status: 404 }),
   WebSocket: FakeWS,
   localStorage: {
     getItem: (k: string) => mem.get(k) ?? null,
@@ -77,8 +83,8 @@ let n = 0;
 const chan = () => `SAME${String(++n).padStart(18, 'A')}`;
 const loginFields = (ms = 120_000) => ({ ln: `nonce_${n}_abcdef`, lx: new Date(Date.now() + ms).toISOString() });
 
-/** Scan a same-phone link (ret, rid; `extra` adds ln/lx) and get the Connect card up. */
-const card = async (extra: Partial<PairLink> = {}, same = true) => {
+/** Scan a same-phone link (ret, rid; `extra` adds ln/lx) and get the Connect card up. `proven`: signed s2. */
+const card = async (extra: Partial<PairLink> = {}, same = true, proven = false) => {
   const site = PrivateKey.fromRandom();
   const link: PairLink = {
     v: PAIR_VERSION,
@@ -90,6 +96,7 @@ const card = async (extra: Partial<PairLink> = {}, same = true) => {
     ...(same && { ret: `${HOST}/rooms/lounge`, rid: `rid${String(n).padStart(20, 'x')}`, b: 'safari' as const }),
     ...extra,
   };
+  if (proven) link.s2 = signPairProofV2({ ...link, ret: link.ret!, rid: link.rid! }, originKey);
   const pending = sessions.beginPairing(pairUrl(link));
   const ws = FakeWS.all.at(-1)!;
   ws.deliver({ t: 'relay', verifiedOrigin: HOST });
@@ -169,7 +176,7 @@ describe('same phone: sign in with Connect, and go back', () => {
 
   test('the card says it signs in, and Connect folds the signature into ready and the return', async () => {
     const lf = loginFields();
-    const c = await card(lf);
+    const c = await card(lf, true, true);
     expect(c.p.signIn).toBe(true);
     const back = c.p.takeReturn();
     const r = await c.p.confirm();
@@ -192,7 +199,7 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(r?.wk).toBe(c.hello.k);
     const href = returnHref(back!, 'ios', r ?? undefined);
     const u = new URL(href);
-    expect(u.origin + u.pathname).toBe(`${HOST}/`);
+    expect(u.origin + u.pathname).toBe(`${HOST}/rooms/lounge`); // proven (s2): the site's own signed ret
     const q = new URLSearchParams(u.hash.slice(1));
     expect(q.get('bwx')).toBe('ok');
     expect(q.get('wk')).toBe(c.hello.k);
@@ -207,7 +214,7 @@ describe('same phone: sign in with Connect, and go back', () => {
   });
 
   test('an expired or malformed challenge is not signed: plain Connect', async () => {
-    const c = await card(loginFields(-1000));
+    const c = await card(loginFields(-1000), true, true);
     expect(c.p.signIn).toBe(false);
     await c.p.confirm();
     await settle();
@@ -225,13 +232,13 @@ describe('same phone: sign in with Connect, and go back', () => {
 
   test('the sign-in card names the account that will sign in (review 22 Nov, 5)', async () => {
     mem.set('bwallet.name.1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA', 'b0asex');
-    const c = await card(loginFields());
+    const c = await card(loginFields(), true, true);
     expect(c.p.signInAs).toBe('$b0asex');
     mem.delete('bwallet.name.1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA');
   });
 
   test('a challenge that expires while the card is up is not signed (review 22 Nov, 3)', async () => {
-    const c = await card(loginFields(300));
+    const c = await card(loginFields(300), true, true);
     expect(c.p.signIn).toBe(true);
     await new Promise((r) => setTimeout(r, 400));
     await c.p.confirm();
@@ -246,6 +253,27 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(c.gone()).toBe(1);
     expect(await c.p.confirm()).toBeNull();
     expect(sessions.pairedSites().some((s) => s.c === c.link.c)).toBe(false);
+  });
+
+  test('review 2 (1): an UNPROVEN origin never gets the one-tap sign-in; the site asks on the separate sheet', async () => {
+    const c = await card(loginFields());
+    expect(c.p.proven).toBe(false);
+    expect(c.p.signIn).toBe(false);
+    await c.p.confirm();
+    await settle();
+    const msgs = await sealedFrom(c.ws, c.siteSealer);
+    expect((msgs.find((m) => m?.t === 'ready') as { login?: unknown })?.login).toBeUndefined();
+    expect(c.p.returnPlan?.ret).toBe(`${HOST}/`); // still returns, to the root
+  });
+
+  test('review 2 (6): the card signs with the account it opened under; another account open now refuses', async () => {
+    const c = await card(loginFields(), true, true);
+    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: '1AccountBBBBBBBBBBBBBBBBBBBBBBBBBB', accountCount: 2 });
+    const r = await c.p.confirm();
+    expect(r).toBeNull();
+    expect(c.gone()).toBe(1);
+    expect(sessions.pairedSites().some((s) => s.c === c.link.c)).toBe(false);
+    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: '1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA', accountCount: 1 });
   });
 
   afterAll(() => {
