@@ -382,6 +382,8 @@ export interface AccountContext {
    * (services/backupFill.ts), then registered. True once registered.
    */
   addOurBackup: () => Promise<boolean>;
+  /** Our server's first fill is unfinished: when addOurBackup may try again (undefined: nothing to retry). */
+  ourBackupRetryAt: () => number | undefined;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
   backupBeforeSend: () => Promise<BackupBeforeSend>;
   /** The backup's state for the honest copy: configured, a push waiting, failures, the last good push. */
@@ -1102,13 +1104,15 @@ export const initWallet = async (
     makeDeviceActive: () =>
       withFullPassMode(ownSik(), 'defer', () => switchActiveAs(keepActive, setActiveStorage)('local')),
     withLock: (fn) => storage.runAsSync(() => fn()),
-    fill: (writer, restorePoint) =>
+    fill: (writer, restorePoint, o) =>
       fillBackup({
         manager: storage as never,
         reader: ownStore() as never,
         writer: writer as never,
         restorePoint,
         yieldWhile: () => ownPayments.waiting(),
+        resume: o?.resume,
+        onProgress: o?.onProgress,
       }),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
@@ -2498,6 +2502,8 @@ export const initWallet = async (
         changeUnbacked: writeAhead?.count() ?? 0,
         // Only while an instant restore runs (flag on): the card's one calm line instead of "Arriving…".
         ...(spendableFirst.loading() ? { snapshot: true } : {}),
+        // Our server's first fill didn't finish (flag on): "Backup incomplete, will retry" until a try lands.
+        ...(spendableFirst.ourBackup().incomplete ? { ourBackupIncomplete: true } : {}),
       };
     },
     receiveWatch: {
@@ -2516,6 +2522,7 @@ export const initWallet = async (
     },
     snapshotLoading: spendableFirst.loading,
     addOurBackup: spendableFirst.addOurBackup,
+    ourBackupRetryAt: () => spendableFirst.ourBackup().retryAt,
     backupState: () => {
       const st = deviceSync.state();
       return {

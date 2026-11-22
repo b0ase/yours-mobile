@@ -22,6 +22,8 @@
  *    and never finished). Age alone is not a fault: pulls run on open and on demand. Hidden with no backup.
  *  - "1 payment's change not backed up yet" (red): a payment went out while the backup could not be reached, and its
  *    change is still only on this device (services/changeWriteAhead.ts, fix 4); gone once a push lands.
+ *  - "Backup incomplete, will retry" (red): our storage server's first backup of this device stopped before it
+ *    finished (instant restore flag on; services/backupFill.ts); gone once a later try lands.
  *
  * Display only: everything here reads; nothing decides what is signed, sent or spent.
  */
@@ -111,6 +113,11 @@ export type BalanceTruth = {
    * the card shows one calm line, never "Arriving…" or the copy's progress.
    */
   snapshot?: boolean;
+  /**
+   * Our storage server's first backup of this device (services/backupFill.ts) stopped before it finished and will be
+   * tried again (spendableFirstWiring addOurBackup): "Backup incomplete, will retry". Absent: nothing to say.
+   */
+  ourBackupIncomplete?: boolean;
 };
 
 /** The one line the balance card shows while an instant restore brings the rest in. */
@@ -121,7 +128,11 @@ export type TruthLine =
   | { kind: 'arriving'; text: string; sats: number }
   | { kind: 'progress'; text: string }
   | { kind: 'sync'; text: string; warn: boolean }
-  | { kind: 'backup'; text: string; warn: true };
+  | { kind: 'backup'; text: string; warn: true }
+  | { kind: 'server-backup'; text: string; warn: true };
+
+/** The line for an unfinished backup to our storage server. */
+export const OUR_BACKUP_INCOMPLETE_LINE = 'Backup incomplete, will retry';
 
 /** "1 payment's change not backed up yet": a payment whose change is still only on this device. Null when none. */
 export function backupLine(t: Pick<BalanceTruth, 'changeUnbacked'>): TruthLine | null {
@@ -209,6 +220,8 @@ export function truthLines(
   if (s) lines.push(s);
   const b = backupLine(t);
   if (b) lines.push(b);
+  if (t.ourBackupIncomplete === true)
+    lines.push({ kind: 'server-backup', text: OUR_BACKUP_INCOMPLETE_LINE, warn: true });
   return lines;
 }
 

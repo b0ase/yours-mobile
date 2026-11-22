@@ -5,11 +5,13 @@
  * initWallet wiring is inert with the flag off: nothing connects, nothing is added.
  */
 import { describe, expect, test } from 'bun:test';
-import { SNAPSHOT_LOADING_LINE, truthLines, type BalanceTruth } from './balanceTruth';
+import { OUR_BACKUP_INCOMPLETE_LINE, SNAPSHOT_LOADING_LINE, truthLines, type BalanceTruth } from './balanceTruth';
+import { FillIncompleteError, type FillProgress } from './backupFill';
 import { moveNoticeShows } from '../components/moveToDevice';
 import {
   createSpendableFirst,
   holdSendsForSnapshot,
+  OUR_BACKUP_RETRY_MS,
   oneSatSnapshotLookups,
   type OurServerClient,
   type SendGate,
@@ -109,6 +111,120 @@ describe('initWallet wiring', () => {
     expect(log).toContain('getCapabilities');
     expect(log).not.toContain('makeDeviceActive');
     expect(w.loading()).toBe(false);
+  });
+});
+
+describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our server is kept, shown and tried again', () => {
+  const progress: FillProgress = {
+    stage: 'bulk',
+    finalSince: 1,
+    offsets: [{ name: 'provenTx', offset: 3 }],
+  };
+  const make = (on: boolean, kvStore: Record<string, unknown>, clock: { t: number }, results: (() => unknown)[]) => {
+    const log: string[] = [];
+    const resumes: unknown[] = [];
+    const client = {
+      makeAvailable: async () => ({ storageIdentityKey: 'server-sik' }),
+      getSettings: () => ({ storageIdentityKey: 'server-sik' }),
+      findOrInsertUser: async () => ({ user: { userId: 7 } }),
+      setActive: async () => undefined,
+    } as unknown as OurServerClient;
+    const w = createSpendableFirst({
+      on,
+      newClient: () => client,
+      device: () => ({ getSettings: () => ({ storageIdentityKey: 'device-sik' }) }) as never,
+      identityKey: async () => '02ab',
+      deviceActive: () => true,
+      tracker: async () => ({ isValidRootForHeight: async () => true }),
+      remoteDefaultCoins: async () => 0,
+      makeDeviceActive: async () => undefined,
+      withLock: (fn) => fn(),
+      fill: async (_w, _r, o) => {
+        log.push('fill');
+        resumes.push(o?.resume ?? null);
+        await o?.onProgress?.(progress);
+        const next = results.shift()?.();
+        if (next instanceof Error) throw next;
+        return { how: 'full', pages: 1, unlockedPages: 0, unlockedMs: 0, lockedMs: [] };
+      },
+      addRemote: async () => void log.push('addRemote'),
+      kv: { get: async (k) => ({ [k]: kvStore[k] }), set: async (i) => void Object.assign(kvStore, i) },
+      markKey: 'mark',
+      now: () => clock.t,
+    });
+    return { w, log, resumes };
+  };
+  const refused = () =>
+    new FillIncompleteError('refused', 'WalletStorageClient rpcCall: network error 429', { retryAfterMs: 120_000 });
+
+  test('a refused fill: not registered, kept with its progress, "Backup incomplete, will retry", Retry-After honoured', async () => {
+    const kv: Record<string, unknown> = {};
+    const clock = { t: NOW };
+    const { w, log } = make(true, kv, clock, [refused]);
+    expect(await w.addOurBackup()).toBe(false);
+    // (d) Our server is no backup of anything it didn't acknowledge: never registered.
+    expect(log).toEqual(['fill']);
+    expect(w.ourBackup()).toEqual({ incomplete: true, retryAt: NOW + 120_000 });
+    // (c) Shown on the balance card, in the lines it already shows.
+    const texts = truthLines(truth({ ourBackupIncomplete: true }), usd, NOW).map((l) => l.text);
+    expect(texts).toContain(OUR_BACKUP_INCOMPLETE_LINE);
+    expect(OUR_BACKUP_INCOMPLETE_LINE).toBe('Backup incomplete, will retry');
+    expect(truthLines(truth(), usd, NOW).map((l) => l.text)).not.toContain(OUR_BACKUP_INCOMPLETE_LINE);
+    // Kept across a restart: a new wallet open reads it back.
+    const again = make(true, kv, clock, []);
+    await again.w.resume();
+    expect(again.w.ourBackup()).toEqual({ incomplete: true, retryAt: NOW + 120_000 });
+  });
+
+  test('(b) never a tight resend: no try before the back-off; after it, the fill goes on from its kept progress', async () => {
+    const kv: Record<string, unknown> = {};
+    const clock = { t: NOW };
+    const { w, log, resumes } = make(true, kv, clock, [refused, () => undefined]);
+    expect(await w.addOurBackup()).toBe(false);
+    clock.t = NOW + 119_000;
+    expect(await w.addOurBackup()).toBe(false);
+    expect(log).toEqual(['fill']);
+    clock.t = NOW + 121_000;
+    expect(await w.addOurBackup()).toBe(true);
+    expect(log).toEqual(['fill', 'fill', 'addRemote']);
+    expect(resumes).toEqual([null, progress]);
+    expect(w.ourBackup()).toEqual({ incomplete: false });
+    expect(kv['mark:ourBackupFill']).toBeNull();
+  });
+
+  test('(b) back-off without a Retry-After grows with each unfinished try; a stalled fill starts again', async () => {
+    const kv: Record<string, unknown> = {};
+    const clock = { t: NOW };
+    const failed = () => new Error('WalletStorageClient rpcCall: network error 503');
+    const stalled = () => new FillIncompleteError('stalled', 'backup fill made no progress');
+    const { w, resumes } = make(true, kv, clock, [failed, failed, stalled, () => undefined]);
+    expect(await w.addOurBackup()).toBe(false);
+    expect(w.ourBackup().retryAt).toBe(NOW + OUR_BACKUP_RETRY_MS[0]);
+    clock.t = w.ourBackup().retryAt!;
+    expect(await w.addOurBackup()).toBe(false);
+    expect(w.ourBackup().retryAt).toBe(clock.t + OUR_BACKUP_RETRY_MS[1]);
+    clock.t = w.ourBackup().retryAt!;
+    expect(await w.addOurBackup()).toBe(false);
+    clock.t = w.ourBackup().retryAt!;
+    expect(await w.addOurBackup()).toBe(true);
+    // The stalled fill's progress is dropped: the try after it starts from the beginning.
+    expect(resumes).toEqual([null, progress, progress, null]);
+  });
+
+  test('flag off: never incomplete, nothing tried', async () => {
+    const { w, log } = make(false, {}, { t: NOW }, [refused]);
+    expect(await w.addOurBackup()).toBe(false);
+    expect(w.ourBackup()).toEqual({ incomplete: false });
+    expect(log).toEqual([]);
+  });
+
+  test('wired: the card reads it, and the background tries again when the back-off is over', async () => {
+    const { readFileSync } = await import('node:fs');
+    const init = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
+    expect(init).toContain('...(spendableFirst.ourBackup().incomplete ? { ourBackupIncomplete: true } : {})');
+    expect(init).toContain('resume: o?.resume,');
+    const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
+    expect(bg).toContain('if (!(await ctx.addOurBackup())) return scheduleOurBackupRetry(ctx);');
   });
 });
 

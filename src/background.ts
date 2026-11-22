@@ -1121,7 +1121,7 @@ const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
   const before = chromeStorageService.getCurrentAccountObject().account;
   const config = before?.storageConfig as StorageConfig | undefined;
   if (!before || !config || withSnapshotRemote(config, true) === config) return;
-  if (!(await ctx.addOurBackup())) return;
+  if (!(await ctx.addOurBackup())) return scheduleOurBackupRetry(ctx);
   // Read again: the account may have changed while the fill ran.
   const account = chromeStorageService.getCurrentAccountObject().account;
   if (account?.addresses.identityAddress !== before.addresses.identityAddress) return;
@@ -1130,6 +1130,26 @@ const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
   await chromeStorageService.updateNested('accounts', {
     [account.addresses.identityAddress]: { storageConfig: next } as unknown as Account,
   });
+};
+
+/**
+ * Our server's first fill didn't finish (refused, stalled or failed; mainnet 1p test, 22 Nov 2026): try again once its
+ * back-off (or the server's Retry-After) is over, from where it stopped. One timer; the next open tries too. Never
+ * sooner: addOurBackup itself refuses a try before then.
+ */
+let ourBackupRetry: ReturnType<typeof setTimeout> | undefined;
+const scheduleOurBackupRetry = (ctx: NonNullable<typeof accountContext>) => {
+  const at = ctx.ourBackupRetryAt();
+  if (at === undefined) return;
+  if (ourBackupRetry) clearTimeout(ourBackupRetry);
+  ourBackupRetry = setTimeout(
+    () => {
+      ourBackupRetry = undefined;
+      if (accountContext !== ctx) return;
+      void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
+    },
+    Math.max(1_000, at - Date.now() + 1_000),
+  );
 };
 
 /** Where the move to this device stands, for the "Retry moving this account to this device" notice. */

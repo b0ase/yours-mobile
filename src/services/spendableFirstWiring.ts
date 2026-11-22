@@ -20,12 +20,36 @@ import {
 import { withTimeout } from './restoreProgress';
 import { buildsTransaction, LocalStoreNeededError } from './localFirst';
 import { isInsufficientFunds } from './fundingPrep';
-import type { FillReport } from './backupFill';
+import { fillError, type FillProgress, type FillReport } from './backupFill';
 
 const CONNECT_MS = 8_000;
 const COUNT_MS = 8_000;
 /** How long a send waits for the background snapshot before it is refused with the wait line. */
 export const SEND_WAIT_MS = 15_000;
+/** After an unfinished fill of our server, the next try waits this long (by failures in a row), or the server's Retry-After if longer. */
+export const OUR_BACKUP_RETRY_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000];
+/** A fill that stopped making progress is tried again from the start, no sooner than this. */
+export const OUR_BACKUP_STALL_RETRY_MS = 15 * 60_000;
+
+/** Our server's first fill didn't finish: kept per account, shown as "Backup incomplete, will retry". */
+export type OurBackupIncomplete = {
+  at: number;
+  /** No try before this (the back-off, or the server's Retry-After). */
+  retryAt: number;
+  reason: string;
+  kind: 'refused' | 'stalled' | 'failed';
+  /** Unfinished tries in a row. */
+  failures: number;
+};
+/** What is kept between tries: the device store it was for, how far the fill got, and why it stopped. */
+type OurBackupFill = { deviceSik: string; progress?: FillProgress | null; incomplete?: OurBackupIncomplete };
+
+/** When the next try may run after `failures` unfinished tries in a row ending with `e`. */
+export function ourBackupRetryMs(e: unknown, failures: number): number {
+  const err = fillError(e);
+  const backoff = OUR_BACKUP_RETRY_MS[Math.min(Math.max(1, failures), OUR_BACKUP_RETRY_MS.length) - 1];
+  return Math.max(backoff, err.retryAfterMs ?? 0, err.kind === 'stalled' ? OUR_BACKUP_STALL_RETRY_MS : 0);
+}
 
 const TXID = /^[0-9a-f]{64}$/i;
 type Bytes = number[] | Uint8Array;
@@ -153,8 +177,13 @@ export type SpendableFirstWiringDeps = {
   /**
    * The first fill of our server from this device (services/backupFill.ts): the bulk outside the storage locks, and a
    * device restored from our snapshot from its restore point. Runs before our server is registered as a backup.
+   * `resume`/`onProgress`: an unfinished fill goes on from the last page our server acknowledged.
    */
-  fill: (writer: OurServerClient, restorePoint?: Date) => Promise<FillReport>;
+  fill: (
+    writer: OurServerClient,
+    restorePoint?: Date,
+    o?: { resume?: FillProgress | null; onProgress?: (p: FillProgress | null) => Promise<void> },
+  ) => Promise<FillReport>;
   /** The factory's addRemote: register a backup for this session. */
   addRemote: (url: string) => Promise<void>;
   owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>;
@@ -170,10 +199,28 @@ export type SpendableFirstWiringDeps = {
   /** The background snapshot finished (or stopped for good): the ordinary pull may run now. */
   onSettled?: (mark: SnapshotMark) => void;
   log?: (...a: unknown[]) => void;
+  now?: () => number;
 };
 
 export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   const log = d.log ?? (() => undefined);
+  const now = d.now ?? Date.now;
+  /** Our server's fill, as kept (kv `${markKey}:ourBackupFill`); read at open, written by every try. */
+  const fillKey = `${d.markKey}:ourBackupFill`;
+  let fillState: OurBackupFill | null = null;
+  const loadFill = async (): Promise<OurBackupFill | null> => {
+    try {
+      const v = (await d.kv.get(fillKey))?.[fillKey] as OurBackupFill | undefined;
+      fillState = v && typeof v === 'object' && typeof v.deviceSik === 'string' ? v : null;
+    } catch {
+      // unreadable: as none
+    }
+    return fillState;
+  };
+  const saveFill = async (v: OurBackupFill | null) => {
+    fillState = v;
+    await d.kv.set({ [fillKey]: v }).catch(() => undefined);
+  };
   let client: OurServerClient | undefined;
   let connecting: Promise<OurServerClient> | undefined;
   let lean = false;
@@ -262,29 +309,76 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
    * Our server as a backup for this session, without the toolbox's merge-and-copy (which would hold every storage lock
    * while it pushed the whole wallet): its user row is pointed at this device first, so it registers as a plain
    * backup and the ordinary pushes fill it.
+   * A fill that doesn't finish (refused, stalled, failed: mainnet 1p test, 22 Nov 2026) is never dropped silently: it
+   * is kept with how far it got, shown as "Backup incomplete, will retry", and our server is not registered (it is not
+   * a backup of anything it hasn't acknowledged). The next try (a timer in the background, or the next open) waits for
+   * the back-off or the server's Retry-After, then goes on from the last page our server acknowledged.
    */
-  const addOurBackup = async (): Promise<boolean> => {
+  let adding: Promise<boolean> | undefined;
+  /** One try at a time (the background's retry timer and a wallet open may both ask). */
+  const addOurBackup = (): Promise<boolean> =>
+    (adding ??= tryOurBackup().finally(() => {
+      adding = undefined;
+    }));
+  const tryOurBackup = async (): Promise<boolean> => {
     if (!d.on || !d.deviceActive()) return false;
+    const deviceSik = d.device()?.getSettings().storageIdentityKey;
+    if (!deviceSik) return false;
+    const kept = await loadFill();
+    const st = kept?.deviceSik === deviceSik ? kept : null;
+    if (st?.incomplete && now() < st.incomplete.retryAt) {
+      log(
+        `[spendable-first] our server's backup incomplete, next try in ${Math.ceil((st.incomplete.retryAt - now()) / 1000)} s`,
+      );
+      return false;
+    }
+    let progress: FillProgress | null = st?.progress ?? null;
     try {
       const c = await connect();
       const identityKey = await d.identityKey();
       const { user } = await c.findOrInsertUser(identityKey);
-      const deviceSik = d.device()?.getSettings().storageIdentityKey;
-      if (!deviceSik) return false;
       await c.setActive({ identityKey, userId: user.userId }, deviceSik);
       // Filled before it is registered: the ordinary push then starts from our server's cursor, never from the
       // beginning inside the storage locks (review, 20 Nov 2026, finding 4).
       const restorePoint = mark?.restoredAt ? new Date(mark.restoredAt) : undefined;
-      const r = await d.fill(c, restorePoint);
+      const r = await d.fill(c, restorePoint, {
+        resume: progress,
+        onProgress: async (p) => {
+          progress = p;
+          await saveFill({ deviceSik, progress: p, ...(st?.incomplete ? { incomplete: st.incomplete } : {}) });
+        },
+      });
       log(
         `[spendable-first] our server filled (${r.how}): ${r.pages} page(s), ${r.unlockedMs} ms unlocked, locked ${r.lockedMs.join('+') || 0} ms`,
       );
       await d.addRemote(SNAPSHOT_SERVER_URL);
+      await saveFill(null);
       return true;
     } catch (e) {
-      log('[spendable-first] our server not added as a backup this session:', e);
+      const err = fillError(e);
+      const failures = (st?.incomplete?.failures ?? 0) + 1;
+      const at = now();
+      const incomplete: OurBackupIncomplete = {
+        at,
+        retryAt: at + ourBackupRetryMs(err, failures),
+        reason: err.message,
+        kind: err.kind,
+        failures,
+      };
+      // A fill that stopped moving starts again next time; any other goes on from its last acknowledged page.
+      await saveFill({ deviceSik, progress: err.kind === 'stalled' ? null : progress, incomplete });
+      log(
+        `[spendable-first] our server's backup incomplete (${err.kind}), will retry in ${Math.ceil((incomplete.retryAt - at) / 1000)} s:`,
+        e,
+      );
       return false;
     }
+  };
+
+  /** Our server's backup didn't finish: "Backup incomplete, will retry", and when the next try may run. */
+  const ourBackup = (): { incomplete: boolean; retryAt?: number } => {
+    const inc = d.on ? fillState?.incomplete : undefined;
+    return inc ? { incomplete: true, retryAt: inc.retryAt } : { incomplete: false };
   };
 
   return {
@@ -310,6 +404,8 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       if (!r.used) return { used: false };
       log(`[spendable-first] restored from our server's snapshot (backup ${remoteUrl} stays the history source)`);
       hook();
+      // A new restore point (and maybe a new device store): an earlier unfinished fill doesn't carry on.
+      await saveFill(null);
       await saveMark({ stage: 'full', after: 0, at: Date.now(), restoredAt });
       void runFull();
       // Our server becomes a saved backup only once its first fill is done (background addSnapshotRemote).
@@ -318,12 +414,14 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     /** At open: hook the BEEF builder and carry on an unfinished background snapshot. */
     resume: async () => {
       if (!d.on) return;
+      await loadFill();
       mark = await loadMark();
       if (mark?.stage !== 'full') return;
       hook();
       void runFull();
     },
     addOurBackup,
+    ourBackup,
     /** Every send waits for (or is refused while) the snapshot is still coming in: holdSendsForSnapshot. */
     guardSends: (wallet: unknown) =>
       holdSendsForSnapshot(wallet, {
