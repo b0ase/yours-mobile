@@ -591,6 +591,72 @@ describe('invisible characters inside words (round-3 review of b-Aware row 353)'
   });
 });
 
+describe('invisible letters and look-alike letters inside words (round-4 review of b-Aware row 353)', () => {
+  // Hangul fillers are letters (Lo), not format characters, so they stayed in the word: 200 of 200 got past Ask b.
+  const FILLERS: Array<[string, string]> = [
+    ['Hangul filler', String.fromCharCode(0x3164)],
+    ['Hangul choseong filler', String.fromCharCode(0x115f)],
+    ['Hangul jungseong filler', String.fromCharCode(0x1160)],
+    ['halfwidth Hangul filler', String.fromCharCode(0xffa0)],
+  ];
+  for (const [name, ch] of FILLERS)
+    test(`${name} inside every word`, () => {
+      for (const words of [...fixedPhrases(5, 128), ...fixedPhrases(2, 256)]) {
+        const text = words.map((w) => `${w.slice(0, 2)}${ch}${w.slice(2)}`).join(' ');
+        expectBlocked(text, words);
+        expect(redactSecrets(text)).toBe('[recovery words hidden]');
+      }
+    });
+  test('words joined only by an invisible character', () => {
+    for (const ch of [String.fromCharCode(0x200b), String.fromCharCode(0x3164)]) {
+      const words = fixedPhrases(1, 128)[0];
+      expect(looksLikeSecret(words.join(ch))).toBe(true);
+      expect(redactSecrets(words.join(ch))).toBe('[recovery words hidden]');
+    }
+  });
+  // Cyrillic letters that look like Latin ones: a e o p c y x i j s h, and capitals A B E K M H O P C T Y X.
+  const LOOK: Record<string, string> = {
+    a: '\u0430',
+    e: '\u0435',
+    o: '\u043e',
+    p: '\u0440',
+    c: '\u0441',
+    y: '\u0443',
+    x: '\u0445',
+    i: '\u0456',
+    s: '\u0455',
+  };
+  const swap = (w: string) => w.replace(/[aeopcyxis]/g, (c) => LOOK[c]);
+  test('Cyrillic look-alike letters in every word', () => {
+    for (const words of [...fixedPhrases(5, 128), ...fixedPhrases(2, 256)]) {
+      const text = words.map(swap).join(' ');
+      expect(looksLikeSecret(text)).toBe(true);
+      expect(redactSecrets(text)).toBe('[recovery words hidden]');
+      const upper = words.map((w) => swap(w).toUpperCase()).join(' ');
+      expect(looksLikeSecret(upper)).toBe(true);
+      expect(redactSecrets(upper)).toBe('[recovery words hidden]');
+    }
+  });
+  test('one look-alike letter in every word, numbered', () => {
+    for (const words of fixedPhrases(5, 128)) {
+      const text = words.map((w, i) => `${i + 1}. ${w.replace(/[aeopcyxis]/, (c) => LOOK[c])}`).join(' ');
+      expect(looksLikeSecret(text)).toBe(true);
+      expect(redactSecrets(text)).toBe('[recovery words hidden]');
+    }
+  });
+  test('Russian, Ukrainian and Korean prose is left alone', () => {
+    for (const p of [
+      'Я вчера пытался отправить деньги другу, но приложение сказало, что перевод не прошёл. Скажите, пожалуйста, что случилось и как это исправить?',
+      'Сохраните слова восстановления на бумаге и никому их не показывайте. Если вы потеряете телефон, эти слова вернут ваш кошелёк.',
+      'Привіт! Після оновлення сторінка балансу порожня, а кнопка назад нічого не робить. Що мені робити з цим гаманцем?',
+      '어제 친구에게 돈을 보내려고 했는데 앱에서 거래가 실패했다고 합니다. 무슨 일이 있었는지 알려주세요.',
+    ]) {
+      expect(containsPhrase(p)).toBe(false);
+      expect(looksLikeSecret(p)).toBe(false);
+    }
+  });
+});
+
 describe('a 24-word phrase that repeats two words (round-3 review of b-Aware row 353)', () => {
   // About 1 random 24-word phrase in 125 repeats two words. With one filler between the words, 2a allowed one repeat and
   // stopped at the second, leaving the end of the phrase readable (a random Japanese test failed this way, 22 Nov 2026).
