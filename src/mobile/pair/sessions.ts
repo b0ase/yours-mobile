@@ -281,6 +281,8 @@ export type PendingPair = {
    * when the user should see why: the site ended the pairing itself (its user said the codes didn't match).
    */
   onGone: (f: (message?: string) => void) => void;
+  /** Why the card ended without connecting (expired, account changed), or undefined. */
+  goneReason: () => string | undefined;
 };
 
 /**
@@ -984,6 +986,7 @@ function connectPairing(
           if (gone) g(goneMessage);
           else goneFns.push(g);
         },
+        goneReason: () => (gone ? goneMessage : undefined),
         confirm: async (agent?: AgentGrant): Promise<ReturnExtra | null> => {
           if (gone) return null;
           if (Date.now() > link.e * 1000) {
@@ -1010,8 +1013,13 @@ function connectPairing(
             ? await signFoldedLogin(link.c, freshReq, agentDeps.ctx?.wallet as never, Date.now(), cardAccount).catch(() => null)
             : null;
           if (signed === 'wrong-account') {
-            supersede(PAIR_ACCOUNT_CHANGED_MESSAGE);
+            // The card is already closed for Connect (end()), so say why directly rather than through supersede.
+            gone = true;
+            goneMessage = PAIR_ACCOUNT_CHANGED_MESSAGE;
+            ws.onclose = null;
             ws.close();
+            goneFns.forEach((g) => g(goneMessage));
+            goneFns = [];
             return null;
           }
           const login = signed;

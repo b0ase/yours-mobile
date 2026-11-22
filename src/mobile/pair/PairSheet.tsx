@@ -222,6 +222,9 @@ export default function PairSheet({
                     .confirm()
                     .catch(() => null)
                     .then((extra) => {
+                      // Nothing was connected (the code expired, or the account changed meanwhile): say why.
+                      const why = p.goneReason();
+                      if (!extra && why) return setStage({ k: 'error', m: why });
                       setStage({
                         k: 'done',
                         origin: p.origin,
