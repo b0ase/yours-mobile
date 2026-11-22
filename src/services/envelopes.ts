@@ -19,7 +19,9 @@
  * - One payment without a sheet takes at most a tenth of the envelope (envelopePerSpendLimit, set at each fill and
  *   shown on the sheet); a bigger one gets the normal pay sheet (b-Aware rows 83, 370).
  * - A payment is held when it is authorised and settled only when the wallet signs it; an action that fails, is
- *   aborted or is left unsigned past the hold deadline gives the hold back (guardEnvelopes; rows 214, 322, 326).
+ *   aborted or is left unsigned past the hold deadline gives the hold back (guardEnvelopes; rows 214, 322, 326). A
+ *   payment an asset module finishes is held the same way (pModuleSpendGate). Holds are stored with the envelope, so a
+ *   background worker that stopped meanwhile has them given back when it starts again (recoverEnvelopeHolds).
  *   A probe (seekPermission=false) and the BRC-177 prefunding check never take anything.
  * - Each payment records where it went (`to`), and Settings › Envelopes lists it.
  */
@@ -53,6 +55,10 @@ export const ENVELOPE_HOLD_TIMEOUT_MS = 10 * 60_000;
 export type EnvelopeEventKind = 'fill' | 'spend' | 'return' | 'refund';
 /** `to`: where a payment went (an address, "data (OP_RETURN)" or "a custom script"), when the wallet saw it. */
 export type EnvelopeEvent = { at: number; kind: EnvelopeEventKind; sats: number; to?: string[] };
+/** A payment taken for an action not yet signed, keyed by the action's reference (given back if it is aborted). */
+export type EnvelopeHold = { sats: number; at: number };
+/** Held payments kept per envelope; past this the oldest record is dropped (that payment then stays taken). */
+export const HOLDS_LIMIT = 500;
 
 export interface Envelope {
   originator: string;
@@ -65,6 +71,8 @@ export interface Envelope {
   filledSats: number;
   spentSats: number;
   history: EnvelopeEvent[];
+  /** Payments held for actions not yet signed (only present when there are some). */
+  holds?: Record<string, EnvelopeHold>;
 }
 
 export type EnvelopeState = { envelopes: Record<string, Envelope> };
@@ -73,6 +81,23 @@ export const emptyEnvelopeState = (): EnvelopeState => ({ envelopes: {} });
 
 const wholeSats = (n: unknown): number | undefined =>
   typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.floor(n) : undefined;
+
+/** Stored holds, junk dropped; newest HOLDS_LIMIT kept. Undefined when there are none. */
+const parseHolds = (raw: unknown): Record<string, EnvelopeHold> | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const ok: [string, EnvelopeHold][] = [];
+  for (const [ref, v] of Object.entries(raw as Record<string, unknown>)) {
+    const sats = wholeSats((v as EnvelopeHold | null)?.sats);
+    const at = wholeSats((v as EnvelopeHold | null)?.at);
+    if (ref && sats !== undefined && sats > 0 && at !== undefined) ok.push([ref, { sats, at }]);
+  }
+  return ok.length ? Object.fromEntries(ok.sort((a, b) => a[1].at - b[1].at).slice(-HOLDS_LIMIT)) : undefined;
+};
+
+const withHolds = (e: Envelope, holds: Record<string, EnvelopeHold>): Envelope => {
+  const { holds: _old, ...rest } = e;
+  return Object.keys(holds).length ? { ...rest, holds } : rest;
+};
 
 /** Read whatever is stored, tolerating junk. A record with a bad balance is dropped (it grants nothing). */
 export const parseEnvelopeState = (raw: unknown): EnvelopeState => {
@@ -88,7 +113,9 @@ export const parseEnvelopeState = (raw: unknown): EnvelopeState => {
     // An envelope stored before the limit existed: a tenth of what is in it now (review 2: not of the total ever put
     // in, which after ten $1 fills and $9 spent let one payment take the whole $1 left).
     const perSpend = wholeSats(e.perSpendSats);
+    const holds = parseHolds(e.holds);
     out.envelopes[key] = {
+      ...(holds ? { holds } : {}),
       originator: key,
       balanceSats,
       perSpendSats: perSpend && perSpend > 0 ? perSpend : envelopePerSpendLimit(balanceSats),
@@ -167,14 +194,16 @@ export const spendFromEnvelope = (
   originator: string,
   sats: number,
   now: number,
-  opts: { limit?: boolean; to?: string[] } = {},
+  opts: { limit?: boolean; to?: string[]; hold?: string } = {},
 ): { state: EnvelopeState; ok: boolean; balanceSats: number; createdAt?: number } => {
   const cur = originator ? state.envelopes[originator] : undefined;
   const amount = spendAmount(sats);
   if (!cur || !(amount > 0) || amount > cur.balanceSats || (opts.limit && amount > cur.perSpendSats))
     return { state, ok: false, balanceSats: cur?.balanceSats ?? 0 };
+  // `hold`: the action this payment is for, written down in the same write so a restarted worker can give it back.
+  const held = opts.hold ? withHolds(cur, { ...cur.holds, [opts.hold]: { sats: amount, at: now } }) : cur;
   const next = withEvent(
-    { ...cur, balanceSats: cur.balanceSats - amount, spentSats: cur.spentSats + amount },
+    { ...held, balanceSats: cur.balanceSats - amount, spentSats: cur.spentSats + amount },
     { at: now, kind: 'spend', sats: amount, ...(opts.to?.length ? { to: opts.to } : {}) },
   );
   return {
@@ -186,28 +215,40 @@ export const spendFromEnvelope = (
 };
 
 /**
- * Give a held payment back (its action failed or was aborted before signing). Only to the same envelope it came from
- * (`createdAt`): an envelope closed with Coin return meanwhile, or closed and opened again, gets nothing back, so a
- * refund never re-earmarks money the user took out.
+ * Give a held payment back (its action failed or was aborted before signing), by the action's reference. Only what
+ * that envelope still holds for it, once: the hold record is removed in the same write, so a second give-back (another
+ * tab, a restarted worker) finds nothing. An envelope closed with Coin return meanwhile, or closed and opened again,
+ * has no such hold, so a refund never re-earmarks money the user took out.
  */
-export const refundToEnvelope = (
+export const refundHold = (
   state: EnvelopeState,
   originator: string,
-  sats: number,
-  createdAt: number,
+  reference: string,
   now: number,
 ): { state: EnvelopeState; refunded: number } => {
   const cur = originator ? state.envelopes[originator] : undefined;
-  const amount = wholeSats(sats) ?? 0;
-  if (!cur || cur.createdAt !== createdAt || amount <= 0) return { state, refunded: 0 };
-  const after = Math.min(MAX_ENVELOPE_SATS, cur.balanceSats + amount);
+  const hold = cur?.holds?.[reference];
+  if (!cur || !hold) return { state, refunded: 0 };
+  const { [reference]: _gone, ...rest } = cur.holds!;
+  const after = Math.min(MAX_ENVELOPE_SATS, cur.balanceSats + hold.sats);
   const refunded = after - cur.balanceSats;
-  if (refunded <= 0) return { state, refunded: 0 };
-  const next = withEvent(
-    { ...cur, balanceSats: after, spentSats: Math.max(0, cur.spentSats - refunded) },
-    { at: now, kind: 'refund', sats: refunded },
-  );
+  const base = withHolds(cur, rest);
+  const next =
+    refunded > 0
+      ? withEvent(
+          { ...base, balanceSats: after, spentSats: Math.max(0, cur.spentSats - refunded) },
+          { at: now, kind: 'refund', sats: refunded },
+        )
+      : base;
   return { state: { envelopes: { ...state.envelopes, [originator]: next } }, refunded };
+};
+
+/** A held payment was made (signed), or can't be given back: forget the hold, the payment stays taken. */
+export const releaseHold = (state: EnvelopeState, originator: string, reference: string): EnvelopeState => {
+  const cur = originator ? state.envelopes[originator] : undefined;
+  if (!cur?.holds?.[reference]) return state;
+  const { [reference]: _gone, ...rest } = cur.holds;
+  return { envelopes: { ...state.envelopes, [originator]: withHolds(cur, rest) } };
 };
 
 /** Coin return: the envelope is closed and its balance released. Returns how much was released. */
@@ -416,11 +457,12 @@ export class EnvelopeStore {
 
   /**
    * A site's payment: atomically take it when it fits the balance and the per-payment limit, recording where it goes.
-   * Resolves to the envelope's createdAt (for refund) when taken, undefined (nothing changed) when not.
+   * `hold`: the action it is for, stored with it (refundHold / releaseHold / recoverEnvelopeHolds). Resolves to the
+   * envelope's createdAt when taken, undefined (nothing changed) when not.
    */
-  reserve(originator: string, sats: number, to?: string[]): Promise<number | undefined> {
+  reserve(originator: string, sats: number, to?: string[], hold?: string): Promise<number | undefined> {
     return this.run((s) => {
-      const r = spendFromEnvelope(s, originator, sats, this.now(), { limit: true, to });
+      const r = spendFromEnvelope(s, originator, sats, this.now(), { limit: true, to, hold });
       return { state: r.ok ? r.state : undefined, result: r.ok ? r.createdAt : undefined };
     });
   }
@@ -430,12 +472,31 @@ export class EnvelopeStore {
     return this.run((s) => ({ result: envelopeFits(s, originator, sats) }));
   }
 
-  /** Give a held payment back to the envelope it came from (refundToEnvelope). Resolves to what was given back. */
-  refund(originator: string, sats: number, createdAt: number): Promise<number> {
+  /** Give the payment held for this action back (refundHold). Resolves to what was given back (0: nothing held). */
+  refundHold(originator: string, reference: string): Promise<number> {
     return this.run((s) => {
-      const r = refundToEnvelope(s, originator, sats, createdAt, this.now());
-      return { state: r.refunded ? r.state : undefined, result: r.refunded };
+      const r = refundHold(s, originator, reference, this.now());
+      return { state: r.state !== s ? r.state : undefined, result: r.refunded };
     });
+  }
+
+  /** The held payment was made: forget its hold (releaseHold). */
+  releaseHold(originator: string, reference: string): Promise<void> {
+    return this.run((s) => {
+      const next = releaseHold(s, originator, reference);
+      return { state: next !== s ? next : undefined, result: undefined };
+    });
+  }
+
+  /** Every held payment, oldest first (for recoverEnvelopeHolds). */
+  holds(): Promise<{ originator: string; reference: string; sats: number; at: number }[]> {
+    return this.run((s) => ({
+      result: Object.values(s.envelopes)
+        .flatMap((e) =>
+          Object.entries(e.holds ?? {}).map(([reference, h]) => ({ originator: e.originator, reference, ...h })),
+        )
+        .sort((a, b) => a.at - b.at),
+    }));
   }
 
   /**
@@ -540,7 +601,7 @@ type SpendArgs = {
 };
 
 type GuardDeps = {
-  envelopes: Pick<EnvelopeStore, 'reserve' | 'fits' | 'refund'>;
+  envelopes: Pick<EnvelopeStore, 'reserve' | 'fits' | 'refundHold' | 'releaseHold'>;
   adminOriginator: string;
   normalize: (o: string) => string;
   /** How long a site may hold a built, unsigned action before its hold is given back (ENVELOPE_HOLD_TIMEOUT_MS). */
@@ -548,8 +609,28 @@ type GuardDeps = {
   log?: (msg: string) => void;
 };
 
-type Hold = { originator: string; sats: number; createdAt: number; timer?: ReturnType<typeof setTimeout> };
+type Hold = { originator: string; timer?: ReturnType<typeof setTimeout> };
 type Bound = { reference: string; originator: string; outputs?: unknown };
+
+/**
+ * Holds a guard in this worker is looking after (any guard instance: a re-initialised wallet keeps the old one's
+ * payments running). recoverEnvelopeHolds leaves these alone.
+ */
+const liveHolds = new Set<string>();
+
+/**
+ * The hold hooks guardEnvelopes puts on the manager, for a payment the toolbox does not finish itself: an asset
+ * module's (pModuleSpendGate). `bind` ties the spend check called next, in the same synchronous step, to `reference`;
+ * `has` says whether that check took the payment from the envelope; `settle` (it was signed, or may have been) keeps
+ * it taken; `giveBack` (the action was confirmed aborted) returns it.
+ */
+export const ENVELOPE_HOLDS = Symbol.for('bwx.envelopeHolds');
+export type EnvelopeHoldHooks = {
+  bind(reference: string, originator: string, outputs?: unknown): void;
+  has(reference: string): boolean;
+  settle(reference: string): void;
+  giveBack(reference: string): Promise<void>;
+};
 type AnyFn = (...a: unknown[]) => unknown;
 
 /** Where a site's requested outputs pay: one entry per distinct payee (describeLockingScript). */
@@ -596,20 +677,31 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
   const aborted = new Set<string>();
   let bound: Bound | undefined;
 
-  const settle = (reference: string) => {
+  const forget = (reference: string): Hold | undefined => {
     const h = holds.get(reference);
-    if (!h) return;
+    if (!h) return undefined;
     holds.delete(reference);
+    liveHolds.delete(reference);
     if (h.timer) clearTimeout(h.timer);
+    return h;
+  };
+  const settle = (reference: string) => {
+    const h = forget(reference);
+    // The stored hold goes too. If that write fails, a later recovery finds it, its abort is refused (signed), and
+    // it is dropped then: the payment stays taken either way.
+    if (h)
+      void deps.envelopes
+        .releaseHold(h.originator, reference)
+        .catch((e: unknown) => log(`[envelopes] could not clear the hold for ${h.originator}: ${String(e)}`));
   };
   const giveBack = async (reference: string) => {
-    const h = holds.get(reference);
+    const h = forget(reference);
     if (!h) return;
-    settle(reference);
-    // A refund that fails leaves the payment taken: never more spending than the user allowed.
+    // A refund that fails is retried by recoverEnvelopeHolds at the next start (the hold is still stored); until then
+    // the payment stays taken: never more spending than the user allowed.
     await deps.envelopes
-      .refund(h.originator, h.sats, h.createdAt)
-      .catch((e: unknown) => log(`[envelopes] could not give back ${h.sats} sats to ${h.originator}: ${String(e)}`));
+      .refundHold(h.originator, reference)
+      .catch((e: unknown) => log(`[envelopes] could not give back a payment to ${h.originator}: ${String(e)}`));
   };
   const armTimer = (reference: string) => {
     const h = holds.get(reference);
@@ -717,6 +809,20 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
     return r;
   });
 
+  const hooks: EnvelopeHoldHooks = {
+    bind: (reference, originator, outputs) => {
+      const mine: Bound = { reference, originator, outputs };
+      bound = mine;
+      queueMicrotask(() => {
+        if (bound === mine) bound = undefined;
+      });
+    },
+    has: (reference) => holds.has(reference),
+    settle,
+    giveBack,
+  };
+  (m as Record<symbol, unknown>)[ENVELOPE_HOLDS] = hooks;
+
   m.ensureSpendingAuthorization = async (args: SpendArgs) => {
     // Read before any await: the action the toolbox bound just now, if this check is its spend check.
     const mine =
@@ -736,10 +842,16 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
     try {
       if (lookOnly) fits = await deps.envelopes.fits(originator, args.satoshis);
       else {
-        const createdAt = await deps.envelopes.reserve(originator, args.satoshis, payeesOf(mine?.outputs));
+        if (mine) liveHolds.add(mine.reference); // stored by reserve: not for a recovery running meanwhile
+        const createdAt = await deps.envelopes.reserve(
+          originator,
+          args.satoshis,
+          payeesOf(mine?.outputs),
+          mine?.reference,
+        );
         fits = createdAt !== undefined;
-        if (fits && mine)
-          holds.set(mine.reference, { originator, sats: Math.ceil(args.satoshis), createdAt: createdAt! });
+        if (fits && mine) holds.set(mine.reference, { originator });
+        else if (mine) liveHolds.delete(mine.reference);
       }
     } catch (e) {
       if (!isEnvelopeUnavailable(e)) throw e;
@@ -757,3 +869,72 @@ export function guardEnvelopes<T extends object>(manager: T, deps: GuardDeps): T
   };
   return manager;
 }
+
+/** Storage refused the abort because the action was signed and shared (or already ended): it can't be given back. */
+const abortRefused = (e: unknown): boolean => {
+  const err = e as { code?: unknown; name?: unknown; message?: unknown } | null;
+  return (
+    err?.code === 'WERR_INVALID_PARAMETER' ||
+    err?.name === 'WERR_INVALID_PARAMETER' ||
+    (typeof err?.message === 'string' && /not been signed and shared/.test(err.message))
+  );
+};
+
+/**
+ * Give back what a stopped worker held (review 3). The extension's background worker can stop at any time (Chrome
+ * ends an idle one after 30 s), and with it the timers and memory of guardEnvelopes: a payment held for an action the
+ * site never signed would stay taken for ever. Holds are stored with the envelope, so at start each one older than
+ * `olderThanMs` (default twice the hold deadline: a worker still running, here or in another web tab, has dealt with
+ * its own by then) and not looked after in this worker is aborted on the base wallet first, so it can never be signed:
+ * - abort confirmed → given back (once: refundHold removes the record in the same write);
+ * - abort refused (it was signed and shared, or already ended) → the record is dropped, the payment stays taken;
+ * - anything else (storage not answering) → kept, tried again at the next start.
+ */
+export const recoverEnvelopeHolds = async (
+  store: Pick<EnvelopeStore, 'holds' | 'refundHold' | 'releaseHold'>,
+  abort: (reference: string) => Promise<{ aborted?: unknown } | undefined>,
+  opts: { now?: number; olderThanMs?: number; isLive?: (reference: string) => boolean; log?: (m: string) => void } = {},
+): Promise<{ refunded: number; dropped: number; kept: number }> => {
+  const now = opts.now ?? Date.now();
+  const cutoff = now - (opts.olderThanMs ?? 2 * ENVELOPE_HOLD_TIMEOUT_MS);
+  const isLive = opts.isLive ?? ((r: string) => liveHolds.has(r));
+  const log = opts.log ?? console.warn;
+  const out = { refunded: 0, dropped: 0, kept: 0 };
+  for (const h of await store.holds()) {
+    if (h.at > cutoff || isLive(h.reference)) continue;
+    let aborted = false;
+    try {
+      aborted = (await abort(h.reference))?.aborted === true;
+    } catch (e) {
+      if (!abortRefused(e)) {
+        out.kept++;
+        log(`[envelopes] could not check a held payment for ${h.originator}; trying again next time: ${String(e)}`);
+        continue;
+      }
+    }
+    if (aborted) out.refunded += await store.refundHold(h.originator, h.reference);
+    else {
+      await store.releaseHold(h.originator, h.reference);
+      out.dropped++;
+    }
+  }
+  return out;
+};
+
+/**
+ * At wallet start: recover now, and once more after the hold deadline has passed for holds that were too young now
+ * (a worker that stops before then does it at its next start). Failures are logged, never thrown.
+ */
+export const scheduleEnvelopeHoldRecovery = (
+  store: Pick<EnvelopeStore, 'holds' | 'refundHold' | 'releaseHold'>,
+  abort: (reference: string) => Promise<{ aborted?: unknown } | undefined>,
+  log: (m: string) => void = console.warn,
+): void => {
+  const run = () =>
+    void recoverEnvelopeHolds(store, abort, { log }).catch((e: unknown) =>
+      log(`[envelopes] hold recovery failed: ${String(e)}`),
+    );
+  run();
+  const t = setTimeout(run, 2 * ENVELOPE_HOLD_TIMEOUT_MS + 60_000);
+  (t as { unref?: () => void }).unref?.();
+};

@@ -22,6 +22,12 @@
  *     failing: the action is aborted on the base wallet and nothing is signed.
  * Buying from an outside listing ("p 1sat input <outpoint>") keeps working, behind the module's sheet and the pay sheet.
  *
+ * An envelope payment taken at step 2 is held for the action (envelopes.ts ENVELOPE_HOLDS; review of rank 7, finding
+ * 1): kept when the call finishes, given back when the action is confirmed aborted (a check after the envelope, or the
+ * module's own finish, failed before anything was signed), and kept when the abort is refused (it may be on the
+ * network). The module aborts some failures itself on the base wallet, so the gate watches the base wallet's aborts
+ * of the actions it gated: a second abort would be refused and tell it nothing.
+ *
  * The toolbox is pinned and patched (pnpm); this wraps the manager instance, as the other guards do, and leaves the
  * toolbox untouched. If the manager ever lacks a method the gate needs, every site action routed to a module is
  * refused instead of let through unchecked.
@@ -30,6 +36,7 @@ import { P2PKH, PublicKey, Transaction } from '@bsv/sdk';
 import { PERMISSION_SCHEME_IDS, parseOneInputLabel } from '@1sat/types';
 import { noteModuleOutputs } from './spendRecipients';
 import { APP_NAME } from '../mobile/storeBuild';
+import { ENVELOPE_HOLDS, type EnvelopeHoldHooks } from './envelopes';
 
 export const HELD_ASSET_REFUSAL = `A site can't name your wallet's own ordinals, tokens, names or locks for ${APP_NAME} to sign`;
 export const MODULE_GATE_UNAVAILABLE = `${APP_NAME} couldn't check this payment, so it was refused`;
@@ -125,6 +132,27 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
     };
   if (!able) return manager;
 
+  // Aborts the base wallet confirms for actions this gate is watching (the module's own included).
+  const watched = new Set<string>();
+  const confirmedAborts = new Set<string>();
+  const base = m.underlying!;
+  const baseAbort = base.abortAction!;
+  base.abortAction = async (args: { reference: string }) => {
+    const r = await baseAbort.call(base, args);
+    const reference = args?.reference;
+    if ((r as { aborted?: unknown } | null)?.aborted === true && watched.has(reference)) confirmedAborts.add(reference);
+    return r;
+  };
+  const envelopeHolds = () => (m as Record<symbol, unknown>)[ENVELOPE_HOLDS] as EnvelopeHoldHooks | undefined;
+  /** The action failed after its payment was held: give it back only once the action is confirmed aborted. */
+  const release = async (reference: string) => {
+    const holds = envelopeHolds();
+    if (!holds?.has(reference)) return;
+    if (!confirmedAborts.has(reference)) await Promise.resolve(base.abortAction!({ reference })).catch(() => undefined);
+    if (confirmedAborts.has(reference)) await holds.giveBack(reference);
+    else holds.settle(reference);
+  };
+
   m.callCreateActionWithPModules = async (finalArgs: unknown, modules: Map<string, PModule>, originator?: string) => {
     // Only the asset modules finish a transaction themselves. Others (the toolbox's own BRC-177 'nosend') hand the
     // signable transaction back to the manager's own spend check, so gating them would charge twice (review 16, F6).
@@ -140,6 +168,7 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
     // What actually goes to the base wallet's createAction: the last module's transformed request.
     let sent: CreateArgs = asked;
     let gated = false;
+    let held: string | undefined;
 
     const gate = async (res: SignableResult) => {
       const { tx: atomic, reference } = res.signableTransaction ?? {};
@@ -162,12 +191,12 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
         // for (spendRecipients.ts; review of 0xrard, 6 Nov 2026).
         noteModuleOutputs(originator, sent.outputs ?? []);
         if (netSpent > 0) {
-          const ok = await m.ensureSpendingAuthorization!({
-            originator,
-            satoshis: netSpent,
-            lineItems,
-            reason: await plainDescription(m, asked.description),
-          });
+          const reason = await plainDescription(m, asked.description);
+          // An envelope payment is held for this action. No await between binding it and the spend check.
+          held = reference;
+          watched.add(reference);
+          envelopeHolds()?.bind(reference, String(originator ?? ''), sent.outputs ?? []);
+          const ok = await m.ensureSpendingAuthorization!({ originator, satoshis: netSpent, lineItems, reason });
           if (!ok) throw new Error('This payment was not approved');
         }
       } catch (err) {
@@ -198,7 +227,19 @@ export function guardPModuleSpends<T extends object>(manager: T, deps: { adminOr
               },
             },
       );
-    return call.call(manager, finalArgs, gatedModules, originator);
+    try {
+      const r = await call.call(manager, finalArgs, gatedModules, originator);
+      if (held) envelopeHolds()?.settle(held); // finished: the payment is made
+      return r;
+    } catch (e) {
+      if (held) await release(held);
+      throw e;
+    } finally {
+      if (held) {
+        watched.delete(held);
+        confirmedAborts.delete(held);
+      }
+    }
   };
   return manager;
 }

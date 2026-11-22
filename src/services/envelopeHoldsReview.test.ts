@@ -54,7 +54,12 @@ type Mode = { signFails?: 'before-share' | 'after-share' };
 function fakeBase(mode: Mode = {}) {
   const calls: string[] = [];
   const src = new Transaction();
-  src.addInput({ sourceTXID: '11'.repeat(32), sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+  src.addInput({
+    sourceTXID: '11'.repeat(32),
+    sourceOutputIndex: 0,
+    unlockingScript: new Script(),
+    sequence: 0xffffffff,
+  });
   src.addOutput({ lockingScript: new P2PKH().lock(new PrivateKey(5).toAddress()), satoshis: FUNDS });
   src.merklePath = new MerklePath(900_000, [[{ offset: 0, hash: src.id('hex'), txid: true }]]);
   const signable = new Map<string, number[]>();
@@ -66,7 +71,12 @@ function fakeBase(mode: Mode = {}) {
     createAction: async (args: { outputs?: { lockingScript: string; satoshis: number }[] }) => {
       calls.push('createAction');
       const tx = new Transaction();
-      tx.addInput({ sourceTransaction: src, sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+      tx.addInput({
+        sourceTransaction: src,
+        sourceOutputIndex: 0,
+        unlockingScript: new Script(),
+        sequence: 0xffffffff,
+      });
       let out = 0;
       for (const o of args.outputs ?? []) {
         tx.addOutput({ lockingScript: Script.fromHex(o.lockingScript), satoshis: o.satoshis });
@@ -128,11 +138,18 @@ async function moduleWallet(opts: { mode?: Mode; selfAbort?: boolean; ledgerFail
         adminOriginator: ADMIN,
         permissionStore: store as never,
       });
-  const mgr = new LocalWalletPermissionsManager(base as never, ADMIN, { permissionModules: modules } as never, {
-    store,
-  } as never);
+  const mgr = new LocalWalletPermissionsManager(
+    base as never,
+    ADMIN,
+    { permissionModules: modules } as never,
+    {
+      store,
+    } as never,
+  );
   const sheets: { satoshis?: number }[] = [];
-  (mgr as unknown as Record<string, unknown>).requestPermissionFlow = async (r: { spending?: { satoshis: number } }) => {
+  (mgr as unknown as Record<string, unknown>).requestPermissionFlow = async (r: {
+    spending?: { satoshis: number };
+  }) => {
     sheets.push({ satoshis: r.spending?.satoshis });
     throw new Error('User denied');
   };
@@ -381,7 +398,7 @@ describe('review 3: holds are stored with the envelope and recovered when the wo
     expect(s.envelopes[KEY].holds).toEqual({ 'ref-a': { sats: 50, at: 5 } });
   });
 
-  test('initWallet recovers this account\'s holds on start, through the base wallet', () => {
+  test("initWallet recovers this account's holds on start, through the base wallet", () => {
     const src = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
     expect(src).toMatch(/scheduleEnvelopeHoldRecovery\(\s*envelopes,/);
   });
