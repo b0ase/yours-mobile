@@ -51,6 +51,45 @@ export function ourBackupRetryMs(e: unknown, failures: number): number {
   return Math.max(backoff, err.retryAfterMs ?? 0, err.kind === 'stalled' ? OUR_BACKUP_STALL_RETRY_MS : 0);
 }
 
+/**
+ * The background's retry of our server's fill: one timer, never sooner than the first back-off step (review of
+ * bcd8129b, 5: a try that returns early, the device not active yet, left a past retryAt and re-armed every second).
+ */
+export function ourBackupRetryTimer(o: {
+  /** When the next try may run; undefined: nothing to retry. */
+  retryAt: () => number | undefined;
+  run: () => void;
+  now?: () => number;
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (t: unknown) => void;
+  minMs?: number;
+}) {
+  const now = o.now ?? Date.now;
+  const setTimer = o.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+  const clearTimer = o.clearTimer ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>));
+  let timer: unknown;
+  return {
+    /** Arm (or re-arm) the timer for the current retryAt. True when armed. */
+    schedule(): boolean {
+      const at = o.retryAt();
+      if (at === undefined) return false;
+      if (timer !== undefined) clearTimer(timer);
+      timer = setTimer(
+        () => {
+          timer = undefined;
+          o.run();
+        },
+        Math.max(o.minMs ?? OUR_BACKUP_RETRY_MS[0], at - now()),
+      );
+      return true;
+    },
+    cancel() {
+      if (timer !== undefined) clearTimer(timer);
+      timer = undefined;
+    },
+  };
+}
+
 const TXID = /^[0-9a-f]{64}$/i;
 type Bytes = number[] | Uint8Array;
 
@@ -182,8 +221,20 @@ export type SpendableFirstWiringDeps = {
   fill: (
     writer: OurServerClient,
     restorePoint?: Date,
-    o?: { resume?: FillProgress | null; onProgress?: (p: FillProgress | null) => Promise<void> },
+    o?: {
+      resume?: FillProgress | null;
+      onProgress?: (p: FillProgress | null) => Promise<void>;
+      /** A fill is known unfinished: never "not-needed" on our server's cursor. */
+      unfinished?: boolean;
+      /** This session closed: the fill ends before its next page. */
+      stopped?: () => boolean;
+    },
   ) => Promise<FillReport>;
+  /**
+   * Our server is in this account's saved backups (an earlier session's fill finished): any kept "incomplete" state is
+   * stale (a closed session's late write) and is dropped.
+   */
+  registered?: () => boolean;
   /** The factory's addRemote: register a backup for this session. */
   addRemote: (url: string) => Promise<void>;
   owns?: (row: SnapOutput, scriptHex: string) => Promise<boolean>;
@@ -217,10 +268,26 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     }
     return fillState;
   };
-  const saveFill = async (v: OurBackupFill | null) => {
+  /** Set by stop(): a closed session's fill writes nothing more (a new session may have saved since). */
+  let closed = false;
+  /** `strict`: a failed write throws, so the fill counts as unfinished instead of carrying on unrecorded. */
+  const saveFill = async (v: OurBackupFill | null, strict = false) => {
+    if (closed) {
+      log('[spendable-first] wallet closed: its backup fill state is not written');
+      if (strict) throw new Error('the wallet closed');
+      return;
+    }
     fillState = v;
-    await d.kv.set({ [fillKey]: v }).catch(() => undefined);
+    try {
+      await d.kv.set({ [fillKey]: v });
+    } catch (e) {
+      log('[spendable-first] could not save the backup fill state:', e);
+      if (strict) throw e;
+    }
   };
+  /** Our server was added as a backup in this session, or is in the account's saved backups. */
+  let added = false;
+  const registered = () => added || (d.registered?.() ?? false);
   let client: OurServerClient | undefined;
   let connecting: Promise<OurServerClient> | undefined;
   let lean = false;
@@ -251,7 +318,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   };
   const saveMark = async (m: SnapshotMark) => {
     mark = m;
-    await d.kv.set({ [d.markKey]: m }).catch(() => undefined);
+    await d.kv.set({ [d.markKey]: m }).catch((e) => log('[spendable-first] could not save the snapshot mark:', e));
   };
   const loadMark = async (): Promise<SnapshotMark | null> => {
     try {
@@ -321,11 +388,16 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       adding = undefined;
     }));
   const tryOurBackup = async (): Promise<boolean> => {
-    if (!d.on || !d.deviceActive()) return false;
+    if (!d.on || closed || !d.deviceActive()) return false;
     const deviceSik = d.device()?.getSettings().storageIdentityKey;
     if (!deviceSik) return false;
     const kept = await loadFill();
     const st = kept?.deviceSik === deviceSik ? kept : null;
+    // Our server is already a saved backup: nothing to fill, and kept state is stale (a closed session's late write).
+    if (registered()) {
+      if (kept) await saveFill(null);
+      return false;
+    }
     if (st?.incomplete && now() < st.incomplete.retryAt) {
       log(
         `[spendable-first] our server's backup incomplete, next try in ${Math.ceil((st.incomplete.retryAt - now()) / 1000)} s`,
@@ -345,13 +417,20 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
         resume: progress,
         onProgress: async (p) => {
           progress = p;
-          await saveFill({ deviceSik, progress: p, ...(st?.incomplete ? { incomplete: st.incomplete } : {}) });
+          // A progress write that fails ends the fill as unfinished (review of bcd8129b, 2): never a fill whose state
+          // was lost carrying on to "done" while the kept state says otherwise.
+          await saveFill({ deviceSik, progress: p, ...(st?.incomplete ? { incomplete: st.incomplete } : {}) }, true);
         },
+        // Any kept state (even with no progress: a stall) means unfinished: never "not-needed" on our server's cursor.
+        unfinished: !!st,
+        stopped: () => closed,
       });
+      if (closed) throw new Error('the wallet closed');
       log(
         `[spendable-first] our server filled (${r.how}): ${r.pages} page(s), ${r.unlockedMs} ms unlocked, locked ${r.lockedMs.join('+') || 0} ms`,
       );
       await d.addRemote(SNAPSHOT_SERVER_URL);
+      added = true;
       await saveFill(null);
       return true;
     } catch (e) {
@@ -365,8 +444,14 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
         kind: err.kind,
         failures,
       };
-      // A fill that stopped moving starts again next time; any other goes on from its last acknowledged page.
-      await saveFill({ deviceSik, progress: err.kind === 'stalled' ? null : progress, incomplete });
+      if (closed) {
+        log("[spendable-first] wallet closed during our server's fill: the next session carries on");
+        return false;
+      }
+      // A fill that stopped moving starts again from the beginning next time (a restart marker, never null: our
+      // server may already hold a cursor from a finished pass); any other goes on from its last acknowledged page.
+      const next: FillProgress | null = err.kind === 'stalled' ? { stage: 'restart', offsets: [] } : progress;
+      await saveFill({ deviceSik, progress: next, incomplete });
       log(
         `[spendable-first] our server's backup incomplete (${err.kind}), will retry in ${Math.ceil((incomplete.retryAt - at) / 1000)} s:`,
         e,
@@ -377,7 +462,7 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
 
   /** Our server's backup didn't finish: "Backup incomplete, will retry", and when the next try may run. */
   const ourBackup = (): { incomplete: boolean; retryAt?: number } => {
-    const inc = d.on ? fillState?.incomplete : undefined;
+    const inc = d.on && !registered() ? fillState?.incomplete : undefined;
     return inc ? { incomplete: true, retryAt: inc.retryAt } : { incomplete: false };
   };
 
@@ -414,7 +499,8 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     /** At open: hook the BEEF builder and carry on an unfinished background snapshot. */
     resume: async () => {
       if (!d.on) return;
-      await loadFill();
+      // State kept while our server is a saved backup is stale (a closed session's late write): dropped.
+      if ((await loadFill()) && registered()) await saveFill(null);
       mark = await loadMark();
       if (mark?.stage !== 'full') return;
       hook();
@@ -456,7 +542,12 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     loading: () => d.on && (lean || mark?.stage === 'full'),
     leanRunning: () => d.on && lean,
     /** Tests and close. */
+    /**
+     * Close (and tests): the session's in-flight fill of our server ends before its next page, and nothing this
+     * session does writes the kept fill state again (the next session may have written it already).
+     */
     stop: () => {
+      closed = true;
       unhook?.();
       unhook = undefined;
     },

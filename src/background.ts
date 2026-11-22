@@ -144,6 +144,7 @@ import {
   type EnsureLocalResult,
 } from './services/localFirst';
 import { SNAPSHOT_SEND_WAIT, spendableFirstOn, withSnapshotRemote } from './services/spendableFirst';
+import { ourBackupRetryTimer } from './services/spendableFirstWiring';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
@@ -1137,19 +1138,17 @@ const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
  * back-off (or the server's Retry-After) is over, from where it stopped. One timer; the next open tries too. Never
  * sooner: addOurBackup itself refuses a try before then.
  */
-let ourBackupRetry: ReturnType<typeof setTimeout> | undefined;
+let ourBackupRetry: ReturnType<typeof ourBackupRetryTimer> | undefined;
 const scheduleOurBackupRetry = (ctx: NonNullable<typeof accountContext>) => {
-  const at = ctx.ourBackupRetryAt();
-  if (at === undefined) return;
-  if (ourBackupRetry) clearTimeout(ourBackupRetry);
-  ourBackupRetry = setTimeout(
-    () => {
-      ourBackupRetry = undefined;
+  ourBackupRetry?.cancel();
+  ourBackupRetry = ourBackupRetryTimer({
+    retryAt: () => ctx.ourBackupRetryAt(),
+    run: () => {
       if (accountContext !== ctx) return;
       void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
     },
-    Math.max(1_000, at - Date.now() + 1_000),
-  );
+  });
+  ourBackupRetry.schedule();
 };
 
 /** Where the move to this device stands, for the "Retry moving this account to this device" notice. */

@@ -1113,7 +1113,11 @@ export const initWallet = async (
         yieldWhile: () => ownPayments.waiting(),
         resume: o?.resume,
         onProgress: o?.onProgress,
+        unfinished: o?.unfinished,
+        stopped: o?.stopped,
       }),
+    // Our server already in the account's saved backups: an earlier fill finished.
+    registered: () => (backups ?? []).includes(SNAPSHOT_SERVER_URL),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
     // The chain's word on the snapshot's coins, and an unconfirmed payment's ancestry (1p checks, 21 Nov 2026).

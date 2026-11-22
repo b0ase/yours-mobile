@@ -12,6 +12,7 @@ import {
   createSpendableFirst,
   holdSendsForSnapshot,
   OUR_BACKUP_RETRY_MS,
+  ourBackupRetryTimer,
   oneSatSnapshotLookups,
   type OurServerClient,
   type SendGate,
@@ -120,9 +121,17 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
     finalSince: 1,
     offsets: [{ name: 'provenTx', offset: 3 }],
   };
-  const make = (on: boolean, kvStore: Record<string, unknown>, clock: { t: number }, results: (() => unknown)[]) => {
+  const make = (
+    on: boolean,
+    kvStore: Record<string, unknown>,
+    clock: { t: number },
+    results: (() => unknown)[],
+    over: Partial<SpendableFirstWiringDeps> = {},
+  ) => {
     const log: string[] = [];
     const resumes: unknown[] = [];
+    const unfinished: unknown[] = [];
+    const stopped: (() => boolean)[] = [];
     const client = {
       makeAvailable: async () => ({ storageIdentityKey: 'server-sik' }),
       getSettings: () => ({ storageIdentityKey: 'server-sik' }),
@@ -142,8 +151,10 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
       fill: async (_w, _r, o) => {
         log.push('fill');
         resumes.push(o?.resume ?? null);
+        unfinished.push(o?.unfinished ?? false);
+        if (o?.stopped) stopped.push(o.stopped);
         await o?.onProgress?.(progress);
-        const next = results.shift()?.();
+        const next = await results.shift()?.();
         if (next instanceof Error) throw next;
         return { how: 'full', pages: 1, unlockedPages: 0, unlockedMs: 0, lockedMs: [] };
       },
@@ -151,8 +162,9 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
       kv: { get: async (k) => ({ [k]: kvStore[k] }), set: async (i) => void Object.assign(kvStore, i) },
       markKey: 'mark',
       now: () => clock.t,
+      ...over,
     });
-    return { w, log, resumes };
+    return { w, log, resumes, unfinished, stopped };
   };
   const refused = () =>
     new FillIncompleteError('refused', 'WalletStorageClient rpcCall: network error 429', { retryAfterMs: 120_000 });
@@ -207,8 +219,78 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
     expect(await w.addOurBackup()).toBe(false);
     clock.t = w.ourBackup().retryAt!;
     expect(await w.addOurBackup()).toBe(true);
-    // The stalled fill's progress is dropped: the try after it starts from the beginning.
-    expect(resumes).toEqual([null, progress, progress, null]);
+    // The stalled fill's progress is dropped: the try after it starts from the beginning (a restart marker).
+    expect(resumes).toEqual([null, progress, progress, { stage: 'restart', offsets: [] }]);
+  });
+
+  test('review 2: a stall keeps a restart marker, and every try after an unfinished one is marked unfinished', async () => {
+    const kv: Record<string, unknown> = {};
+    const clock = { t: NOW };
+    const stalled = () => new FillIncompleteError('stalled', 'backup fill made no progress');
+    const { w, resumes, unfinished } = make(true, kv, clock, [stalled, () => undefined]);
+    expect(await w.addOurBackup()).toBe(false);
+    expect((kv['mark:ourBackupFill'] as { progress: unknown }).progress).toEqual({ stage: 'restart', offsets: [] });
+    clock.t = w.ourBackup().retryAt!;
+    expect(await w.addOurBackup()).toBe(true);
+    // The second fill knows it is unfinished: never "not-needed" on our server's cursor from the first.
+    expect(unfinished).toEqual([false, true]);
+    expect(resumes[1]).toEqual({ stage: 'restart', offsets: [] });
+  });
+
+  test('review 2: a progress write that fails ends the fill as unfinished (never silently swallowed)', async () => {
+    const kv: Record<string, unknown> = {};
+    const lines: string[] = [];
+    const { w, log } = make(true, kv, { t: NOW }, [() => undefined], {
+      kv: {
+        get: async () => ({}),
+        set: async () => {
+          throw new Error('QuotaExceededError');
+        },
+      },
+      log: (...a) => void lines.push(a.map(String).join(' ')),
+    });
+    expect(await w.addOurBackup()).toBe(false);
+    expect(log).toEqual(['fill']);
+    expect(w.ourBackup().incomplete).toBe(true);
+    expect(lines.some((l) => l.includes('could not save the backup fill state'))).toBe(true);
+  });
+
+  test('review 3: a closed session’s fill stops and never overwrites the next session’s state', async () => {
+    const kv: Record<string, unknown> = {};
+    const clock = { t: NOW };
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    // Session A's fill is still running when the wallet locks and session B opens.
+    const a = make(true, kv, clock, [async () => (await held, refused())]);
+    const aTry = a.w.addOurBackup();
+    await new Promise((r) => setTimeout(r, 0));
+    a.w.stop();
+    expect(a.stopped[0]()).toBe(true); // the fill ends before its next page
+    const b = make(true, kv, clock, [() => undefined]);
+    expect(await b.w.addOurBackup()).toBe(true);
+    expect(kv['mark:ourBackupFill']).toBeNull();
+    release();
+    expect(await aTry).toBe(false);
+    // A's late failure wrote nothing: B's cleared state stands, no "Backup incomplete" sticks.
+    expect(kv['mark:ourBackupFill']).toBeNull();
+    expect(b.w.ourBackup()).toEqual({ incomplete: false });
+    expect(a.log).toEqual(['fill']);
+  });
+
+  test('review 3: kept "incomplete" state while our server is already a saved backup is stale and dropped', async () => {
+    const kv: Record<string, unknown> = {
+      'mark:ourBackupFill': {
+        deviceSik: 'device-sik',
+        progress,
+        incomplete: { at: NOW, retryAt: NOW + 60_000, reason: 'x', kind: 'refused', failures: 1 },
+      },
+    };
+    const { w, log } = make(true, kv, { t: NOW }, [], { registered: () => true });
+    await w.resume();
+    expect(w.ourBackup()).toEqual({ incomplete: false });
+    expect(kv['mark:ourBackupFill']).toBeNull();
+    expect(await w.addOurBackup()).toBe(false);
+    expect(log).toEqual([]);
   });
 
   test('flag off: never incomplete, nothing tried', async () => {
@@ -223,8 +305,45 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
     const init = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
     expect(init).toContain('...(spendableFirst.ourBackup().incomplete ? { ourBackupIncomplete: true } : {})');
     expect(init).toContain('resume: o?.resume,');
-    const bg = readFileSync(new URL('../background.ts', import.meta.url), 'utf8');
-    expect(bg).toContain('if (!(await ctx.addOurBackup())) return scheduleOurBackupRetry(ctx);');
+  });
+
+  describe('review 5: the background’s retry timer', () => {
+    const fake = () => {
+      const timers: { fn: () => void; ms: number; cleared: boolean }[] = [];
+      return {
+        timers,
+        setTimer: (fn: () => void, ms: number) => {
+          const t = { fn, ms, cleared: false };
+          timers.push(t);
+          return t;
+        },
+        clearTimer: (t: unknown) => void ((t as { cleared: boolean }).cleared = true),
+      };
+    };
+    test('a retryAt already past (a try that returned early): never sooner than the first back-off step', () => {
+      const f = fake();
+      let runs = 0;
+      const t = ourBackupRetryTimer({ retryAt: () => NOW - 5_000, run: () => void runs++, now: () => NOW, ...f });
+      expect(t.schedule()).toBe(true);
+      expect(f.timers.map((x) => x.ms)).toEqual([OUR_BACKUP_RETRY_MS[0]]);
+      f.timers[0].fn();
+      expect(runs).toBe(1);
+    });
+    test('a later retryAt waits until then; re-arming keeps one timer; nothing to retry arms nothing', () => {
+      const f = fake();
+      let at: number | undefined = NOW + 300_000;
+      const t = ourBackupRetryTimer({ retryAt: () => at, run: () => undefined, now: () => NOW, ...f });
+      t.schedule();
+      t.schedule();
+      expect(f.timers.map((x) => [x.ms, x.cleared])).toEqual([
+        [300_000, true],
+        [300_000, false],
+      ]);
+      at = undefined;
+      t.cancel();
+      expect(t.schedule()).toBe(false);
+      expect(f.timers.filter((x) => !x.cleared)).toEqual([]);
+    });
   });
 });
 
