@@ -14,6 +14,8 @@ import {
   claimRid,
   isAllowedReturn,
   planReturn,
+  returnIsFoldable,
+  isFoldableReturnUrl,
   resetRidMemory,
   returnTarget,
   returnUrlFor,
@@ -190,5 +192,30 @@ describe('return URL for each browser', () => {
   });
   test('never builds a non-https return', () => {
     expect(() => returnUrlFor('http://www.tokenblaster.lol/', 'chrome', 'ios')).toThrow();
+  });
+});
+
+describe('review 4 (L3, CTO 22 Nov 2026): which returns may carry a folded sign-in', () => {
+  const plan = { ret: `${O}/`, rid: RID };
+  test('Android: an explicit-package intent to a browser in our table folds (chrome, opera, …)', () => {
+    for (const b of ['chrome', 'firefox', 'samsung', 'edge', 'brave', 'opera'] as const)
+      expect(returnIsFoldable({ ...plan, b }, 'android')).toBe(true);
+    expect(returnIsFoldable(plan, 'android')).toBe(true); // plain https
+  });
+  test('iOS: chrome/firefox return through a custom scheme: no fold; safari/none is plain https: fold', () => {
+    expect(returnIsFoldable({ ...plan, b: 'chrome' }, 'ios')).toBe(false);
+    expect(returnIsFoldable({ ...plan, b: 'firefox' }, 'ios')).toBe(false);
+    expect(returnIsFoldable({ ...plan, b: 'safari' }, 'ios')).toBe(true);
+    expect(returnIsFoldable(plan, 'ios')).toBe(true);
+  });
+  test('an intent naming a package not in our table, or a fallback off the origin root, never folds', () => {
+    const t = encodeURIComponent(`${O}/#bwx=ok&rid=${RID}`);
+    const host = new URL(O).host;
+    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.evil.browser;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
+    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent('https://evil.example/')};end`, `${O}/`)).toBe(false);
+    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=http;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
+    expect(isFoldableReturnUrl(`intent://evil.example/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
+    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(true);
+    expect(isFoldableReturnUrl(`googlechromes://${host}/`, `${O}/`)).toBe(false);
   });
 });

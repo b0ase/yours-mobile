@@ -313,14 +313,22 @@ describe('same phone: sign in with Connect, and go back', () => {
     sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: ROOT_ACCOUNT, accountCount: 1 });
   });
 
-  test('review 4 (L3): a return through a custom scheme or named Android package (b=chrome/firefox/…) never carries the sign-in', async () => {
-    for (const b of ['chrome', 'firefox', 'samsung', 'edge', 'brave'] as const) {
+  test('review 4 (L3, CTO): Android browser intents fold; iOS custom schemes never carry the sign-in', async () => {
+    // Android: intent:// with an exact package from our own table goes only to that installed browser.
+    sessions.setReturnPlatform('android');
+    for (const b of ['chrome', 'firefox', 'samsung', 'edge', 'brave', 'opera'] as const) {
+      const c = await card({ ...loginFields(), b });
+      expect(c.p.signIn).toBe(true);
+    }
+    // iOS: googlechromes:// / firefox:// are custom schemes any app can register: no fold, the separate sheet.
+    sessions.setReturnPlatform('ios');
+    for (const b of ['chrome', 'firefox'] as const) {
       const c = await card({ ...loginFields(), b });
       expect(c.p.returnPlan).not.toBeNull(); // it still returns…
       expect(c.p.signIn).toBe(false); // …but the sign-in goes on the separate sheet
     }
-    const plain = await card({ ...loginFields(), b: 'other' });
-    expect(plain.p.signIn).toBe(true);
+    expect((await card({ ...loginFields(), b: 'safari' })).p.signIn).toBe(true); // plain https
+    sessions.setReturnPlatform(null);
   });
 
   test('review 4 (L6): the signing wallet must be the card account; another identity refuses with a plain line', async () => {
