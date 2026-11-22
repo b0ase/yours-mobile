@@ -36,8 +36,8 @@ import * as bip39 from 'bip39';
  *    ("the then then"), is read as a label, so that list is not blocked.
  *  - In a list numbered in words with no "is" or ":" ("fifth six sixth X"), a phrase word that is the next number
  *    after its own numbering is read as numbering.
- *  - Look-alike letters are folded for Cyrillic and Greek only; other scripts' look-alikes (Cherokee, Armenian,
- *    full-width letters are already folded by NFKD) are not.
+ *  - Look-alike letters are folded for Cyrillic and Greek only (NFKD already folds full-width and styled letters);
+ *    look-alikes from other scripts, such as Cherokee or Armenian, are not.
  * Long text: lists with fewer than MIN_HITS words in the text are skipped, the checksum is worked out from list
  * positions, and the loops stop as soon as no later word can make a match, so the cost grows with the length of the
  * text, not its square (review of row 353: 20,000 list words took 16s).
