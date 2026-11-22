@@ -6,7 +6,6 @@ import { redactSecrets } from './errorReport';
 import { containsPhrase, hidePhrases } from './phraseGuard';
 
 const W12 = 'abandon ability able about above absent absorb abstract absurd abuse access accident'.split(' ');
-const W24 = bip39.generateMnemonic(256).split(' ');
 
 /**
  * Fixed valid phrases, the same every run (a random phrase made the tests below flaky: about 1 in 30 repeats a word).
@@ -25,8 +24,24 @@ const fixedPhrases = (count: number, bits: 128 | 256, avoid: string[] = [], list
   return out;
 };
 /**
+ * A fixed 24-word phrase, the same every run. It was random, and a random one shares a word with the test text about 1
+ * run in 85 or more: W12's "accident" made a position check find it in the wrong place, and "restore" (in "Restore
+ * failed:"), "hidden" (in the placeholder) or a label-rule word could do the same to a left-over check (22 Nov 2026).
+ */
+const W24 = fixedPhrases(1, 256, [
+  ...W12,
+  'restore',
+  'hidden',
+  'word',
+  'seed',
+  'pass',
+  'secret',
+  'balance',
+  'total',
+])[0];
+/**
  * A 24-word phrase that starts with "hidden": a BIP39 word that is also in the placeholder "[recovery words hidden]".
- * A random W24 holds it about 1 run in 85, and the left-over check used to read the placeholder's "hidden" as a word
+ * A random 24-word phrase held it about 1 run in 85, and the left-over check used to read the placeholder's "hidden" as a word
  * left in the clear (full-suite loop, 5 Nov 2026: three "24 …" cases failed together).
  */
 const HIDDEN24 = (() => {
@@ -297,8 +312,7 @@ describe('filler words that are themselves BIP39 words (review of b-Aware row 35
       }
     });
   test('a 24-word phrase with "word N" labels', () => {
-    let words = bip39.generateMnemonic(256).split(' ');
-    while (words.includes('word')) words = bip39.generateMnemonic(256).split(' ');
+    const words = fixedPhrases(1, 256, ['word'], undefined, 'labels-')[0];
     expectBlocked(words.map((x, i) => `word ${i + 1}: ${x}`).join(', '), words);
   });
 });
@@ -335,11 +349,9 @@ describe('the guard is fast on long word-heavy text (review of b-Aware row 353)'
   test('a phrase cut in two where the scan stops is still hidden when hiding shrank the text before it', () => {
     // Recovery words are looked for in the first 20,000 characters first. Here they hide down to one placeholder,
     // and the next phrase straddles character 20,000: its first words alone would be too few to find.
-    // A fixed 24-word phrase with no word of W12, not the random W24: about 1 run in 85, W24 held "accident" (W12's
-    // last word), indexOf found it in the prefix and the straddle check failed (flaky in folder runs, 22 Nov 2026).
-    const block = fixedPhrases(1, 256, W12)[0]
-      .map((w, i) => `${i + 1}. ${w}`)
-      .join('\n');
+    // W24 holds no word of W12: when it was random, about 1 run in 85 it held "accident" (W12's last word), indexOf
+    // found that in the prefix and the straddle check failed (flaky in folder runs, 22 Nov 2026).
+    const block = W24.map((w, i) => `${i + 1}. ${w}`).join('\n');
     let prefix = '';
     while (prefix.length + block.length + 1 < 19900) prefix += `${block}\n`;
     const text = `${prefix.padEnd(19950, ' ')}qqq rrr sss ${W12.join(' ')} done`;

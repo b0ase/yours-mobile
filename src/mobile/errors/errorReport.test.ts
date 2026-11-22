@@ -3,7 +3,8 @@ import * as bip39 from 'bip39';
 import { askBMessage, errorReportText, redactSecrets } from './errorReport';
 
 const PHRASE12 = 'abandon ability able about above absent absorb abstract absurd abuse access accident';
-const PHRASE24 = bip39.generateMnemonic(256);
+// Fixed, not random (22 Nov 2026): a random phrase could hold "restore", which the error text below also holds.
+const PHRASE24 = bip39.entropyToMnemonic('7d3f0a9c51e2b84f6a0c9d1e2f3a4b5c6d7e8f9011223344556677889900aabb');
 const WIF = 'L1aW4aubDFB7yfras2S1mN3bqg9nwySY8nkoLmJebSLD5BWv3ENZ';
 const HEX = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 
