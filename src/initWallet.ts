@@ -382,6 +382,11 @@ export interface AccountContext {
    * (services/backupFill.ts), then registered. True once registered.
    */
   addOurBackup: () => Promise<boolean>;
+  /**
+   * Once per device: our server is a saved backup; compare its coin count with this device's. Different: a restart
+   * marker is kept and `drop` takes our server out of the saved remotes (spendableFirstWiring checkOurBackup).
+   */
+  checkOurBackup: (drop: () => Promise<void>) => Promise<'match' | 'repair' | 'done' | 'skip' | 'error'>;
   /** Our server's first fill is unfinished: when addOurBackup may try again (undefined: nothing to retry). */
   ourBackupRetryAt: () => number | undefined;
   /** Push this device's rows to the backup now; a Store payment is broadcast only when this is ok (deviceSync.ts). */
@@ -1118,6 +1123,9 @@ export const initWallet = async (
       }),
     // Our server already in the account's saved backups: an earlier fill finished.
     registered: () => (backups ?? []).includes(SNAPSHOT_SERVER_URL),
+    // The once-per-device check of our server's backup (checkOurBackup): this device's own count, never beside a payment.
+    deviceDefaultCoins: async () => (await baseWallet.listOutputs({ basket: 'default', limit: 1 })).totalOutputs,
+    busy: () => ownPayments.waiting(),
     addRemote: (url) => withFullPassMode(ownSik(), 'defer', () => addRemote(url)),
     owns: (row, script) => stopBackupCheck.verifier.owns(row as never, script),
     // The chain's word on the snapshot's coins, and an unconfirmed payment's ancestry (1p checks, 21 Nov 2026).
@@ -2526,6 +2534,7 @@ export const initWallet = async (
     },
     snapshotLoading: spendableFirst.loading,
     addOurBackup: spendableFirst.addOurBackup,
+    checkOurBackup: spendableFirst.checkOurBackup,
     ourBackupRetryAt: () => spendableFirst.ourBackup().retryAt,
     backupState: () => {
       const st = deviceSync.state();

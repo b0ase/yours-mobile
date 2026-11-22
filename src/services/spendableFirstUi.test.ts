@@ -358,6 +358,133 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
     expect(tries).toBe(3);
   });
 
+  describe('a backup an older build registered half-filled (build 153 on the owner’s iPhone): checked once, repaired', () => {
+    const setup = (o: {
+      server?: () => Promise<number>;
+      device?: () => Promise<number>;
+      kv?: Record<string, unknown>;
+      kvGet?: () => Promise<Record<string, unknown>>;
+      kvSet?: (i: Record<string, unknown>) => Promise<void>;
+      busy?: () => boolean;
+    }) => {
+      const kv = o.kv ?? {};
+      const calls: string[] = [];
+      const client = {
+        makeAvailable: async () => ({ storageIdentityKey: 'server-sik' }),
+        getSettings: () => ({ storageIdentityKey: 'server-sik' }),
+        findOrInsertUser: async () => ({ user: { userId: 7 } }),
+        setActive: async () => undefined,
+        listOutputs: async (_a: unknown, vargs: { basket?: string; limit?: number }) => {
+          calls.push(`server:${vargs.basket}:${vargs.limit}`);
+          return { totalOutputs: await (o.server ?? (async () => 5))() };
+        },
+      } as unknown as OurServerClient;
+      const m = make(true, kv, { t: NOW }, [], {
+        newClient: () => client,
+        registered: () => true,
+        deviceDefaultCoins: async () => (calls.push('device'), (o.device ?? (async () => 5))()),
+        busy: o.busy,
+        kv: {
+          get: o.kvGet ?? (async (k) => ({ [k]: kv[k] })),
+          set: o.kvSet ?? (async (i) => void Object.assign(kv, i)),
+        },
+      });
+      const dropped: string[] = [];
+      const drop = async () => void dropped.push('ours');
+      return { ...m, kv, calls, dropped, drop };
+    };
+
+    test('counts match: done, and never asked again on this device', async () => {
+      const x = setup({});
+      expect(await x.w.checkOurBackup(x.drop)).toBe('match');
+      expect(x.calls).toEqual(['server:default:1', 'device']);
+      expect(await x.w.checkOurBackup(x.drop)).toBe('done');
+      expect(x.calls).toHaveLength(2);
+      expect(x.dropped).toEqual([]);
+      expect(x.w.ourBackup()).toEqual({ incomplete: false });
+    });
+
+    test('fewer coins on our server: a full restart marker first, then only our server is dropped; the next open refills it', async () => {
+      const x = setup({ server: async () => 3, device: async () => 5 });
+      expect(await x.w.checkOurBackup(x.drop)).toBe('repair');
+      expect(x.dropped).toEqual(['ours']);
+      const kept = x.kv['mark:ourBackupFill'] as { progress: unknown; incomplete: { retryAt: number } };
+      expect(kept.progress).toEqual({ stage: 'restart', offsets: [], full: true });
+      expect(kept.incomplete.retryAt).toBe(NOW);
+      // "Backup incomplete, will retry" from now until the refill lands.
+      expect(x.w.ourBackup().incomplete).toBe(true);
+      // Nothing this session touches the marker (our server stays registered until the next open).
+      expect(await x.w.addOurBackup()).toBe(false);
+      expect(x.log).toEqual([]);
+      expect((x.kv['mark:ourBackupFill'] as { progress: unknown }).progress).toEqual(kept.progress);
+      expect(await x.w.checkOurBackup(x.drop)).toBe('done');
+      // The next open (our server no longer saved): the whole fill runs, as unfinished, from the marker.
+      const next = make(true, x.kv, { t: NOW + 1 }, [() => undefined], { registered: () => false });
+      await next.w.resume();
+      expect(next.w.ourBackup().incomplete).toBe(true);
+      expect(await next.w.addOurBackup()).toBe(true);
+      expect(next.unfinished).toEqual([true]);
+      expect(next.resumes).toEqual([{ stage: 'restart', offsets: [], full: true }]);
+      expect(next.w.ourBackup()).toEqual({ incomplete: false });
+    });
+
+    test('more coins spendable on our server (one spent here still spendable there): repaired too', async () => {
+      const x = setup({ server: async () => 6, device: async () => 5 });
+      expect(await x.w.checkOurBackup(x.drop)).toBe('repair');
+      expect(x.dropped).toEqual(['ours']);
+    });
+
+    test('our server unreachable, or this device’s count failing: nothing changes, checked again next open', async () => {
+      for (const o of [
+        { server: async () => Promise.reject(new Error('network error 503')) },
+        { device: async () => Promise.reject(new Error('idb closed')) },
+      ]) {
+        const x = setup(o);
+        expect(await x.w.checkOurBackup(x.drop)).toBe('error');
+        expect(x.dropped).toEqual([]);
+        expect(x.kv['mark:ourBackupCheck']).toBeUndefined();
+        expect(x.kv['mark:ourBackupFill']).toBeUndefined();
+      }
+    });
+
+    test('its record unreadable, or the marker unwritable: no drop (never a dropped remote without its marker)', async () => {
+      const a = setup({ kvGet: async () => Promise.reject(new Error('storage unavailable')), server: async () => 1 });
+      expect(await a.w.checkOurBackup(a.drop)).toBe('error');
+      expect(a.calls).toEqual([]);
+      const b = setup({ kvSet: async () => Promise.reject(new Error('QuotaExceededError')), server: async () => 1 });
+      expect(await b.w.checkOurBackup(b.drop)).toBe('error');
+      expect(b.dropped).toEqual([]);
+    });
+
+    test('dropping fails: not recorded as done, so the check (and the repair) runs again next open', async () => {
+      const x = setup({ server: async () => 1 });
+      expect(await x.w.checkOurBackup(async () => Promise.reject(new Error('the account changed')))).toBe('error');
+      expect(x.kv['mark:ourBackupCheck']).toBeUndefined();
+    });
+
+    test('never beside a payment of its own, and never while a snapshot is still coming in', async () => {
+      const x = setup({ busy: () => true, server: async () => 1 });
+      expect(await x.w.checkOurBackup(x.drop)).toBe('skip');
+      expect(x.calls).toEqual([]);
+      const kv: Record<string, unknown> = { mark: { stage: 'full', after: 0, at: NOW } };
+      const y = setup({ kv, server: async () => 1 });
+      await y.w.resume();
+      expect(await y.w.checkOurBackup(y.drop)).toBe('skip');
+      expect(y.dropped).toEqual([]);
+    });
+
+    test('only our server leaves the saved remotes; every other remote and the active one stay', async () => {
+      const { withoutSnapshotRemote } = await import('./spendableFirst');
+      const config = { remotes: ['https://wallet.1sat.app', SNAPSHOT_SERVER_URL, 'https://other.example'], x: 1 };
+      expect(withoutSnapshotRemote(config)).toEqual({
+        remotes: ['https://wallet.1sat.app', 'https://other.example'],
+        x: 1,
+      });
+      const none = { remotes: ['https://wallet.1sat.app'] };
+      expect(withoutSnapshotRemote(none)).toBe(none);
+    });
+  });
+
   describe('review 5: the background’s retry timer', () => {
     const fake = () => {
       const timers: { fn: () => void; ms: number; cleared: boolean }[] = [];

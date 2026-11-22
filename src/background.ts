@@ -143,7 +143,13 @@ import {
   moveProgressTracker,
   type EnsureLocalResult,
 } from './services/localFirst';
-import { SNAPSHOT_SEND_WAIT, spendableFirstOn, withSnapshotRemote } from './services/spendableFirst';
+import {
+  SNAPSHOT_SEND_WAIT,
+  SNAPSHOT_SERVER_URL,
+  spendableFirstOn,
+  withoutSnapshotRemote,
+  withSnapshotRemote,
+} from './services/spendableFirst';
 import { ourBackupAttempt, ourBackupRetryTimer } from './services/spendableFirstWiring';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
@@ -1121,7 +1127,12 @@ const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
   if (!ctx.storage.isActiveStorageProvider()) return;
   const before = chromeStorageService.getCurrentAccountObject().account;
   const config = before?.storageConfig as StorageConfig | undefined;
-  if (!before || !config || withSnapshotRemote(config, true) === config) return;
+  if (!before || !config) return;
+  if (withSnapshotRemote(config, true) === config) {
+    // Our server already saved as a backup: once per device, check an older build didn't register it half-filled.
+    if (!config.activeRemote && config.remotes?.includes(SNAPSHOT_SERVER_URL)) await checkSavedOurBackup(ctx, before);
+    return;
+  }
   const tryAdd = ourBackupAttempt({
     add: () => ctx.addOurBackup(),
     timer: ourBackupTimer,
@@ -1136,6 +1147,23 @@ const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
   await chromeStorageService.updateNested('accounts', {
     [account.addresses.identityAddress]: { storageConfig: next } as unknown as Account,
   });
+};
+
+/**
+ * Builds before 30a4fbcd could save our server as a backup half-filled (owner's iPhone, build 153). The wallet compares
+ * coin counts once per device (checkOurBackup); on a difference, only our server leaves this account's saved remotes,
+ * and the next open fills it as new. An error changes nothing.
+ */
+const checkSavedOurBackup = async (ctx: NonNullable<typeof accountContext>, before: Account) => {
+  const id = before.addresses.identityAddress;
+  const r = await ctx.checkOurBackup(async () => {
+    const account = chromeStorageService.getCurrentAccountObject().account;
+    if (account?.addresses.identityAddress !== id) throw new Error('the account changed');
+    const next = withoutSnapshotRemote(account.storageConfig as StorageConfig | undefined);
+    if (!next || next === account.storageConfig) return;
+    await chromeStorageService.updateNested('accounts', { [id]: { storageConfig: next } as unknown as Account });
+  });
+  if (r === 'repair') console.warn('[background] storage: our server\'s backup was incomplete; it is filled again next open');
 };
 
 /**

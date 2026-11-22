@@ -699,3 +699,29 @@ describe('review of 82bdb7e3: every pass shares the fill’s pace; a backup that
       expect(await rows(x.backup)).toEqual(await rows(x.dev));
     });
 });
+
+describe('repair of a backup an older build registered half-filled', () => {
+  test('a full restart marker runs the whole two-pass fill, never a restore-point pass alone', async () => {
+    const x = await setup(5);
+    // Our server has a cursor (an older build's fill answered "not-needed" on it) but lacks rows.
+    await fillBackup({ manager: x.manager, reader: x.dev, writer: x.backup, pageGapMs: 0 });
+    await new Promise((r) => setTimeout(r, 20));
+    const restorePoint = new Date();
+    await new Promise((r) => setTimeout(r, 20));
+    const [coin] = await x.dev.findOutputs({ partial: {} });
+    await x.dev.updateOutput(coin.outputId, { outputDescription: 'changed', updated_at: new Date() } as never);
+    const unguard = installInboundSyncGuard(StorageIdb);
+    const r = await fillBackup({
+      manager: x.manager,
+      reader: x.dev,
+      writer: x.backup,
+      restorePoint,
+      marginMs: 0,
+      pageGapMs: 0,
+      resume: { stage: 'restart', offsets: [], full: true },
+    }).finally(unguard);
+    expect(r.how).toBe('full');
+    expect(r.unlockedPages).toBeGreaterThan(0);
+    expect(await rows(x.backup)).toEqual(await rows(x.dev));
+  });
+});

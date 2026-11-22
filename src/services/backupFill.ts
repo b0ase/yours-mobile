@@ -109,7 +109,17 @@ export type FillReport = {
  * 30a4fbcd, 1), so a restore or final pass starts again from its since.
  */
 export type FillStage = 'refs' | 'restore' | 'bulk' | 'final' | 'restart';
-export type FillProgress = { stage: FillStage; since?: number; finalSince?: number; offsets: Offsets };
+export type FillProgress = {
+  stage: FillStage;
+  since?: number;
+  finalSince?: number;
+  offsets: Offsets;
+  /**
+   * With 'restart': the whole two-pass fill, never a pass from the restore point alone (the repair of a backup that
+   * an older build registered half-filled: spendableFirstWiring checkOurBackup).
+   */
+  full?: boolean;
+};
 
 /**
  * The fill stopped before our server said "done". `refused`: the server answered 429 or 5xx (`retryAfterMs` from its
@@ -402,13 +412,14 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
     return { ...report, how };
   };
 
-  const restoreFrom = lost
-    ? undefined
-    : resume?.stage === 'refs' || resume?.stage === 'restore'
-      ? resume.since
-      : !resume && d.restorePoint
-        ? d.restorePoint.getTime() - margin
-        : undefined;
+  const restoreFrom =
+    lost || (kept?.stage === 'restart' && kept.full === true)
+      ? undefined
+      : resume?.stage === 'refs' || resume?.stage === 'restore'
+        ? resume.since
+        : !resume && d.restorePoint
+          ? d.restorePoint.getTime() - margin
+          : undefined;
   if (restoreFrom !== undefined) {
     await locked(async () => {
       await pass('refs', zeros(), { since: restoreFrom });
