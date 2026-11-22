@@ -340,9 +340,10 @@ export const trustResolvedKey = (
   r: Pick<Resolved, 'input' | 'pubkey' | 'forwardsTo' | 'forwardSigner' | 'via' | 'opnsChecked' | 'opnsKeySigned'>,
 ) => {
   // An OpNS key is remembered only when checked on chain and signed by that key, never on the index's word alone.
-  if (!trustedKey(r)) return;
+  const key = trustedKey(r);
+  if (!key) return;
   const typed = r.input.replace(/^\$/, '').split('@')[0];
-  trustCurrentKey(typed, r.pubkey);
+  trustCurrentKey(typed, key);
   if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
 };
 
