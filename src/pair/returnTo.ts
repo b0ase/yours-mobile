@@ -84,19 +84,16 @@ export const resetRidMemory = () => memory.clear();
 /** The decision taken when the pairing is checked: return to `ret` (still subject to the rid) or not at all. */
 export type ReturnPlan = { ret: string; rid: string; b?: BrowserHint } | null;
 /**
- * P0 22 Nov 2026: a link WITHOUT a v2 proof returns too (sites on @bwalletx/connect have no well-known pairing key, so
- * requiring `s2` meant the same-phone sign-in never came back), but only to the ROOT of the exact origin the relay saw
- * (review 22 Nov 2026): that origin is only a claim without a proof, so the link may not choose a path on it. With a
- * valid `s2` the site chose and signed `ret`, so its path is used. A link whose `s2` does NOT verify never returns.
- * `rid` stays one-time, and the fragment's frame is sealed to the site's pairing key.
+ * Where to send the user after Connect, or null. Review 3 (22 Nov 2026): always the ROOT of the exact origin the relay
+ * saw, and only when the link asks for a return (`ret` on that origin, and a one-time `rid`). Origin proofs (`s`, `s2`)
+ * are ignored, so no link chooses a path; the site keeps the page it started on and goes back to it itself
+ * (@bwalletx/connect 0.9.0). The fragment's frame is sealed to the site's pairing key; `rid` stays one-time.
  */
-export function planReturn(link: PairLink, origin: string, v2Proven: boolean): ReturnPlan {
+export function planReturn(link: PairLink, origin: string): ReturnPlan {
   if (!link.ret || !link.rid) return null;
-  if (link.s2 && !v2Proven) return null;
   if (origin !== link.o) return null;
   if (!isAllowedReturn(link.ret, link.o)) return null;
-  const ret = v2Proven ? link.ret : `${new URL(link.o).origin}/`;
-  return { ret, rid: link.rid, ...(link.b && { b: link.b }) };
+  return { ret: `${new URL(link.o).origin}/`, rid: link.rid, ...(link.b && { b: link.b }) };
 }
 
 /**

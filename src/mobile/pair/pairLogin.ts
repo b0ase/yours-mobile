@@ -317,7 +317,7 @@ export const foldedLoginRequest = (
 /**
  * Sign a folded sign-in. The user approved it on the Connect card itself ("Connect and sign in to <host>"), which
  * names the host and the account just like the separate sign-in sheet, so there is no second sheet. Not remembered as
- * a grant; the chat-key proof that may follow over the same text is allowed once (noteApprovedLogin), as after the sheet.
+ * a grant, and it arms no follow-up: a chat-key proof the site asks for next gets its own sheet.
  */
 export async function signFoldedLogin(
   channel: string,
@@ -338,6 +338,8 @@ export async function signFoldedLogin(
       data: Utils.toArray(req.message, 'utf8'),
     } as never),
   ]);
-  noteApprovedLogin(channel, req.message, now);
+  // Review 3 (22 Nov 2026): a one-tap sign-in never arms the silent chat-key (BSM) follow-up (it would be answered
+  // over the relay with no sheet). If the site asks for it, it gets the usual sheet.
+  void channel;
   return { k: publicKey, sig: Utils.toHex(signature) };
 }

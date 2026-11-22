@@ -1,5 +1,12 @@
 # Phone pairing: proving a site's origin
 
+> **Review 3, 22 Nov 2026: origin proofs (`s`, `s2`) are no longer trusted, and the wallet ignores them.** A site's
+> proof route signs for any caller that sets an `Origin` header, which a script outside a browser can do, so a proof
+> made a phisher's relay session look clean. Every pairing now shows "a site that claims to be <host>"; the wallet
+> returns only to the ROOT of the exact origin the relay saw (when the link asks with `ret` + `rid`); the one-tap
+> sign-in needs only that return, because its signature travels ONLY in the return fragment, never over the relay, and
+> arms no silent follow-up. The history below is kept for reference.
+
 ## Return to the site (v2), quick reference
 
 Add these four optional fields to the pairing link, next to the fields you already send. Keep `v=1` and keep `s`:

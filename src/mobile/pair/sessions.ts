@@ -18,7 +18,6 @@ import {
   sessionWalletClaim,
   claimDigestSync,
   isAllowedRelay,
-  verifyPairProofs,
   type HelloFrame,
   type PairLink,
   type PairMessage,
@@ -285,17 +284,11 @@ export type PendingPair = {
 };
 
 /**
- * The sign guard names a paired session's site only when that pairing proved its origin (b-Aware 25 Oct 2026).
- * Registered here because the sessions (and their `proven` flag) live in this module.
+ * The sign guard names a paired session's site only when that pairing proved its origin (b-Aware 25 Oct 2026). Review 3
+ * (22 Nov 2026): origin proofs are no longer trusted (a site's proof route signs for any caller that sets an Origin
+ * header, which a script can), so no pairing counts as proven, including ones stored with `proven` before.
  */
-setProvenPairingCheck((originator) => {
-  const want = pairedKeyHost(originator);
-  try {
-    return load().some((s) => !!s.proven && pairedKeyHost(keyOf(s)) === want);
-  } catch {
-    return false;
-  }
-});
+setProvenPairingCheck(() => false);
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -622,7 +615,7 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
         store: agentDeps.twetch,
         wallet: agentDeps.ctx?.wallet as unknown as TwetchWallet | undefined,
         bsvUsd,
-        proven: !!l.stored.proven,
+        proven: false, // review 3 (22 Nov 2026): origin proofs are not trusted
       })),
     });
   try {
@@ -631,7 +624,7 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
     const login = await handlePairLoginCall(l.stored.c, l.stored.origin, action, params, {
       wallet: agentDeps.ctx?.wallet as never,
       handle: () => accountNamesFor(agentDeps.currentId).payable,
-      proven: !!l.stored.proven,
+      proven: false, // review 3 (22 Nov 2026): origin proofs are not trusted
       onSignedIn: closeConnectCardsFor,
     });
     if (login) return reply(l, { t: 'res', id, ...login });
@@ -934,23 +927,18 @@ function connectPairing(
       ws.send(helloSent);
       const { key, code } = await deriveSession(P, link.k, link.c, link.cd ?? 4);
       sealer = new Sealer(key, 'wallet');
-      // The relay's origin is only a header; the host is shown plainly only when the site proves it (B3).
-      const proofs =
-        (link.s || link.s2) && f.verifiedOrigin !== CLI_ORIGIN
-          ? await verifyPairProofs(link)
-          : { v1: false, v2: false };
-      const proven = proofs.v1 || proofs.v2;
-      const returnPlan = f.verifiedOrigin === CLI_ORIGIN ? null : planReturn(link, f.verifiedOrigin, proofs.v2);
+      // The relay's origin is only a header, and origin proofs (s, s2) are ignored (review 3, 22 Nov 2026: a site's proof
+      // route can't tell a browser from a script). The host is always shown as "a site that claims to be", and the
+      // return always goes to the ROOT of the relay-seen origin.
+      const proven = false;
+      const returnPlan = f.verifiedOrigin === CLI_ORIGIN ? null : planReturn(link, f.verifiedOrigin);
       let returnTaken = false;
-      // The site's sign-in, folded into Connect: only for a PROVEN origin (a valid s2; review 2, 22 Nov 2026). The
-      // relay's origin is a header any non-browser client can set, so an unproven "site" could be relaying a real
-      // site's challenge; its sign-in goes on the separate sheet, which names the claimed host with the warning. Never
-      // for the CLI, whose confirm screen is its own.
-      // CTO 22 Nov 2026: and only when the wallet can return, because the signature travels ONLY in the return (the
-      // fragment the wallet opens in this phone's browser at the exact origin), never over the relay. No return (a
-      // desktop QR, no ret): no fold; the site asks over the relay and gets the separate sheet, as before.
+      // The site's sign-in, folded into Connect, only when the wallet can return: the signature travels ONLY in the
+      // return (the fragment the wallet opens in this phone's browser at the exact relay-seen origin), never over the
+      // relay (CTO 22 Nov 2026), so whoever holds the site end of the channel never sees it. No return (a desktop QR,
+      // no ret): no fold; the site asks over the relay and gets the separate sheet. Never for the CLI.
       const loginReq =
-        f.verifiedOrigin === CLI_ORIGIN || !proofs.v2 || !returnPlan
+        f.verifiedOrigin === CLI_ORIGIN || !returnPlan
           ? null
           : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
       // The account this card opened under: Connect signs with it, or not at all (review 2, 22 Nov 2026).
@@ -1032,7 +1020,6 @@ function connectPairing(
             ...(agentDeps.currentId && { account: agentDeps.currentId }),
             // v2: the QR claim is spent at the relay; rejoin with the session claim. An older relay kept the QR claim.
             ...(v2 ? { claim: sessionClaim, wcv: 2 as const } : { claim }),
-            ...(proven && { proven: true }),
           };
           // A re-pair on a channel the CLI chose again starts clean: the old pairing's strategy proposal goes with it.
           dropProposalsOf(peek(link.c));
