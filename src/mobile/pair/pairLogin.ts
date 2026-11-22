@@ -19,7 +19,7 @@
  * originator, so the signature is the same one the site would have got through the permission manager, and no grant
  * is written that could make the next sign-in silent.
  */
-import { BSM, Utils } from '@bsv/sdk';
+import { BSM, PublicKey, Utils } from '@bsv/sdk';
 import { MESSAGE_SIGNING_PROTOCOL } from '@1sat/types';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE } from '../../services/userDenied';
 import { APP_NAME } from '../storeBuild';
@@ -281,4 +281,76 @@ export async function handlePairLoginCall(
     };
   }
   return null;
+}
+
+/* ---------- sign-in folded into Connect (same phone, @bwalletx/connect 0.9.0; P0 22 Nov 2026) ---------- */
+
+/**
+ * The sign-in a pairing link asks for with Connect (`ln` nonce, `lx` expiry), as the same createSignature params the
+ * site would otherwise send after pairing. Checked exactly like that request (parseLoginRequest): the text is rebuilt
+ * here for the relay-verified origin, so the link chooses nothing but the nonce and a near expiry. null when the link
+ * asks for none, or for one that can't be signed (expired, too far ahead, malformed).
+ */
+export const foldedLoginRequest = (
+  ln: string | undefined,
+  lx: string | undefined,
+  sessionOrigin: string,
+  now = Date.now(),
+): LoginRequest | null => {
+  if (!ln || !lx) return null;
+  let origin: string;
+  try {
+    origin = new URL(sessionOrigin).origin;
+  } catch {
+    return null;
+  }
+  const params = {
+    protocolID: [2, LOGIN_PROTOCOL_NAME],
+    keyID: ln,
+    counterparty: 'anyone',
+    data: Utils.toArray(loginMessage(origin, ln, lx), 'utf8'),
+  };
+  const req = parseLoginRequest(params, sessionOrigin, now);
+  return typeof req === 'string' ? null : req;
+};
+
+/**
+ * Sign a folded sign-in. The user approved it on the Connect card itself ("Connect and sign in to <host>"), which
+ * names the host and the account just like the separate sign-in sheet, so there is no second sheet. Not remembered as
+ * a grant, and it arms no follow-up: a chat-key proof the site asks for next gets its own sheet.
+ */
+export async function signFoldedLogin(
+  channel: string,
+  req: LoginRequest,
+  wallet: WalletLike | undefined,
+  now = Date.now(),
+  /** The card's account (identity address). The signing wallet's identity key must be that account's (review 4, L6). */
+  expectAccount?: string,
+): Promise<{ k: string; sig: string } | 'wrong-account' | null> {
+  if (!wallet) return null; // locked: plain Connect; the site then asks the usual way
+  // Review 22 Nov 2026: never sign a challenge that expired while the card was up.
+  const m = /\nExpires: (\S+)$/.exec(req.message);
+  if (!m || !(Date.parse(m[1]) > now)) return null;
+  const { publicKey } = await wallet.getPublicKey({ identityKey: true } as never);
+  if (expectAccount !== undefined) {
+    let address = '';
+    try {
+      address = PublicKey.fromString(publicKey).toAddress();
+    } catch {
+      address = '';
+    }
+    if (address !== expectAccount) return 'wrong-account';
+  }
+  const [{ signature }] = await Promise.all([
+    wallet.createSignature({
+      protocolID: [2, LOGIN_PROTOCOL_NAME],
+      keyID: req.nonce,
+      counterparty: 'anyone',
+      data: Utils.toArray(req.message, 'utf8'),
+    } as never),
+  ]);
+  // Review 3 (22 Nov 2026): a one-tap sign-in never arms the silent chat-key (BSM) follow-up (it would be answered
+  // over the relay with no sheet). If the site asks for it, it gets the usual sheet.
+  void channel;
+  return { k: publicKey, sig: Utils.toHex(signature) };
 }

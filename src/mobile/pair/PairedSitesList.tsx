@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { pairedSiteLabel } from './claimedHost';
 import { Globe, Terminal } from 'lucide-react';
 import { forget, pairedSites, subscribePairs, type StoredSession } from './sessions';
 import { usd2 } from './mintScope';
@@ -37,9 +38,7 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
               <div className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-white">
                 {s.agent
                   ? `${APP_NAME} CLI · ${s.agent.name}`
-                  : s.proven
-                    ? new URL(s.origin).host
-                    : `claims to be ${new URL(s.origin).host}`}
+                  : pairedSiteLabel(s)}
               </div>
               <div className="text-xs" style={{ color: MUTED }}>
                 {s.agent

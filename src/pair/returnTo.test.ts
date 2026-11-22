@@ -14,6 +14,8 @@ import {
   claimRid,
   isAllowedReturn,
   planReturn,
+  returnIsFoldable,
+  isFoldableReturnUrl,
   resetRidMemory,
   returnTarget,
   returnUrlFor,
@@ -49,11 +51,11 @@ const memKv = (): KV & { data: Map<string, string> } => {
 beforeEach(() => resetRidMemory());
 
 describe('return allow-list', () => {
-  test('same host and subdomains of the proven origin, https only', () => {
+  test('the exact origin only (review 22 Nov 2026: no subdomains), https only', () => {
     expect(isAllowedReturn('https://www.tokenblaster.lol/play', O)).toBe(true);
-    expect(isAllowedReturn('https://game.www.tokenblaster.lol/', O)).toBe(true);
+    expect(isAllowedReturn('https://game.www.tokenblaster.lol/', O)).toBe(false);
     expect(isAllowedReturn('https://tokenblaster.lol/', 'https://tokenblaster.lol')).toBe(true);
-    expect(isAllowedReturn('https://app.tokenblaster.lol/', 'https://tokenblaster.lol')).toBe(true);
+    expect(isAllowedReturn('https://app.tokenblaster.lol/', 'https://tokenblaster.lol')).toBe(false);
   });
   test('ATTACK: other hosts, look-alikes, parents, http, userinfo, ports and other schemes are refused', () => {
     for (const r of [
@@ -81,7 +83,8 @@ describe('v2 proof + plan', () => {
     expect([l.ret, l.rid, l.b]).toEqual([`${O}/terrornode?x=1`, RID, 'chrome']);
     const p = await verifyPairProofs(l, wellKnown);
     expect(p).toEqual({ v1: true, v2: true });
-    expect(planReturn(l, O, p.v2)).toEqual({ ret: `${O}/terrornode?x=1`, rid: RID, b: 'chrome' });
+    // Review 3 (22 Nov 2026): proofs are ignored; the return is always the relay-seen origin's ROOT.
+    expect(planReturn(l, O)).toEqual({ ret: `${O}/`, rid: RID, b: 'chrome' });
   });
   test('cd=8 is bound into v2: proven when kept, and stripping it (a downgrade to 4 digits) breaks v2', async () => {
     const l = parsePairUrl(pairUrl(v2({ cd: 8 })));
@@ -99,7 +102,7 @@ describe('v2 proof + plan', () => {
     expect(parsed.ret).toBeUndefined();
     const p = await verifyPairProofs(parsed, wellKnown);
     expect(p).toEqual({ v1: true, v2: false });
-    expect(planReturn(parsed, O, p.v2)).toBeNull();
+    expect(planReturn(parsed, O)).toBeNull();
   });
   test('ATTACK: ret, rid or b swapped on a real link breaks the v2 proof: no return', async () => {
     for (const over of [
@@ -111,20 +114,21 @@ describe('v2 proof + plan', () => {
       const l = { ...v2(), ...over };
       const p = await verifyPairProofs(l, wellKnown);
       expect(p.v2).toBe(false);
-      expect(planReturn(l, O, p.v2)).toBeNull();
+      // Proofs no longer matter: an off-origin ret never returns; anything else returns to the root only.
+      expect(planReturn(l, O)).toEqual(over.ret === 'https://evil.example/' ? null : { ret: `${O}/`, rid: l.rid, b: l.b });
     }
   });
   test('ATTACK: a forger signing their own v2 proof is not proven: no return', async () => {
     const l = v2({}, PrivateKey.fromRandom());
     const p = await verifyPairProofs(l, wellKnown);
     expect(p).toEqual({ v1: false, v2: false });
-    expect(planReturn(l, O, p.v2)).toBeNull();
+    expect(planReturn(l, O)?.ret).toBe(`${O}/`); // a forged proof changes nothing: the root of the relay's origin
   });
   test('ATTACK: a proven link whose ret is off-origin, or whose relay origin differs, gets no return', async () => {
     const off = v2({ ret: 'https://evil.example/' });
     expect((await verifyPairProofs(off, wellKnown)).v2).toBe(true); // the site signed it, but…
-    expect(planReturn(off, O, true)).toBeNull(); // …it is not on the proven origin
-    expect(planReturn(v2(), 'https://other.example', true)).toBeNull();
+    expect(planReturn(off, O)).toBeNull(); // …it is not on the origin
+    expect(planReturn(v2(), 'https://other.example')).toBeNull();
   });
   test('malformed return fields are dropped, the link still parses', () => {
     const l = parsePairUrl(pairUrl({ ...base(), ret: 'x'.repeat(600), rid: 'short', b: 'netscape' as never }));
@@ -188,5 +192,30 @@ describe('return URL for each browser', () => {
   });
   test('never builds a non-https return', () => {
     expect(() => returnUrlFor('http://www.tokenblaster.lol/', 'chrome', 'ios')).toThrow();
+  });
+});
+
+describe('review 4 (L3, CTO 22 Nov 2026): which returns may carry a folded sign-in', () => {
+  const plan = { ret: `${O}/`, rid: RID };
+  test('Android: an explicit-package intent to a browser in our table folds (chrome, opera, …)', () => {
+    for (const b of ['chrome', 'firefox', 'samsung', 'edge', 'brave', 'opera'] as const)
+      expect(returnIsFoldable({ ...plan, b }, 'android')).toBe(true);
+    expect(returnIsFoldable(plan, 'android')).toBe(true); // plain https
+  });
+  test('iOS: chrome/firefox return through a custom scheme: no fold; safari/none is plain https: fold', () => {
+    expect(returnIsFoldable({ ...plan, b: 'chrome' }, 'ios')).toBe(false);
+    expect(returnIsFoldable({ ...plan, b: 'firefox' }, 'ios')).toBe(false);
+    expect(returnIsFoldable({ ...plan, b: 'safari' }, 'ios')).toBe(true);
+    expect(returnIsFoldable(plan, 'ios')).toBe(true);
+  });
+  test('an intent naming a package not in our table, or a fallback off the origin root, never folds', () => {
+    const t = encodeURIComponent(`${O}/#bwx=ok&rid=${RID}`);
+    const host = new URL(O).host;
+    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.evil.browser;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
+    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent('https://evil.example/')};end`, `${O}/`)).toBe(false);
+    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=http;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
+    expect(isFoldableReturnUrl(`intent://evil.example/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
+    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(true);
+    expect(isFoldableReturnUrl(`googlechromes://${host}/`, `${O}/`)).toBe(false);
   });
 });
