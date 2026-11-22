@@ -237,6 +237,70 @@ describe('OpNS payee: one index answer is not enough', () => {
     await expect(resolve(f)).rejects.toThrow(/Not paying/);
   });
 
+  test('a made-up outpoint no source has heard of (all answer "not found") is refused', async () => {
+    // Live answers for a fabricated txid (22 Nov 2026): ORDFS 404 "not found in BEEF", WoC hex 404, WoC spent 400.
+    const fake = 'f'.repeat(64);
+    const f = mock({
+      [GP]: { outpoint: `${fake}_0`, origin: ORIGIN, owner: ATTACKER, map: { 'opns.idKey': ID_KEY } },
+      [ONESAT_ORIGIN]: { name: NAME, outpoint: ORIGIN.replace('_', '.') },
+      [`${WOC}/tx/${fake}/hex`]: 404,
+      [`${WOC}/tx/${fake}/0/spent`]: 400,
+      [`https://api.1sat.app/1sat/ordfs/metadata/${fake}_0:-2`]: 404,
+    });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
+  test('WhatsOnChain says the coin\'s transaction does not exist: refused, even if ORDFS is down', async () => {
+    const tx = ownerTx(await boundLock(idPriv, ID_KEY));
+    const owner = PushDrop.decode(tx.outputs[0].lockingScript).lockingPublicKey.toAddress();
+    const txid = tx.id('hex');
+    const f = world(tx, owner, ID_KEY, {
+      [`${WOC}/tx/${txid}/hex`]: 404,
+      [`${WOC}/tx/${txid}/0/spent`]: 'down',
+      [`https://api.1sat.app/1sat/ordfs/metadata/${txid}_0:-2`]: 'down',
+    });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
+  test('WhatsOnChain spent check says the transaction is unknown (400): refused', async () => {
+    const tx = ownerTx(await boundLock(idPriv, ID_KEY));
+    const owner = PushDrop.decode(tx.outputs[0].lockingScript).lockingPublicKey.toAddress();
+    const txid = tx.id('hex');
+    const f = world(tx, owner, ID_KEY, {
+      [`${WOC}/tx/${txid}/hex`]: 503,
+      [`${WOC}/tx/${txid}/0/spent`]: 400,
+      [`https://api.1sat.app/1sat/ordfs/metadata/${txid}_0:-2`]: 'down',
+    });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
+  test('ORDFS says the coin does not exist (404): refused', async () => {
+    const tx = ownerTx(await boundLock(idPriv, ID_KEY));
+    const owner = PushDrop.decode(tx.outputs[0].lockingScript).lockingPublicKey.toAddress();
+    const txid = tx.id('hex');
+    const f = world(tx, owner, ID_KEY, {
+      [`${WOC}/tx/${txid}/hex`]: 'down',
+      [`${WOC}/tx/${txid}/0/spent`]: 'down',
+      [`https://api.1sat.app/1sat/ordfs/metadata/${txid}_0:-2`]: 404,
+    });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
+  test('rate limits and server errors are only "can\'t reach": the weaker label, still payable', async () => {
+    const lock = await boundLock(idPriv, ID_KEY);
+    const tx = ownerTx(lock);
+    const owner = PushDrop.decode(lock).lockingPublicKey.toAddress();
+    const txid = tx.id('hex');
+    const f = world(tx, owner, ID_KEY, {
+      [`${WOC}/tx/${txid}/hex`]: 429,
+      [`${WOC}/tx/${txid}/0/spent`]: 502,
+      [`https://api.1sat.app/1sat/ordfs/metadata/${txid}_0:-2`]: 429,
+    });
+    const r = await resolve(f);
+    expect(destinationFor(r, 'bsv')).toEqual({ ok: true, to: owner });
+    expect(opnsTrustLabel(r)?.verified).toBe(false);
+  });
+
   test('an unbound name stays unpayable even when every source agrees', async () => {
     const tx = ownerTx(new P2PKH().lock(OWNER));
     const r = await resolve(world(tx, OWNER));

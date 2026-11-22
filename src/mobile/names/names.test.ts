@@ -7,6 +7,7 @@ import {
   destinationFor,
   parseRecipient,
   resolveRecipient,
+  trustResolvedKey,
   scriptToAddress,
   externalLabel,
   TOKENS_UNSUPPORTED,
@@ -314,4 +315,42 @@ describe('bmailx.com sibling domain (one name, two addresses)', () => {
     expect(bwalletPaymails('john', 'bwalletx.com')).toEqual(['john@bwalletx.com', 'john@bmailx.com']);
     expect(bwalletPaymails('john', '')).toEqual([]);
   });
+});
+
+describe('remembered keys: never an OpNS key only the index vouches for (b-Aware opns-indexer)', () => {
+  const mem = new Map<string, string>();
+  const real = globalThis.localStorage;
+  const seen = () => JSON.parse(mem.get('bwallet.names.seenKeys') ?? '{}') as Record<string, string>;
+  const withMem = (fn: () => void) => {
+    mem.clear();
+    globalThis.localStorage = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => void mem.set(k, v),
+      removeItem: (k: string) => void mem.delete(k),
+      clear: () => mem.clear(),
+      key: () => null,
+      length: 0,
+    } as Storage;
+    try {
+      fn();
+    } finally {
+      globalThis.localStorage = real;
+    }
+  };
+  const opns = { input: 'satchmo', via: 'opns-owner' as const, pubkey: '03ff' };
+
+  test('an index-only or unsigned OpNS key is not saved for the name', () =>
+    withMem(() => {
+      trustResolvedKey({ ...opns, opnsChecked: 'index', opnsKeySigned: true });
+      trustResolvedKey({ ...opns, opnsChecked: 'chain', opnsKeySigned: false });
+      trustResolvedKey({ ...opns });
+      expect(seen().satchmo).toBeUndefined();
+    }));
+
+  test('a chain-checked, key-signed OpNS key, and a paymail key, are still saved', () =>
+    withMem(() => {
+      trustResolvedKey({ ...opns, opnsChecked: 'chain', opnsKeySigned: true });
+      trustResolvedKey({ input: '$cafe', via: 'p2p-paymail', pubkey: '02aa' });
+      expect(seen()).toEqual({ satchmo: '03ff', cafe: '02aa' });
+    }));
 });
