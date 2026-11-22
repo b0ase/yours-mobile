@@ -13,7 +13,7 @@ import {
   UNSIGNED_NOTE,
   forwardLabel,
   isOurDomain,
-  opnsBinding,
+  opnsTrustLabel,
   parseRecipient,
   resolveRecipient,
   trustResolvedKey,
@@ -312,9 +312,19 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       {UNSIGNED_NOTE}
                     </div>
                   )}
-                  {opnsBinding(r) === 'bound' && (
-                    <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
-                      <Check size={11} /> Verified on chain · bound to {short(r.pubkey ?? '')}
+                  {opnsTrustLabel(r)?.verified && (
+                    <div
+                      data-testid="opns-verified"
+                      className="text-[11px] flex items-center gap-1"
+                      style={{ color: '#2ecc71' }}
+                    >
+                      <Check size={11} /> {opnsTrustLabel(r)?.text}
+                    </div>
+                  )}
+                  {opnsTrustLabel(r) && !opnsTrustLabel(r)?.verified && (
+                    // Only the OpNS index's word: never a green tick (b-Aware opns-indexer, row 213).
+                    <div data-testid="opns-index-only" className="text-[11px] break-all" style={{ color: gray }}>
+                      {opnsTrustLabel(r)?.text}
                     </div>
                   )}
                 </div>

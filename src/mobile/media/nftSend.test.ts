@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { canUseAsAvatar, isSelfRecipient, nftSendButton, PENDING_SEND_TEXT, SELF_SEND_TEXT } from './nftSend';
+import {
+  canUseAsAvatar,
+  isSelfRecipient,
+  nftSendButton,
+  PENDING_SEND_TEXT,
+  recipientKeys,
+  SELF_SEND_TEXT,
+} from './nftSend';
 
 const base = { to: '', status: 'empty' as const, busy: false, onChain: true };
 
@@ -48,6 +55,23 @@ describe('self-send and pending', () => {
     expect(isSelfRecipient({ to: '1other', ordAddress: '1me' }, own)).toBe(true);
     expect(isSelfRecipient({ to: '1other', pubkey: '03cd' }, own)).toBe(false);
     expect(isSelfRecipient({ to: '' }, { addresses: [''] })).toBe(false);
+  });
+  test('⚠ an OpNS key only the index vouches for never counts as this wallet (or anyone)', () => {
+    const own = { identityPubKey: '02ab', addresses: ['1me'] };
+    const opns = {
+      via: 'opns-owner' as const,
+      pubkey: '02ab',
+      ordAddress: '1attacker',
+      opnsChecked: 'chain' as const,
+      opnsKeySigned: false,
+    };
+    expect(recipientKeys(opns)).toEqual({ ordAddress: '1attacker' });
+    expect(isSelfRecipient({ to: '1attacker', ...recipientKeys(opns) }, own)).toBe(false);
+    expect(recipientKeys({ ...opns, opnsKeySigned: true })).toEqual({ pubkey: '02ab', ordAddress: '1attacker' });
+    expect(recipientKeys({ via: 'p2p-paymail', pubkey: '03cd', ordAddress: '1x' })).toEqual({
+      pubkey: '03cd',
+      ordAddress: '1x',
+    });
   });
 });
 

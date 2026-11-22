@@ -19,6 +19,7 @@ const {
   PayeeReviewError,
   PAYEE_ADDRESS_CHANGED,
   PAYEE_KEY_CHANGED,
+  PAYEE_KEY_MISSING,
   PAYEE_LEGACY_CONFIRM,
   keyFingerprint,
   legacyPin,
@@ -79,6 +80,29 @@ beforeEach(() => {
 });
 
 describe('payeeDestination', () => {
+  test('⚠ an OpNS key only the index vouches for is never pinned, and never satisfies a pinned key', () => {
+    const opns = resolved({ input: 'satchmo', via: 'opns-owner', nameBinding: undefined, opnsChecked: 'chain' });
+    expect(payeeDestination(ALICE, { ...opns, opnsKeySigned: false })).toEqual({ address: '1AliceAddr' });
+    expect(() => payeeDestination(PINNED, { ...opns, opnsKeySigned: false })).toThrow(PAYEE_KEY_MISSING);
+    expect(payeeDestination(PINNED, { ...opns, opnsKeySigned: true })).toEqual({
+      address: '1AliceAddr',
+      pubkey: KEY_A,
+    });
+  });
+  test('⚠ a refused OpNS name never puts an index-only key on the review card', () => {
+    const opns = resolved({ input: 'satchmo', via: 'opns-owner', nameBinding: 'bad', opnsChecked: 'chain' });
+    const servedKey = (r: Resolved) => {
+      try {
+        payeeDestination(PINNED, r);
+      } catch (err) {
+        expect(err).toBeInstanceOf(PayeeReviewError);
+        return (err as InstanceType<typeof PayeeReviewError>).servedKey;
+      }
+      throw new Error('expected a review');
+    };
+    expect(servedKey({ ...opns, opnsKeySigned: false })).toBeUndefined();
+    expect(servedKey({ ...opns, opnsKeySigned: true })).toBe(KEY_A);
+  });
   test('same pinned key and address → destination', () => {
     expect(payeeDestination(PINNED, resolved())).toEqual({ address: '1AliceAddr', pubkey: KEY_A });
   });

@@ -5,6 +5,8 @@ import {
   businessLabel,
   fetchRoles,
   identityKeyOf,
+  loadCardInputs,
+  opnsCardKey,
   opnsCandidates,
   parseBitsignPublic,
   parseRoles,
@@ -227,5 +229,35 @@ describe('roles and bio', () => {
       profile: { handle: 'alice', displayName: null, avatarUrl: null, bio: '  builder  ' },
     });
     expect(v.bio).toBe('builder');
+  });
+});
+
+describe('contact card: OpNS names (b-Aware opns-indexer)', () => {
+  test("an index-only opns.idKey never puts a name on someone's card: only a binding its key signed", async () => {
+    // The OpNS index claims "alice" is bound to this contact's key; nothing on chain backs it up.
+    const f = (async (url: string) =>
+      url === 'https://ordinals.gorillapool.io/api/opns/alice'
+        ? new Response(
+            JSON.stringify({
+              outpoint: `${'f'.repeat(64)}_0`,
+              owner: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
+              map: { 'opns.idKey': KEY },
+            }),
+          )
+        : // The OpNS check sources can't be reached: only the index's word is left (not "no such coin", a 404).
+          new Response('{}', {
+            status: /^https:\/\/api\.(whatsonchain\.com|1sat\.app\/1sat\/ordfs)\//.test(url) ? 503 : 404,
+          })) as never;
+    const inputs = await loadCardInputs(contact({ paymail: null }), f, async () => null);
+    expect(inputs.opns?.find((o) => o.name === 'alice')?.pubkey).toBeUndefined();
+    expect(buildCard(inputs).opnsNames).toEqual([]);
+  });
+
+  test('a signed binding counts only when the name index check also passed (opnsChecked chain)', () => {
+    const r = { pubkey: KEY, opnsKeySigned: true };
+    expect(opnsCardKey({ ...r, opnsChecked: 'chain' })).toBe(KEY);
+    // The 1sat name index couldn't be reached: the coin may not be this name's inscription.
+    expect(opnsCardKey({ ...r, opnsChecked: 'index' })).toBeUndefined();
+    expect(opnsCardKey({ pubkey: KEY, opnsChecked: 'chain', opnsKeySigned: false })).toBeUndefined();
   });
 });

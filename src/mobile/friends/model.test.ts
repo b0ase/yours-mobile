@@ -5,6 +5,7 @@ import {
   buildFriends,
   cleanBsv,
   findBySlug,
+  friendKey,
   friendSlug,
   loadLocal,
   lookalikeWarnings,
@@ -202,5 +203,21 @@ describe('DM drafts', () => {
   });
   test('space invite', () => {
     expect(spaceInviteText('lounge', 'the Lounge')).toBe('Join me in the Lounge: https://bwalletx.com/s/LOUNGE');
+  });
+});
+
+describe('friendKey: the identity key a resolved name is saved under', () => {
+  const KEY = '03' + 'c'.repeat(64);
+  const opns = { input: 'satchmo', via: 'opns-owner' as const, pubkey: KEY };
+  test('⚠ an OpNS key only the index vouches for is never saved as the friend', () => {
+    expect(() => friendKey({ ...opns, opnsChecked: 'chain', opnsKeySigned: false })).toThrow(/not signed on chain/);
+    expect(() => friendKey({ ...opns, opnsChecked: 'index', opnsKeySigned: true })).toThrow(/not signed on chain/);
+  });
+  test('a chain-checked, key-signed OpNS key and a paymail key are saved (lowercase)', () => {
+    expect(friendKey({ ...opns, opnsChecked: 'chain', opnsKeySigned: true })).toBe(KEY);
+    expect(friendKey({ input: '$cafe', via: 'p2p-paymail', pubkey: KEY.toUpperCase() })).toBe(KEY);
+  });
+  test('no key → says it cannot be saved', () => {
+    expect(() => friendKey({ input: 'bob@example.com', via: 'paymail-address' })).toThrow(/no identity key/);
   });
 });

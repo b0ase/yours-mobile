@@ -1,14 +1,24 @@
-import { parseRecipient, resolveRecipient, ResolveError, type Fetch } from '../names/names';
+import {
+  OPNS_KEY_UNVERIFIED,
+  opnsKeyUnverified,
+  parseRecipient,
+  resolveRecipient,
+  ResolveError,
+  type Fetch,
+} from '../names/names';
 import { shortKey, type Peer } from './machine';
 
 /**
  * "Call a name": $handle, paymail or OpNS name → the callee's IDENTITY KEY, via the same
- * resolution the Send screen uses (paymail pki / OpNS idKey). A bare address has no key.
+ * resolution the Send screen uses (paymail pki / OpNS idKey). A bare address has no key, and an OpNS idKey counts
+ * only when it is a binding its key signed on the owner output, checked on chain (names.ts opnsKeyUnverified).
  */
 export async function resolveCallee(f: Fetch, raw: string): Promise<Peer> {
   const p = parseRecipient(raw);
   if (p.kind === 'address') throw new ResolveError('Call a $handle, paymail or name, not an address');
   const r = await resolveRecipient(f, p);
+  // An OpNS key only the index vouches for is never called nor taken as proof of who is calling (verifyCaller).
+  if (opnsKeyUnverified(r)) throw new ResolveError(OPNS_KEY_UNVERIFIED(r.input));
   if (!r.pubkey || !/^0[23][0-9a-f]{64}$/i.test(r.pubkey)) {
     throw new ResolveError(`${r.input} has no identity key to call`);
   }

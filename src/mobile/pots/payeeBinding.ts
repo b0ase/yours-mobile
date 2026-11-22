@@ -13,7 +13,7 @@
  * resolves now is the one their last payment went to; otherwise they stop and ask once. An approved app subscription
  * to a paymail (pinOnFirstPay) pins what its first payment pays, since nothing has been paid to compare with yet.
  */
-import { destinationFor, proofRefusal, type Resolved } from '../names/names';
+import { destinationFor, proofRefusal, trustedKey, type Resolved } from '../names/names';
 import { checkPaymentOutputs } from '../../utils/guardedSendBsv';
 import type { Payee, Subscription } from './pots';
 
@@ -61,19 +61,21 @@ export const payeeDestination = (p: Payee, r: Resolved, opts: { ignorePin?: bool
   const d = destinationFor(r, 'bsv');
   if (!d.ok) {
     if (r.nameBinding === 'bad' || r.nameBinding === 'changed' || proofRefusal(r))
-      throw new PayeeReviewError(d.error, r.pubkey);
+      throw new PayeeReviewError(d.error, trustedKey(r));
     throw new Error(d.error);
   }
   if (r.targetKind !== 'address') throw new Error(P2P_ONLY(p.paymail ?? r.input));
   const served = d.to;
+  // An OpNS key only the index vouches for is never pinned, nor matched against a pin (names.ts trustedKey).
+  const key = trustedKey(r);
   if (p.pinnedKey && !opts.ignorePin) {
-    if (!r.pubkey) throw new PayeeReviewError(PAYEE_KEY_MISSING, undefined, served);
-    if (r.pubkey !== p.pinnedKey) throw new PayeeReviewError(PAYEE_KEY_CHANGED, r.pubkey, served);
+    if (!key) throw new PayeeReviewError(PAYEE_KEY_MISSING, undefined, served);
+    if (key !== p.pinnedKey) throw new PayeeReviewError(PAYEE_KEY_CHANGED, key, served);
   }
   // The key alone proves nothing about a basic-resolution address: the address is pinned too.
   if (p.pinnedAddress && !opts.ignorePin && served !== p.pinnedAddress)
-    throw new PayeeReviewError(PAYEE_ADDRESS_CHANGED, r.pubkey, served);
-  return { address: served, ...(r.pubkey ? { pubkey: r.pubkey } : {}) };
+    throw new PayeeReviewError(PAYEE_ADDRESS_CHANGED, key, served);
+  return { address: served, ...(key ? { pubkey: key } : {}) };
 };
 
 /**
