@@ -185,6 +185,58 @@ describe('OpNS payee: one index answer is not enough', () => {
     expect(opnsTrustLabel(r)?.verified).toBe(false);
   });
 
+  test("a lying index pointing at the attacker's plain coin (ORDFS: no inscription there) is refused", async () => {
+    // Live ORDFS answer for a non-inscription outpoint: 200, no origin, empty content type (checked 22 Nov 2026).
+    const tx = ownerTx(new P2PKH().lock(ATTACKER));
+    const txid = tx.id('hex');
+    const f = world(tx, ATTACKER, ID_KEY, {
+      [`https://api.1sat.app/1sat/ordfs/metadata/${txid}_0:-2`]: {
+        contentLength: 0,
+        contentType: '',
+        outpoint: `${txid}.0`,
+        sequence: 0,
+      },
+    });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
+  test('a plain coin is refused even when the 1sat name index is unreachable', async () => {
+    const tx = ownerTx(new P2PKH().lock(ATTACKER));
+    const txid = tx.id('hex');
+    const f = world(tx, ATTACKER, ID_KEY, {
+      [ONESAT_ORIGIN]: 503,
+      [`https://api.1sat.app/1sat/ordfs/metadata/${txid}_0:-2`]: { contentLength: 0, contentType: '', sequence: 0 },
+    });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
+  test('the coin holds an inscription with the right origin but it is not an OpNS name: refused', async () => {
+    const tx = ownerTx(new P2PKH().lock(OWNER));
+    const txid = tx.id('hex');
+    const f = world(tx, OWNER, ID_KEY, {
+      [`https://api.1sat.app/1sat/ordfs/metadata/${txid}_0:-2`]: {
+        outpoint: `${txid}.0`,
+        origin: ORIGIN.replace('_', '.'),
+        contentType: 'text/plain',
+      },
+    });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
+  test('the index leaves out the outpoint: refused, not paid on its word', async () => {
+    const tx = ownerTx(new P2PKH().lock(OWNER));
+    const f = world(tx, OWNER, ID_KEY, { [GP]: { origin: ORIGIN, owner: OWNER, map: { 'opns.idKey': ID_KEY } } });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
+  test('the index sends a malformed outpoint: refused', async () => {
+    const tx = ownerTx(new P2PKH().lock(OWNER));
+    const f = world(tx, OWNER, ID_KEY, {
+      [GP]: { outpoint: 'not-an-outpoint', origin: ORIGIN, owner: OWNER, map: { 'opns.idKey': ID_KEY } },
+    });
+    await expect(resolve(f)).rejects.toThrow(/Not paying/);
+  });
+
   test('an unbound name stays unpayable even when every source agrees', async () => {
     const tx = ownerTx(new P2PKH().lock(OWNER));
     const r = await resolve(world(tx, OWNER));
