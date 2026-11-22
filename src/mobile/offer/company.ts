@@ -157,10 +157,13 @@ const usdText = (v: string) =>
 
 /** The amount and status a receipt row shows. A receipt held for no rate shows its BSV, never a USD figure. */
 export const receiptLine = (r: Receipt): { amount: string; status: string } => {
-  if (r.held === 'rate_unavailable' && r.status !== 'received_after_lapse')
+  if (r.held === 'rate_unavailable')
     return {
       amount: `${r.payment.bsv} BSV`,
-      status: 'Received, held: no exchange rate when it arrived, so it is not valued yet',
+      status:
+        r.status === 'received_after_lapse'
+          ? 'Received after the offer lapsed (held), with no exchange rate when it arrived, so it is not valued yet'
+          : 'Received, held: no exchange rate when it arrived, so it is not valued yet',
     };
   return {
     amount: usdText(r.payment.usdValue),
