@@ -124,11 +124,11 @@ export type Resolved = {
    * Only ever set for a full name@domain the user typed; a $handle never resolves outside bWalletX.
    */
   external?: string;
-  /** The ordinal address came with a valid signature by `pubkey` (checkOrdProof). */
+  /** The ordinal address came with a valid signature by `pubkey` (checkOrdProof). False: an outside host's, unsigned. */
   ordVerified?: boolean;
   /** The ordinal address came with a proof that does NOT verify against `pubkey`: ordAddress is dropped. */
   ordProofBad?: boolean;
-  /** The host served an ordinal address with no owner signature at all (b-Aware 102/250): ordAddress is dropped. */
+  /** Our host served an ordinal address with no owner signature at all (b-Aware 102/250): ordAddress is dropped. */
   ordUnsigned?: boolean;
   /** A raw public key exactly as typed (via 'pubkey'); `pubkey` holds its compressed form. */
   rawKey?: string;
@@ -390,14 +390,16 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
     const o = await capJson<Fields & { ordProof?: unknown }>(ord);
     const address = str(o?.address);
     if (address) {
-      // b_feedback 67, b-Aware 102/250: the host could swap the address. Use it only with the key owner's signature
-      // over it; a missing signature is refused like a bad one (fail closed), never kept as a fallback.
+      // b_feedback 67, b-Aware 102/250: the host could swap the address. On our names (key pinned by the owner's
+      // signed binding) use it only with the key owner's signature over it; a missing one is refused like a bad one
+      // (fail closed). An outside host also serves the key a proof is checked against, so a proof proves nothing
+      // there and none serves one: its address is kept as 'unverified' (the pay sheet says so), as for BSV.
       const proof = o?.ordProof === undefined ? 'none' : await checkOrdProof(r.pubkey, address, o.ordProof);
       if (proof === 'bad') r.ordProofBad = true;
-      else if (proof === 'none') r.ordUnsigned = true;
+      else if (proof === 'none' && !r.external) r.ordUnsigned = true;
       else {
         r.ordAddress = address;
-        r.ordVerified = true;
+        r.ordVerified = proof === 'ok';
       }
     }
   }
@@ -578,8 +580,9 @@ export const BAD_ORD_PROOF =
   "This name's ordinal address isn't signed by its owner's key, so it may have been swapped. Not sending tokens to it.";
 
 /**
- * b-Aware 102/250: the host served an ordinal address with NO owner signature. Tokens, NFTs and names are never sent
- * to it (fail closed): the host alone could have swapped in anyone's address. A typed 1… address still works.
+ * b-Aware 102/250: our host served a name's ordinal address with NO owner signature. Tokens, NFTs and names are never
+ * sent to it (fail closed): the host alone could have swapped in anyone's address. A typed 1… address still works.
+ * (An outside host's unsigned address is used, marked 'unverified': see resolvePaymail.)
  */
 export const UNSIGNED_ORD = `This name's ordinals address isn't signed by its owner, so ${APP_NAME} can't be sure it's theirs. Not sending tokens to it. Ask them for their ordinals address (1…) and send to that instead.`;
 
@@ -615,7 +618,7 @@ export const checkOrdProof = async (
 /**
  * Whether the destination a send will use is checked against the payee's key: P2P paymail outputs are re-derived
  * at send time (utils/paymailDestination.ts), which only our host supports; token sends need a signed ord address
- * (an unsigned or badly signed one is refused by destinationFor, so 'unverified' for tokens is a defensive fallback).
+ * (on our names an unsigned or badly signed one is refused by destinationFor; an outside host's is 'unverified').
  * 'unverified' puts NOT_VERIFIED_NOTE on the pay sheet; null means there's nothing a host could swap.
  */
 export const destinationCheck = (

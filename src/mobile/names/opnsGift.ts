@@ -7,8 +7,8 @@ import { APP_NAME } from '../storeBuild';
  *
  * A name is a 1-sat ordinal, so it only ever goes to an ORDINALS destination: an address typed as-is, or a
  * paymail's ordinal-receive address (the 1Sat `ordAddress` capability; bWalletX paymails answer it from the
- * alias's stored ord_address), used only when its owner signed it (ordProof; unsigned → UNSIGNED_ORD, b-Aware
- * 102/250). A paymail with only a P2P / payment destination is refused, the same rule as
+ * alias's stored ord_address), on our names used only when its owner signed it (ordProof; unsigned → UNSIGNED_ORD,
+ * b-Aware 102/250). A paymail with only a P2P / payment destination is refused, the same rule as
  * NFT sends (names.ts destinationFor 'token'): a BSV payment address may not keep 1-sat outputs apart.
  *
  * A listed name is taken off sale first (cancelOpnsListing), then sent (sendOpns), all under ONE approval.
