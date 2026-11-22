@@ -235,7 +235,8 @@ export default function PairSheet({
                       });
                       // Phone apps: return on their own once 'ready' is on its way (it is also in the return, for a
                       // browser tab that slept through it). The web wallet needs a tap (popups).
-                      if (back && returnPlatform() !== 'web') setTimeout(() => void openReturn(back, extra ?? undefined), 300);
+                      if (back && returnPlatform() !== 'web')
+                        setTimeout(() => void openReturn(back, extra ?? undefined), 300);
                     });
                 }}
                 className="flex-1 rounded-xl py-3 font-bold"

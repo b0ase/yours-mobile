@@ -13,11 +13,22 @@
  */
 import { afterAll, describe, expect, mock, test } from 'bun:test';
 import { BSM, PrivateKey, ProtoWallet, PublicKey, Signature, Utils } from '@bsv/sdk';
-import { PAIR_VERSION, Sealer, deriveSession, isSealed, pairUrl, signPairProofV2, type PairLink } from '../../pair/protocol';
+import {
+  PAIR_VERSION,
+  Sealer,
+  deriveSession,
+  isSealed,
+  pairUrl,
+  signPairProofV2,
+  type PairLink,
+} from '../../pair/protocol';
 import { keepGlobals, stubGlobals } from '../../testing/stubGlobals';
 
 const realDappBrowser = { ...(await import('../dappBrowser')) };
-mock.module('../dappBrowser', () => ({ ...realDappBrowser, handleSiteCall: async () => ({ success: true, data: {} }) }));
+mock.module('../dappBrowser', () => ({
+  ...realDappBrowser,
+  handleSiteCall: async () => ({ success: true, data: {} }),
+}));
 
 class FakeWS {
   static CONNECTING = 0;
@@ -198,19 +209,25 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(q.get('bwx')).toBe('ok');
     expect(q.get('wk')).toBe(c.hello.k);
     const b64 = q.get('f')!.replace(/-/g, '+').replace(/_/g, '/');
-    const frame = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)), (ch) => ch.charCodeAt(0))));
+    const frame = JSON.parse(
+      new TextDecoder().decode(
+        Uint8Array.from(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)), (ch) => ch.charCodeAt(0)),
+      ),
+    );
     const m = (await c.siteSealer.open(frame)) as { t: string; login?: { k: string; sig: string } }; // after the relay ready
     expect(m.t).toBe('ready');
     expect(m.login?.k).toBe(root.toPublicKey().toString());
     // The signature is the login signature the site's verifySignIn checks.
     const { loginMessage } = await import('./pairLogin');
-    const { valid } = await new ProtoWallet('anyone').verifySignature({
-      protocolID: [2, 'bwallet sign in'],
-      keyID: lf.ln,
-      counterparty: root.toPublicKey().toString(),
-      data: Utils.toArray(loginMessage(HOST, lf.ln, lf.lx), 'utf8'),
-      signature: Utils.toArray(m.login!.sig, 'hex'),
-    } as never).catch(() => ({ valid: false }));
+    const { valid } = await new ProtoWallet('anyone')
+      .verifySignature({
+        protocolID: [2, 'bwallet sign in'],
+        keyID: lf.ln,
+        counterparty: root.toPublicKey().toString(),
+        data: Utils.toArray(loginMessage(HOST, lf.ln, lf.lx), 'utf8'),
+        signature: Utils.toArray(m.login!.sig, 'hex'),
+      } as never)
+      .catch(() => ({ valid: false }));
     expect(valid).toBe(true);
     expect(PublicKey.fromString(m.login!.k)).toBeTruthy();
     expect(Signature).toBeTruthy();
@@ -305,12 +322,20 @@ describe('same phone: sign in with Connect, and go back', () => {
 
   test('review 2 (6): the card signs with the account it opened under; another account open now refuses', async () => {
     const c = await card(loginFields(), true, true);
-    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: '1AccountBBBBBBBBBBBBBBBBBBBBBBBBBB', accountCount: 2 });
+    sessions.setAgentPairDeps({
+      ctx: { wallet: new ProtoWallet(root) } as never,
+      currentId: '1AccountBBBBBBBBBBBBBBBBBBBBBBBBBB',
+      accountCount: 2,
+    });
     const r = await c.p.confirm();
     expect(r).toBeNull();
     expect(c.gone()).toBe(1);
     expect(sessions.pairedSites().some((s) => s.c === c.link.c)).toBe(false);
-    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: ROOT_ACCOUNT, accountCount: 1 });
+    sessions.setAgentPairDeps({
+      ctx: { wallet: new ProtoWallet(root) } as never,
+      currentId: ROOT_ACCOUNT,
+      accountCount: 1,
+    });
   });
 
   test('review 4 (L3, CTO): Android browser intents fold; iOS custom schemes never carry the sign-in', async () => {
@@ -335,12 +360,20 @@ describe('same phone: sign in with Connect, and go back', () => {
     const c = await card(loginFields());
     let message: string | undefined;
     c.p.onGone((m) => (message = m));
-    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(PrivateKey.fromRandom()) } as never, currentId: ROOT_ACCOUNT, accountCount: 1 });
+    sessions.setAgentPairDeps({
+      ctx: { wallet: new ProtoWallet(PrivateKey.fromRandom()) } as never,
+      currentId: ROOT_ACCOUNT,
+      accountCount: 1,
+    });
     const r = await c.p.confirm();
     expect(r).toBeNull();
     expect(message).toBe(sessions.PAIR_ACCOUNT_CHANGED_MESSAGE);
     expect(sessions.pairedSites().some((s) => s.c === c.link.c)).toBe(false);
-    sessions.setAgentPairDeps({ ctx: { wallet: new ProtoWallet(root) } as never, currentId: ROOT_ACCOUNT, accountCount: 1 });
+    sessions.setAgentPairDeps({
+      ctx: { wallet: new ProtoWallet(root) } as never,
+      currentId: ROOT_ACCOUNT,
+      accountCount: 1,
+    });
   });
 
   afterAll(() => {

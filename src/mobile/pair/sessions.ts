@@ -24,7 +24,14 @@ import {
   type RelayFrame,
 } from '../../pair/protocol';
 import { inOrder } from '../../pair/in-order';
-import { claimRid, planReturn, returnIsFoldable, type ReturnExtra, type ReturnPlan, type ReturnPlatform } from '../../pair/returnTo';
+import {
+  claimRid,
+  planReturn,
+  returnIsFoldable,
+  type ReturnExtra,
+  type ReturnPlan,
+  type ReturnPlatform,
+} from '../../pair/returnTo';
 import { returnPlatform } from './openReturn';
 import { handleSiteCall } from '../dappBrowser';
 import { isMintPrivateCode } from '../../services/mintPrivateAction';
@@ -1008,7 +1015,10 @@ function connectPairing(
           end();
           ws.onclose = null;
           // A CLI must be bound to an agent account; only a CLI pairing carries an agent grant.
-          if ((f.verifiedOrigin === CLI_ORIGIN && (!agent || !opts.allowCli)) || (agent && f.verifiedOrigin !== CLI_ORIGIN)) {
+          if (
+            (f.verifiedOrigin === CLI_ORIGIN && (!agent || !opts.allowCli)) ||
+            (agent && f.verifiedOrigin !== CLI_ORIGIN)
+          ) {
             ws.close();
             return null;
           }
@@ -1018,7 +1028,9 @@ function connectPairing(
           // Review 4 (L6): the wallet that signs must be the card's account (its identity key's address), not just the
           // open account id: refuse with a plain line otherwise.
           const signed = freshReq
-            ? await signFoldedLogin(link.c, freshReq, agentDeps.ctx?.wallet as never, Date.now(), cardAccount).catch(() => null)
+            ? await signFoldedLogin(link.c, freshReq, agentDeps.ctx?.wallet as never, Date.now(), cardAccount).catch(
+                () => null,
+              )
             : null;
           if (signed === 'wrong-account') {
             // The card is already closed for Connect (end()), so say why directly rather than through supersede.

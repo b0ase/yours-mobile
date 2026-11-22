@@ -17,7 +17,9 @@ describe('claimed hosts', () => {
   });
 
   test('Paired websites ignores an old proven flag', () => {
-    expect(pairedSiteLabel({ origin: 'https://www.bchatx.com', proven: true } as never)).toBe('claims to be www.bchatx.com');
+    expect(pairedSiteLabel({ origin: 'https://www.bchatx.com', proven: true } as never)).toBe(
+      'claims to be www.bchatx.com',
+    );
     expect(pairedSiteLabel({ origin: 'https://a.example' } as never)).toBe('claims to be a.example');
   });
 });

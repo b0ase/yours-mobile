@@ -36,9 +36,7 @@ export function PairedSitesList({ onScan }: { onScan: () => void }) {
             {s.agent ? <Terminal size={18} color="#BDB4FE" /> : <Globe size={18} color={MUTED} />}
             <div className="min-w-0 flex-1">
               <div className="overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-white">
-                {s.agent
-                  ? `${APP_NAME} CLI · ${s.agent.name}`
-                  : pairedSiteLabel(s)}
+                {s.agent ? `${APP_NAME} CLI · ${s.agent.name}` : pairedSiteLabel(s)}
               </div>
               <div className="text-xs" style={{ color: MUTED }}>
                 {s.agent

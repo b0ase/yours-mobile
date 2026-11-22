@@ -1,5 +1,11 @@
 import { Capacitor } from '@capacitor/core';
-import { returnTarget, returnUrlFor, type ReturnExtra, type ReturnPlan, type ReturnPlatform } from '../../pair/returnTo';
+import {
+  returnTarget,
+  returnUrlFor,
+  type ReturnExtra,
+  type ReturnPlan,
+  type ReturnPlatform,
+} from '../../pair/returnTo';
 import { YoursNative } from '../native';
 
 /** Which opener this shell uses: the phone apps by OS; the web wallet (and anything else) opens the https URL. */

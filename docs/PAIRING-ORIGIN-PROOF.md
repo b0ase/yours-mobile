@@ -12,13 +12,13 @@
 Add these four optional fields to the pairing link, next to the fields you already send. Keep `v=1` and keep `s`:
 older wallets ignore the new fields and still see your v1 proof.
 
-| Field | Value                                                                                                                                |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Field | Value                                                                                                                                                                                                                      |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ret` | The https URL to send the user back to after Allow. Exactly the origin `o` (no subdomains, since 22 Nov 2026). At most 512 bytes. No userinfo, no port. Without a valid `s2` the wallet returns to the origin's root only. |
-| `rid` | A one-time request id: 16 random bytes, base64url (22 chars; 16–64 `[A-Za-z0-9_-]` accepted). New for every link.                    |
-| `b`   | Browser hint: `safari`, `chrome`, `firefox`, `samsung`, `edge`, `brave` or `other`. Optional.                                        |
-| `s2`  | The v2 proof: DER signature (hex), by a key in your `/.well-known/bwalletx-pair.json`, over the UTF-8 string below.                  |
-| `cd`  | Comparison-code length: `8` (BRC-185). Optional; without it the wallet shows the legacy 4 digits.                                    |
+| `rid` | A one-time request id: 16 random bytes, base64url (22 chars; 16–64 `[A-Za-z0-9_-]` accepted). New for every link.                                                                                                          |
+| `b`   | Browser hint: `safari`, `chrome`, `firefox`, `samsung`, `edge`, `brave` or `other`. Optional.                                                                                                                              |
+| `s2`  | The v2 proof: DER signature (hex), by a key in your `/.well-known/bwalletx-pair.json`, over the UTF-8 string below.                                                                                                        |
+| `cd`  | Comparison-code length: `8` (BRC-185). Optional; without it the wallet shows the legacy 4 digits.                                                                                                                          |
 
 ```
 bwallet-pair-v2|proof|<c>|<k lowercase>|<o>|<e>|<ret>|<rid>|<b, or empty>[|cd=<cd>]

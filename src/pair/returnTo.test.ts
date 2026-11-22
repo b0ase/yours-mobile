@@ -115,7 +115,9 @@ describe('v2 proof + plan', () => {
       const p = await verifyPairProofs(l, wellKnown);
       expect(p.v2).toBe(false);
       // Proofs no longer matter: an off-origin ret never returns; anything else returns to the root only.
-      expect(planReturn(l, O)).toEqual(over.ret === 'https://evil.example/' ? null : { ret: `${O}/`, rid: l.rid, b: l.b });
+      expect(planReturn(l, O)).toEqual(
+        over.ret === 'https://evil.example/' ? null : { ret: `${O}/`, rid: l.rid, b: l.b },
+      );
     }
   });
   test('ATTACK: a forger signing their own v2 proof is not proven: no return', async () => {
@@ -211,11 +213,36 @@ describe('review 4 (L3, CTO 22 Nov 2026): which returns may carry a folded sign-
   test('an intent naming a package not in our table, or a fallback off the origin root, never folds', () => {
     const t = encodeURIComponent(`${O}/#bwx=ok&rid=${RID}`);
     const host = new URL(O).host;
-    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.evil.browser;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
-    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent('https://evil.example/')};end`, `${O}/`)).toBe(false);
-    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=http;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
-    expect(isFoldableReturnUrl(`intent://evil.example/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(false);
-    expect(isFoldableReturnUrl(`intent://${host}/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${t};end`, `${O}/`)).toBe(true);
+    expect(
+      isFoldableReturnUrl(
+        `intent://${host}/#bwx=ok#Intent;scheme=https;package=com.evil.browser;S.browser_fallback_url=${t};end`,
+        `${O}/`,
+      ),
+    ).toBe(false);
+    expect(
+      isFoldableReturnUrl(
+        `intent://${host}/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent('https://evil.example/')};end`,
+        `${O}/`,
+      ),
+    ).toBe(false);
+    expect(
+      isFoldableReturnUrl(
+        `intent://${host}/#bwx=ok#Intent;scheme=http;package=com.android.chrome;S.browser_fallback_url=${t};end`,
+        `${O}/`,
+      ),
+    ).toBe(false);
+    expect(
+      isFoldableReturnUrl(
+        `intent://evil.example/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${t};end`,
+        `${O}/`,
+      ),
+    ).toBe(false);
+    expect(
+      isFoldableReturnUrl(
+        `intent://${host}/#bwx=ok#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${t};end`,
+        `${O}/`,
+      ),
+    ).toBe(true);
     expect(isFoldableReturnUrl(`googlechromes://${host}/`, `${O}/`)).toBe(false);
   });
 });
