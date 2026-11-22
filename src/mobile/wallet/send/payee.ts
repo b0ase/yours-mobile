@@ -1,4 +1,4 @@
-import { isOurDomain } from '../../names/names';
+import { isOurDomain, type Resolved } from '../../names/names';
 import { keyFingerprint } from '../identityLine';
 
 /**
@@ -130,6 +130,17 @@ export const SELF_PAY_NOTE = 'This is you. Only the network fee will be spent.';
 /** Same compressed public key (hex, any case). */
 export const sameKey = (a: string | undefined, b: string | undefined): boolean =>
   !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** What the Send card remembers about a resolved payee for the confirm sheet (notePending → payeeNote). */
+export const sendPayeeMeta = (
+  r: Pick<Resolved, 'input' | 'avatar' | 'via' | 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>,
+  label: string,
+): { input: string; label: string; avatar?: string; pubkey?: string } => ({
+  input: r.input,
+  label,
+  avatar: r.avatar,
+  pubkey: r.pubkey,
+});
 
 export const payeeNote = (
   acct: string,

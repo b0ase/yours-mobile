@@ -1,3 +1,5 @@
+import type { Resolved } from '../names/names';
+
 /**
  * Two-step NFT send (owner, 12 Oct 2026: "three clicks could be two"): 1) pick the recipient, 2) one "Send to <name>"
  * button. Pure state → button, so the rules are testable.
@@ -45,6 +47,12 @@ export const isSelfRecipient = (r: { to?: string; pubkey?: string; ordAddress?: 
   const mine = new Set((own.addresses || []).filter(Boolean));
   return [r.to, r.ordAddress].some((a) => !!a && mine.has(a));
 };
+
+/** The recipient's keys for isSelfRecipient, from the name box's resolution. */
+export const recipientKeys = (r: Pick<Resolved, 'via' | 'pubkey' | 'ordAddress' | 'opnsChecked' | 'opnsKeySigned'>) => ({
+  pubkey: r.pubkey,
+  ordAddress: r.ordAddress,
+});
 
 /** "Use as my bAvatar" only while the image NFT is still ours: not sent, not burned, not still going out. */
 export const canUseAsAvatar = (kind: string, s: { sent: boolean; burned: boolean; pending: boolean }) =>

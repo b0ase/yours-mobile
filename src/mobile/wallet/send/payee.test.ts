@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { canonPaymail, hasPaid, loadPaid, lookalikeOf, payeeNote, recordPaid, SELF_PAY_NOTE, shape } from './payee';
+import {
+  canonPaymail,
+  hasPaid,
+  loadPaid,
+  lookalikeOf,
+  payeeNote,
+  recordPaid,
+  SELF_PAY_NOTE,
+  sendPayeeMeta,
+  shape,
+} from './payee';
 
 const mem = () => {
   const m = new Map<string, string>();
@@ -90,6 +100,36 @@ describe('payment to self (P0, 11 Nov 2026: 1¢ to own boase@bwalletx.com)', () 
     expect(payeeNote('acct', 'alice@bwalletx.com', { label: '$alice', pubkey: KEY }, s, [], OWN)?.self).toBeUndefined();
     expect(payeeNote('acct', 'boase@bwalletx.com', { label: '$boase' }, s, [], OWN)?.self).toBeUndefined();
     expect(payeeNote('acct', 'boase@bwalletx.com', { label: '$boase', pubkey: OWN }, s, [])?.self).toBeUndefined();
+  });
+  test('⚠ an OpNS name whose key only the index vouches for never says "This is you" nor shows that key', () => {
+    // The name's owner writes opns.idKey: an attacker sets it to the victim's own key while the BSV goes to him.
+    const s = mem();
+    const opns = {
+      input: 'satchmo',
+      target: '1Attacker',
+      targetKind: 'address' as const,
+      via: 'opns-owner' as const,
+      displayName: 'satchmo',
+      pubkey: OWN,
+      opnsChecked: 'chain' as const,
+      opnsKeySigned: false,
+    };
+    const meta = sendPayeeMeta(opns, 'satchmo');
+    expect(meta.pubkey).toBeUndefined();
+    const n = payeeNote('acct', opns.target, meta, s, [], OWN);
+    expect(n?.self).toBeUndefined();
+    expect(n?.fingerprint).toBeUndefined();
+    expect(sendPayeeMeta({ ...opns, opnsChecked: 'index' }, 'satchmo').pubkey).toBeUndefined();
+    // Checked on chain AND signed by that key: the key is the owner's own.
+    expect(sendPayeeMeta({ ...opns, opnsKeySigned: true }, 'satchmo').pubkey).toBe(OWN);
+    // A paymail keeps its key (its binding is checked elsewhere).
+    const pm = { input: 'boase@bwalletx.com', target: 'boase@bwalletx.com', targetKind: 'paymail' as const };
+    expect(sendPayeeMeta({ ...pm, via: 'p2p-paymail', pubkey: OWN, avatar: 'a.png' }, '$boase')).toEqual({
+      input: 'boase@bwalletx.com',
+      label: '$boase',
+      avatar: 'a.png',
+      pubkey: OWN,
+    });
   });
   test('the confirm sheet shows the note and still offers Send (informational, never blocks)', async () => {
     const { renderToStaticMarkup } = await import('react-dom/server');
