@@ -256,7 +256,13 @@ import {
   type OurServerClient,
 } from './services/spendableFirstWiring';
 import { reportFromWallet } from './services/reportSink';
-import { makeUnfailRepair, withFailedRowRepair } from './services/failedRowRepair';
+import {
+  installUnfailGuard,
+  makeUnfailRepair,
+  noticeText,
+  takeFailedNotices,
+  withFailedRowRepair,
+} from './services/failedRowRepair';
 import { fillBackup } from './services/backupFill';
 
 /** Longest close() waits for the receive watch's two processed-tx stores (closed alongside the wallet's own storage). */
@@ -274,6 +280,11 @@ export const lastCloseSteps: string[] = [];
 // single-label names), so the background router grants admin only to the extension's own
 // pages and refuses this originator from any other sender (services/adminOriginator.ts).
 export const ADMIN_ORIGINATOR = chrome.runtime.id;
+
+// Every un-fail the wallet toolbox makes (TaskUnFail, TaskReviewDoubleSpends' 'unfail', proof completion) checks first
+// that no other live payment of this wallet spent the same coins (services/failedRowRepair.ts; review of fix/385). Set
+// before any wallet opens: createWebWallet runs the Monitor once straight away.
+installUnfailGuard();
 
 /**
  * Wrap a wallet so every method call pre-binds `originator` to the supplied
@@ -1561,31 +1572,32 @@ export const initWallet = async (
   // every intake fail with "…invalid status failed" on every run. The sync's internalizeAction repairs a mined one
   // with the toolbox's proof-checked UnFail and takes it in; one not mined is left out with its reason
   // (services/failedRowRepair.ts).
-  // A payment of ours that a mined one made impossible (the same coins) is failed by that repair: the user is told
-  // plainly the recipient did not get it (review of fix/385, R1).
+  // A payment of ours that a mined one made impossible (the same coins) is failed by that repair, and a notice is kept
+  // in the wallet's store with it; deliverFailedNotices shows it (review of fix/385).
   const unfailRepair = makeUnfailRepair({
     storage: storage as never,
     monitor: walletMonitor as never,
     services: toolboxServices as never,
-    onPaymentsFailed: (payments) => {
-      for (const p of payments) {
-        const sats = Math.abs(p.satoshis ?? 0);
-        const message = `Your payment${sats ? ` of ${sats.toLocaleString('en-GB')} sats` : ''} (${p.txid.slice(0, 8)}…) didn’t go through: another payment from this wallet, now confirmed, used the same coins. The recipient didn’t get it.`;
-        console.warn(`[failedRow] payment ${p.txid} failed: ${message}`);
-        try {
-          chrome.notifications?.create({
-            type: 'basic',
-            iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-            title: 'A payment didn’t go through',
-            message,
-            priority: 2,
-          });
-        } catch (err) {
-          console.warn('[failedRow] notification failed:', err);
-        }
-      }
-    },
   });
+  /** Notices of payments that won't go through (stored with the repair that failed them), each shown once. */
+  const deliverFailedNotices = async () => {
+    if (!storage.isActiveStorageProvider()) return;
+    for (const n of await takeFailedNotices(storage as never)) {
+      const { title, message } = noticeText(n);
+      console.warn(`[failedRow] payment ${n.txid}: ${message}`);
+      try {
+        chrome.notifications?.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+          title,
+          message,
+          priority: 2,
+        });
+      } catch (err) {
+        console.warn('[failedRow] notification failed:', err);
+      }
+    }
+  };
   const adminWallet = withFailedRowRepair(withOriginator(wallet, ADMIN_ORIGINATOR), { repair: unfailRepair });
 
   mark('permissions + sync context ready');
@@ -2148,7 +2160,11 @@ export const initWallet = async (
   // One receive-guard run at a time: overlapping runs each internalized and swept the same outputs.
   const receiveGuardFlight = singleFlight(receiveGuardOnce);
   const runReceiveGuard = () => receiveGuardFlight.run();
-  const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
+  const guard = () =>
+    runReceiveGuard()
+      .catch((err) => console.error('[receiveGuard] failed:', err))
+      .then(() => deliverFailedNotices())
+      .catch((err: unknown) => console.warn('[failedRow] notices:', err));
   guardSoon = () => void guard();
 
   // Transactions the address sync keeps aside as held as failed, per account, across restarts (services/prioritySync.ts).
@@ -2246,6 +2262,7 @@ export const initWallet = async (
             .catch((err: unknown) => console.error('[initWallet] deposit sweep failed:', err));
         }
         sendSyncStatus({ status: 'complete', ...result });
+        void deliverFailedNotices().catch((err: unknown) => console.warn('[failedRow] notices:', err));
         // Only a clean run counts as having read the new addresses' history; a failed one keeps the rescan pending.
         if (result.failed === 0) persistScanThrough();
         console.log('[initWallet] Address sync complete:', result);

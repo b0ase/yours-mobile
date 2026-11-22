@@ -2,15 +2,22 @@
  * The sync's "held as failed" refusal (services/failedRowRepair.ts, report #385), in a module of its own so the address
  * sync and the back-off can recognise it without loading the wallet toolbox.
  */
-export type HeldReason = 'not-mined' | 'unavailable' | 'unrepaired' | 'conflict' | 'unconfirmed' | 'proof-pending';
+export type HeldReason =
+  | 'not-mined'
+  | 'unchecked'
+  | 'unavailable'
+  | 'unrepaired'
+  | 'conflict'
+  | 'unconfirmed'
+  | 'proof-pending';
 
 const WHY: Record<HeldReason, string> = {
   'not-mined': 'not mined yet, so it stays out until it is',
+  unchecked: 'its block proof couldn’t be checked yet; it tries again',
   unavailable: 'this device’s store can’t be repaired directly right now',
   unrepaired: 'the repair left it held',
   conflict: 'a confirmed payment of this wallet spent the same coins',
-  unconfirmed:
-    'it is in a block, and a payment of this wallet that spent the same coins is settled once it has 3 confirmations',
+  unconfirmed: `a payment of this wallet that spent the same coins is settled once this one has 3 confirmations`,
   'proof-pending': 'its block proof checked out, but the wallet couldn’t confirm the proof yet; it tries again',
 };
 
@@ -24,8 +31,9 @@ export const HELD_AS_FAILED = 'is held as failed on this device';
 export class HeldAsFailedError extends Error {
   readonly txid: string;
   readonly reason: HeldReason;
-  constructor(txid: string, reason: HeldReason) {
-    super(`Transaction ${txid.slice(0, 8)}… ${HELD_AS_FAILED}: ${WHY[reason]}`);
+  /** `detail`: the specific why, when there is one (which payment waits on which confirmations). */
+  constructor(txid: string, reason: HeldReason, detail?: string) {
+    super(`Transaction ${txid.slice(0, 8)}… ${HELD_AS_FAILED}: ${detail ?? WHY[reason]}`);
     this.name = 'HeldAsFailedError';
     this.txid = txid;
     this.reason = reason;
