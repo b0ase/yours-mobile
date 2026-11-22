@@ -49,11 +49,11 @@ const memKv = (): KV & { data: Map<string, string> } => {
 beforeEach(() => resetRidMemory());
 
 describe('return allow-list', () => {
-  test('same host and subdomains of the proven origin, https only', () => {
+  test('the exact origin only (review 22 Nov 2026: no subdomains), https only', () => {
     expect(isAllowedReturn('https://www.tokenblaster.lol/play', O)).toBe(true);
-    expect(isAllowedReturn('https://game.www.tokenblaster.lol/', O)).toBe(true);
+    expect(isAllowedReturn('https://game.www.tokenblaster.lol/', O)).toBe(false);
     expect(isAllowedReturn('https://tokenblaster.lol/', 'https://tokenblaster.lol')).toBe(true);
-    expect(isAllowedReturn('https://app.tokenblaster.lol/', 'https://tokenblaster.lol')).toBe(true);
+    expect(isAllowedReturn('https://app.tokenblaster.lol/', 'https://tokenblaster.lol')).toBe(false);
   });
   test('ATTACK: other hosts, look-alikes, parents, http, userinfo, ports and other schemes are refused', () => {
     for (const r of [

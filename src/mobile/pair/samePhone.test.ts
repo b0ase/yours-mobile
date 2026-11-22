@@ -149,10 +149,17 @@ describe('same phone: the site tab sleeps', () => {
 });
 
 describe('same phone: sign in with Connect, and go back', () => {
-  test('without an origin proof, a ret on the verified origin still returns (sites on @bwalletx/connect)', async () => {
+  test('without an origin proof, the return goes to the verified origin ROOT only (review 22 Nov, 4)', async () => {
     const c = await card();
     expect(c.p.proven).toBe(false);
-    expect(c.p.returnPlan?.ret).toBe(`${HOST}/rooms/lounge`);
+    expect(c.p.returnPlan?.ret).toBe(`${HOST}/`);
+  });
+
+  test('never to a subdomain, a port or another scheme, proven or not (review 22 Nov, 4)', async () => {
+    for (const ret of ['https://sub.pairtest.example/', 'https://pairtest.example:8443/', 'http://pairtest.example/']) {
+      const c = await card({ ret });
+      expect(c.p.returnPlan).toBeNull();
+    }
   });
 
   test('a ret on another host never returns', async () => {
@@ -185,7 +192,7 @@ describe('same phone: sign in with Connect, and go back', () => {
     expect(r?.wk).toBe(c.hello.k);
     const href = returnHref(back!, 'ios', r ?? undefined);
     const u = new URL(href);
-    expect(u.origin + u.pathname).toBe(`${HOST}/rooms/lounge`);
+    expect(u.origin + u.pathname).toBe(`${HOST}/`);
     const q = new URLSearchParams(u.hash.slice(1));
     expect(q.get('bwx')).toBe('ok');
     expect(q.get('wk')).toBe(c.hello.k);
@@ -214,6 +221,31 @@ describe('same phone: sign in with Connect, and go back', () => {
     await settle();
     const msgs = await sealedFrom(c.ws, c.siteSealer);
     expect(msgs.some((m) => m?.t === 'close')).toBe(true);
+  });
+
+  test('the sign-in card names the account that will sign in (review 22 Nov, 5)', async () => {
+    mem.set('bwallet.name.1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA', 'b0asex');
+    const c = await card(loginFields());
+    expect(c.p.signInAs).toBe('$b0asex');
+    mem.delete('bwallet.name.1AccountAAAAAAAAAAAAAAAAAAAAAAAAAA');
+  });
+
+  test('a challenge that expires while the card is up is not signed (review 22 Nov, 3)', async () => {
+    const c = await card(loginFields(300));
+    expect(c.p.signIn).toBe(true);
+    await new Promise((r) => setTimeout(r, 400));
+    await c.p.confirm();
+    await settle();
+    const msgs = await sealedFrom(c.ws, c.siteSealer);
+    expect((msgs.find((m) => m?.t === 'ready') as { login?: unknown })?.login).toBeUndefined();
+  });
+
+  test('the card closes when its code expires, and Connect after that does nothing (review 22 Nov, 3)', async () => {
+    const c = await card({ e: Math.floor(Date.now() / 1000) + 1 });
+    await new Promise((r) => setTimeout(r, 2100));
+    expect(c.gone()).toBe(1);
+    expect(await c.p.confirm()).toBeNull();
+    expect(sessions.pairedSites().some((s) => s.c === c.link.c)).toBe(false);
   });
 
   afterAll(() => {
