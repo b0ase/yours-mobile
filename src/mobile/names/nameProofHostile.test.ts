@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
 import { keyChange, trustCurrentKey } from './binding';
-import { KEY_CHANGED, destinationFor, parseRecipient, resolveRecipient, trustResolvedKey, type Fetch } from './names';
+import {
+  KEY_CHANGED,
+  destinationFor,
+  parseRecipient,
+  proofKeyOverride,
+  resolveRecipient,
+  trustResolvedKey,
+  type Fetch,
+} from './names';
 import { signRequest } from './paymail';
 import { proofNonce, resetProviderKeyCache, trustProofSub, verifyNameProof, type ProviderKey } from './proof';
 
@@ -180,6 +188,54 @@ describe('hostile pki: archived keys and firstSeen from the server are not trust
     };
     const r = await resolveRecipient(host(answer, [google.pub]), parseRecipient('victim.gmail@bwallet.space'));
     expect(r.nameProof?.status).toBe('unproven');
+  });
+});
+
+describe('a proof key this wallet never saw, for a name it saw proven before (review finding 1)', () => {
+  // The wallet saw the name proven (at a lookup, through the server's old archive) but never paid it and never kept
+  // a copy of the key; Google has since rotated that key out. Send stops; the payer needs a deliberate way through.
+  const oldProof = async (owner: ReturnType<typeof wallet>) => ({
+    handle: 'victim.gmail@bwalletx.com',
+    pubkey: owner.key,
+    binding: await bindingFrom(owner, 'victim.gmail', 1),
+    proof: { provider: 'google', idToken: await signJwt(rotated, await claimsFor(owner.key)), keys: [] },
+  });
+
+  test('the payer gets an "I\'ve checked with them" override, and using it makes the name payable (no badge)', async () => {
+    trustProofSub('victim.gmail', '1111');
+    const owner = wallet(941);
+    const answer = await oldProof(owner);
+    let r = await resolveRecipient(host(answer, [google.pub]), parseRecipient('victim.gmail@bwallet.space'));
+    expect(r.nameProof?.status).toBe('unchecked');
+    expect(destinationFor(r, 'bsv').ok).toBe(false);
+    expect(proofKeyOverride(r)).toBe(true);
+    trustResolvedKey(r); // what the override button does
+    resetProviderKeyCache();
+    r = await resolveRecipient(host(answer, [google.pub]), parseRecipient('victim.gmail@bwallet.space'));
+    expect(r.nameProof?.status).toBe('unproven');
+    expect(destinationFor(r, 'bsv').ok).toBe(true);
+    expect(proofKeyOverride(r)).toBe(false);
+  });
+
+  test('no override for other stops: a proven name, a bad binding, or a key change (that one has its own button)', async () => {
+    const owner = wallet(942);
+    const r = await resolveRecipient(
+      host(await oldProof(owner), [rotated.pub, google.pub]),
+      parseRecipient('victim.gmail@bwallet.space'),
+    );
+    expect(r.nameProof?.status).toBe('proven');
+    expect(proofKeyOverride(r)).toBe(false);
+    const unchecked = {
+      ...r,
+      nameProof: { status: 'unchecked' as const, provider: 'google' as const, reason: 'unknown signing key' },
+    };
+    expect(proofKeyOverride(unchecked)).toBe(true);
+    expect(proofKeyOverride({ ...unchecked, nameBinding: 'bad' })).toBe(false);
+    expect(proofKeyOverride({ ...unchecked, nameBinding: 'mismatch' })).toBe(false);
+    expect(proofKeyOverride({ ...unchecked, nameBinding: 'changed' })).toBe(false);
+    expect(proofKeyOverride({ ...unchecked, pubkey: undefined })).toBe(false);
+    // "This version can't check proofs" (no client id) is not a key we could re-trust.
+    expect(proofKeyOverride({ ...unchecked, nameProof: { status: 'unchecked', provider: 'google' } })).toBe(false);
   });
 });
 
