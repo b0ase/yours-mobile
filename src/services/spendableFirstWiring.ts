@@ -245,7 +245,8 @@ export const ourBackupCheckKey = (markKey: string) => `${markKey}:ourBackupCheck
  * At wallet init, before the stores connect: may our server (saved as a backup) join this session now? Only once this
  * device's check found it whole ('match' or 'repaired'). Not checked yet, or a repair pending: it is left out of the
  * session and joins only after the check (ensureOurBackup), never detached from a live session. A record that can't be
- * read: it joins as before, and the check runs again next init (never a drop on an error).
+ * read is held out too (review of b936a98c, 2): never joined unrepaired; the repair reads it again (and waits on an
+ * unreadable one: runRepair's notNow).
  */
 export async function ourBackupInitPlan(
   kv: { get(key: string): Promise<Record<string, unknown> | undefined> },
@@ -257,7 +258,7 @@ export async function ourBackupInitPlan(
     const r = (await kv.get(key))?.[key] as OurBackupCheckRecord | null | undefined;
     return r?.deviceSik === deviceSik && r.check === 'repaired' ? 'attach' : 'defer';
   } catch {
-    return 'attach';
+    return 'defer';
   }
 }
 
@@ -514,7 +515,21 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
       return false;
     }
     let progress: FillProgress | null = st?.progress ?? null;
-    const full = o.repair === true || st?.full === true || (progress?.stage === 'restart' && progress.full === true);
+    /**
+     * Until this device holds 'repaired' (review of b936a98c, 1), every fill is the whole two-pass fill, as unfinished:
+     * never "not-needed" on a cursor an older build left on a half-filled server, never one from the restore point
+     * (owner's iPhone, build 153). A record that can't be read counts as not repaired.
+     */
+    let repaired = false;
+    try {
+      const k = ourBackupCheckKey(d.markKey);
+      const r = (await d.kv.get(k))?.[k] as OurBackupCheckRecord | null | undefined;
+      repaired = r?.deviceSik === deviceSik && r.check === 'repaired';
+    } catch {
+      repaired = false;
+    }
+    const full =
+      !repaired || o.repair === true || st?.full === true || (progress?.stage === 'restart' && progress.full === true);
     const keep = (p: FillProgress | null, incomplete?: OurBackupIncomplete): OurBackupFill => ({
       deviceSik,
       progress: p,
@@ -538,23 +553,27 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
           await saveFill(keep(p, st?.incomplete), true);
         },
         // Any kept state (even with no progress: a stall) means unfinished: never "not-needed" on our server's cursor.
-        unfinished: !!st || o.repair === true,
+        unfinished: !!st || o.repair === true || !repaired,
         stopped: () => closed,
         ...(full ? { full: true } : {}),
       });
       if (closed) throw new Error('the wallet closed');
+      // Only a whole fill repairs: any other answer leaves our server out, and the next try runs the whole fill.
+      if (!repaired && r.how !== 'full')
+        throw new FillIncompleteError('failed', `our server's fill answered ${r.how}, not the whole fill`);
       log(
         `[spendable-first] our server filled (${r.how}): ${r.pages} page(s), ${r.unlockedMs} ms unlocked, locked ${r.lockedMs.join('+') || 0} ms`,
       );
       await d.addRemote(SNAPSHOT_SERVER_URL);
       added = true;
       d.onAttached?.();
-      // Every fill that finished (a repair, or a first fill by this build) records it with the registration: the next
-      // init lets our server join at once, never re-checked or refilled (review of 8ee88600, 2). Not recorded (the
-      // store failed): the next init repeats the whole fill, which merges idempotently.
-      await d.kv
-        .set({ [ourBackupCheckKey(d.markKey)]: { deviceSik, check: 'repaired', at: now() } })
-        .catch((e) => log("[spendable-first] our server's fill: not recorded; the next init fills it again:", e));
+      // A whole fill (a repair, or a first fill by this build) records it with the registration: the next init lets
+      // our server join at once, never re-checked or refilled (review of 8ee88600, 2). Only how === 'full' writes it
+      // (review of b936a98c, 1). Not recorded (the store failed): the next init repeats the whole fill (idempotent).
+      if (r.how === 'full')
+        await d.kv
+          .set({ [ourBackupCheckKey(d.markKey)]: { deviceSik, check: 'repaired', at: now() } })
+          .catch((e) => log("[spendable-first] our server's fill: not recorded; the next init fills it again:", e));
       await saveFill(null);
       return true;
     } catch (e) {

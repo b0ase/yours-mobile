@@ -227,7 +227,7 @@ async function halfFill(x: Setup) {
 }
 
 describe('our server’s one-time repair: held out of the session until the whole fill has run', () => {
-  test('at init: held out until a fill finished on this device; an unreadable record joins as before', async () => {
+  test('at init: held out until a fill finished on this device; an unreadable record is held out too', async () => {
     const store_: Record<string, unknown> = {};
     const kv = { get: async (k: string) => ({ [k]: store_[k] }) };
     expect(await ourBackupInitPlan(kv, 'mark', 'sik')).toBe('defer');
@@ -236,9 +236,44 @@ describe('our server’s one-time repair: held out of the session until the whol
     store_[KEY] = { deviceSik: 'sik', check: 'repaired', at: 1 };
     expect(await ourBackupInitPlan(kv, 'mark', 'sik')).toBe('attach');
     expect(await ourBackupInitPlan(kv, 'mark', 'other')).toBe('defer');
+    // Unreadable: held out too (review of b936a98c, 2); never joined unrepaired. The repair's own read retries.
     const broken = { get: async () => Promise.reject(new Error('storage unavailable')) };
-    expect(await ourBackupInitPlan(broken, 'mark', 'sik')).toBe('attach');
+    expect(await ourBackupInitPlan(broken, 'mark', 'sik')).toBe('defer');
   });
+
+  test('R1 (review of b936a98c, 1): an older build filled once, the device moved on: the first fill by this build runs whole', async () => {
+    const x = await setup(3);
+    await halfFill(x);
+    const kv: Record<string, unknown> = {};
+    const first = init(x, kv, { deferred: false });
+    expect(await first.w.addOurBackup()).toBe(true);
+    // Never "not-needed" on the cursor the older build left: the whole two-pass fill, then 'repaired'.
+    expect(first.log.fills).toEqual([{ full: true, unfinished: true }]);
+    expect(await rows(x.server)).toEqual(await rows(x.dev));
+    expect(kv[KEY]).toMatchObject({ check: 'repaired' });
+  });
+
+  for (const how of ['not-needed', 'restore-point'] as const)
+    test(`a fill that answered ${how} never records 'repaired': our server stays out, the next init runs the whole fill`, async () => {
+      const x = await setup(3);
+      await halfFill(x);
+      const kv: Record<string, unknown> = {};
+      const short = { how, pages: 0, unlockedPages: 0, unlockedMs: 0, lockedMs: [] };
+      const first = init(x, kv, { deferred: false, fill: async () => short });
+      expect(await first.w.addOurBackup()).toBe(false);
+      expect((kv[KEY] as { check?: string } | undefined)?.check).not.toBe('repaired');
+      expect(serverIn(x)).toBe(false);
+      expect(first.w.ourBackup().incomplete).toBe(true);
+      first.w.stop();
+      const sik = x.dev.getSettings().storageIdentityKey;
+      expect(await ourBackupInitPlan({ get: async (k) => ({ [k]: kv[k] }) }, 'mark', sik)).toBe('defer');
+      delete kv['mark:ourBackupFill']; // its back-off, so this test needn't wait
+      const next = init(x, kv);
+      expect(await next.w.ensureOurBackup()).toBe(true);
+      expect(next.log.fills).toEqual([{ full: true, unfinished: true }]);
+      expect(await rows(x.server)).toEqual(await rows(x.dev));
+      expect(kv[KEY]).toMatchObject({ check: 'repaired' });
+    });
 
   test('a whole backup gets the fill once too (idempotent): repaired, our server joins for real', async () => {
     const x = await setup(3);

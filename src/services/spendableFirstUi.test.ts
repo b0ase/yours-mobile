@@ -207,8 +207,12 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
     expect(kv['mark:ourBackupFill']).toBeNull();
   });
 
+  /** A device whose one-time whole fill is recorded: its later fills may be any kind (review of b936a98c, 1). */
+  const repaired = (): Record<string, unknown> => ({
+    'mark:ourBackupCheck': { deviceSik: 'device-sik', check: 'repaired', at: 0 },
+  });
   test('(b) back-off without a Retry-After grows with each unfinished try; a stalled fill starts again', async () => {
-    const kv: Record<string, unknown> = {};
+    const kv = repaired();
     const clock = { t: NOW };
     const failed = () => new Error('WalletStorageClient rpcCall: network error 503');
     const stalled = () => new FillIncompleteError('stalled', 'backup fill made no progress');
@@ -227,7 +231,7 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
   });
 
   test('review 2: a stall keeps a restart marker, and every try after an unfinished one is marked unfinished', async () => {
-    const kv: Record<string, unknown> = {};
+    const kv = repaired();
     const clock = { t: NOW };
     const stalled = () => new FillIncompleteError('stalled', 'backup fill made no progress');
     const { w, resumes, unfinished } = make(true, kv, clock, [stalled, () => undefined]);
@@ -238,6 +242,26 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
     // The second fill knows it is unfinished: never "not-needed" on our server's cursor from the first.
     expect(unfinished).toEqual([false, true]);
     expect(resumes[1]).toEqual({ stage: 'restart', offsets: [] });
+  });
+
+  test('review of b936a98c, 1: until repaired, every try is the whole fill, as unfinished, with its stall marker', async () => {
+    const kv: Record<string, unknown> = {};
+    const clock = { t: NOW };
+    const stalled = () => new FillIncompleteError('stalled', 'backup fill made no progress');
+    const { w, unfinished, fulls } = make(true, kv, clock, [stalled, () => undefined]);
+    expect(await w.addOurBackup()).toBe(false);
+    expect((kv['mark:ourBackupFill'] as { progress: unknown }).progress).toEqual({
+      stage: 'restart',
+      offsets: [],
+      full: true,
+    });
+    clock.t = w.ourBackup().retryAt!;
+    expect(await w.addOurBackup()).toBe(true);
+    expect([unfinished, fulls]).toEqual([
+      [true, true],
+      [true, true],
+    ]);
+    expect(kv['mark:ourBackupCheck']).toMatchObject({ check: 'repaired', deviceSik: 'device-sik' });
   });
 
   test('review 2: a progress write that fails ends the fill as unfinished (never silently swallowed)', async () => {
