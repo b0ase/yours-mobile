@@ -3,10 +3,13 @@ import {
   BASE_DELAY_MS,
   MAX_DELAY_MS,
   PERMANENT_DELAY_MS,
+  HELD_DELAY_MS,
   backoffDelay,
   createInternalizeBackoff,
   isPermanentInternalizeError,
 } from './internalizeBackoff';
+
+import { HeldAsFailedError } from './failedRowRepair';
 
 const FAILED = new Error('The tx parameter must be target transaction of internalizeAction has invalid status failed.');
 
@@ -37,5 +40,12 @@ describe('internalize back-off', () => {
     b.fail(tx, new Error('timeout'));
     now += BASE_DELAY_MS;
     expect(b.due(tx)).toBe(true);
+  });
+
+  test('a transaction held as failed (report #385 review, 4) waits an hour, not a minute, before its next download', () => {
+    const held = new HeldAsFailedError('a'.repeat(64), 'not-mined');
+    expect(HELD_DELAY_MS).toBe(60 * 60 * 1000);
+    expect(backoffDelay(1, held)).toBe(HELD_DELAY_MS);
+    expect(backoffDelay(5, held)).toBe(HELD_DELAY_MS);
   });
 });

@@ -8,8 +8,16 @@
  * exponentially. In memory only: a fresh service worker tries once more.
  */
 
+import { HELD_AS_FAILED } from './heldAsFailed';
+
 /** Errors no retry can fix: storage holds the transaction in a state internalizeAction refuses. */
 const PERMANENT = [/invalid status failed/i, /invalid status invalid/i];
+/**
+ * Held as failed by the sync's repair (services/failedRowRepair.ts, report #385): not mined yet, or a conflict. Each try
+ * downloads its BEEF again, so it waits an hour (review of fix/385, 4); a repair elsewhere clears it sooner.
+ */
+const HELD = new RegExp(HELD_AS_FAILED, 'i');
+export const HELD_DELAY_MS = 60 * 60 * 1000;
 
 export const BASE_DELAY_MS = 60 * 1000;
 export const MAX_DELAY_MS = 6 * 60 * 60 * 1000;
@@ -23,6 +31,7 @@ export const isPermanentInternalizeError = (err: unknown) => PERMANENT.some((re)
 /** Delay after the n-th consecutive failure (n >= 1). */
 export function backoffDelay(failures: number, err?: unknown): number {
   if (isPermanentInternalizeError(err)) return PERMANENT_DELAY_MS;
+  if (HELD.test(message(err))) return HELD_DELAY_MS;
   return Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** Math.max(0, failures - 1));
 }
 

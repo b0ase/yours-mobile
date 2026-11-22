@@ -15,14 +15,15 @@
 import { APP_NAME } from '../mobile/storeBuild';
 
 /** Bumped whenever RESERVED_LABEL_PREFIXES changes (reservedLabels.test.ts pins the list against it). */
-export const RESERVED_LABELS_VERSION = 2;
+export const RESERVED_LABELS_VERSION = 3;
 
 /**
  * Label prefixes only the wallet itself may write or list by. A label is compared as the toolbox stores it: trimmed
  * and lower-cased. Each entry is a first word; the label is reserved when it is that word alone or starts with it
  * followed by white space.
  */
-export const RESERVED_LABEL_PREFIXES: readonly string[] = ['bmail'];
+/** 'bwx notice': the wallet's "payment didn't go through" notices (services/failedRowRepair.ts; #385 fifth review, M2). */
+export const RESERVED_LABEL_PREFIXES: readonly string[] = ['bmail', 'bwx notice'];
 
 export const RESERVED_LABEL_REFUSAL = `This label is reserved for ${APP_NAME} itself`;
 

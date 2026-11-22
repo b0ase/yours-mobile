@@ -2426,6 +2426,60 @@ describe('16d: every honest coin comes back; no row stands in for the chain', ()
     expect(coin.spentBy).toBe(settled.transactionId);
   });
 
+  test("#385 fifth review, L1: D6, but a live payment here has spent the coin again: held, the coin stays that payment's", async () => {
+    const d = await phoneWithBackup();
+    d.chain.answer = 'unspent';
+    const userId = await userOf(d.phone, d);
+    const x = new Transaction();
+    x.addInput({ sourceTXID: d.coin, sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+    x.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 49_000 });
+    const T = (await d.phone.findTransactions({ partial: { userId, txid: d.coin2 }, noRawTx: true }))[0];
+    const at = new Date();
+    await d.phone.insertTransaction({
+      ...T,
+      transactionId: 0,
+      txid: x.id('hex'),
+      reference: Utils.toBase64(Random(12)),
+      status: 'failed',
+      rawTx: x.toBinary(),
+      provenTxId: undefined,
+      isOutgoing: true,
+      created_at: at,
+      updated_at: at,
+    } as never);
+    // B: this device paid the released coin out again; its broadcast was taken, it is live.
+    const b = new Transaction();
+    b.addInput({ sourceTXID: d.coin, sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+    b.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 48_000 });
+    await d.phone.insertTransaction({
+      ...T,
+      transactionId: 0,
+      txid: b.id('hex'),
+      reference: Utils.toBase64(Random(12)),
+      status: 'unproven',
+      rawTx: b.toBinary(),
+      provenTxId: undefined,
+      isOutgoing: true,
+      created_at: at,
+      updated_at: at,
+    } as never);
+    const B = (await d.phone.findTransactions({ partial: { userId, txid: b.id('hex') }, noRawTx: true }))[0];
+    const coin0 = await d.row(d.phone, d.coin);
+    await d.phone.updateOutput(coin0.outputId, { spendable: false, spentBy: B.transactionId } as never);
+    await d.sm.updateBackups();
+    const ru = await userOf(d.remote, d);
+    const RX = (await d.remote.findTransactions({ partial: { userId: ru, txid: x.id('hex') }, noRawTx: true }))[0];
+    await d.remote.updateTransaction(RX.transactionId, { status: 'completed', updated_at: later() } as never);
+    const v: InboundVerifier = { ...d.verifier, recover: async () => 'done' as const };
+    await d.merge();
+    const r = await admitPending(d.phone as never, d.kd.identityKey, v, { now });
+    expect(r.applied).toBe(0);
+    const held = (await d.phone.findTransactions({ partial: { userId, txid: x.id('hex') }, noRawTx: true }))[0];
+    expect(held.status).toBe('failed'); // the gated repair settles it, never this path
+    const coin = await d.row(d.phone, d.coin);
+    expect(coin.spentBy).toBe(B.transactionId);
+  });
+
   test("D7: this device's own just-broadcast payment is not failed on a backup's word while WoC lags", async () => {
     const d = await phoneWithBackup();
     const userId = await userOf(d.phone, d);

@@ -229,3 +229,16 @@ describe('recoverMinedFailedActions with a remote active store', () => {
     expect(s.calls.runs).toBe(0);
   });
 });
+
+describe('a mined action whose coins another payment spent (#385 second review, 4)', () => {
+  test('reported as contested, not as "no proven-tx request" or "proof rejected"', async () => {
+    const s = fakeStore([{ txid: T1 }, { txid: T2 }], [T1, T2]);
+    s.deps.queueUnfail = async (txids: string[]) => ({ queued: txids.length - 1, contested: [T2] }) as never;
+    const r = await recoverMinedFailedActions(s.deps);
+    expect(r.restored).toEqual([T1]);
+    expect(r.notRestored).toEqual([
+      { txid: T2, reason: 'another payment of this wallet spent the same coins; the sync settles it' },
+    ]);
+    expect(recoverySummary(r)).toMatch(/another payment of this wallet spent the same coins/);
+  });
+});

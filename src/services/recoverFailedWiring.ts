@@ -4,6 +4,7 @@
  */
 import type { Wallet, WalletStorageManager, sdk } from '@bsv/wallet-toolbox-client';
 import type { FailedAction, RecoverDeps, RecoverReport } from './recoverFailed';
+import { spendsContested } from './failedRowRepair';
 
 export type RecoverWiring = {
   storage: Pick<WalletStorageManager, 'getAuth' | 'runAsStorageProvider' | 'isActiveStorageProvider'>;
@@ -105,15 +106,28 @@ export function makeRecoverDeps(w: RecoverWiring): RecoverDeps {
         return out;
       });
     },
+    // A mined action whose coins another payment of this wallet (not failed) has spent since is not queued: UnFail
+    // would hand the coins to it and leave that payment's outputs spendable too (review of fix/385, R1). The sync's
+    // repair settles those with a verified proof (services/failedRowRepair.ts).
     queueUnfail: (txids) =>
       storage.runAsStorageProvider(async (sp) => {
         let n = 0;
-        for (const txid of txids)
-          for (const req of await sp.findProvenTxReqs({ partial: { txid } })) {
+        const contested: string[] = [];
+        for (const txid of txids) {
+          const reqs = await sp.findProvenTxReqs({ partial: { txid } });
+          if (await spendsContested(sp as never, txid, reqs.find((r) => r.rawTx?.length)?.rawTx)) {
+            console.warn(
+              `[recover] ${txid}: another payment of this wallet spends its coins; left for the sync's repair`,
+            );
+            contested.push(txid);
+            continue;
+          }
+          for (const req of reqs) {
             await sp.updateProvenTxReq(req.provenTxReqId, { status: 'unfail' });
             n++;
           }
-        return n;
+        }
+        return { queued: n, contested };
       }),
     // A merkle proof, nothing less: mempool or "unknown" leaves the action as it is.
     isMined: async (txid) => !!(await w.services.getMerklePath(txid))?.merklePath,

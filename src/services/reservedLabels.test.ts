@@ -32,10 +32,11 @@ const PAID = `bmail paid ${TXID}.0 ${'cd'.repeat(20)}`;
 describe('reserved action labels', () => {
   // Changing the list is a security decision: bump RESERVED_LABELS_VERSION and this test together.
   test('the list is pinned', () => {
-    expect(RESERVED_LABELS_VERSION).toBe(2);
+    expect(RESERVED_LABELS_VERSION).toBe(3);
     // v2: special-operation names (any 64-hex label or tag) and names that are not printable ASCII.
+    // v3: 'bwx notice', the wallet's own "payment didn't go through" notices (#385 fifth review, M2).
     expect(TAG_METHODS).toEqual(['listOutputs', 'createAction', 'internalizeAction']);
-    expect(RESERVED_LABEL_PREFIXES).toEqual(['bmail']);
+    expect(RESERVED_LABEL_PREFIXES).toEqual(['bmail', 'bwx notice']);
     expect(LABEL_METHODS).toEqual(['createAction', 'internalizeAction', 'listActions']);
   });
 
@@ -44,6 +45,12 @@ describe('reserved action labels', () => {
       expect(isReservedLabel(l)).toBe(true);
     for (const l of ['bmailer', 'my bmail', 'b mail stamp', 'tokenblaster', '', undefined, 7, ['bmail x']])
       expect(isReservedLabel(l)).toBe(false);
+  });
+
+  test("the wallet's payment notices can't be set by a site (#385 fifth review, M2)", () => {
+    for (const l of ['bwx notice payment respent', 'bwx notice payment parent failed', ' BWX Notice x', 'bwx notice'])
+      expect(isReservedLabel(l)).toBe(true);
+    for (const l of ['bwx', 'bwx noticeboard', 'my bwx notice']) expect(isReservedLabel(l)).toBe(false);
   });
 
   test("bMail's own record labels are reserved, whatever the letter", () => {
