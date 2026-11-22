@@ -7,6 +7,23 @@ import { containsPhrase, hidePhrases } from './phraseGuard';
 
 const W12 = 'abandon ability able about above absent absorb abstract absurd abuse access accident'.split(' ');
 const W24 = bip39.generateMnemonic(256).split(' ');
+
+/**
+ * Fixed valid phrases, the same every run (a random phrase made the tests below flaky: about 1 in 30 repeats a word).
+ * Phrase k comes from sha256("phrase-guard-<k>"); phrases using any word of `avoid` are skipped.
+ */
+const fixedPhrases = (count: number, bits: 128 | 256, avoid: string[] = [], list?: string[], tag = ''): string[][] => {
+  const out: string[][] = [];
+  for (let k = 0; out.length < count; k++) {
+    const hex = createHash('sha256')
+      .update(`phrase-guard-${tag}${bits}-${k}`)
+      .digest('hex')
+      .slice(0, bits / 4);
+    const words = bip39.entropyToMnemonic(hex, list).normalize('NFC').split(/\s+/); // \s takes in U+3000 (Japanese)
+    if (!words.some((w) => avoid.includes(w))) out.push(words);
+  }
+  return out;
+};
 /**
  * A 24-word phrase that starts with "hidden": a BIP39 word that is also in the placeholder "[recovery words hidden]".
  * A random W24 holds it about 1 run in 85, and the left-over check used to read the placeholder's "hidden" as a word
@@ -211,7 +228,7 @@ describe('recovery phrases in every BIP39 language (b-Aware 657, row 364)', () =
   for (const lang of OTHER_LISTS) {
     const list = bip39.wordlists[lang];
     for (const bits of [128, 256]) {
-      const words = bip39.generateMnemonic(bits, undefined, list).normalize('NFC').split(/\s+/); // \s takes in U+3000, the space bip39 puts between Japanese words
+      const [words] = fixedPhrases(1, bits as 128 | 256, [], list, lang);
       const forms: Array<[string, string]> = [
         ['plain', words.join(' ')],
         ['as bip39 writes it', bip39.entropyToMnemonic(bip39.mnemonicToEntropy(words.join(' '), list), list)],
@@ -259,13 +276,8 @@ describe('ordinary text in other languages, and punctuation-heavy text, is left 
     });
 });
 
-/** A valid 12-word phrase that does not itself use any of `avoid` (so a test's filler words are only filler). */
-const phraseAvoiding = (avoid: string[]) => {
-  for (;;) {
-    const words = bip39.generateMnemonic(128).split(' ');
-    if (!words.some((w) => avoid.includes(w))) return words;
-  }
-};
+/** The run-th fixed 12-word phrase that does not itself use any of `avoid` (so a test's filler words are only filler). */
+const phraseAvoiding = (avoid: string[], run: number) => fixedPhrases(run + 1, 128, avoid)[run];
 
 describe('filler words that are themselves BIP39 words (review of b-Aware row 353)', () => {
   const ORD = ['st', 'nd', 'rd'];
@@ -279,8 +291,8 @@ describe('filler words that are themselves BIP39 words (review of b-Aware row 35
   ];
   for (const [name, avoid, make] of CASES)
     test(`blocked: ${name}`, () => {
-      for (let run = 0; run < 5; run++) {
-        const words = phraseAvoiding(avoid);
+      for (let run = 0; run < 20; run++) {
+        const words = phraseAvoiding(avoid, run);
         expectBlocked(make(words), words);
       }
     });
@@ -390,23 +402,6 @@ describe('ordinal numbering with a phrase that repeats a word (review of b-Aware
     expectBlocked(repeating.map((x, i) => `${i + 1}${['st', 'nd', 'rd'][i] ?? 'th'} word: ${x},`).join(' '), repeating);
   });
 });
-
-/**
- * Fixed valid phrases, the same every run (a random phrase made the tests below flaky: about 1 in 30 repeats a word).
- * Phrase k comes from sha256("phrase-guard-<k>"); phrases using any word of `avoid` are skipped.
- */
-const fixedPhrases = (count: number, bits: 128 | 256, avoid: string[] = []): string[][] => {
-  const out: string[][] = [];
-  for (let k = 0; out.length < count; k++) {
-    const hex = createHash('sha256')
-      .update(`phrase-guard-${bits}-${k}`)
-      .digest('hex')
-      .slice(0, bits / 4);
-    const words = bip39.entropyToMnemonic(hex).split(' ');
-    if (!words.some((w) => avoid.includes(w))) out.push(words);
-  }
-  return out;
-};
 
 const SPELLED_ORDINALS = [
   'first',
@@ -542,4 +537,32 @@ describe('invisible characters inside words (round-3 review of b-Aware row 353)'
       'qqq [recovery words hidden] zzz',
     );
   });
+});
+
+describe('a 24-word phrase that repeats two words (round-3 review of b-Aware row 353)', () => {
+  // About 1 random 24-word phrase in 125 repeats two words. With one filler between the words, 2a allowed one repeat and
+  // stopped at the second, leaving the end of the phrase readable (a random Japanese test failed this way, 22 Nov 2026).
+  const twoRepeats = (lang: 'english' | 'japanese') => {
+    const list = bip39.wordlists[lang];
+    const base = fixedPhrases(1, 256, [], list, `two-repeats-${lang}`)[0].map((w) =>
+      list.findIndex((x) => x.normalize('NFC') === w),
+    ); // the list is NFKD
+    base[15] = base[3];
+    base[20] = base[7];
+    const bits = base
+      .slice(0, 23)
+      .map((i) => i.toString(2).padStart(11, '0'))
+      .join('')
+      .concat(base[23].toString(2).padStart(11, '0').slice(0, 3));
+    const hex = bits.replace(/[01]{4}/g, (n) => parseInt(n, 2).toString(16));
+    return bip39.entropyToMnemonic(hex, list).normalize('NFC').split(/\s+/);
+  };
+  for (const lang of ['english', 'japanese'] as const)
+    test(`${lang}, a filler between every word`, () => {
+      const words = twoRepeats(lang);
+      expect(words.length).toBe(24);
+      expect(new Set(words).size).toBe(22);
+      expectBlocked(words.join(' zz '), words);
+      expectBlocked(words.map((w, i) => `${w} q${String.fromCharCode(97 + i)}x`).join(' '), words);
+    });
 });
