@@ -89,18 +89,32 @@ describe('restore: the backup total shows while the wallet copies itself', () =>
   });
 
   test('balance reads complete during the copy, and the card then switches to the real balance', async () => {
-    const { deps } = slowRestore(300);
+    // The copy holds until the test lets it go, so reads made meanwhile are inside the copy whatever the machine's
+    // load (a 200 ms wall-clock window here failed under the full suite). `done` is always awaited: a run left going
+    // would be joined by the next test's switch (runningSwitches) and hand it this run's result.
+    const { deps, isCopied } = slowRestore(0);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let copying!: () => void;
+    const inCopy = new Promise<void>((r) => (copying = r));
+    const copy = deps.setActiveStorage;
+    deps.setActiveStorage = async (t) => {
+      if (t === 'local') {
+        copying();
+        await held;
+      }
+      await copy(t);
+    };
     const done = switchToLocalVerified(deps);
-    let reads = 0;
-    const t0 = Date.now();
-    while (Date.now() - t0 < 200) {
-      await deps.summarize();
-      reads++;
-      await new Promise((r) => setTimeout(r, 20));
+    try {
+      await inCopy;
+      for (let i = 0; i < 5; i++) await deps.summarize();
+      expect(isCopied()).toBe(false);
+      expect(cardLines().some((l) => l.kind === 'arriving')).toBe(true);
+    } finally {
+      release();
+      await done;
     }
-    expect(reads).toBeGreaterThan(3);
-    expect(cardLines().some((l) => l.kind === 'arriving')).toBe(true);
-    await done;
     expect(getRestoreView()).toBeNull();
     expect(cardLines().some((l) => l.kind === 'arriving' || l.kind === 'progress')).toBe(false);
   });
