@@ -7,6 +7,28 @@
  * The server never holds keys. No disputes or vote mode in this version.
  */
 import type { RoleKey, WireProposal } from '../locks/tokenEscrow';
+import { TOKEN_ROOMS_ENABLED } from '../storeBuild';
+
+/**
+ * ⚠ NO NEW COMMISSIONS (escrow ruling §6, 15 Nov 2026). A commission locks its reward in a script where one key is
+ * the room arbiter's, a key the company runs. The ruling: no NEW commission escrow may be created with that key.
+ * Escrows already funded must still finish, so accepting a delivery, broadcasting a release and reclaiming after the
+ * deadline are untouched. This comes back on when commissions are rebuilt so that no company key is involved.
+ *
+ * Off here means off everywhere in the wallet, even when a room still reports an arbiter key: the /commission
+ * composer, a draft's "lock the reward" step on its card, and the lock itself (locks/tokenEscrowApi.ts fundEscrow).
+ * Functions take it as a last parameter that defaults to this, so tests can run both ways.
+ */
+export const COMMISSIONS_CREATE_ENABLED = false;
+/** The one line shown wherever a new commission used to start. */
+export const COMMISSIONS_PAUSED =
+  'New commissions are paused while we rebuild them so no company key is involved. Existing ones still complete.';
+/** What a refused create or lock says: the pause, and that nothing moved. */
+export const COMMISSIONS_PAUSED_ERROR = `${COMMISSIONS_PAUSED} Nothing was locked or paid.`;
+/** Throws unless new commissions are on. Called first by everything that would create or fund one. */
+export const assertCommissionsCreateEnabled = (enabled: boolean = COMMISSIONS_CREATE_ENABLED): void => {
+  if (!enabled) throw new Error(COMMISSIONS_PAUSED_ERROR);
+};
 
 export type CommissionStatus = 'draft' | 'open' | 'accepted' | 'released' | 'expired' | 'refunded' | 'cancelled';
 
@@ -115,14 +137,30 @@ export type CardAction =
   | { kind: 'none' };
 
 /** What the card offers ME right now. `height` is the current block height (0 = unknown). */
-export function cardAction(d: CommissionDetail, me: string, height: number, now: Date): CardAction {
+export function cardAction(
+  d: CommissionDetail,
+  me: string,
+  height: number,
+  now: Date,
+  createEnabled: boolean = COMMISSIONS_CREATE_ENABLED,
+): CardAction {
   const c = d.commission;
   const poster = c.created_by === me;
   const e = d.escrow;
   if (c.status === 'draft') {
+    // A draft has locked nothing yet. While new commissions are paused it can't go on to lock: no terms to sign, no
+    // reward to lock, for the poster or the person it was written for.
+    if (!createEnabled) return { kind: 'wait', label: COMMISSIONS_PAUSED };
     if (c.assignee && c.assignee === me && !e?.pubkeys.some((k) => k.role === 'deliverer'))
       return { kind: 'deliverer-key' };
-    if (!poster) return { kind: 'wait', label: 'Waiting for the poster to lock the reward' };
+    if (!poster)
+      return {
+        kind: 'wait',
+        // Store wording (CTO decision 1, 16 Nov 2026): a payment for work, never a "reward".
+        label: TOKEN_ROOMS_ENABLED
+          ? 'Waiting for the poster to lock the reward'
+          : 'Waiting for the poster to lock the payment',
+      };
     if (c.assignee && !e?.pubkeys.some((k) => k.role === 'deliverer'))
       return { kind: 'wait', label: `Waiting for $${c.assignee} to sign the terms` };
     return { kind: 'fund' };

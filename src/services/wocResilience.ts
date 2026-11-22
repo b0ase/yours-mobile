@@ -179,10 +179,11 @@ export function hardenWalletServices(
   services: unknown,
   apiKey = wocApiKeyFromEnv(),
   fallback: FallbackOptions = {},
+  backoff?: BackoffOptions,
 ): boolean {
   const svc = services as OneSatLike & ToolboxServicesLike;
   const toolbox = svc?.fallbackServices ?? svc;
-  const a = hardenWhatsOnChain(toolbox?.whatsonchain, apiKey);
+  const a = hardenWhatsOnChain(toolbox?.whatsonchain, apiKey, backoff);
   const b = addProviderFallback(svc, fallback);
   return a || b;
 }

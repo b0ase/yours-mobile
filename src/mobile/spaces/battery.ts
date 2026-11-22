@@ -8,11 +8,11 @@
  */
 import { Capacitor } from '@capacitor/core';
 import { SpaceSession, type SpaceSessionPlugin } from './background';
+import { APP_NAME } from '../storeBuild';
 
 export const BATTERY_ASKED_KEY = 'bwallet.spaces.batteryAsked.v1';
 export const BATTERY_TITLE = 'Keep the Space running with the screen off';
-export const BATTERY_TEXT =
-  'Android can pause bWalletX to save battery when your screen turns off, which drops you out of the Space. Allow bWalletX to keep running and the Space carries on in your pocket.';
+export const BATTERY_TEXT = `Android can pause ${APP_NAME} to save battery when your screen turns off, which drops you out of the Space. Allow ${APP_NAME} to keep running and the Space carries on in your pocket.`;
 
 const os = () => {
   try {

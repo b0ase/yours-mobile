@@ -87,7 +87,13 @@ export const BAPPS: readonly Bapp[] = [
     id: 'bmail',
     name: 'bMail',
     icon: bmailIcon,
-    purpose: 'Tokenised mail, price-to-reach and inbox tips.',
+    // The room cards are bWalletX only (BSPACES_ENABLED); the store bundle still gets plain wording.
+    purpose:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? 'Mail that pays, price-to-reach and inbox tips.'
+        : 'Tokenised mail, price-to-reach and inbox tips.',
     site: 'https://bmailx.com',
     ticker: 'BMAIL',
   }),
@@ -103,7 +109,12 @@ export const BAPPS: readonly Bapp[] = [
     id: 'bstore',
     name: 'bStore',
     icon: bstoreIcon,
-    purpose: 'Themes, icons and packs for bWalletX, and their makers.',
+    purpose:
+      import.meta.env.VITE_STORE_BUILD === '1' ||
+      import.meta.env.VITE_CHANNEL === 'ios-store' ||
+      import.meta.env.VITE_CHANNEL === 'android-play'
+        ? 'Themes, icons and packs, and their makers.'
+        : 'Themes, icons and packs for bWalletX, and their makers.',
     site: null,
     ticker: 'BSTORE',
   }),

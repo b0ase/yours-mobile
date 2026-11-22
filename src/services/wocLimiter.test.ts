@@ -162,6 +162,31 @@ describe('createLockPacer (app-wide: every context of the origin shares one lock
     expect(got).toEqual(['a', 'send check', 'c']);
     expect(names()).toEqual([WOC_LOCK]);
   });
+  test('a refused lock (a page being left) is never asked for again without a timer in between', async () => {
+    // What a document that is being unloaded gets from navigator.locks.request: an immediate rejection, every time.
+    let asked = 0;
+    const locks = {
+      request: () => (asked++, Promise.reject(new DOMException('not fully active', 'InvalidStateError'))),
+    };
+    const gaps: (() => void)[] = [];
+    const pacer = createLockPacer(locks, { gapMs: 334, sleep: () => new Promise<void>((r) => gaps.push(r)) });
+    const got: string[] = [];
+    void pacer.slot().then(() => got.push('a'));
+    void pacer.slot().then(() => got.push('b'));
+    for (let i = 0; i < 20; i++) await tick();
+    // Before the fix this asked again in a microtask loop that never ended (the tab froze): the test never got here.
+    expect(asked).toBe(1);
+    expect(got).toEqual([]);
+    // After one gap this context's next request goes anyway (paced here), and only then is the lock asked for again.
+    gaps.shift()!();
+    for (let i = 0; i < 5; i++) await tick();
+    expect(got).toEqual(['a']);
+    expect(asked).toBe(2);
+    gaps.shift()!();
+    for (let i = 0; i < 5; i++) await tick();
+    expect(got).toEqual(['a', 'b']);
+    expect(asked).toBe(2); // nobody waiting: not asked again
+  });
   test('17c L1: a pause holds the shared lock once; a second one while it runs is not stacked', async () => {
     const { locks, requests } = fakeLocks();
     const asked: number[] = [];

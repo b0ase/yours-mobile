@@ -3,6 +3,7 @@ import { MAP } from '@1sat/templates';
 import { ORDINALS_BASKET, ORDLOCK_V2_TAG, readAssetIdTag } from '@1sat/types';
 import { OP, Script, type WalletOutput } from '@bsv/sdk';
 import { RepeatGuard, repeatRefusal } from '../../services/repeatGuard';
+import { MARKET_ENABLED } from '../storeBuild';
 import { getTagValue } from '../../utils/format';
 
 /**
@@ -73,7 +74,14 @@ export const burnAvailability = (s: {
   if (s.onChain === false)
     return { show: false, reason: "This NFT's mint never reached the network, so there is nothing on chain to burn." };
   if (s.onChain === null) return { show: false };
-  if (s.listed) return { show: false, reason: 'Listed for sale. Cancel the listing before burning.' };
+  // A store build has no Market: the listing was made in another app on the same seed (round A8, S3).
+  if (s.listed)
+    return {
+      show: false,
+      reason: MARKET_ENABLED
+        ? 'Listed for sale. Cancel the listing before burning.'
+        : 'Listed elsewhere. Cancel that listing before burning.',
+    };
   if (s.locked) return { show: false, reason: 'Locked. It can be burned after it unlocks.' };
   return { show: true };
 };

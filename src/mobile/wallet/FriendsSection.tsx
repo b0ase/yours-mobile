@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { X_FOLLOWS_IMPORT_ENABLED } from '../storeBuild';
+import { APP_NAME, X_FOLLOWS_IMPORT_ENABLED } from '../storeBuild';
 import { heldBsv21Balances } from '../airdrops/heldBalances';
 import { type Bsv21Balance } from '@1sat/actions';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -157,7 +157,7 @@ export const FriendsSection = () => {
           className="flex items-center justify-between gap-2 rounded-xl border border-[#3a3220] bg-[var(--bw-surface)] px-3 py-2 text-sm text-white"
         >
           <span>
-            <span style={{ color: '#E6B84C' }}>Joined bWalletX</span> · {n.who} joined: {handleOf(n.paymail)}
+            <span style={{ color: '#E6B84C' }}>Joined {APP_NAME}</span> · {n.who} joined: {handleOf(n.paymail)}
           </span>
           <button
             type="button"

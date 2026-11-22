@@ -1,5 +1,4 @@
-import { trustCurrentKey } from './binding';
-import { provenByLabel, trustProofSub } from './proof';
+import { provenByLabel } from './proof';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Check, Loader2, X } from 'lucide-react';
 import { Input } from '../../components/Input';
@@ -14,9 +13,12 @@ import {
   UNSIGNED_NOTE,
   forwardLabel,
   isOurDomain,
-  opnsBinding,
+  opnsTrustLabel,
   parseRecipient,
+  proofKeyOverride,
   resolveRecipient,
+  trustProvenAccount,
+  trustResolvedKey,
   VIA_LABEL,
   type Resolved,
 } from './names';
@@ -26,6 +28,7 @@ import { payeeDetail, recipientHint } from './payeeText';
 import { PLAIN_KEY_WARNING } from './pubkeyRecipient';
 import { isPeerPayUri, parsePeerPay } from '../scan/peerpay';
 import { requestPay } from '../wallet/payNav';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Recipient box for the Send screens (build-time swap for upstream's address <Input>, see
@@ -95,11 +98,10 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
     emit(d.to);
     status.current?.('ready', r);
     // Remember who this name was when you chose to pay it (BRC-169 4.4 key-change check next time).
-    if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad' && r.nameBinding !== 'mismatch')
-      trustCurrentKey(r.input.replace(/^\$/, '').split('@')[0], r.pubkey);
+    // ...and, for a followed forward, who signed it: only that key may speak for the typed name next time.
+    if (r.pubkey && r.nameBinding && r.nameBinding !== 'bad' && r.nameBinding !== 'mismatch') trustResolvedKey(r);
     // ...and which provider account proved it (a different one next time stops the payment).
-    if (r.nameProof?.status === 'proven' && r.nameProof.sub)
-      trustProofSub(r.input.replace(/^\$/, '').split('@')[0], r.nameProof.sub);
+    if (r.nameProof?.status === 'proven') trustProvenAccount(r);
   };
 
   const onType = (input: string) => {
@@ -278,18 +280,18 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       className="mt-1 text-xs font-semibold border-0 bg-transparent p-0 cursor-pointer"
                       style={{ color: 'var(--bw-accent-hi)' }}
                     >
-                      Did you mean {r.didYouMean}? (a bWalletX name)
+                      Did you mean {r.didYouMean}? (a {APP_NAME} name)
                     </button>
                   )}
-                  {r.nameBinding === 'signed' && (
+                  {r.nameBinding === 'signed' && d.ok && (
                     <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
                       <Check size={11} /> Signed by its owner{r.forwardsTo ? ` as ${r.forwardsTo}@` : ''} · bound to{' '}
                       {short(r.pubkey ?? '')}
                     </div>
                   )}
-                  {r.forwardsTo && (
+                  {forwardLabel(r, asset) && (
                     <div data-testid="name-forward" className="text-[11px] break-all" style={{ color: fg }}>
-                      {forwardLabel(r)}
+                      {forwardLabel(r, asset)}
                     </div>
                   )}
                   {r.nameProof?.status === 'proven' && (
@@ -311,9 +313,19 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       {UNSIGNED_NOTE}
                     </div>
                   )}
-                  {opnsBinding(r) === 'bound' && (
-                    <div className="text-[11px] flex items-center gap-1" style={{ color: '#2ecc71' }}>
-                      <Check size={11} /> Verified on chain · bound to {short(r.pubkey ?? '')}
+                  {opnsTrustLabel(r)?.verified && (
+                    <div
+                      data-testid="opns-verified"
+                      className="text-[11px] flex items-center gap-1"
+                      style={{ color: '#2ecc71' }}
+                    >
+                      <Check size={11} /> {opnsTrustLabel(r)?.text}
+                    </div>
+                  )}
+                  {opnsTrustLabel(r) && !opnsTrustLabel(r)?.verified && (
+                    // Only the OpNS index's word: never a green tick (b-Aware opns-indexer, row 213).
+                    <div data-testid="opns-index-only" className="text-[11px] break-all" style={{ color: gray }}>
+                      {opnsTrustLabel(r)?.text}
                     </div>
                   )}
                 </div>
@@ -330,11 +342,26 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       className="self-start bg-transparent border-0 p-0 text-xs font-semibold underline cursor-pointer"
                       style={{ color: fg }}
                       onClick={() => {
-                        trustCurrentKey(r.input.replace(/^\$/, '').split('@')[0], r.pubkey!);
+                        // Also the forward's signer, as confirm() does: else the next resolve is a name mismatch.
+                        trustResolvedKey(r);
                         onType(text);
                       }}
                     >
                       I've checked with them: trust the new wallet
+                    </button>
+                  )}
+                  {proofKeyOverride(r) && (
+                    // A proof signed by a provider key this wallet never saw: same deliberate override.
+                    <button
+                      type="button"
+                      className="self-start bg-transparent border-0 p-0 text-xs font-semibold underline cursor-pointer"
+                      style={{ color: fg }}
+                      onClick={() => {
+                        trustResolvedKey(r);
+                        onType(text);
+                      }}
+                    >
+                      I've checked with them: pay this wallet
                     </button>
                   )}
                   {r.nameProof?.status === 'sub-changed' && r.nameProof.sub && (
@@ -344,7 +371,7 @@ export const NameInput = ({ theme, value, onChange, asset, placeholder, style, a
                       className="self-start bg-transparent border-0 p-0 text-xs font-semibold underline cursor-pointer"
                       style={{ color: fg }}
                       onClick={() => {
-                        trustProofSub(r.input.replace(/^\$/, '').split('@')[0], r.nameProof!.sub!);
+                        trustProvenAccount(r);
                         onType(text);
                       }}
                     >

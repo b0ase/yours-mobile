@@ -12,6 +12,7 @@ import { JIG_DUST, RUN_JIG_SATS } from './runGuard';
 import { identifyJig, outpoint, readRun, type IdentifiedJig, type NpgMap } from './runIdentify';
 import type { ChainReader, Utxo } from './chainReads';
 import { readListingTx } from './relayxListing';
+import { MARKET_ENABLED } from '../mobile/storeBuild';
 
 export const RELAYX_ACCOUNT = "m/44'/236'/0'";
 export const RELAYX_CHAINS = [2, 0, 1] as const;
@@ -290,7 +291,8 @@ const S2 = /series 2/i;
 /** Gallery sections: listed on RelayX, NPG Series 2, NPG Series 1, other NPG girls (one per class), other Run NFTs, unread. */
 export function groupFound(found: readonly Found[]): Group[] {
   const groups: Group[] = [
-    { key: 'listed', title: 'Listed for sale on RelayX', items: [] },
+    // Store wording (CTO decision 5, 16 Nov 2026): a RelayX listing is state, not an offer.
+    { key: 'listed', title: MARKET_ENABLED ? 'Listed for sale on RelayX' : 'Listed on RelayX', items: [] },
     { key: 's2', title: 'NPG Series 2', items: [] },
     { key: 's1', title: 'NPG Series 1', items: [] },
     { key: 'npg', title: 'Ninja Punk Girls', items: [] },

@@ -16,7 +16,7 @@ import {
 } from './claimPersonal';
 import { getFundRecord, showOnWallet } from '../tokens/indexFund';
 import { FinishIndexing } from '../tokens/FinishIndexing';
-import { NRT_ENABLED, PAID_FEATURES_ENABLED } from '../storeBuild';
+import { NRT_ENABLED, PAID_FEATURES_ENABLED, TOKEN_ROOMS_ENABLED } from '../storeBuild';
 import { DEFAULT_SUPPLY, getPersonalLink, onPersonalChange, personalTicker, validateSupply } from './personalToken';
 import { getMyName } from './myName';
 import { SendConfirmation } from '../../components/SendConfirmation';
@@ -119,6 +119,8 @@ export const PersonalTokenLauncher = ({ onClose }: { onClose: () => void }) => {
   };
 
   const mintToken = async (name = tokenName) => {
+    // No personal token in a store build (this card is not offered there either: HandleOnboarding).
+    if (!PAID_FEATURES_ENABLED) return;
     setConfirming(false);
     setBusy(true);
     setTokenMsg('');
@@ -139,6 +141,11 @@ export const PersonalTokenLauncher = ({ onClose }: { onClose: () => void }) => {
       // Names, Rooms and Tickets: a token opens no room by itself; attach it to a room in You › Rooms.
       if (NRT_ENABLED) {
         setTokenMsg(`$${l.ticker} minted. Add it as a ticket to any room from You › Rooms.`);
+        return;
+      }
+      // No token rooms in a store build: written so Rollup drops the room text there.
+      if (!TOKEN_ROOMS_ENABLED) {
+        setTokenMsg(`$${l.ticker} minted.`);
         return;
       }
       setTokenMsg(`$${l.ticker} minted. Opening your room…`);
@@ -164,10 +171,10 @@ export const PersonalTokenLauncher = ({ onClose }: { onClose: () => void }) => {
         paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)',
       }}
       role="dialog"
-      aria-label="Launch your tokens"
+      aria-label={PAID_FEATURES_ENABLED ? 'Launch your tokens' : undefined}
     >
       <div className="flex items-center justify-between px-4 h-12">
-        <span className="text-base font-bold text-white">Launch your tokens</span>
+        <span className="text-base font-bold text-white">{PAID_FEATURES_ENABLED ? 'Launch your tokens' : ''}</span>
         <button type="button" aria-label="Close" onClick={onClose} className="p-2 bg-transparent border-0">
           <X size={18} color={GRAY} />
         </button>

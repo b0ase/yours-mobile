@@ -3,13 +3,17 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { formatAmount, listPots, listSubs, nextDue, type Subscription } from './pots';
 
 /**
- * Pot notifications (POTS-SUBSCRIPTIONS-PLAN.md §6): a local reminder 24h before each standing order is due,
- * re-scheduled on every change (fires with the app closed, no server), plus "pot running low" and "payment
- * failed" notices. Never prompts for permission here; only posts if it was already granted.
+ * Pot notifications (POTS-SUBSCRIPTIONS-PLAN.md §6): a local reminder before each standing order is due (a day ahead,
+ * or half a period ahead for orders of a day or less), re-scheduled on every change and every app open (fires with the
+ * app closed, no server), plus "pot running low" and "payment failed" notices. Never prompts for permission here;
+ * only posts if it was already granted.
  */
 const BASE = 43_000;
 const SPAN = 5_000;
-const REMIND_BEFORE = 24 * 3600_000;
+const HOUR = 3600_000;
+const REMIND_BEFORE = 24 * HOUR;
+/** When the usual reminder time has passed but the payment is still ahead: remind this long before it instead. */
+const LATE_REMIND_BEFORE = 15 * 60_000;
 const LOW_KEY = 'bwallet.potLowNotified';
 
 /** A stable notification id for a subscription's reminder (BASE..BASE+SPAN). */
@@ -19,16 +23,43 @@ export const reminderId = (subId: string) => {
   return BASE + (h % SPAN);
 };
 
-/** The reminders to schedule at `now`: active orders whose reminder time is still ahead. */
+const PERIOD_MS: Record<'day' | 'week' | 'month' | 'year', number> = {
+  day: 24 * HOUR,
+  week: 7 * 24 * HOUR,
+  month: 28 * 24 * HOUR,
+  year: 365 * 24 * HOUR,
+};
+/** How long before a payment its reminder fires: a day, or half the period for an order of a day or less. */
+const remindBefore = (s: Subscription) =>
+  Math.min(REMIND_BEFORE, (typeof s.period === 'object' ? s.period.seconds * 1000 : PERIOD_MS[s.period]) / 2);
+
+/** "tomorrow", "in 12 hours", "in 30 minutes": how far the payment is when the reminder fires. */
+const ahead = (ms: number) =>
+  ms >= 20 * HOUR
+    ? 'tomorrow'
+    : ms >= 1.5 * HOUR
+      ? `in ${Math.round(ms / HOUR)} hours`
+      : `in ${Math.max(1, Math.round(ms / 60_000))} minutes`;
+
+/**
+ * The reminders to schedule at `now`: one per active order, before its next payment. Daily and hourly orders are
+ * reminded half a period ahead, since a day ahead is always past for them (b-Aware row 268, 12 Nov 2026); when the
+ * usual time has passed but the payment is still ahead, the reminder comes 15 minutes before it instead.
+ */
 export const plannedReminders = (subs: Subscription[], potName: (id: string) => string, now: number) =>
   subs
     .filter((s) => s.status === 'active' || s.status === 'lowFunds')
     .map((s) => ({ s, due: nextDue(s) }))
-    .filter((x): x is { s: Subscription; due: number } => x.due !== null && x.due - REMIND_BEFORE > now)
-    .map(({ s, due }) => ({
+    .filter((x): x is { s: Subscription; due: number } => x.due !== null)
+    .map(({ s, due }) => {
+      const usual = due - remindBefore(s);
+      return { s, due, at: usual > now ? usual : due - LATE_REMIND_BEFORE };
+    })
+    .filter((x) => x.at > now)
+    .map(({ s, due, at }) => ({
       id: reminderId(s.id),
-      at: due - REMIND_BEFORE,
-      title: `${s.payee.name}: ${formatAmount(s.amount)} tomorrow`,
+      at,
+      title: `${s.payee.name}: ${formatAmount(s.amount)} ${ahead(due - at)}`,
       body: `Paid from your ${potName(s.potId)} pot when you open the app.`,
     }));
 

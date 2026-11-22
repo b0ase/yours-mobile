@@ -1029,6 +1029,27 @@ export function accountHandles(resp: unknown): string[] {
   return [...out];
 }
 
+/**
+ * The account's names carried in a failed names-list response, for the seal page. Only a server error (5xx: the
+ * P0 case, a 503 with fee_unavailable that still lists the names) is trusted to carry them; any other failure
+ * (401, 403, 404, 4xx) gives none, so the page signs in again on a 401 or shows the error (review S7).
+ */
+export function handlesFromErrorBody(e: { status?: unknown; data?: unknown } | null | undefined): string[] {
+  const status = e?.status;
+  if (typeof status !== 'number' || status < 500 || status > 599) return [];
+  return accountHandles(e?.data);
+}
+
+/**
+ * Why the account's other names could not be loaded, for the seal page (never swallowed: a block bound to another of
+ * your names would otherwise just look missing).
+ */
+export function namesLoadError(e: unknown): string {
+  const status = (e as { status?: unknown } | null)?.status;
+  const code = typeof status === 'number' && status > 0 ? ` (${status})` : '';
+  return `Couldn't load your other names${code}, so blocks for them can't be shown here. Try again in a moment.`;
+}
+
 export function myFields(fields: SigField[], myHandles: string[], signedIds: Set<string>): SigField[] {
   const mine = new Set(myHandles.map((h) => h.replace(/^\$/, '').toLowerCase()).filter(Boolean));
   return fields.filter(

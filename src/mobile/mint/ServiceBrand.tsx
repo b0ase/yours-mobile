@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import { FileText, Lock } from 'lucide-react';
 import type { ServiceStyle } from './serviceStyles';
+import { MINT_PREVIEWS_ENABLED } from '../storeBuild';
 
 /**
  * The Mint sheet's brand pieces (owner-approved mock, 1 Nov 2026): one lockup for every service, and a blank example
@@ -280,7 +281,8 @@ export const ServiceExample = ({ id, s }: { id: string; s: ServiceStyle }) => {
         </div>
       </>
     );
-  else if (id === 'sell')
+  // The 'sell' card is a bWalletX preview (mintCatalog.ts MINT_PREVIEWS_ENABLED): no listing example in a store build.
+  else if (MINT_PREVIEWS_ENABLED && id === 'sell')
     body = (
       <>
         <Ex>your listing</Ex>

@@ -16,7 +16,7 @@ import {
 } from './offer';
 import { mergeOffers, parseOffer, type OfferSealed } from './payload';
 import { acceptAndPay, retryPending, type Pending, type PendingStore } from './accept';
-import { verifyCompany, type Company } from './company';
+import { receiptLine, verifyCompany, type Company, type Receipt } from './company';
 import { brc29Script } from '../../utils/paymailDestination';
 
 // Test data only: random keys, a made-up reference and amount.
@@ -373,5 +373,61 @@ describe('verified company', () => {
     expect(verifyCompany({ ...co, directors: [] }, o, ok).verified).toBe(false);
     expect(verifyCompany(co, o, { companySig: false, directorSig: true }).verified).toBe(false);
     expect(verifyCompany(null, o, ok).verified).toBe(false);
+  });
+});
+
+describe('receipt line (b-Aware row 353: no rate at receipt)', () => {
+  const base: Receipt = {
+    status: 'received_shortfall',
+    offerRef: 'ACME-1',
+    offeree: { handle: null, identityKey: '02'.padEnd(66, '1') },
+    payment: {
+      txid: 'ab',
+      usdValue: '50.00',
+      bsv: '1.00000000',
+      rateUsdPerBsv: '50.00',
+      shortfallUsd: '50.00',
+      firstSeen: '',
+    },
+    allotment: null,
+  };
+  test('a short payment says how short', () => {
+    expect(receiptLine(base)).toEqual({ amount: '$50.00', status: 'Received, short of the amount (short $50.00)' });
+  });
+  test('held for no rate: BSV amount, never a USD value or a shortfall', () => {
+    const r: Receipt = {
+      ...base,
+      held: 'rate_unavailable',
+      payment: { ...base.payment, usdValue: '0.00', rateUsdPerBsv: '0.00', shortfallUsd: '0.00' },
+    };
+    expect(receiptLine(r)).toEqual({
+      amount: '1.00000000 BSV',
+      status: 'Received, held: no exchange rate when it arrived, so it is not valued yet',
+    });
+  });
+});
+
+describe('receipt line: held for no rate and after the offer lapsed (review of b-Aware row 353)', () => {
+  test('shows the BSV amount and says it lapsed and is not valued, never "$0.00"', () => {
+    const r: Receipt = {
+      status: 'received_after_lapse',
+      held: 'rate_unavailable',
+      offerRef: 'ACME-2',
+      offeree: { handle: null, identityKey: '02'.padEnd(66, '1') },
+      payment: {
+        txid: 'cd',
+        usdValue: '0.00',
+        bsv: '2.50000000',
+        rateUsdPerBsv: '0.00',
+        shortfallUsd: '0.00',
+        firstSeen: '',
+      },
+      allotment: null,
+    };
+    const line = receiptLine(r);
+    expect(line.amount).toBe('2.50000000 BSV');
+    expect(line.amount).not.toContain('$');
+    expect(line.status).toContain('lapsed');
+    expect(line.status).toContain('not valued yet');
   });
 });

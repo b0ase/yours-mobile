@@ -13,7 +13,7 @@ import { refreshMessage } from './nftActions';
 import { playMusic, useWalletMedia, type MediaItem } from './useWalletMedia';
 import { getTagValue } from '../../utils/format';
 import type { Weapon } from '../three3d/ordnance';
-import { TOKENBLASTER_ENABLED } from '../storeBuild';
+import { MARKET_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 import { KeptAirdrops } from '../airdrops/AirdropNft';
 import { inWalletList, keptNfts } from '../airdrops/inbox';
 import { useAirdrops } from '../airdrops/useAirdrops';
@@ -225,7 +225,10 @@ export const MediaSection = () => {
           <div className="rounded-2xl p-5 flex flex-col gap-3 text-center" style={{ background: '#101114' }}>
             <p className="text-sm text-white font-semibold m-0">Nothing here yet.</p>
             <p className="text-xs text-[#98A2B3] m-0">
-              Music, video and pictures you buy or mint live here and play from here.
+              {/* Store wording (CTO decision 4, 16 Nov 2026): nothing is bought in the store edition. */}
+              {MARKET_ENABLED
+                ? 'Music, video and pictures you buy or mint live here and play from here.'
+                : 'Music, video and pictures you mint or receive live here and play from here.'}
             </p>
             <div className="flex flex-wrap justify-center gap-2 mt-1">
               <button

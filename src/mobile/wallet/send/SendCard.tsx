@@ -9,7 +9,7 @@ import type { Theme } from '../../../theme.types';
 import { NameInput } from '../../names/NameInput';
 import { useContacts } from '../../chat/useContacts';
 import { payTarget } from '../../chat/contacts';
-import { noteContacts } from './payee';
+import { noteContacts, sendPayeeMeta } from './payee';
 import { PAYMENT_NOTE_MAX } from './paymentNote';
 import {
   balanceLine,
@@ -262,12 +262,7 @@ export const SendCard = (p: Props) => {
                   : '';
                 setNames((n) => ({ ...n, [r.id]: label }));
                 if (s === 'ready' && resolved) {
-                  notePending(resolved.target, {
-                    input: resolved.input,
-                    label,
-                    avatar: resolved.avatar,
-                    pubkey: resolved.pubkey,
-                  });
+                  notePending(resolved.target, sendPayeeMeta(resolved, label));
                 }
               }}
               style={{ width: '100%', margin: '0' }}

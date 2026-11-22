@@ -18,6 +18,8 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const KEY_RE = /^0[23][0-9a-f]{64}$/;
 const USD_RE = /^\d{1,9}(\.\d{1,2})?$/;
 const STATUSES = ['received_pending_allotment', 'received_shortfall', 'received_after_lapse'];
+/** rateSource (and `held`) of a receipt that arrived while no USD/BSV rate of ours was available. */
+const RATE_UNAVAILABLE = 'rate_unavailable';
 
 /** The exact text each party's identity key signs (same string in the wallet: src/mobile/offer/sign.ts). */
 const sigRecord = (ref, role, hash) => `bcorp-offer|v1|ref=${ref}|role=${role}|hash=${hash}`;
@@ -123,22 +125,24 @@ function usdValueOf(sats, rate) {
 /**
  * Which rate to value the payment at: the payer's build-time rate when it is within 5% of ours at receipt
  * (so a payer who paid exactly the quoted amount is not short by a cent of drift), else ours.
+ * No rate of ours (CoinGecko down): null, never the payer's rate on its own. The payer chooses that figure, so a
+ * half payment with a doubled rate would read as paid in full (b-Aware row 353). The receipt is then held.
  */
 function pickRate(payerRate, serverRate) {
   const p = Number(payerRate);
   const s = Number(serverRate);
-  if (Number.isFinite(s) && s > 0) {
-    if (Number.isFinite(p) && p > 0 && Math.abs(p - s) / s <= 0.05) return { rate: p, source: 'payer-build' };
-    return { rate: s, source: 'coingecko' };
-  }
-  if (Number.isFinite(p) && p > 0) return { rate: p, source: 'payer-build-unchecked' };
-  return null;
+  if (!Number.isFinite(s) || s <= 0) return null;
+  if (Number.isFinite(p) && p > 0 && Math.abs(p - s) / s <= 0.05) return { rate: p, source: 'payer-build' };
+  return { rate: s, source: 'coingecko' };
 }
 
 /** The record (template §B). `allotment` is null and nothing here can set it. */
 function buildReceipt({ company, offer, payment, completedHash, subscriberSig, checks, alias, domain, now }) {
-  const usdValue = payment.usdValue;
-  const want = cents(offer.amount_usd);
+  // No rate at receipt: the USD value is unknown. Held as received_shortfall (never pending allotment) with
+  // held: 'rate_unavailable' and no shortfall figure, until someone values it at the rate for firstSeen.
+  const unrated = payment.rateSource === RATE_UNAVAILABLE;
+  const usdValue = unrated ? null : payment.usdValue;
+  const want = unrated ? null : cents(offer.amount_usd);
   const got = cents(usdValue) ?? 0;
   const status = receiptStatus({
     amountUsd: offer.amount_usd,
@@ -149,6 +153,7 @@ function buildReceipt({ company, offer, payment, completedHash, subscriberSig, c
   return {
     type: 'subscription_receipt',
     status,
+    ...(unrated ? { held: RATE_UNAVAILABLE } : {}),
     company: { name: company.name, number: company.number },
     offerRef: offer.ref,
     offeree: { handle: offer.offeree_handle || null, identityKey: offer.offeree_key },
@@ -257,6 +262,7 @@ module.exports = {
   OFFER_TAG,
   OFFER_SIG_PROTOCOL,
   STATUSES,
+  RATE_UNAVAILABLE,
   sigRecord,
   verifyOfferSig,
   companies,

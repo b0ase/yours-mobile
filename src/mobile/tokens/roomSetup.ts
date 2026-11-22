@@ -1,6 +1,6 @@
 import validate from 'bitcoin-address-validation';
 import type { OneSatContext } from '@1sat/actions';
-import { STORE_BUILD, bcorpFeeAddress } from '../storeBuild';
+import { STORE_BUILD, TOKEN_ROOMS_ENABLED, bcorpFeeAddress } from '../storeBuild';
 import { hasRate, usdToSats } from '../money/money';
 import { BCHAT_ORIGIN } from '../chat/api';
 import { INDEX_FUND_NETWORK_SATS, fundAmount, fundIndexing, type OverlayStatus } from './indexFund';
@@ -99,7 +99,12 @@ export const resetServerSetupFeeCache = () => {
 
 /** "Free: one of the first 1,000 rooms (N left)", or '' when the free offer doesn't apply. */
 export const freeRoomNote = (server: ServerSetupFee | undefined) =>
-  server && server.reason === 'free-first-1000' && server.freeRemaining > 0 && server.feeUsd === 0
+  // Not in a store build: there is no room and no bCorp fee to waive there.
+  TOKEN_ROOMS_ENABLED &&
+  server &&
+  server.reason === 'free-first-1000' &&
+  server.freeRemaining > 0 &&
+  server.feeUsd === 0
     ? `Free: one of the first 1,000 rooms (${server.freeRemaining.toLocaleString('en-US')} left)`
     : '';
 
@@ -152,13 +157,21 @@ export const payRoomSetup = (
   status: OverlayStatus | null,
   feeSats: number,
   feeAddress = roomSetupFeeAddress(),
+  store: boolean = STORE_BUILD,
 ) =>
-  fundIndexing(ctx, tokenId, ticker, {
-    status,
-    allowDerived: true,
-    timeoutMs: 8000,
-    extraOutputs: roomSetupExtraOutputs(ticker, feeSats, feeAddress),
-  });
+  // A store build pays no indexing: fundIndexing refuses there before the indexer or the wallet is asked.
+  fundIndexing(
+    ctx,
+    tokenId,
+    ticker,
+    {
+      status,
+      allowDerived: true,
+      timeoutMs: 8000,
+      extraOutputs: roomSetupExtraOutputs(ticker, feeSats, feeAddress),
+    },
+    store,
+  );
 
 // ── "Not now" (per token, this device) ──
 

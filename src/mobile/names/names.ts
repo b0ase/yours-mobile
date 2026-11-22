@@ -1,5 +1,12 @@
-import { checkBinding, keyChange, type BindingStatus } from './binding';
-import { checkNameProof, PROOF_PROVIDERS, type ProofCheck } from './proof';
+import {
+  checkBinding,
+  checkForward,
+  keyChange,
+  trustCurrentKey,
+  trustForwardSigner,
+  type BindingStatus,
+} from './binding';
+import { checkNameProof, followProofKey, PROOF_PROVIDERS, trustProofSub, UNKNOWN_KEY, type ProofCheck } from './proof';
 import { ProtoWallet, Utils } from '@bsv/sdk';
 import { SIGN_KEY_ID, SIGN_PROTOCOL, signedMessage } from './paymail';
 import { AMOUNT_HINT, cleanRecipient, isMainnetAddress, looksLikeAmount } from './address';
@@ -9,6 +16,8 @@ import { BWALLET_PAYMAIL_API, BWALLET_PAYMAIL_DOMAIN, LEGACY_PAYMAIL_DOMAINS, SI
 const alsoOurs = (): string[] => [...(LEGACY_PAYMAIL_DOMAINS ?? []), ...(SIBLING_PAYMAIL_DOMAINS ?? [])];
 import { isPlaceholderName } from './handlePrompt';
 import { compressedKey, keyAddress, knownKeyLabel, parsePubKey, shortKey } from './pubkeyRecipient';
+import { APP_NAME, STORE_BUILD } from '../storeBuild';
+import { checkOpnsOnChain } from './opnsChain';
 
 /**
  * "Send to a name": classify what the user typed in a recipient box and resolve it to
@@ -103,6 +112,10 @@ export type Resolved = {
    * payments go to this name (bare alias), whose binding `nameBinding` describes. Shown, never swapped silently.
    */
   forwardsTo?: string;
+  /** The key that signed the followed forward (set only with `forwardsTo`); confirm() remembers it for the typed name. */
+  forwardSigner?: string;
+  /** The version (seq) of the typed name's own signed binding; unset for a forward or an unsigned name. */
+  bindingSeq?: number;
   /** A provable name's provider-signed proof (names/proof.ts, docs PROVABLE-NAMES.md): set only for `name.gmail`. */
   nameProof?: ProofCheck;
   /** Where tokens (BSV-21 / ordinals) would go, if this name can receive them. */
@@ -114,12 +127,21 @@ export type Resolved = {
    * Only ever set for a full name@domain the user typed; a $handle never resolves outside bWalletX.
    */
   external?: string;
-  /** The ordinal address came with a valid signature by `pubkey` (checkOrdProof). False: served without one. */
+  /** The ordinal address came with a valid signature by `pubkey` (checkOrdProof). False: an outside host's, unsigned. */
   ordVerified?: boolean;
   /** The ordinal address came with a proof that does NOT verify against `pubkey`: ordAddress is dropped. */
   ordProofBad?: boolean;
+  /** Our host served an ordinal address with no owner signature at all (b-Aware 102/250): ordAddress is dropped. */
+  ordUnsigned?: boolean;
   /** A raw public key exactly as typed (via 'pubkey'); `pubkey` holds its compressed form. */
   rawKey?: string;
+  /**
+   * OpNS only (opnsChain.ts): 'chain' = the owner output was checked on WhatsOnChain and against the 1sat name index;
+   * 'index' = only the OpNS index's word (a check source couldn't be reached or doesn't know the name yet).
+   */
+  opnsChecked?: 'chain' | 'index';
+  /** OpNS only: `pubkey` comes from an identity binding its key signed on the owner output, not an index string. */
+  opnsKeySigned?: boolean;
 };
 
 export class ResolveError extends Error {}
@@ -129,7 +151,7 @@ export class ResolveError extends Error {}
  * domain, so it is never mistaken for a bWalletX handle ("boase@handcash.io — outside bWalletX").
  */
 export const externalLabel = (r: Pick<Resolved, 'input' | 'external'>): string | undefined =>
-  r.external ? `${r.input.replace(/^\$/, '').toLowerCase()} — outside bWalletX` : undefined;
+  r.external ? `${r.input.replace(/^\$/, '').toLowerCase()} — outside ${APP_NAME}` : undefined;
 
 /**
  * Whether an OpNS name is bound to a wallet (signed identity key, opns.idKey) or only held at an address.
@@ -150,7 +172,7 @@ export const SERVICES = {
 type DohResponse = { Answer?: { type: number; data?: unknown }[] };
 type BsvaliasDoc = { capabilities?: Capabilities };
 type Fields = Record<string, unknown>;
-type OpnsRecord = { owner?: unknown; map?: Fields };
+type OpnsRecord = { owner?: unknown; outpoint?: unknown; origin?: unknown; map?: Fields };
 type Outpoint = { outpoint?: unknown };
 type Inscription = {
   owner?: unknown;
@@ -278,7 +300,8 @@ export const scriptToAddress = (hex: string): string | undefined => {
 
 /**
  * The bare target alias of a forward our host declared for `alias` ({from, to} paymails), or undefined. Only a
- * forward FROM the typed name to a different name counts; anything else is ignored.
+ * forward FROM the typed name to a different name has the right shape. This is the SHAPE only and says nothing about
+ * trust: the host's word is not enough. resolvePaymail follows a forward only after checkForward (owner signature).
  */
 export const forwardTarget = (alias: string, fw: unknown): string | undefined => {
   if (!fw || typeof fw !== 'object') return undefined;
@@ -293,9 +316,74 @@ export const forwardTarget = (alias: string, fw: unknown): string | undefined =>
   return to;
 };
 
-/** "boase@ forwards to b0asex@ (same owner)": the confirm-card line for a forwarded bWalletX name. */
-export const forwardLabel = (r: Pick<Resolved, 'input' | 'forwardsTo'>): string | undefined => {
-  if (!r.forwardsTo) return undefined;
+type KeyFields = Pick<Resolved, 'via' | 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>;
+
+/**
+ * An OpNS name whose `pubkey` is only the index's opns.idKey string: not an identity binding its key signed on the
+ * owner output that was checked on chain. Such a key is shown (opnsTrustLabel) but never acted on (b-Aware
+ * opns-indexer: the spec wants opns.idKey bound by a signature the wallet checks).
+ */
+export const opnsKeyUnverified = (r: KeyFields): boolean =>
+  r.via === 'opns-owner' && !!r.pubkey && !(r.opnsChecked === 'chain' && r.opnsKeySigned);
+
+/**
+ * The identity key a resolved name may be acted on with (call it, verify a caller, save it as a friend, hand it a
+ * name, pin it): `pubkey`, except an OpNS key that only the index vouches for (opnsKeyUnverified), which gives none.
+ */
+export const trustedKey = (r: KeyFields): string | undefined => (opnsKeyUnverified(r) ? undefined : r.pubkey);
+
+/** Why an OpNS key that only the index vouches for can't be used to call, save or hand a name to. */
+export const OPNS_KEY_UNVERIFIED = (name: string) =>
+  `${name}'s wallet key comes only from the OpNS index and is not signed on chain, so it can't be used here yet.`;
+
+/**
+ * Remember the paid key for the typed name and, for a followed forward, who signed it (only that key may forward the
+ * name next time). Used by NameInput's confirm() and by its "I've checked with them: trust the new wallet" override.
+ */
+export const trustResolvedKey = (
+  r: Pick<
+    Resolved,
+    | 'input'
+    | 'pubkey'
+    | 'forwardsTo'
+    | 'forwardSigner'
+    | 'via'
+    | 'opnsChecked'
+    | 'opnsKeySigned'
+    | 'bindingSeq'
+    | 'nameProof'
+  >,
+) => {
+  // An OpNS key is remembered only when checked on chain and signed by that key, never on the index's word alone.
+  const key = trustedKey(r);
+  if (!key) return;
+  const typed = r.input.replace(/^\$/, '').split('@')[0];
+  trustCurrentKey(typed, key, r.forwardsTo ? undefined : r.bindingSeq);
+  if (r.forwardsTo && r.forwardSigner) trustForwardSigner(typed, r.forwardSigner);
+  // proofKeyOverride's stop: accept this key for the name the proof was checked for (a forward's target).
+  const p = r.nameProof;
+  // Its time floor is now: an older token for another key can't take the name back (fifth review).
+  if (p?.status === 'unchecked' && p.overridable && p.alias) followProofKey(p.alias, key, p.seq);
+};
+
+/**
+ * Remember the provider account that proves the name (on a confirmed payment, or "trust the new account"), under the
+ * name the proof was checked for: a forward's target, not the typed name.
+ */
+export const trustProvenAccount = (r: Pick<Resolved, 'input' | 'nameProof'>) => {
+  const p = r.nameProof;
+  if (!p?.sub) return;
+  trustProofSub(p.alias ?? r.input.replace(/^\$/, '').split('@')[0], p.sub);
+};
+
+/**
+ * "boase@ forwards to b0asex@ (same owner)": the confirm-card line for a forwarded bWalletX name. `forwardsTo` is set
+ * only from a forward the typed name's owner signed, so "same owner" is said only when that signature verified AND the
+ * wallet lets the payment proceed. A refused resolve (key changed, name mismatch, bad proof) shows the refusal alone.
+ */
+export const forwardLabel = (r: Resolved, asset: Parameters<typeof destinationFor>[1] = 'bsv'): string | undefined => {
+  // Only beside a destination this send can actually pay (the same check the card refuses on).
+  if (!r.forwardsTo || !destinationFor(r, asset).ok) return undefined;
   const from = r.input.replace(/^\$/, '').split('@')[0].toLowerCase();
   return `${from}@ forwards to ${r.forwardsTo}@ (same owner)`;
 };
@@ -329,8 +417,14 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
     r.pubkey = str(id?.pubkey);
     // Our names carry the owner's signed binding: check it here rather than trust our server.
     if (!r.external && r.pubkey) {
-      const to = forwardTarget(alias, id?.forward);
-      if (to) r.forwardsTo = to;
+      // Only a forward the typed name's owner signed (and that hasn't expired) counts; an unsigned one is ignored and
+      // the typed name's own binding is checked against the served key below, so a mismatch refuses.
+      const fw = await checkForward(alias, id?.forward, forwardTarget);
+      const to = fw?.to;
+      if (fw) {
+        r.forwardsTo = fw.to;
+        r.forwardSigner = fw.signer;
+      }
       // A forward's binding is the target's: check it against the target name, never the typed one.
       const boundTo = to ?? alias;
       const servedFor = String((id?.binding as { alias?: unknown } | undefined)?.alias ?? '').toLowerCase();
@@ -338,12 +432,18 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
         servedFor && servedFor !== boundTo.toLowerCase()
           ? 'mismatch'
           : await checkBinding(boundTo, r.pubkey, id?.binding);
-      const from = (id?.binding as { handover?: { from?: string } } | undefined)?.handover?.from;
+      const served = id?.binding as { handover?: { from?: string }; seq?: number } | undefined;
+      const from = served?.handover?.from;
+      // The binding's version counts only for the typed name's own binding (a forward's is the target's).
+      if (status === 'signed' && !to && Number.isInteger(served?.seq)) r.bindingSeq = served?.seq;
       // The key-change stop stays on the TYPED name: a forward never resets what this wallet remembers for it.
-      r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from);
+      r.nameBinding = status === 'mismatch' ? status : keyChange(alias, r.pubkey, status, from, r.bindingSeq);
       // Provable names: the provider's own signature says which wallet this name belongs to; checked here.
       // A forward's proof is the target's (the server serves the target row), so check it against the target.
-      r.nameProof = (await checkNameProof(f, boundTo, r.pubkey, id?.proof)) ?? undefined;
+      // Its binding version (and handover signer) goes with it, only when that binding checked out: the kept proven key
+      // follows a signed handover and never moves back to an older version.
+      const proofBinding = status === 'signed' ? { seq: served?.seq, handoverFrom: from } : {};
+      r.nameProof = (await checkNameProof(f, boundTo, r.pubkey, id?.proof, proofBinding)) ?? undefined;
     }
     // Our host only pays names it knows (pki answers with a key). Without this an unknown alias resolved as payable
     // and failed later at send time as "the paymail host answered 404" (owner, 25 Oct 2026: bwalletx@bwalletx.com).
@@ -355,9 +455,13 @@ export const resolvePaymail = async (f: Fetch, paymail: string, input = paymail)
     const o = await capJson<Fields & { ordProof?: unknown }>(ord);
     const address = str(o?.address);
     if (address) {
-      // b_feedback 67: the host could swap the address. Trust it only with the key owner's signature over it.
+      // b_feedback 67, b-Aware 102/250: the host could swap the address. On our names (key pinned by the owner's
+      // signed binding) use it only with the key owner's signature over it; a missing one is refused like a bad one
+      // (fail closed). An outside host also serves the key a proof is checked against, so a proof proves nothing
+      // there and none serves one: its address is kept as 'unverified' (the pay sheet says so), as for BSV.
       const proof = o?.ordProof === undefined ? 'none' : await checkOrdProof(r.pubkey, address, o.ordProof);
       if (proof === 'bad') r.ordProofBad = true;
+      else if (proof === 'none' && !r.external) r.ordUnsigned = true;
       else {
         r.ordAddress = address;
         r.ordVerified = proof === 'ok';
@@ -390,28 +494,50 @@ export const resolveOpns = async (f: Fetch, name: string): Promise<Resolved> => 
   const rec = await tryJson<OpnsRecord>(f, `${SERVICES.opnsApi}/${encodeURIComponent(name)}`);
   let owner = str(rec?.owner);
   let pubkey = str(rec?.map?.['opns.idKey']);
+  let outpoint = str(rec?.outpoint);
+  let origin = str(rec?.origin);
   if (!owner) {
     // Fallback: 1sat-stack origin → latest inscription location.
     const o = await tryJson<Outpoint>(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
-    const origin = str(o?.outpoint);
+    origin = str(o?.outpoint);
     if (!origin) throw new ResolveError(`No one has the name "${name}"`);
     const latest = await tryJson<Inscription>(
       f,
       `${SERVICES.inscriptionLatest}/${origin.replace('.', '_')}/latest?script=false`,
     );
     owner = str(latest?.owner);
+    outpoint = str(latest?.outpoint);
     pubkey ??= str(latest?.data?.map?.['opns.idKey']);
     if (!owner) throw new ResolveError(`Couldn't locate the owner of "${name}"`);
   }
+  // One index's answer is not enough (b-Aware opns-indexer): check the coin and the name on other sources.
+  const check = await checkOpnsOnChain(f, { name, owner, outpoint, origin, idKey: pubkey });
+  if (check.status === 'refused') throw new ResolveError(check.reason);
   return {
     input: name,
     target: owner,
     targetKind: 'address',
     via: 'opns-owner',
     displayName: name,
-    pubkey,
+    pubkey: check.idKey,
     ordAddress: owner,
+    opnsChecked: check.status,
+    opnsKeySigned: check.keySigned,
   };
+};
+
+/**
+ * The confirm-card line under a bound OpNS name. "Verified on chain" only when the owner output was checked on
+ * other sources AND the key is a binding its key signed there; anything less is "From the OpNS index".
+ */
+export const opnsTrustLabel = (
+  r: Pick<Resolved, 'via' | 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>,
+): { verified: boolean; text: string } | undefined => {
+  if (opnsBinding(r) !== 'bound') return undefined;
+  const key = shortKey(r.pubkey ?? '');
+  return r.opnsChecked === 'chain' && r.opnsKeySigned
+    ? { verified: true, text: `Verified on chain · bound to ${key}` }
+    : { verified: false, text: `From the OpNS index · bound to ${key} (not verified on chain)` };
 };
 
 /**
@@ -439,7 +565,7 @@ export const isOurDomain = (d: string, domain: string = BWALLET_PAYMAIL_DOMAIN) 
   return (!!domain && x === domain.toLowerCase()) || alsoOurs().includes(x);
 };
 
-export const noSuchUser = (input: string) => `No bWalletX user called ${input}`;
+export const noSuchUser = (input: string) => `No ${APP_NAME} user called ${input}`;
 
 /**
  * A `$name` is a bWalletX handle and nothing else (owner, 13 Oct 2026): name@<domain> (bwalletx.com),
@@ -540,9 +666,15 @@ export const TOKENS_UNSUPPORTED = "This name can't receive tokens";
 export const BAD_ORD_PROOF =
   "This name's ordinal address isn't signed by its owner's key, so it may have been swapped. Not sending tokens to it.";
 
+/**
+ * b-Aware 102/250: our host served a name's ordinal address with NO owner signature. Tokens, NFTs and names are never
+ * sent to it (fail closed): the host alone could have swapped in anyone's address. A typed 1… address still works.
+ * (An outside host's unsigned address is used, marked 'unverified': see resolvePaymail.)
+ */
+export const UNSIGNED_ORD = `This name's ordinals address isn't signed by its owner, so ${APP_NAME} can't be sure it's theirs. Not sending tokens to it. Ask them for their ordinals address (1…) and send to that instead.`;
+
 /** Shown on the pay sheet when bWalletX can't check the destination against the payee's key. */
-export const NOT_VERIFIED_NOTE =
-  "Not verified: this name's host doesn't let bWalletX check the payment address against the owner's key.";
+export const NOT_VERIFIED_NOTE = `Not verified: this name's host doesn't let ${APP_NAME} check the payment address against the owner's key.`;
 
 /** "ord" proof (paymail.ts signOrdProof) by `pubkey` over `address`: ok, bad, or none (nothing to check against). */
 export const checkOrdProof = async (
@@ -572,7 +704,8 @@ export const checkOrdProof = async (
 
 /**
  * Whether the destination a send will use is checked against the payee's key: P2P paymail outputs are re-derived
- * at send time (utils/paymailDestination.ts), which only our host supports; token sends need a signed ord address.
+ * at send time (utils/paymailDestination.ts), which only our host supports; token sends need a signed ord address
+ * (on our names an unsigned or badly signed one is refused by destinationFor; an outside host's is 'unverified').
  * 'unverified' puts NOT_VERIFIED_NOTE on the pay sheet; null means there's nothing a host could swap.
  */
 export const destinationCheck = (
@@ -602,12 +735,10 @@ export const BAD_BINDING =
  * Our host answered the typed name with a different name's binding and no forward (28 Oct 2026: boase@ came back
  * as b0asex@). Nothing shows the typed name's owner chose that wallet, so it is never paid; no "Pay anyway".
  */
-export const NAME_MISMATCH =
-  "This name isn't set up in bWalletX: the server answered with a different name's wallet, and its owner hasn't signed this name or set it to forward. Not paying it. Ask them for their exact name.";
+export const NAME_MISMATCH = `This name isn't set up in ${APP_NAME}: the server answered with a different name's wallet, and its owner hasn't signed this name or set it to forward. Not paying it. Ask them for their exact name.`;
 
 /** Shown under a bWalletX name whose owner hasn't signed its binding yet. Payable: the key is still remembered. */
-export const UNSIGNED_NOTE =
-  "Not signed by its owner yet: bWalletX can't prove the owner chose this wallet. If it's a large amount, check the name with them first.";
+export const UNSIGNED_NOTE = `Not signed by its owner yet: ${APP_NAME} can't prove the owner chose this wallet. If it's a large amount, check the name with them first.`;
 
 /** BRC-169 4.4: the name points to a different key than before, with no signed handover. */
 export const KEY_CHANGED =
@@ -622,9 +753,28 @@ export const proofRefusal = (r: Pick<Resolved, 'nameProof'>): string | undefined
     return `This name has no proof from ${who}, so it may not belong to who it says. Not paying it.`;
   if (p.status === 'sub-changed')
     return `This name is now proven by a different ${who} account than before. Not paying it.`;
-  if (p.status === 'unchecked') return `This version of bWalletX can't check ${who} proofs. Not paying it.`;
+  if (p.status === 'unchecked' && p.reason === UNKNOWN_KEY)
+    return `This name's ${who} proof is signed with a key this wallet never saw ${who} publish, so it can't be checked. Not paying it.`;
+  if (p.status === 'unchecked') return `This version of ${APP_NAME} can't check ${who} proofs. Not paying it.`;
   return `This name's proof from ${who} doesn't check out, so it may have been moved without its owner. Not paying it.`;
 };
+
+/**
+ * A name this wallet saw proven before it kept the proven wallet key (before this update), whose proof is now signed
+ * by a provider key it never saw published (e.g. one rotated out before this wallet kept its own copy): Send stops,
+ * and like a key change (BRC-169 4.4) the payer may deliberately get through after checking with the person. The
+ * override trusts the served key for the proven name (trustResolvedKey), after which it pays as unproven, with no
+ * badge. Not offered for any other stop, nor for a name whose proven key this wallet kept (second review, finding 1).
+ */
+export const proofKeyOverride = (r: Pick<Resolved, 'pubkey' | 'nameBinding' | 'nameProof'>): boolean =>
+  !!r.pubkey &&
+  r.nameProof?.status === 'unchecked' &&
+  r.nameProof.reason === UNKNOWN_KEY &&
+  !!r.nameProof.overridable &&
+  r.nameBinding !== 'bad' &&
+  r.nameBinding !== 'mismatch' &&
+  // A key change has its own override, which trusts the same key (and the proof key too: trustResolvedKey).
+  r.nameBinding !== 'changed';
 
 export const destinationFor = (
   r: Resolved,
@@ -638,6 +788,7 @@ export const destinationFor = (
   if (proofErr) return { ok: false, error: proofErr };
   if (asset === 'bsv') return { ok: true, to: r.target };
   if (r.ordProofBad) return { ok: false, error: BAD_ORD_PROOF };
+  if (r.ordUnsigned) return { ok: false, error: UNSIGNED_ORD };
   if (r.ordAddress) return { ok: true, to: r.ordAddress };
   return { ok: false, error: TOKENS_UNSUPPORTED };
 };
@@ -648,7 +799,11 @@ export type Availability =
   | { status: 'invalid'; name: string; reason: string };
 
 /** Read-only OpNS availability: origin exists → taken; else the mine tree's nearest parent. */
-export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Availability> => {
+export const checkOpnsAvailability = async (
+  f: Fetch,
+  raw: string,
+  store: boolean = STORE_BUILD,
+): Promise<Availability> => {
   const name = raw.trim().toLowerCase().replace(/^@/, '');
   if (!OPNS_RE.test(name)) return { status: 'invalid', name, reason: 'Letters, numbers and - only' };
   const o = await tryJson<Outpoint>(f, `${SERVICES.opnsOrigin}/${encodeURIComponent(name)}`);
@@ -662,8 +817,11 @@ export const checkOpnsAvailability = async (f: Fetch, raw: string): Promise<Avai
     );
     const price = Number(latest?.data?.list?.price);
     const latestOutpoint = str(latest?.outpoint);
+    // A store build never learns of a listing: a taken name is just taken there (no price, no Buy).
     const listing =
-      price > 0 && !latest?.spend && latestOutpoint ? { outpoint: latestOutpoint.replace('_', '.'), price } : undefined;
+      !store && price > 0 && !latest?.spend && latestOutpoint
+        ? { outpoint: latestOutpoint.replace('_', '.'), price }
+        : undefined;
     return {
       status: 'taken',
       name,

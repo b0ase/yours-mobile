@@ -10,8 +10,9 @@ import { IS_EXTENSION } from '../extension';
 import { Capacitor } from '@capacitor/core';
 import { returnHint, switchBackHint } from './doneHint';
 import { Scanner } from '../scan/Scanner';
-import type { ReturnPlan } from '../../pair/returnTo';
+import type { ReturnExtra, ReturnPlan } from '../../pair/returnTo';
 import { openReturn, returnPlatform } from './openReturn';
+import { APP_NAME } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -22,7 +23,7 @@ type Stage =
   | { k: 'scan' }
   | { k: 'joining' }
   | { k: 'confirm'; p: PendingPair }
-  | { k: 'done'; origin: string; proven?: boolean; back?: ReturnPlan }
+  | { k: 'done'; origin: string; proven?: boolean; back?: ReturnPlan; extra?: ReturnExtra; signedIn?: boolean }
   | { k: 'error'; m: string };
 
 /**
@@ -165,7 +166,7 @@ export default function PairSheet({
               <ShieldCheck size={28} color={GOLD} />
             </span>
             <p className="mt-5 text-sm" style={{ color: MUTED }}>
-              Connect your wallet to
+              {stage.p.signIn ? 'Connect your wallet and sign in to' : 'Connect your wallet to'}
             </p>
             {stage.p.proven ? (
               <p className="mt-1 break-all text-xl font-bold text-white">{new URL(stage.p.origin).host}</p>
@@ -180,9 +181,14 @@ export default function PairSheet({
                   a site that claims to be {new URL(stage.p.origin).host}
                 </p>
                 <p className="mt-2 text-xs" style={{ color: AMBER }}>
-                  bWalletX can&apos;t confirm this. Only connect if you opened the QR code on that site yourself.
+                  {APP_NAME} can&apos;t confirm this. Only connect if you opened the QR code on that site yourself.
                 </p>
               </>
+            )}
+            {stage.p.signIn && (
+              <p className="mt-2 text-sm" style={{ color: MUTED }} data-testid="pair-sign-in-as">
+                as <span className="font-semibold text-white">{stage.p.signInAs || 'this account'}</span>
+              </p>
             )}
             <p className="mt-6 text-sm" style={{ color: MUTED }}>
               Does the website show this code?
@@ -209,16 +215,34 @@ export default function PairSheet({
               <button
                 onClick={() => {
                   // Spend the one-time rid before anything else: a replayed link gets the plain done screen.
-                  const back = stage.p.takeReturn();
-                  stage.p.confirm();
-                  setStage({ k: 'done', origin: stage.p.origin, proven: stage.p.proven, back });
-                  // Phone apps: return on their own once 'ready' is on its way. The web wallet needs a tap (popups).
-                  if (back && returnPlatform() !== 'web') setTimeout(() => void openReturn(back), 600);
+                  const p = stage.p;
+                  const back = p.takeReturn();
+                  setStage({ k: 'joining' });
+                  void p
+                    .confirm()
+                    .catch(() => null)
+                    .then((extra) => {
+                      // Nothing was connected (the code expired, or the account changed meanwhile): say why.
+                      const why = p.goneReason();
+                      if (!extra && why) return setStage({ k: 'error', m: why });
+                      setStage({
+                        k: 'done',
+                        origin: p.origin,
+                        proven: p.proven,
+                        back,
+                        extra: extra ?? undefined,
+                        signedIn: p.signIn,
+                      });
+                      // Phone apps: return on their own once 'ready' is on its way (it is also in the return, for a
+                      // browser tab that slept through it). The web wallet needs a tap (popups).
+                      if (back && returnPlatform() !== 'web')
+                        setTimeout(() => void openReturn(back, extra ?? undefined), 300);
+                    });
                 }}
                 className="flex-1 rounded-xl py-3 font-bold"
                 style={{ background: GOLD, color: '#000' }}
               >
-                Yes, connect
+                {stage.p.signIn ? 'Yes, sign in' : 'Yes, connect'}
               </button>
             </div>
           </div>
@@ -234,7 +258,7 @@ export default function PairSheet({
             </span>
             <p className="mt-4 text-lg font-bold text-white">
               {stage.origin === CLI_ORIGIN
-                ? 'Paired with the bWalletX CLI'
+                ? `Paired with the ${APP_NAME} CLI`
                 : stage.proven
                   ? `Connected to ${new URL(stage.origin).host}`
                   : `Connected to a site that claims to be ${new URL(stage.origin).host}`}
@@ -252,7 +276,7 @@ export default function PairSheet({
             </p>
             {stage.back && (
               <button
-                onClick={() => stage.back && void openReturn(stage.back)}
+                onClick={() => stage.back && void openReturn(stage.back, stage.extra)}
                 data-testid="pair-return"
                 className="mt-8 w-full rounded-xl py-3 font-bold"
                 style={{ background: GOLD, color: '#000' }}

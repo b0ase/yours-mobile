@@ -1,5 +1,5 @@
 import { ExternalLink, MonitorUp, X } from 'lucide-react';
-import { STORE_BUILD } from '../storeBuild';
+import { APP_NAME, STORE_BUILD } from '../storeBuild';
 import { studioRoomParam } from './broadcast';
 
 /**
@@ -58,7 +58,7 @@ export const BroadcastSheet = ({
         </button>
       ) : (
         <p className="mt-4 rounded-2xl p-3 text-[13px]" style={{ border: '1px solid #ffffff2a', color: MUTED }}>
-          This device can&rsquo;t share a tab. Use bWalletX in Chrome on a computer, or open the studio.
+          This device can&rsquo;t share a tab. Use {APP_NAME} in Chrome on a computer, or open the studio.
         </p>
       )}
       {!STORE_BUILD && (

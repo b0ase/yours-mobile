@@ -165,9 +165,9 @@ const BCORP_TEXT: Swaps = {
   'src/components/YoursIcon.tsx': [
     [
       "import { useState, useRef, useEffect } from 'react';",
-      "import { useState, useRef, useEffect } from 'react';\nimport { appNameFor } from '../mobile/storeBuild';",
+      "import { useState, useRef, useEffect } from 'react';\nimport { APP_NAME } from '../mobile/storeBuild';",
     ],
-    ['alt="Yours Head"', 'alt={appNameFor()}'],
+    ['alt="Yours Head"', 'alt={APP_NAME}'],
   ],
   'src/pages/requests/UsbCheckRequest.tsx': [['is asking Yours to', 'is asking bWallet to']],
   'src/pages/onboarding/RestoreAccount.tsx': [

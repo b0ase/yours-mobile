@@ -1,11 +1,10 @@
 import { PNEE_POTS_ENABLED } from '../storeBuild';
 import { useState } from 'react';
 import { resolvePayee } from './potSend';
-import { keyFingerprint } from './payeeBinding';
+import { approveReview, keyFingerprint, pointsSomewhereNew } from './payeeBinding';
 import {
   amountSats,
   cancelSub,
-  confirmPayeeReview,
   formatAmount,
   formatPeriod,
   moveSub,
@@ -29,6 +28,8 @@ const STATUS: Record<Subscription['status'], { label: string; color: string }> =
   ended: { label: 'Ended', color: MUTED },
 };
 
+const NEEDS_APPROVAL = { label: 'Paused · approve', color: '#FDA29B' };
+
 const day = (t: number) =>
   new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -48,7 +49,9 @@ export const SubscriptionCard = ({
   /** Shown as "Paid from <pot>" when there is no Pays-from picker (the Pots & Locks › Subscriptions tab). */
   potLabel?: string;
 }) => {
-  const st = STATUS[sub.status];
+  // Waiting for the user to approve a new destination: paused for payments, whatever the status says.
+  const st =
+    sub.needsReview && (sub.status === 'active' || sub.status === 'lowFunds') ? NEEDS_APPROVAL : STATUS[sub.status];
   const next = nextDue(sub);
   const live = sub.status === 'active' || sub.status === 'lowFunds';
   const over = sub.status === 'cancelled' || sub.status === 'ended';
@@ -92,7 +95,7 @@ export const SubscriptionCard = ({
           Pays from
           <select
             value={sub.potId}
-            onChange={(e) => moveSub(sub.id, e.target.value)}
+            onChange={(e) => moveSub(sub.id, e.target.value, Date.now(), rate ?? 0)}
             className="rounded-lg px-2 py-1.5 text-xs font-bold text-white"
             style={{ background: LINE, border: 0 }}
           >
@@ -153,18 +156,38 @@ export const SubscriptionCard = ({
   );
 };
 
-/** A payee that failed verification: show why, and let the user check and accept the current destination. */
+/** One side of the review card: an address and, when known, the wallet key behind it. */
+const Dest = ({ label, address, pubkey }: { label: string; address?: string; pubkey?: string }) => (
+  <div className="text-xs flex flex-col" style={{ color: MUTED }}>
+    <span>{label}</span>
+    <span className="text-white break-all" data-testid={`sub-review-${label.toLowerCase()}`}>
+      {address ?? 'not recorded'}
+    </span>
+    {pubkey && <span>wallet key {keyFingerprint(pubkey)}</span>}
+  </div>
+);
+
+/**
+ * A payee whose destination changed or couldn't be verified (b-Aware row 73): nothing is paid until the user taps
+ * Approve on the destination shown here, old next to new. Approve pins exactly what is shown; the scheduler never
+ * moves a pin by itself.
+ */
 const ReviewPayee = ({ sub }: { sub: Subscription }) => {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const check = async () => {
+  const review = sub.needsReview;
+  const served = review?.servedAddress;
+  // Approve looks the payee up again with the set-up checks: it pins only what this card shows (or, when the
+  // destination itself was refused, what the confirm shows), never an address nothing ties to the payee's key.
+  const approve = async () => {
     setBusy(true);
     setErr('');
     try {
-      const d = await resolvePayee(sub.payee, { ignorePin: true });
-      const who = d.pubkey ? `wallet key ${keyFingerprint(d.pubkey)}` : 'no wallet key';
-      if (window.confirm(`Pay ${sub.payee.paymail ?? sub.payee.name} at ${d.address} (${who}) from now on?`))
-        confirmPayeeReview(sub.id, d.pubkey);
+      // When the payee moved on since this card was raised, approveReview shows the new destination here and throws.
+      await approveReview(sub, resolvePayee, (d) => {
+        const who = d.pubkey ? `wallet key ${keyFingerprint(d.pubkey)}` : 'no wallet key';
+        return window.confirm(`Pay ${sub.payee.paymail ?? sub.payee.name} at ${d.address} (${who}) from now on?`);
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -177,23 +200,47 @@ const ReviewPayee = ({ sub }: { sub: Subscription }) => {
       style={{ background: '#F0443822' }}
       data-testid="sub-needs-review"
     >
+      {served && (
+        <div className="text-xs font-bold text-white" data-testid="sub-review-headline">
+          {pointsSomewhereNew(sub.payee.paymail ?? sub.payee.name)}
+        </div>
+      )}
       <div className="text-xs" style={{ color: '#FDA29B' }}>
-        Not paying: {sub.needsReview?.reason}
+        Not paying: {review?.reason}
       </div>
+      {served && (
+        <div className="flex flex-col gap-1">
+          <Dest label="Was" address={sub.payee.pinnedAddress} pubkey={sub.payee.pinnedKey} />
+          <Dest label="Now" address={served} pubkey={review?.servedKey} />
+        </div>
+      )}
       {err && (
         <div className="text-xs" style={{ color: '#FDA29B' }}>
           {err}
         </div>
       )}
-      <button
-        type="button"
-        onClick={() => void check()}
-        disabled={busy}
-        className="rounded-lg px-3 py-2 text-sm font-bold border-0"
-        style={{ background: LINE, color: '#fff' }}
-      >
-        {busy ? 'Checking…' : 'Check new destination'}
-      </button>
+      {served ? (
+        <button
+          type="button"
+          onClick={() => void approve()}
+          disabled={busy}
+          className="rounded-lg px-3 py-2 text-sm font-bold border-0"
+          style={{ background: LINE, color: '#fff' }}
+          data-testid="sub-review-approve"
+        >
+          {busy ? 'Checking…' : 'Approve new destination'}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void approve()}
+          disabled={busy}
+          className="rounded-lg px-3 py-2 text-sm font-bold border-0"
+          style={{ background: LINE, color: '#fff' }}
+        >
+          {busy ? 'Checking…' : 'Check new destination'}
+        </button>
+      )}
     </div>
   );
 };

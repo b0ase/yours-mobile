@@ -9,6 +9,7 @@ import {
   broadcastRaw,
   potBalanceSats,
   potPneeUnits,
+  potTxKnown,
   resolvePayee,
   signFromPot,
   signPneeFromPot,
@@ -51,6 +52,7 @@ const tick = async () => {
     resolve: engineResolve,
     sign: (potId, outputs, memo) => signFromPot(e.store, potId, outputs, memo),
     broadcast: broadcastRaw,
+    txKnown: potTxKnown,
     ...(PNEE_POTS_ENABLED
       ? {
           signPnee: (potId: string, outputs: Parameters<typeof signPneeFromPot>[2], memo?: string) =>

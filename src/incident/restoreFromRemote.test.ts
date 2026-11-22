@@ -295,6 +295,18 @@ describe('restore on a new device pulls the backup store before the device store
     expect(s.txs.length).toBe(5);
   });
 
+  test('a call that joins a running switch still gets its own onFinished (the restore view clears)', async () => {
+    const root = PrivateKey.fromRandom();
+    const { remote, tag } = await phoneThatCollected(root, { push: true });
+    const d = await newDevice(root, remote, tag);
+    const finished: string[] = [];
+    const first = switchToLocalVerified({ ...d.deps, onFinished: () => finished.push('first') });
+    const joiner = switchToLocalVerified({ ...d.deps, onFinished: () => finished.push('joiner') });
+    const [a, b] = await Promise.all([first, joiner]);
+    expect([a.ok, b.ok]).toEqual([true, true]);
+    expect(finished.sort()).toEqual(['first', 'joiner']);
+  });
+
   test('backup never received the receipts (phone local-active, never pushed): store restore finds nothing', async () => {
     const root = PrivateKey.fromRandom();
     const { remote, tag } = await phoneThatCollected(root, { push: false });

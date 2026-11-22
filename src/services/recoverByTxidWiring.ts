@@ -2,6 +2,8 @@
  * The toolbox side of recoverByTxid.ts: what initWallet passes in. Its own module so the incident tests
  * (src/incident/sweepUnrecorded.test.ts) run exactly the production wiring.
  */
+import { beefWithProof, spendsContested } from './failedRowRepair';
+import { CONTESTED } from './recoverFailed';
 import { Beef, Hash, MerklePath, Transaction, Utils } from '@bsv/sdk';
 import type { KeyDeriver } from '@bsv/sdk';
 import type { StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
@@ -55,6 +57,11 @@ export type TxidWiring = {
     ) => Promise<{ status?: string; isUtxo?: boolean }>;
   };
   legacyAddresses?: { label: string; address: string }[];
+  /**
+   * The sync's repair (services/failedRowRepair.ts makeUnfailRepair), for a transaction whose coins another live
+   * payment of this wallet has spent since: repairRows never hands those coins over on its own (#385 second review, 3).
+   */
+  settleContested?: (txid: string, beef: Beef) => Promise<{ result: string; detail?: string }>;
   log?: (msg: string) => void;
   progress?: (step: string) => void;
   /** Per-store search timeout (ms), default 20 s. */
@@ -266,6 +273,15 @@ export function makeTxidRecoverDeps(w: TxidWiring): TxidRecoverDeps {
       );
     },
     repairRows: async ({ txid, rawTx, merklePath, transactionId, outputIds }) => {
+      // Another live payment of this wallet spends a coin this one spent: settled by the sync's repair (that payment
+      // failed through the toolbox, the proof checked, three confirmations), or nothing is written.
+      if (await withRepairStore(storage, (sp) => spendsContested(sp as never, txid, rawTx))) {
+        // Only 'repaired' lets this write: 'not-failed' (settled elsewhere meanwhile) or any hold writes nothing.
+        const r = w.settleContested
+          ? await w.settleContested(txid, beefWithProof(rawTx, merklePath))
+          : { result: 'unavailable' };
+        if (r.result !== 'repaired') throw new Error(`${CONTESTED} (${r.result}${r.detail ? `: ${r.detail}` : ''})`);
+      }
       const header = await services.getHeaderForHeight(merklePath.blockHeight);
       if (!header?.length) throw new Error(`no block header for height ${merklePath.blockHeight}`);
       const leaf = merklePath.path[0].find((l) => l.hash === txid);

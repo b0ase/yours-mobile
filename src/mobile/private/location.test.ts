@@ -239,6 +239,13 @@ describe('locationVerdict: real tiny files', () => {
     expect(v(F.webm(false), 'video/webm')).toBe('none');
   });
 
+  test('MKV / WebM holding a binary EXIF block: GPS is found, no GPS is none', () => {
+    for (const mime of ['video/x-matroska', 'video/webm']) {
+      expect(v(F.mkvWithExif(true), mime)).toBe('found');
+      expect(v(F.mkvWithExif(false), mime)).toBe('none');
+    }
+  });
+
   test('an image / video format it cannot read may contain location; other files need evidence', () => {
     expect(v([1, 2, 3, 4, 5, 6, 7, 8, 9], 'image/x-unknown')).toBe('unknown');
     expect(v([1, 2, 3, 4, 5, 6, 7, 8, 9], 'video/x-msvideo')).toBe('unknown');

@@ -10,6 +10,7 @@ import {
   type WalletName,
 } from '../names/paymail';
 import { handoverIsEmpty } from './handoverEmpty';
+import { handoverKey } from './handoverKey';
 
 const f: typeof fetch = (u, i) => fetch(u, i);
 const short = (k: string) => `${k.slice(0, 6)}…${k.slice(-4)}`;
@@ -63,11 +64,10 @@ export function NameHandover({ names, onChanged }: { names: WalletName[]; onChan
   const release = () =>
     act(async () => {
       const name = alias || plain[0];
-      const r = /^0[23][0-9a-f]{64}$/i.test(to.trim())
-        ? { pubkey: to.trim().toLowerCase() }
-        : await resolveRecipient(f, parseRecipient(to));
-      if (!r.pubkey) throw new Error("Couldn't find that wallet's key");
-      await releaseName(f, apiContext.wallet, name, r.pubkey);
+      const key = /^0[23][0-9a-f]{64}$/i.test(to.trim())
+        ? to.trim().toLowerCase()
+        : handoverKey(await resolveRecipient(f, parseRecipient(to)));
+      await releaseName(f, apiContext.wallet, name, key);
       setReleased(name);
     }, 'Released. The name moves when the other wallet accepts it.');
 

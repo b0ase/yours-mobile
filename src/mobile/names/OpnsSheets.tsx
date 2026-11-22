@@ -5,6 +5,7 @@ import { CARD } from '../../components/approval/cardTheme';
 import { PayHero } from '../../components/approval/ApprovalHeroes';
 import { fmtSats, fmtUsd } from '../money/money';
 import { usdOrSats } from './opnsSell';
+import { APP_NAME, MARKET_ENABLED } from '../storeBuild';
 
 const Sheet = (p: { children: ReactNode }) =>
   createPortal(
@@ -35,13 +36,14 @@ export const OpnsBuySheet = (p: {
   <Sheet>
     <ApprovalCard
       ours
-      site="bWalletX"
+      site={`${APP_NAME}`}
       siteSub={p.site}
       onClose={p.onClose}
       hero={<PayHero amount={usdOrSats(p.priceSats, p.rate)} sub={fmtSats(p.priceSats)} />}
       title={
         <>
-          Buy <span style={{ color: CARD.gold }}>{p.name}</span>
+          {MARKET_ENABLED ? 'Buy ' : ''}
+          <span style={{ color: CARD.gold }}>{p.name}</span>
         </>
       }
       primary={{ label: 'Allow', onClick: p.onAllow }}
@@ -68,7 +70,7 @@ export const OpnsSellSheet = (p: {
   <Sheet>
     <ApprovalCard
       ours
-      site="bWalletX"
+      site={`${APP_NAME}`}
       siteSub="bMint · Sell OpNS names"
       onClose={p.onClose}
       hero={<PayHero amount={fmtUsd(p.totalUsd)} sub={`${fmtSats(p.totalSats)} if all sell`} badge="SELL" />}
@@ -108,7 +110,7 @@ export const OpnsGiftSheet = (p: {
   <Sheet>
     <ApprovalCard
       ours
-      site="bWalletX"
+      site={`${APP_NAME}`}
       siteSub="bMint · Gift OpNS names"
       onClose={p.onClose}
       hero={<PayHero amount="Free" sub="Network fee only" badge="GIFT" />}
@@ -148,7 +150,7 @@ export const OpnsVaultCancelSheet = (p: {
   <Sheet>
     <ApprovalCard
       ours
-      site="bWalletX"
+      site={`${APP_NAME}`}
       siteSub="bMint · OpNS Vault"
       onClose={p.onClose}
       hero={<PayHero amount="Vault" sub="Plus a small network fee" badge="KEEP" />}

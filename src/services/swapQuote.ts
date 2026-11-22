@@ -8,6 +8,7 @@
  */
 import { WOC_MAINNET_URL } from '@1sat/actions';
 import type { RateQuote } from '../mobile/p2p/swap/swapActions';
+import { APP_NAME } from '../mobile/storeBuild';
 
 export const SWAP_RATE_TTL_MS = 5 * 60_000;
 export const SWAP_RATE_TIMEOUT_MS = 4_000;
@@ -60,7 +61,7 @@ export function makeSwapQuote(d: SwapQuoteDeps): () => Promise<RateQuote> {
     const c = await d.readCache().catch(() => undefined);
     // A cached rate without a timestamp (the popup's legacy cache) is treated as stale: try fresh first.
     if (c && valid(c.rate) && typeof c.timestamp === 'number' && now() - c.timestamp < SWAP_RATE_TTL_MS)
-      return { rate: c.rate, source: 'bWalletX price feed (cached BSV/USD rate)' };
+      return { rate: c.rate, source: `${APP_NAME} price feed (cached BSV/USD rate)` };
     for (const s of sources) {
       try {
         const rate = await fetchRate(d.fetch, s, timeoutMs);

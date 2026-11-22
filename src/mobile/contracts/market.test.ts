@@ -81,7 +81,7 @@ const ann = new ProtoWallet(PrivateKey.fromRandom());
 const attacker = new ProtoWallet(PrivateKey.fromRandom());
 const annBase = {
   format: CONTRACT_ENVELOPE_FORMAT,
-  contract: { format: 'bwalletx.contract/1', name: 'NDA', network: 'mainnet' },
+  contract: { format: 'bwalletx.contract/1', name: 'NDA', network: 'mainnet', source: 'return true' },
   description: 'A plain NDA',
   author: { name: 'Ann', address: '1AuthorAddressxxxxxxxxxxxxxxxxxxxx' },
   sale: { priceUsd: 1, copies: 10, payTo: '1AuthorAddressxxxxxxxxxxxxxxxxxxxx' },
@@ -218,7 +218,8 @@ describe('buyContract pays only the payee the author inscribed', () => {
     expect(err).toContain('copies a contract first listed by');
   });
 
-  test("an earlier unsigned listing from another address doesn't block the signed author", async () => {
+  // b-Aware row 352: after an unsigned listing only the same address may follow, so a signed clone can't win.
+  test('an earlier unsigned listing from another address blocks a later signed one', async () => {
     const unsignedFirst = {
       ...theCopy,
       createdAt: '2026-10-01T00:00:00Z',
@@ -228,8 +229,8 @@ describe('buyContract pays only the payee the author inscribed', () => {
       } as ContractEnvelope,
     };
     const { calls, err } = await run(anns, authorBody, [unsignedFirst, anns]);
-    expect(calls.length).toBeGreaterThan(0);
-    expect(err).toBe('wallet reached');
+    expect(calls).toEqual([]);
+    expect(err).toContain('copies a contract first listed by');
   });
 
   test('the author listing again from another address, under the same key, is not a copy', async () => {

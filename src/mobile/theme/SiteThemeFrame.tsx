@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { trueHost, type WornTheme } from './connectSiteTheme';
 import { STRIP, useSiteTheme } from './useSiteTheme';
 import { FRAMED_ARM_MS, originLabel } from '../../services/frameAccess';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * The approval sheet's frame (docs/SITE-THEME.md). On top, always, the wallet's own strip: fixed colours, the true
@@ -36,7 +37,7 @@ export const OriginStrip = ({
       <rect x="4" y="11" width="16" height="10" rx="2" />
       <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
-    <span style={{ color: STRIP.muted }}>bWalletX · request from</span>
+    <span style={{ color: STRIP.muted }}>{APP_NAME} · request from</span>
     <span className="font-bold truncate" style={{ color: STRIP.text }}>
       {originLabel(originator, embeddedIn)}
     </span>
@@ -78,7 +79,7 @@ export const SiteThemeBanner = ({ theme, originator }: { theme: WornTheme; origi
         {theme.name}
       </div>
       <div className="truncate" style={{ fontSize: 11, color: theme.accentHi }}>
-        Connected with bWalletX · {trueHost(originator)}
+        Connected with {APP_NAME} · {trueHost(originator)}
       </div>
     </div>
   </div>

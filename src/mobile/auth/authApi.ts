@@ -78,7 +78,7 @@ export const scopeLabel = (s: string) =>
     : s === 'profile' || s === 'paymail'
       ? 'Your $name and paymail'
       : s === 'bitsign'
-        ? 'Your bit-sign verified level'
+        ? 'Your bChatX verified level'
         : s;
 
 /** The 4-digit code the site shows; the sheet only enables Allow once four digits are typed. */

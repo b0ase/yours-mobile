@@ -28,6 +28,7 @@ import { bavatarSvg } from '../bavatar/bavatar';
 import { unreadCount, type NotifyItem, type NotifyKind } from './notify';
 import { clearItems, getItems, readAll, readOne, subscribeItems } from './store';
 import './notifications-page.css';
+import { APP_NAME } from '../storeBuild';
 
 const ICONS: Record<NotifyKind, typeof Bell> = {
   reply: MessageCircle,
@@ -111,7 +112,7 @@ export default function NotificationsPage() {
           <p className="nf-empty-sub">
             {items.length
               ? 'No notifications of this kind yet.'
-              : 'Replies, mentions, room messages, payments and sales show up here while bWalletX is open. Choose which in Settings → Notifications.'}
+              : `Replies, mentions, room messages, payments and sales show up here while ${APP_NAME} is open. Choose which in Settings → Notifications.`}
           </p>
         </div>
       ) : (

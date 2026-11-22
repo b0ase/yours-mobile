@@ -140,6 +140,15 @@ export class FakeChain {
     return { ok: true };
   }
 
+  /** The network forgets an unmined transaction (it dropped out of the mempool): its inputs are unspent again. */
+  drop(txid: string) {
+    const t = this.txs.get(txid);
+    if (!t || t.block !== undefined) throw new Error(`${txid} is not in the mempool`);
+    for (const i of inputsOf(t.tx)) if (this.spentBy.get(i) === txid) this.spentBy.delete(i);
+    for (let v = 0; v < t.tx.outputs.length; v++) this.owned.delete(op(txid, v));
+    this.txs.delete(txid);
+  }
+
   /** Mine everything in the mempool into the next block (one block per call). */
   mine() {
     this.height++;
@@ -180,7 +189,9 @@ export class FakeChain {
       this.unmocked.push(url);
       return new Response('', { status: 404 });
     }
-    const f = this.take(source);
+    // ARC's broadcast (POST /v1/tx, a BEEF body) is the 'broadcast' source, as the wallet's own postBeef is.
+    const post = source === 'arc' && init?.method === 'POST' && /\/v1\/tx$/.test(url);
+    const f = this.take(post ? 'broadcast' : source);
     if (f === 'timeout') {
       await new Promise<void>((resolve) => {
         const t = setTimeout(resolve, this.timeoutMs);
@@ -192,15 +203,39 @@ export class FakeChain {
       throw Object.assign(new Error(`network: ${source} timed out`), { name: 'TimeoutError' });
     }
     if (f) return new Response('', { status: Number(f) });
+    if (post) return this.arcPost(init?.body);
     return this.answer(source, url);
   }) as typeof fetch;
+
+  /** ARC taking a BEEF: its unmined transactions reach the network, or the first double spend is reported. */
+  private arcPost(body: unknown): Response {
+    const json = (j: unknown) => new Response(JSON.stringify(j), { status: 200 });
+    let beef: Beef;
+    try {
+      beef = Beef.fromBinary([...(body as Uint8Array)]);
+    } catch {
+      return new Response(JSON.stringify({ status: 461, detail: 'Malformed transaction' }), { status: 461 });
+    }
+    let txid = '';
+    for (const b of beef.txs) {
+      if (!b.tx || b.bumpIndex !== undefined) continue;
+      txid = b.txid;
+      const r = this.accept(b.tx);
+      if (!r.ok) return json({ txid, txStatus: 'DOUBLE_SPEND_ATTEMPTED', extraInfo: `already spent by ${r.by}` });
+    }
+    return json({ txid, txStatus: 'SEEN_ON_NETWORK' });
+  }
 
   private answer(source: Source, url: string): Response {
     const json = (j: unknown) => new Response(JSON.stringify(j), { status: 200 });
     const notFound = () => new Response('', { status: 404 });
     if (source === 'woc') {
       let m = /\/tx\/hash\/([0-9a-f]{64})$/.exec(url);
-      if (m) return this.has(m[1]) ? json({ txid: m[1], hash: m[1] }) : notFound();
+      if (m) {
+        const block = this.txs.get(m[1])?.block;
+        const mined = block ? { blockheight: block, confirmations: this.height - block + 1 } : {};
+        return this.has(m[1]) ? json({ txid: m[1], hash: m[1], ...mined }) : notFound();
+      }
       m = /\/tx\/([0-9a-f]{64})\/hex$/.exec(url);
       if (m) return this.has(m[1]) ? new Response(Utils.toHex(this.txs.get(m[1])!.raw)) : notFound();
       m = /\/tx\/([0-9a-f]{64})\/(\d+)\/spent$/.exec(url);
@@ -263,6 +298,9 @@ export class FakeChain {
           return t.raw;
         },
       },
+      // A coin is unspent when the network has it and nothing spends it (the BRC-177 expiry task's anchor check).
+      isUtxo: async (o: { txid?: string; vout?: number }) =>
+        !!o?.txid && this.has(o.txid) && !this.spentBy.has(op(o.txid, Number(o.vout))),
       getChainTracker: async () => tracker,
       getHeight: async () => this.height,
       getHeaderForHeight: async () => new Array(80).fill(0),
@@ -312,6 +350,12 @@ export class FakeChain {
             },
           ];
         const refused: { txid: string; reason: string }[] = [];
+        // ARC processes every unproven transaction a BEEF carries, not only the ones named (task 54 review, round 2):
+        // a transaction riding in a BEEF reaches the network whether or not it is an ancestor of the named ones.
+        for (const b of beef.txs) {
+          if (b.hasProof || !b.tx || txids.includes(b.txid)) continue;
+          this.accept(b.tx, { walletBroadcast: true });
+        }
         for (const t of txids) {
           const tx = beef.findTxid(t)?.tx;
           if (!tx) continue;

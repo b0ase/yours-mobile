@@ -17,6 +17,7 @@
  * waiting: it aborts nothing, and the step it stopped waiting for (an unlock, a deposit sweep the wallet already
  * broadcast) is left to finish on its own. noSend / unsent release logic is elsewhere and untouched.
  */
+import { APP_NAME } from '../mobile/storeBuild';
 
 export const STEP_TIMEOUT_MS = 5000;
 /** Wallet-settle deadline, counted from the moment the background is warm (not from the site's call). */
@@ -28,14 +29,11 @@ export const UNLOCK_WAIT_MS = 60_000;
 export type CodedError = Error & { code: string; status: number };
 
 export const WALLET_NOT_READY_CODE = 'ERR_WALLET_NOT_READY';
-export const WALLET_NOT_READY_MESSAGE =
-  'bWalletX is still starting up and could not take this request yet. Nothing was paid; try again in a moment.';
+export const WALLET_NOT_READY_MESSAGE = `${APP_NAME} is still starting up and could not take this request yet. Nothing was paid; try again in a moment.`;
 export const WALLET_LOCKED_TIMEOUT_CODE = 'ERR_WALLET_LOCKED_TIMEOUT';
-export const WALLET_LOCKED_TIMEOUT_MESSAGE =
-  'bWalletX is locked and was not unlocked in time. Nothing was paid; unlock bWalletX, then try again.';
+export const WALLET_LOCKED_TIMEOUT_MESSAGE = `${APP_NAME} is locked and was not unlocked in time. Nothing was paid; unlock ${APP_NAME}, then try again.`;
 export const FUNDING_TIMEOUT_CODE = 'ERR_FUNDING_TIMEOUT';
-export const FUNDING_TIMEOUT_MESSAGE =
-  'bWalletX took too long to get your balance ready for this payment. Nothing was paid; try again.';
+export const FUNDING_TIMEOUT_MESSAGE = `${APP_NAME} took too long to get your balance ready for this payment. Nothing was paid; try again.`;
 
 const coded = (message: string, code: string, status: number): CodedError =>
   Object.assign(new Error(message), { code, status });

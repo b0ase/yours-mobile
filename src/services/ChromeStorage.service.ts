@@ -30,6 +30,7 @@ import {
   KdfPending,
   UsbSecurity,
 } from './types/chromeStorage.types';
+import { APP_NAME } from '../mobile/storeBuild';
 
 // passKey lives in chrome.storage.session (in-memory only, survives service worker idle,
 // cleared on browser close, not written to disk, not accessible to content scripts).
@@ -105,24 +106,23 @@ export const isRealAccount = (a: unknown): boolean =>
 
 /** changePassword: the stored keys don't open with the session key and an earlier change left its note. */
 export const UNFINISHED_PASSWORD_CHANGE =
-  "An earlier password change didn't finish, so nothing was changed. Lock bWalletX and unlock with the new password " +
+  `An earlier password change didn't finish, so nothing was changed. Lock ${APP_NAME} and unlock with the new password ` +
   "you chose then (if that doesn't open it, your old one). Then try again.";
 /** changePassword: the stored keys don't open with the session key and there is no note. */
-export const KEYS_CHANGED_SINCE_UNLOCK =
-  "Your wallet's keys changed since you unlocked, so nothing was changed. Lock bWalletX, unlock again and try again.";
+export const KEYS_CHANGED_SINCE_UNLOCK = `Your wallet's keys changed since you unlocked, so nothing was changed. Lock ${APP_NAME}, unlock again and try again.`;
 
 /** ChromeStorageService.set: the write landed, but reading storage back afterwards failed. */
 export class SavedNotReloadedError extends Error {
   constructor(cause: unknown) {
     const why = cause instanceof Error ? cause.message : (cause as { message?: string } | null)?.message;
-    super(`Saved, but bWalletX could not read its storage back${why ? ` (${why})` : ''}`);
+    super(`Saved, but ${APP_NAME} could not read its storage back${why ? ` (${why})` : ''}`);
     this.name = 'SavedNotReloadedError';
   }
 }
 
 /** changePassword: the new password is stored, but reading storage back failed; the session already uses it. */
 export const PASSWORD_SAVED_NOT_RELOADED =
-  'Your new password is saved, but bWalletX could not read its storage back. Lock bWalletX and unlock with the new ' +
+  `Your new password is saved, but ${APP_NAME} could not read its storage back. Lock ${APP_NAME} and unlock with the new ` +
   'password.';
 
 /** A note's `older` salts; anything not a list of strings (a damaged note) counts as none. */

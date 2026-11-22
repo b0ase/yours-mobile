@@ -3,6 +3,7 @@ import { Buffer } from 'buffer';
 import process from 'process';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
+import { setAppRemount } from './appRemount';
 import { RootErrorBoundary } from './RootErrorBoundary';
 import { ServiceProvider } from './contexts/providers/ServiceProvider';
 import { ThemeProvider } from './contexts/providers/ThemeProvider';
@@ -54,13 +55,22 @@ if (PasskeyCheck && location.pathname.replace(/\/$/, '').endsWith('/passkey-chec
       <PasskeyCheck />
     </Suspense>,
   );
-} else
-  rootDiv.render(
-    <RootErrorBoundary>
-      <ServiceProvider>
-        <ThemeProvider>
-          <App />
-        </ThemeProvider>
-      </ServiceProvider>
-    </RootErrorBoundary>,
-  );
+} else {
+  // A new key unmounts every provider and screen and builds them again (appRemount.ts).
+  let generation = 0;
+  const renderApp = () =>
+    rootDiv.render(
+      <RootErrorBoundary key={generation}>
+        <ServiceProvider>
+          <ThemeProvider>
+            <App />
+          </ThemeProvider>
+        </ServiceProvider>
+      </RootErrorBoundary>,
+    );
+  setAppRemount(() => {
+    generation += 1;
+    renderApp();
+  });
+  renderApp();
+}

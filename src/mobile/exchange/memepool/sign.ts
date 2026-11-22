@@ -11,6 +11,7 @@ import {
   UnlockingScript,
   Utils,
   LockingScript,
+  type Transaction,
   type WalletInterface,
   type WalletProtocol,
 } from '@bsv/sdk';
@@ -81,4 +82,53 @@ export async function signOurInputs(
     ]).toHex();
   }
   return unlocks;
+}
+
+/**
+ * "Recover now" (trade.ts recoverNow): the unlocking script for our funding coin at `index` of a transaction the
+ * wallet built (createAction, signAndProcess false), signed SIGHASH_ALL|FORKID over that transaction exactly as built.
+ * The coin's satoshis and script come from our own record, not the transaction, so a txid-only input still signs.
+ * The key must hash to the coin's lock first.
+ */
+export async function signSelfSpend(
+  wallet: WalletInterface,
+  tx: Transaction,
+  index: number,
+  coin: { satoshis: number; script: string; key: CoinKey },
+): Promise<string> {
+  const { publicKey } = await wallet.getPublicKey({
+    protocolID: coin.key.protocolID,
+    keyID: coin.key.keyID,
+    counterparty: 'self',
+    forSelf: true,
+  });
+  const pkh = Utils.toHex(PublicKey.fromString(publicKey).toHash() as number[]);
+  if (pkh !== parseP2pkh(coin.script))
+    throw new Error('Refusing to sign: that coin is not locked to this wallet’s key.');
+  const input = tx.inputs[index];
+  const preimage = TransactionSignature.format({
+    sourceTXID: input.sourceTXID ?? input.sourceTransaction!.id('hex'),
+    sourceOutputIndex: input.sourceOutputIndex,
+    sourceSatoshis: coin.satoshis,
+    transactionVersion: tx.version,
+    otherInputs: tx.inputs.filter((_, j) => j !== index),
+    inputIndex: index,
+    outputs: tx.outputs,
+    inputSequence: input.sequence ?? 0xffffffff,
+    subscript: LockingScript.fromHex(coin.script),
+    lockTime: tx.lockTime,
+    scope: SIGHASH_ALL_FORKID,
+  });
+  const { signature } = await wallet.createSignature({
+    hashToDirectlySign: Hash.sha256(Hash.sha256(preimage)),
+    protocolID: coin.key.protocolID,
+    keyID: coin.key.keyID,
+    counterparty: 'self',
+  });
+  const sig = [...signature, SIGHASH_ALL_FORKID];
+  const pub = Utils.toArray(publicKey, 'hex');
+  return new UnlockingScript([
+    { op: sig.length, data: sig },
+    { op: pub.length, data: pub },
+  ]).toHex();
 }

@@ -1,5 +1,5 @@
 import type { Contact } from '../chat/contacts';
-import { CAP, fill, getCapabilities, resolveOpns, type Fetch } from '../names/names';
+import { CAP, fill, getCapabilities, resolveOpns, type Fetch, type Resolved } from '../names/names';
 import { listPaymails, type WalletName } from '../names/paymail';
 
 /**
@@ -11,7 +11,7 @@ import { listPaymails, type WalletName } from '../names/paymail';
  *  - paymail public profile   bsvalias f12f968c92d6              → name + avatar
  *  - paymail pki              bsvalias pki                       → identity key (when the contact has none)
  *  - bWalletX paymail lookup  listPaymails(identityKey)          → their other paymails; a `.x` name proves X
- *  - OpNS                     resolveOpns(name)                  → a name counts only when bound to their key
+ *  - OpNS                     resolveOpns(name)                  → a name counts only when its signed binding is their key
  */
 
 export type PaymailPublic = { name?: string; avatar?: string; pubkey?: string };
@@ -186,6 +186,13 @@ export const fetchRoles = async (f: Fetch, handle: string): Promise<BusinessRole
 export type GetJson = (url: string) => Promise<unknown>;
 
 /** Everything public about one contact, in parallel; any source that fails is simply left out. */
+/**
+ * The key an OpNS name proves for a contact card: only a binding its key signed on the owner output, and only when
+ * the coin was also checked to be that name's inscription (opnsChecked 'chain'), never an index's opns.idKey string.
+ */
+export const opnsCardKey = (r: Pick<Resolved, 'pubkey' | 'opnsChecked' | 'opnsKeySigned'>): string | undefined =>
+  r.opnsKeySigned && r.opnsChecked === 'chain' ? r.pubkey : undefined;
+
 export const loadCardInputs = async (c: Contact, f: Fetch, getJson: GetJson): Promise<CardInputs> => {
   const safe = <T>(p: Promise<T>, d: T) => p.catch(() => d);
   const [profile, paymailProfile, businesses] = await Promise.all([
@@ -201,7 +208,8 @@ export const loadCardInputs = async (c: Contact, f: Fetch, getJson: GetJson): Pr
     ? await Promise.all(
         opnsCandidates(c, paymails).map((name) =>
           safe(
-            resolveOpns(f, name).then((r) => ({ name, pubkey: r.pubkey })),
+            // Only a binding its key signed on chain counts, never an index's opns.idKey string (b-Aware opns-indexer).
+            resolveOpns(f, name).then((r) => ({ name, pubkey: opnsCardKey(r) })),
             { name } as OpnsCheck,
           ),
         ),

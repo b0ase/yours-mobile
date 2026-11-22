@@ -1,6 +1,7 @@
 import { useIssuer } from './useIssuer';
 import { BadgeCheck, ShieldQuestion, TriangleAlert } from 'lucide-react';
 import { issuerLabel } from './issuerVerify';
+import { APP_NAME } from '../storeBuild';
 
 const GOLD = '#d4af37';
 const GREY = '#8a8a8a';
@@ -16,7 +17,7 @@ export function IssuerBadge({ tokenId, compact = false }: { tokenId: string | nu
       data-testid="issuer-badge"
       title={
         info?.official
-          ? 'First-party token: this exact token id is built into bWalletX'
+          ? `First-party token: this exact token id is built into ${APP_NAME}`
           : verified && info?.identityKey
             ? `Signed in the mint tx by identity key ${info.identityKey}`
             : (info?.reason ?? text)

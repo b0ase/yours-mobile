@@ -14,6 +14,7 @@ import { isMintPrivateAction, isMintPrivateCode } from '../../services/mintPriva
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
 import { ONE_APPROVAL_SEAL } from '../../services/sealPass';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
+import { isRefusalCode } from '../../services/refusalCodes';
 import {
   CONFIRM_USER_CALL,
   LAST_VERIFICATION_CALL,
@@ -127,7 +128,13 @@ export const toXdmResponse = (id: string, reply: unknown) => {
   const description = typeof r.error === 'string' && r.error ? r.error : 'Request failed';
   // wallet.mintPrivate refusals keep their code so the site can read it (services/mintPrivateAction.ts).
   // Timeouts keep their code so the site can offer Retry (mobile/siteGate.ts, docs/BIOMETRIC-GATE.md).
-  if (isMintPrivateCode(r.code) || r.code === SITE_CALL_TIMEOUT_CODE || r.code === VERIFICATION_TIMEOUT_CODE)
+  // The wallet's own refusals (stale sheet, blocked site, payees unreadable…) keep theirs: never read as "you cancelled".
+  if (
+    isMintPrivateCode(r.code) ||
+    isRefusalCode(r.code) ||
+    r.code === SITE_CALL_TIMEOUT_CODE ||
+    r.code === VERIFICATION_TIMEOUT_CODE
+  )
     return { type: 'CWI', isInvocation: false, id, status: 'error', description, code: r.code } as const;
   return { type: 'CWI', isInvocation: false, id, status: 'error', description, code: 1 } as const;
 };

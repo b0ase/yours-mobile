@@ -7,6 +7,7 @@
  *
  * Pure: no chrome, no React. Tested in sendErrors.test.ts.
  */
+import { APP_NAME } from '../mobile/storeBuild';
 
 /** 'yes': it went out on chain (e.g. a $name payment whose delivery to the payee's host failed afterwards). */
 export type MoneyMoved = 'no' | 'unknown' | 'yes';
@@ -171,7 +172,7 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
   if (/another wallet extension|OTHER_WALLET_EXTENSION/i.test(raw))
     return make(
       'other-extension',
-      'Another wallet extension is answering requests in this browser. Nothing was sent. Turn off the other bWalletX (or other wallet) extensions in chrome://extensions, then try again.',
+      `Another wallet extension is answering requests in this browser. Nothing was sent. Turn off the other ${APP_NAME} (or other wallet) extensions in chrome://extensions, then try again.`,
       'no',
     );
 
@@ -294,7 +295,7 @@ export function classifySendError(e: unknown, phase: 'before-sign' | 'send' = 's
   if (/WERR_STORAGE_REMOTE_FAILING|online storage \(.*\) is failing/i.test(raw))
     return make(
       'storage-remote-failing',
-      "bWalletX's online storage (wallet.1sat.app) is failing for your account. Nothing was sent. Switch to This device in Settings › Storage, then try again.",
+      `${APP_NAME}'s online storage (wallet.1sat.app) is failing for your account. Nothing was sent. Switch to This device in Settings › Storage, then try again.`,
       'no',
     );
 

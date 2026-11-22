@@ -25,6 +25,7 @@ import { buildReceipt, receiptMap, receiptSvg, type Receipt, type ReceiptIdentit
 import { MAX_PIECES, MIN_PIECE_SATS, mergePlans, type LockMode, type LockPlan, type PlanPiece } from './schedule';
 import type { ChromeStorageService } from '../../services/ChromeStorage.service';
 import { FEE_PER_KB } from '../../utils/constants';
+import { APP_NAME } from '../storeBuild';
 
 const LOCK_KEY_ID = 'lock';
 const planKey = (account: string) => `bwx.lockPlans.${account}`;
@@ -157,7 +158,7 @@ export async function receiptOutput(
   const tags = ['type:image/svg+xml', 'origin', 'lock-receipt'];
   return {
     hex: buildInscriptionScript(dest, content, 'image/svg+xml', receiptMap(r)).toHex(),
-    ci: buildOrdinalCustomInstructions({ protocolID: P1SAT_PROTOCOL, keyID, tags, name: 'bWalletX lock receipt' }),
+    ci: buildOrdinalCustomInstructions({ protocolID: P1SAT_PROTOCOL, keyID, tags, name: `${APP_NAME} lock receipt` }),
     tags,
   };
 }

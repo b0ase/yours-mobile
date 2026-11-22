@@ -8,17 +8,37 @@
  *    taken in as an ordinary wallet payment and show in the balance.
  * Signing goes through createSignature (sign.ts); nothing here sees a private key.
  */
-import { P2PKH, PublicKey, Random, Utils, type WalletInterface, type WalletProtocol } from '@bsv/sdk';
+import {
+  P2PKH,
+  PublicKey,
+  type Beef,
+  type ChainTracker,
+  Random,
+  Transaction,
+  UnlockingScript,
+  Utils,
+  type WalletInterface,
+  type WalletProtocol,
+} from '@bsv/sdk';
 import { noteFor, tokenCoins, tokenOutputTags } from '../../market/launchpad/tokens';
-import { signOurInputs } from './sign';
+import { signOurInputs, signSelfSpend } from './sign';
 import { bsv21TransferScript, addressPkh, parseBsv21Transfer, parseP2pkh } from './script';
-import type { Funding, OfferedCoin, OrdKey, PayKey, TradeWallet } from './trade';
+import type { Funding, OfferedCoin, OrdKey, PayKey, SpendGuard, TradeWallet } from './trade';
 import type { Template } from './validate';
 
 const ONESAT: WalletProtocol = [0, 'onesat'];
 const BRC29: WalletProtocol = [2, '3241645161d8'];
+/**
+ * The most of a "Recover now" that may go anywhere but our explicit output: the network fee plus the wallet's own
+ * change from what the fee doesn't need (a 1-in, 2-out transaction costs far less).
+ */
+const MAX_RECOVERY_FEE = 2_000;
 
-type BeefSource = { getBeefForTxid(txid: string): Promise<{ toBinaryAtomic(txid: string): number[] }> };
+type BeefSource = {
+  getBeefForTxid(txid: string): Promise<Beef>;
+  /** The wallet's block-header tracker (wallet-toolbox Services). Without it nothing counts as proven. */
+  getChainTracker?(): Promise<ChainTracker>;
+};
 
 export function memepoolWallet(
   wallet: WalletInterface,
@@ -45,9 +65,10 @@ export function memepoolWallet(
       const keyID = `${tokenId}-${Date.now()}`;
       return { address: await addressOf(ONESAT, keyID), key: { protocolID: ONESAT, keyID } };
     },
-    async newPayKey() {
-      const derivationPrefix = Utils.toBase64(Random(10));
-      const derivationSuffix = Utils.toBase64(Random(10));
+    async newPayKey(nonce) {
+      // With a stored nonce the key is re-derivable from the wallet (BRC-42); without, a fresh one (sells).
+      const derivationPrefix = nonce?.prefix ?? Utils.toBase64(Random(10));
+      const derivationSuffix = nonce?.suffix ?? Utils.toBase64(Random(10));
       const keyID = `${derivationPrefix} ${derivationSuffix}`;
       return {
         address: await addressOf(BRC29, keyID),
@@ -71,12 +92,120 @@ export function memepoolWallet(
       return { coin, beef: Array.from(r.tx), pay };
     },
     async returnFunding(f: Funding) {
+      // Records keep no BEEF (it can fill the storage quota): a swept funding fetches it again from the network.
+      let tx = f.beef;
+      if (!tx.length) {
+        if (!services) throw new Error('No way to fetch the funding transaction right now.');
+        tx = (await services.getBeefForTxid(f.coin.txid)).toBinaryAtomic(f.coin.txid);
+      }
       await wallet.internalizeAction({
-        tx: f.beef,
+        tx,
         outputs: [await payment(f.pay, f.coin.vout)],
         description: 'Memepool buy not made: BSV back in your wallet',
         labels: ['memepool'],
       });
+    },
+    async spendBack(f: Funding, guard: SpendGuard) {
+      // The funding transaction's BEEF: in memory, else fetched. Without either, the wallet's own storage vouches for
+      // the transaction it created (trustSelf 'known'), which is the source the guarded createAction itself uses.
+      let inputBEEF: number[] | undefined = f.beef.length ? f.beef : undefined;
+      if (!inputBEEF && services)
+        inputBEEF = await services
+          .getBeefForTxid(f.coin.txid)
+          .then((b) => b.toBinaryAtomic(f.coin.txid))
+          .catch(() => undefined);
+      // The BSV comes back as an explicit output to a fresh BRC-29 key of ours; at most MAX_RECOVERY_FEE goes anywhere
+      // else (the network fee, and the wallet's own change from what the fee doesn't need).
+      const amount = f.coin.satoshis - MAX_RECOVERY_FEE;
+      if (amount < 1) throw new Error('This coin is too small to recover.');
+      const derivationPrefix = Utils.toBase64(Random(10));
+      const derivationSuffix = Utils.toBase64(Random(10));
+      const keyID = `${derivationPrefix} ${derivationSuffix}`;
+      const pay: PayKey = {
+        address: await addressOf(BRC29, keyID),
+        key: { protocolID: BRC29, keyID },
+        derivationPrefix,
+        derivationSuffix,
+      };
+      const script = new P2PKH().lock(pay.address).toHex();
+      const created = await wallet.createAction({
+        description: 'Recover BSV from an unfinished Memepool buy',
+        ...(inputBEEF ? { inputBEEF } : {}),
+        inputs: [
+          {
+            outpoint: `${f.coin.txid}.${f.coin.vout}`,
+            unlockingScriptLength: 108,
+            inputDescription: 'BSV set aside for a Memepool buy',
+          },
+        ],
+        outputs: [{ lockingScript: script, satoshis: amount, outputDescription: 'Your BSV back from a Memepool buy' }],
+        labels: ['memepool'],
+        options: { signAndProcess: false, randomizeOutputs: false, acceptDelayedBroadcast: false, trustSelf: 'known' },
+      });
+      const signable = created.signableTransaction;
+      if (!signable) throw new Error('The wallet did not return a transaction to sign.');
+      let sent = false;
+      try {
+        const tx = Transaction.fromAtomicBEEF(signable.tx);
+        // Fail closed: exactly one input (our funding coin), our output exactly once, everything else within the cap.
+        const idx = tx.inputs.findIndex(
+          (i) =>
+            (i.sourceTXID ?? i.sourceTransaction?.id('hex')) === f.coin.txid && i.sourceOutputIndex === f.coin.vout,
+        );
+        if (idx !== 0 || tx.inputs.length !== 1)
+          throw new Error('Refusing to sign: the wallet changed the recovery transaction.');
+        const ours = tx.outputs.flatMap((o, i) =>
+          o.lockingScript.toHex() === script && o.satoshis === amount ? [i] : [],
+        );
+        if (ours.length !== 1) throw new Error('Refusing to sign: the recovery output is missing.');
+        const vout = ours[0];
+        const elsewhere = tx.outputs.reduce((s, o, i) => (i === vout ? s : s + (o.satoshis ?? 0)), 0);
+        if (elsewhere > MAX_RECOVERY_FEE)
+          throw new Error('Refusing to sign: the transaction pays more than the fee allowance elsewhere.');
+        await guard.beforeSign();
+        const unlockingScript = await signSelfSpend(wallet, tx, idx, f.coin);
+        tx.inputs[idx].unlockingScript = UnlockingScript.fromHex(unlockingScript);
+        const txid = tx.id('hex');
+        await guard.beforeBroadcast();
+        const out = { txid, vout, satoshis: amount, script, pay };
+        if (guard.note && !guard.note(out))
+          throw new Error("This wallet couldn't save a note it needs, so nothing was sent.");
+        sent = true;
+        const done = await wallet.signAction({ reference: signable.reference, spends: { [idx]: { unlockingScript } } });
+        // Take the coin in as an ordinary wallet payment; if that fails, the noted record lets the sweep do it later.
+        let internalized = false;
+        try {
+          const beef = done.tx ?? (services ? (await services.getBeefForTxid(txid)).toBinaryAtomic(txid) : undefined);
+          if (beef) {
+            await wallet.internalizeAction({
+              tx: beef,
+              outputs: [await payment(pay, vout)],
+              description: 'Memepool buy recovered: BSV back in your wallet',
+              labels: ['memepool'],
+            });
+            internalized = true;
+          }
+        } catch {
+          /* left for the sweep */
+        }
+        return { txid: done.txid ?? txid, out, internalized };
+      } catch (e) {
+        if (!sent) await wallet.abortAction({ reference: signable.reference }).catch(() => undefined);
+        throw e;
+      }
+    },
+    async inBlock(txid: string) {
+      // A merkle proof for `txid` (from the wallet's services) checked against the wallet's own block headers.
+      if (!services?.getChainTracker) return false;
+      try {
+        const beef = await services.getBeefForTxid(txid);
+        const btx = beef.findTxid(txid);
+        const path = btx?.bumpIndex === undefined ? undefined : beef.bumps[btx.bumpIndex];
+        if (!path) return false;
+        return (await path.verify(txid, await services.getChainTracker())) === true;
+      } catch {
+        return false;
+      }
     },
     async tokenCoins(tokenId) {
       const { coins } = await tokenCoins(wallet, false);

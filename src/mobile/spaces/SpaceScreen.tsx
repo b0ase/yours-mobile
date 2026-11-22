@@ -80,7 +80,7 @@ import {
   needsSpeakChoice,
   type TranscriptionMode,
 } from './transcription';
-import { TRANSCRIPTION_ENABLED } from '../storeBuild';
+import { APP_NAME, TRANSCRIPTION_ENABLED } from '../storeBuild';
 import {
   applyParticipantsReply,
   defaultJoinAs,
@@ -640,7 +640,7 @@ const SpaceScreenInner = ({
   /** always_open / host_label / always_here, from any space reply that carries them. */
   const [roomMeta, setRoomMeta] = useState<RoomSpaceMeta>(() => ({
     alwaysOpen: alwaysOpenProp,
-    hostLabel: alwaysOpenProp && isAlwaysOpenTicker(ticker) ? 'bWalletX' : null,
+    hostLabel: alwaysOpenProp && isAlwaysOpenTicker(ticker) ? `${APP_NAME}` : null,
     alwaysHere: [],
   }));
   const noteMeta = useCallback(
@@ -1712,7 +1712,8 @@ const SpaceScreenInner = ({
               </div>
             )}
             <p className="mt-1 mb-4 text-[11px]" style={{ color: MUTED }}>
-              The permanent page for this Space: live now, ended later. Scan the QR in bWalletX or with a phone camera.
+              The permanent page for this Space: live now, ended later. Scan the QR in {APP_NAME} or with a phone
+              camera.
             </p>
             <InviteLinksPanel
               create={createInvite}

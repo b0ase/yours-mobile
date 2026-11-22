@@ -4,6 +4,7 @@
  * picks; the bWalletX CLI (`bwalletx key import`) decrypts it with the same scheme:
  *   PBKDF2-SHA256 (310k iterations, 16-byte salt) → AES-256-GCM (12-byte iv, tag appended, as WebCrypto does).
  */
+import { APP_NAME } from '../storeBuild';
 export const AGENT_KEY_FORMAT = 'bwalletx.agentkey/1';
 export const KEYFILE_ITER = 310_000;
 export const MIN_PASSPHRASE = 10;
@@ -54,7 +55,7 @@ export const encryptAgentKeyFile = async (
 };
 
 export const decryptAgentKeyFile = async (file: AgentKeyFile, passphrase: string): Promise<AgentKeySecrets> => {
-  if (file.format !== AGENT_KEY_FORMAT) throw new Error('Not a bWalletX agent key file');
+  if (file.format !== AGENT_KEY_FORMAT) throw new Error(`Not a ${APP_NAME} agent key file`);
   const key = await aesKey(passphrase, unb64(file.enc.salt), file.enc.iter);
   try {
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(file.enc.iv) }, key, unb64(file.enc.data));

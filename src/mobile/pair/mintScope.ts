@@ -17,6 +17,10 @@ export type MintRecord = {
   outpoint: string;
   usd: number;
   collectionId?: string;
+  /** A hold taken before signing (reserveMint): counted on the budget, not yet settled. Its txid is ''. */
+  pending?: true;
+  /** The hold's id, so settleMint / releaseMint find it. */
+  id?: string;
 };
 export type MintLimits = {
   maxItems: number;
@@ -76,13 +80,46 @@ export function checkMintBudget(l: MintLimits | undefined, estUsd: number | null
     );
 }
 
+const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
+
 /** After broadcast: count the item and the actual dollars spent. */
 export const recordMint = (l: MintLimits, rec: MintRecord): MintLimits => ({
   ...l,
   items: l.items + 1,
-  spentUsd: Math.round((l.spentUsd + rec.usd) * 1e6) / 1e6,
+  spentUsd: round6(l.spentUsd + rec.usd),
   recent: [rec, ...l.recent].slice(0, 50),
 });
+
+/**
+ * Before signing: hold one item and the estimated dollars on the budget, saved with the pairing, so an app killed
+ * between the broadcast and the record still has this mint counted (b-Aware row 245, 11 Nov 2026). settleMint swaps
+ * the hold for the actual cost; releaseMint gives it back when nothing was sent.
+ */
+export const reserveMint = (l: MintLimits, hold: { id: string; at: number; name: string; usd: number }): MintLimits =>
+  recordMint(l, { ...hold, txid: '', outpoint: '', pending: true });
+
+/** The hold `id` becomes the real record: the budget moves from the estimate to the actual cost. */
+export const settleMint = (l: MintLimits, id: string, rec: MintRecord): MintLimits => {
+  const hold = l.recent.find((r) => r.pending && r.id === id);
+  if (!hold) return recordMint(l, rec);
+  return {
+    ...l,
+    spentUsd: round6(Math.max(0, l.spentUsd - hold.usd + rec.usd)),
+    recent: l.recent.map((r) => (r === hold ? rec : r)),
+  };
+};
+
+/** Nothing was sent: the hold `id` is given back (one item and its dollars). */
+export const releaseMint = (l: MintLimits, id: string): MintLimits => {
+  const hold = l.recent.find((r) => r.pending && r.id === id);
+  if (!hold) return l;
+  return {
+    ...l,
+    items: Math.max(0, l.items - 1),
+    spentUsd: round6(Math.max(0, l.spentUsd - hold.usd)),
+    recent: l.recent.filter((r) => r !== hold),
+  };
+};
 
 // ---- Chunked upload over the encrypted channel ----
 

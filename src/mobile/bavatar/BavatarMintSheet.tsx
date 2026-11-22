@@ -14,7 +14,6 @@ import { MAX_VARIANT } from './bavatar';
 import {
   bavatarArt,
   bavatarClient,
-  bavatarLabel,
   bavatarNumber,
   currentVariant,
   FOUNDING,
@@ -23,6 +22,13 @@ import {
   mintOffer,
   recoverPendingBavatar,
 } from './mintBavatar';
+import { APP_NAME } from '../storeBuild';
+
+/**
+ * The sheet's title line and image alt: "$alice · bWallet #007" in a store build (APP_NAME, A10 R4). The inscription
+ * itself keeps bavatarLabel's "$alice · bWalletX #007" (mintBavatar.ts), the on-chain name isBavatarItem matches.
+ */
+const shownLabel = (handle: string, n: number) => `$${handle} · ${APP_NAME} ${bavatarNumber(n)}`;
 
 type State =
   | { k: 'loading' }
@@ -116,14 +122,14 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
     >
       <ApprovalCard
         ours
-        site="bWalletX"
+        site={`${APP_NAME}`}
         siteSub={founding ? 'Founding 1,000' : 'Your bAvatar'}
         onClose={onClose}
         closeLabel="Close"
         hero={
           <MintHero
             image={preview || undefined}
-            alt={mine ? bavatarLabel(mine.handle, mine.number) : 'Your bAvatar'}
+            alt={mine ? shownLabel(mine.handle, mine.number) : 'Your bAvatar'}
             number={replacing && !isCurrent ? undefined : num}
             whole
           />
@@ -165,7 +171,7 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
         )}
         {mine && (
           <>
-            <div style={{ fontSize: 18, fontWeight: 600 }}>{bavatarLabel(mine.handle, mine.number)}</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>{shownLabel(mine.handle, mine.number)}</div>
             {!preview && (
               <p className="m-0" style={{ fontSize: 14, color: CARD.muted }}>
                 Claim a $name first: your bAvatar carries it.
@@ -201,7 +207,7 @@ export default function BavatarMintSheet({ onClose }: { onClose: () => void }) {
             {!isCurrent && <PrivacyChoice isPublic={makePublic} onChange={setMakePublic} />}
             <div className="flex flex-wrap" style={{ gap: 8 }}>
               {isCurrent && <Chip solid>Your bAvatar now</Chip>}
-              {offer?.kind === 'free' && <Chip solid>FREE: first mint, fee paid by bWalletX</Chip>}
+              {offer?.kind === 'free' && <Chip solid>FREE: first mint, fee paid by {APP_NAME}</Chip>}
               {offer?.kind === 'paid' && (
                 <Chip>Network fee ~{offer.sats.toLocaleString('en-GB')} sats, paid by you</Chip>
               )}

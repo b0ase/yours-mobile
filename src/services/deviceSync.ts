@@ -387,6 +387,11 @@ export type BackupBeforeSend =
 export async function backupBeforeSend(d: {
   deviceActive: () => boolean;
   backupConfigured: () => boolean;
+  /**
+   * The configured backup can't take the push in this session yet (our server held out for its one-time repair, and
+   * no other backup in the session): the line to refuse with. Undefined: go on.
+   */
+  heldOut?: () => string | undefined;
   pushNow: () => Promise<DeviceSyncResult>;
   timeoutMs?: number;
   log?: (m: string) => void;
@@ -396,6 +401,11 @@ export async function backupBeforeSend(d: {
   if (!d.backupConfigured()) {
     log('[deviceSync] no backup configured: a Store payment goes out with its rows on this device only');
     return { ok: true, how: 'no-backup' };
+  }
+  const held = d.heldOut?.();
+  if (held) {
+    log('[deviceSync] Store payment waits: the backup is being rebuilt and no other backup is connected');
+    return { ok: false, error: held };
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<DeviceSyncResult>((ok) => {

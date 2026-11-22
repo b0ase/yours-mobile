@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { MARKET_ENABLED } from '../storeBuild';
 
 /**
  * PROTOTYPE (demo/desktop-shell): the pinned bApps registry, the manifest reader and the sidebar badge
@@ -59,7 +60,13 @@ export const isPath = (p: unknown): p is string => {
   }
 };
 const SECTION_ID = /^[a-z0-9][a-z0-9-]{0,23}$/;
-const SLOT_LABELS: Record<string, string> = { wallet: 'Wallet', exchange: 'Exchange', feed: 'Feed', chat: 'Chat' };
+// A store build has no Exchange (MARKET_ENABLED): the label is not in its bundle.
+const SLOT_LABELS: Record<string, string> = {
+  wallet: 'Wallet',
+  exchange: MARKET_ENABLED ? 'Exchange' : '',
+  feed: 'Feed',
+  chat: 'Chat',
+};
 
 /** Read the bApp's sections from its manifest; v1 manifests fall back to their path slots. Never throws. */
 export function readWide(raw: unknown): Wide | null {

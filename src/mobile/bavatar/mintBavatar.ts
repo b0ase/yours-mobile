@@ -33,7 +33,10 @@ export const MAX_BAVATAR_BYTES = 40_000;
 /** #001 under 1,000, plain digits after: `bavatarNumber(7)` → `#007`, `bavatarNumber(1234)` → `#1234`. */
 export const bavatarNumber = (n: number) => '#' + (n < FOUNDING ? String(n).padStart(3, '0') : String(n));
 
-/** "$alice · bWalletX #007", the inscription's MAP name and the sheet's title line. */
+/**
+ * "$alice · bWalletX #007", the inscription's MAP name (on chain; pictureSource.ts isBavatarItem matches it). The mint
+ * sheet shows its own label with APP_NAME (BavatarMintSheet.tsx shownLabel), not this one.
+ */
 export const bavatarLabel = (handle: string, n: number) => `$${handle} · bWalletX ${bavatarNumber(n)}`;
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

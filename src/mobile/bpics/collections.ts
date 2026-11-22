@@ -10,6 +10,7 @@
  * holder and the listing price. Its plain inscription search times out on very large collections.
  */
 import { isSafeImageType } from './bpics';
+import { APP_NAME } from '../storeBuild';
 
 export type AllowedCollection = {
   /** Collection inscription outpoint (txid_vout): what items name as subTypeData.collectionId. */
@@ -72,8 +73,7 @@ export const ALLOWED_COLLECTIONS: readonly AllowedCollection[] = [
     id: 'bb945bc7b07ed24dcf145a1db67ba8d3158d7bb944d8152e05e09d5e20f1d775_0',
     name: 'Pepe Universo',
     artist: 'its creator (ZoideNFT)',
-    description:
-      'Cyber Pepe pixel art by the collection’s creator. Not made, endorsed or licensed by bWalletX or Matt Furie.',
+    description: `Cyber Pepe pixel art by the collection’s creator. Not made, endorsed or licensed by ${APP_NAME} or Matt Furie.`,
   },
   {
     id: 'bf14c6f6337c623aaf53db8e20593fbd0934a32b553903e6ddbc9528290a5959_0',

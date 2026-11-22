@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { PrivateKey, ProtoWallet, PublicKey } from '@bsv/sdk';
 import { guardCrossSiteSigning } from './crossSiteSignGuard';
 import {
   _resetOwnBackends,
@@ -55,6 +56,31 @@ describe("no site signs in as the user to the wallet's own servers (review 13 No
     expect(isAuthMessageArgs(auth(BMAIL_KEY))).toBe(true);
     expect(isAuthMessageArgs({ protocolID: [2, ' Auth  Message Signature '] })).toBe(true);
     expect(isAuthMessageArgs({ protocolID: [1, 'auth message signature'] })).toBe(false);
+  });
+
+  // Review 15 Nov 2026: another spelling of the same key must not get a signature. Upper case is the guard's to
+  // refuse (it compares lower-cased); the uncompressed form (04…) never matches the guard, and stays safe only
+  // because the wallet itself will not take such a counterparty. This pins both halves.
+  test('an upper-case or uncompressed spelling of our own server keys gets no signature', async () => {
+    const { m, calls } = manager();
+    const real = new ProtoWallet(PrivateKey.fromRandom());
+    for (const key of [BMAIL_KEY, ONESAT_KEY]) {
+      const pk = PublicKey.fromString(key);
+      const uncompressed = `04${pk.getX().toHex(32)}${pk.getY().toHex(32)}`;
+      for (const spelt of [key.toUpperCase(), ` ${key.toUpperCase()} `]) {
+        await expect(m.createSignature(auth(spelt), SITE)).rejects.toThrow(OWN_BACKEND_REFUSAL);
+        await expect(m.createHmac(auth(spelt), SITE)).rejects.toThrow(OWN_BACKEND_REFUSAL);
+      }
+      expect(calls.length).toBe(0);
+      for (const spelt of [uncompressed, uncompressed.toUpperCase()]) {
+        const args = { ...auth(spelt), protocolID: [2, 'auth message signature'] as [2, string] };
+        await expect(real.createSignature(args)).rejects.toThrow();
+        await expect(real.createHmac(args)).rejects.toThrow();
+      }
+      // The ordinary spelling does sign on the real wallet: the refusals above are about the spelling.
+      const fine = { ...auth(key), protocolID: [2, 'auth message signature'] as [2, string] };
+      expect((await real.createSignature(fine)).signature.length).toBeGreaterThan(0);
+    }
   });
 
   test('the first-party keys are seeded: refused for a site from the first call, even on a fresh install (A2)', async () => {

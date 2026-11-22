@@ -12,7 +12,7 @@ import {
 } from '@1sat/actions';
 import { DEPOSIT_BASKET, LEGACY_ONESAT_PROTOCOL, ONESAT_PROTOCOL } from '@1sat/types';
 import { Beef, OP, PublicKey, Utils, type InternalizeOutput, type Transaction, type WalletProtocol } from '@bsv/sdk';
-import { prioritySync, type PartProgress, type PrioritySyncResult } from './prioritySync';
+import { prioritySync, type PartProgress, type PrioritySyncDeps, type PrioritySyncResult } from './prioritySync';
 import { createInternalizeLock, type InternalizeLock } from './internalizeLock';
 import { spentIn, type SpendCheck } from './spendCheck';
 
@@ -313,6 +313,10 @@ export const runPrioritySync = async (
     foreignSpend?: (spenders: string[]) => void;
     /** Coins taken in on an "unspent" or unclear answer, to be asked about again (services/takenRecheck.ts). */
     onTaken?: (outpoints: string[]) => void;
+    /** Transactions held as failed, kept aside so the cursor moves on (prioritySync `held`; review of fix/385, 4). */
+    held?: PrioritySyncDeps['held'];
+    heldDue?: PrioritySyncDeps['heldDue'];
+    heldFailed?: PrioritySyncDeps['heldFailed'];
   },
 ): Promise<PrioritySyncResult> => {
   const services = ctx.services;
@@ -380,6 +384,9 @@ export const runPrioritySync = async (
       // Each coin candidate is spend-checked as it is found, the concurrent ones in one batch (N3), names never (R1);
       // the spend check keeps the answers a while (cacheMs), so its take() asks no one again.
       checkCoin: opts.spends ? coalesce(opts.spends) : undefined,
+      held: opts.held,
+      heldDue: opts.heldDue,
+      heldFailed: opts.heldFailed,
       onProgress: opts.onProgress,
       onCoinsReady: opts.onCoinsReady,
     });

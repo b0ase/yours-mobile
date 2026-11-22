@@ -6,13 +6,13 @@
  * No "management" permission: each extension's content script adds its own id to a shared attribute on <html>. A
  * content script that sees another id records it in its own chrome.storage.local; the wallet page warns once.
  */
+import { APP_NAME } from '../mobile/storeBuild';
 
 export const MARK_ATTR = 'data-bwalletx-ext';
 export const SEEN_KEY = 'bwxOtherExtension';
 export const WARNED_KEY = 'bwxOtherExtensionWarned';
 
-export const DUPLICATE_WARNING =
-  'Another wallet extension is installed in this Chrome profile (two bWalletX copies, or another Yours-based wallet). Both answer payment requests and sync the same coins, which can make sends fail. Keep one: turn the other off in chrome://extensions.';
+export const DUPLICATE_WARNING = `Another wallet extension is installed in this Chrome profile (two ${APP_NAME} copies, or another Yours-based wallet). Both answer payment requests and sync the same coins, which can make sends fail. Keep one: turn the other off in chrome://extensions.`;
 
 /** Pure: our id added to the attribute's id list, and the other ids already there. */
 export function mergeMark(current: string | null, ownId: string): { next: string; others: string[] } {

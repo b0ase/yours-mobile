@@ -21,6 +21,7 @@ import {
   Utils,
 } from '@bsv/sdk';
 import type { MneeClient, MneeConfig } from '@1sat/client';
+import { assertNotPaused, FeaturePausedError } from '../mobile/config/killSwitch';
 
 // ─── Cosign tx helpers (mirrored from @1sat/actions/mnee) ────
 
@@ -171,6 +172,8 @@ export async function sweepLegacyMnee(input: SweepLegacyMneeInput): Promise<Swee
   const legacyAddress = legacyPrivateKey.toPublicKey().toAddress();
 
   try {
+    // The sweep signs with the raw legacy key, outside the wallet, so it checks the spending pause itself (b-Aware 505).
+    await assertNotPaused('spending');
     onProgress?.('Fetching MNEE configuration...');
     const config = await mneeClient.getConfig();
     if (!config?.approver) return { error: 'Failed to get MNEE config' };
@@ -230,6 +233,7 @@ export async function sweepLegacyMnee(input: SweepLegacyMneeInput): Promise<Swee
     }
 
     // Submit to MNEE for cosigner signature + broadcast
+    await assertNotPaused('spending');
     onProgress?.('Submitting to MNEE...');
     const rawTx = tx.toHex();
     const submitResult = await mneeClient.submitRawTx(rawTx, { broadcast: true });
@@ -259,6 +263,8 @@ export async function sweepLegacyMnee(input: SweepLegacyMneeInput): Promise<Swee
 
     return { ticketId, error: 'Timed out waiting for confirmation' };
   } catch (err) {
+    // A pause is not a failure: let it through unchanged so the caller can say so. The funds stay where they are.
+    if (err instanceof FeaturePausedError) throw err;
     console.error('[sweepLegacyMnee]', err);
     return { error: err instanceof Error ? err.message : 'Unknown error' };
   }

@@ -20,7 +20,7 @@ import { forgetSiteTheme, wornSiteThemes } from './siteTheme';
 import { setSiteThemesOn, siteThemesOn } from './connectSiteTheme';
 import { accentOfPack } from './themePack';
 import { deriveMix, mixFromPack, nextMixerOpen, type MixSpec } from './mixer';
-import { THEME_ORDERS_ENABLED, THEME_STORE_PAID_ENABLED } from '../storeBuild';
+import { APP_NAME, THEME_ORDERS_ENABLED, THEME_STORE_PAID_ENABLED } from '../storeBuild';
 import { useOwnedThemes } from '../themeStore/useOwnedThemes';
 import { patternUri } from '../wallet/cardPatterns';
 import { yourThemes } from './yourThemes';
@@ -278,8 +278,8 @@ function AppColours({
           }}
         />
         <span>
-          Wear a connected site&apos;s theme on its approval sheets. The site and amounts always show in bWalletX&apos;s
-          own colours.
+          Wear a connected site&apos;s theme on its approval sheets. The site and amounts always show in {APP_NAME}
+          &apos;s own colours.
         </span>
       </label>
       <p className="bw-theme-group">Mono</p>

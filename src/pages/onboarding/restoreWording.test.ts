@@ -11,6 +11,7 @@ test('the restore screen never says the 12 words are all you need, and says to k
   const src = readFileSync(join(import.meta.dir, 'RestoreAccount.tsx'), 'utf8');
   expect(src).not.toMatch(/all you need/i);
   expect(src).toContain(
-    'If your old device still works, keep bWalletX on it until this one shows the right balance: some change from before this update is recorded only on the device that made it.',
+    // The app's name is the build constant APP_NAME (bWalletX, or bWallet in the store edition).
+    'If your old device still works, keep ${APP_NAME} on it until this one shows the right balance: some change from before this update is recorded only on the device that made it.',
   );
 });

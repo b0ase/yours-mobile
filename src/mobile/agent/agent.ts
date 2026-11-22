@@ -7,6 +7,7 @@
  * The system prompt is guide.ts. Replies are whole turns (no streaming). Pure helpers here.
  */
 import { containsPhrase } from '../errors/phraseGuard';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Owner, 25 Oct 2026: "For now, it shouldn't cost users anything to talk to b. If they want to send bug reports
@@ -21,8 +22,7 @@ export const ASK_B_FREE = true;
  */
 /** Where the first-open line's "More" goes. */
 export const ASK_B_MORE_URL = 'https://bwalletx.com/talk-to-b';
-export const ASK_B_DISCLOSURE =
-  "I'm b, the bWalletX team. We read these chats to fix bugs and improve b. Don't share your recovery phrase or passwords.";
+export const ASK_B_DISCLOSURE = `I'm b, the ${APP_NAME} team. We read these chats to fix bugs and improve b. Don't share your recovery phrase or passwords.`;
 
 export type AgentRole = 'user' | 'assistant';
 export type AgentMessage = { role: AgentRole; text: string };
@@ -50,7 +50,8 @@ export const looksLikeSecret = (text: string): boolean => {
   if (/(?<![1-9A-HJ-NP-Za-km-z])[xt]prv[1-9A-HJ-NP-Za-km-z]{100,}/.test(t)) return true;
   // A labelled password / passphrase / PIN / key ("my password is hunter2", "pin: 4821").
   if (SECRET_LABELLED.test(t)) return true;
-  // Recovery words however written: numbered, one per line, in a grid, capitals, after a label (phraseGuard.ts).
+  // Recovery words however written and in any BIP39 language: numbered, one per line, in a grid, capitals, joined by
+  // any punctuation, with filler words between, after a label (phraseGuard.ts).
   if (containsPhrase(t)) return true;
   // 12 / 15 / 18 / 21 / 24 lowercase words and nothing else: a recovery phrase.
   const words = t.split(/\s+/);

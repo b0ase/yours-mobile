@@ -69,7 +69,10 @@ Reply (wallet → page):
 | `expiresAt`    | number | ms since 1970; in the future and at most 15 minutes ahead          |
 | `signature`    | string | BSM signature (base64, compact) by `merchantKey`, see Signing      |
 
-The paymail must resolve to an address (P2P-only paymails are not supported yet). The result is a **status**
+The paymail must resolve to an address (P2P-only paymails are not supported yet), and that address must be the
+P2PKH address of the identity key the paymail serves: a host that serves any other address is refused before the
+sheet, since nothing ties it to the payee (`… gives an address that nothing ties to its wallet key …`); pay to a BSV
+address instead. The result is a **status**
 (below). Errors: `Declined` (the user said Not now, or made a pot first), `Unsigned request…`,
 `The merchant signature doesn’t match this request`, `This request has expired`, `This request was already used`,
 `Only a pot can pay`, `Unlock bWalletX, then try again`, or a message naming the bad argument.

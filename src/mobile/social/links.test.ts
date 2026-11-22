@@ -32,3 +32,25 @@ describe('Link your accounts', () => {
     expect(badgeText({ provider: 'ebay', handle: 'moisty' })).toBe('moisty on eBay');
   });
 });
+
+describe('welcome screen: asking which providers are on (the bmarketx.com eBay status call)', () => {
+  const on = { enabled: true, desktop: false, hidden: false, pending: false };
+  test('asked only when the buttons will show', async () => {
+    const { signupPanelAsks } = await import('./links');
+    expect(signupPanelAsks(on)).toBe(true);
+    expect(signupPanelAsks({ ...on, enabled: false })).toBe(false); // store build: no panel
+    expect(signupPanelAsks({ ...on, desktop: true })).toBe(false); // Desktop: no panel
+    expect(signupPanelAsks({ ...on, hidden: true })).toBe(false); // after Skip
+    expect(signupPanelAsks({ ...on, pending: true })).toBe(false); // a started link is waiting
+  });
+
+  test('the panel uses it, and a store build returns before any fetch', async () => {
+    const { readFileSync } = await import('node:fs');
+    const panel = readFileSync(new URL('./SignupLinkPanel.tsx', import.meta.url), 'utf8');
+    expect(panel).toContain('if (!asks) return;');
+    const links = readFileSync(new URL('./links.ts', import.meta.url), 'utf8');
+    const gate = links.indexOf('if (!LINK_ACCOUNTS_ENABLED) return DEFAULT_PROVIDERS;');
+    expect(gate).toBeGreaterThan(0);
+    expect(gate).toBeLessThan(links.indexOf('const ebay = ebayAvailable(f);'));
+  });
+});

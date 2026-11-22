@@ -1,6 +1,6 @@
 import { manifestVersion, settingsBuildInfo } from '../utils/versionLabel';
 import { requestThemeSheet } from '../mobile/theme/themeNav';
-import { ENVELOPES_ENABLED, THEME_ORDERS_ENABLED } from '../mobile/storeBuild';
+import { APP_NAME, ENVELOPES_ENABLED, THEME_ORDERS_ENABLED } from '../mobile/storeBuild';
 import { AvatarTooBigError } from '../mobile/names/animatedAvatar';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1206,7 +1206,7 @@ export const Settings = () => {
             <SettingRow
               icon={<Radio size={16} />}
               label="Spaces with the screen off"
-              description="Let bWalletX keep a live Space running when the screen sleeps"
+              description={`Let ${APP_NAME} keep a live Space running when the screen sleeps`}
               onClick={() => void requestIgnoreBattery()}
             />
             <Divider />

@@ -141,10 +141,9 @@ test('overlayStatus gives up on a hung indexer instead of waiting forever', asyn
   const ctx = {
     services: { bsv21: { getTokenDetails: () => new Promise(() => {}) } },
   } as unknown as OneSatContext;
-  const t0 = Date.now();
-  expect(await overlayStatus(ctx, ID)).toBeNull();
-  expect(Date.now() - t0).toBeLessThan(9000);
-}, 12000);
+  // A short injected timeout: the give-up path fires without waiting the real 8 s, and no wall-clock bound is asserted.
+  expect(await overlayStatus(ctx, ID, 20)).toBeNull();
+});
 
 test('withFavorite puts the new token first, deduped', () => {
   expect(withFavorite(undefined, `${'a'.repeat(64)}.0`)).toEqual([ID]);

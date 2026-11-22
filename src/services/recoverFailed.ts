@@ -46,8 +46,11 @@ export type RecoverDeps = {
    * 'unsigned', 'sending'; dkg, 14 Oct 2026). Read only.
    */
   listFailed: () => Promise<FailedAction[]>;
-  /** Queue exactly these txids for the proof-checked UnFail repair (their proven-tx requests -> 'unfail'). */
-  queueUnfail: (txids: string[]) => Promise<number>;
+  /**
+   * Queue exactly these txids for the proof-checked UnFail repair (their proven-tx requests -> 'unfail'). Txids whose
+   * coins another live payment of this wallet spends are not queued and come back as `contested` (#385 review).
+   */
+  queueUnfail: (txids: string[]) => Promise<number | { queued: number; contested: string[] }>;
   /** True ONLY when the network has a merkle proof for txid (mined). Mempool or unknown is false. */
   isMined: (txid: string) => Promise<boolean>;
   /** Run the Monitor's UnFail task now. */
@@ -85,6 +88,9 @@ export type RecoverReport = {
 
 const TXID = /^[0-9a-f]{64}$/i;
 
+/** A mined action left alone because another live payment of this wallet spent its coins (#385 review). */
+export const CONTESTED = 'another payment of this wallet spent the same coins; the sync settles it';
+
 export async function recoverMinedFailedActions(deps: RecoverDeps): Promise<RecoverReport> {
   const log = deps.log ?? ((m: string) => console.log(m));
   const report: RecoverReport = { failed: 0, mined: [], restored: [], restoredDetail: [], notRestored: [] };
@@ -111,10 +117,15 @@ export async function recoverMinedFailedActions(deps: RecoverDeps): Promise<Reco
     }
     if (!report.mined.length) return report;
     log(`[recover] ${report.mined.length} stuck action(s) are mined; restoring: ${report.mined.join(', ')}`);
-    const queued = await deps.queueUnfail(report.mined);
+    const q = await deps.queueUnfail(report.mined);
+    const queued = typeof q === 'number' ? q : q.queued;
+    const contested = new Set(typeof q === 'number' ? [] : q.contested);
+    for (const txid of contested) report.notRestored!.push({ txid, reason: CONTESTED });
     if (!queued) {
-      log('[recover] no proven-tx request found for the mined txid(s); nothing queued');
-      for (const txid of report.mined) report.notRestored!.push({ txid, reason: 'no proven-tx request in storage' });
+      if (contested.size < report.mined.length)
+        log('[recover] no proven-tx request found for the mined txid(s); nothing queued');
+      for (const txid of report.mined)
+        if (!contested.has(txid)) report.notRestored!.push({ txid, reason: 'no proven-tx request in storage' });
       return report;
     }
     log(`[recover] UnFail: ${(await deps.runUnFail()).trim() || 'done'}`);
@@ -122,7 +133,7 @@ export async function recoverMinedFailedActions(deps: RecoverDeps): Promise<Reco
       (await deps.listFailed()).filter((a) => (a.status ?? 'failed') === 'failed').map((a) => a.txid),
     );
     for (const a of candidates) {
-      if (!report.mined.includes(a.txid)) continue;
+      if (!report.mined.includes(a.txid) || contested.has(a.txid)) continue;
       if (still.has(a.txid)) {
         report.notRestored!.push({ txid: a.txid, reason: 'still failed (proof rejected)' });
         continue;

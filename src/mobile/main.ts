@@ -216,7 +216,12 @@ const mainChrome = attachContext('main', window);
 defineChrome(window, mainChrome);
 routeWindowOpen(window);
 // Upstream's embedder hooks (src/platform.ts); overlay frames share this object.
-const platform: PlatformHooks = { welcomeNotice: UNOFFICIAL_NOTICE, ...(await initBiometricUnlock(mainChrome)) };
+const platform: PlatformHooks = {
+  welcomeNotice: UNOFFICIAL_NOTICE,
+  ...(await initBiometricUnlock(mainChrome)),
+  // The same test as the hub's persistSession above: where the session is memory only, "Enter" must not reload.
+  sessionSurvivesReload: Capacitor.isNativePlatform(),
+};
 (window as any).__yoursPlatform = platform;
 markBootStage('biometric unlock init done');
 

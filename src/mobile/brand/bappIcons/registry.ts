@@ -4,7 +4,7 @@
  * initial in the app colour), so the set can grow without new art.
  */
 import { FEED_COLORS, GOLD } from '../../feed/feeds';
-import { PLACEMENT_ENABLED } from '../../storeBuild';
+import { MARKET_ENABLED, PLACEMENT_ENABLED } from '../../storeBuild';
 import { GLYPHS, type GlyphSlug } from './glyphs';
 
 export type BappIconDef = { slug: GlyphSlug; label: string; color: string };
@@ -49,7 +49,8 @@ export const BAPP_ICONS: Record<GlyphSlug, BappIconDef> = {
   bdns: def('bdns', 'bDNS', FEED_COLORS.bdns),
   bedu: def('bedu', 'bEdu', FEED_COLORS.bedu),
   bmaps: def('bmaps', 'bMaps', FEED_COLORS.bmaps),
-  bexchange: def('bexchange', 'bExchange', FEED_COLORS.bexchange),
+  // bExchange is bWalletX only (MARKET_ENABLED): the store bundle never carries its name.
+  bexchange: def('bexchange', MARKET_ENABLED ? 'bExchange' : '', FEED_COLORS.bexchange),
   // bShares is bWalletX only (PLACEMENT_ENABLED): the store bundle never carries its name.
   bshares: def('bshares', PLACEMENT_ENABLED ? 'bShares' : '', FEED_COLORS.bdns),
 };

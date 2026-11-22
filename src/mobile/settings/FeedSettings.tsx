@@ -59,18 +59,21 @@ import { SignNoteScreen } from '../notes/SignNoteScreen';
 import { WagesScreen } from '../wages/WagesScreen';
 import { TwetchSettings } from '../twetch/TwetchSettings';
 import {
+  APP_NAME,
   B_AGENT_DESC,
+  INDEXING_ENABLED,
+  LINK_ACCOUNTS_ENABLED,
   MY_TOKENS_DESC,
   MY_TOKENS_NOTE,
+  SUBSCRIPTIONS_DESC,
+  SUBSCRIPTIONS_ENABLED,
+  TOKEN_ROOMS_ENABLED,
+  TWETCH_POST_ENABLED,
+  WAGES_ENABLED,
   isBWalletX,
   languageSettingsEnabled,
   potsEnabled,
   socialLoginEnabled,
-  LINK_ACCOUNTS_ENABLED,
-  TWETCH_POST_ENABLED,
-  WAGES_ENABLED,
-  SUBSCRIPTIONS_DESC,
-  SUBSCRIPTIONS_ENABLED,
 } from '../storeBuild';
 import { onSubscribeRequest, peekSubscribeRequest } from '../pots/subscribeLink';
 import { CATEGORIES, CATEGORY_LABELS } from '../notify/notify';
@@ -165,13 +168,18 @@ const FEED_SETTINGS_SEARCH: SettingsEntry[] = [
     keywords: ['browser', 'web', 'bweb', 'sites'],
     target: { kind: 'screen', screen: 'bweb' },
   },
-  {
-    id: 'feed-indexing',
-    label: 'Token indexing',
-    description: 'One-tap indexing fee',
-    keywords: ['index', 'indexing', 'token', 'fee'],
-    target: { kind: 'screen', screen: 'indexing' },
-  },
+  // Paid indexing is bWalletX only (INDEXING_ENABLED).
+  ...(INDEXING_ENABLED
+    ? [
+        {
+          id: 'feed-indexing',
+          label: 'Token indexing',
+          description: 'One-tap indexing fee',
+          keywords: ['index', 'indexing', 'token', 'fee'],
+          target: { kind: 'screen', screen: 'indexing' },
+        } satisfies SettingsEntry,
+      ]
+    : []),
   {
     id: 'feed-bookmarks',
     label: 'Bookmarks',
@@ -200,13 +208,17 @@ const FEED_SETTINGS_SEARCH: SettingsEntry[] = [
     keywords: ['sign in', 'login', 'sessions', 'devices'],
     target: { kind: 'screen', screen: 'signins' },
   },
-  {
-    id: 'feed-tokens',
-    label: 'My tokens',
-    description: 'Tokens you launched',
-    keywords: ['tokens', 'my tokens', 'coins'],
-    target: { kind: 'screen', screen: 'tokens' },
-  },
+  ...(INDEXING_ENABLED
+    ? [
+        {
+          id: 'feed-tokens',
+          label: 'My tokens',
+          description: 'Tokens you launched',
+          keywords: ['tokens', 'my tokens', 'coins'],
+          target: { kind: 'screen', screen: 'tokens' },
+        } satisfies SettingsEntry,
+      ]
+    : []),
   {
     id: 'feed-sweep',
     label: 'Sweep into this account',
@@ -498,11 +510,17 @@ const MyTokenRow = ({ token, onDone }: { token: OwnToken; onDone: () => void }) 
       ? 'Checking…'
       : s.status === null
         ? 'The indexer didn’t answer. Try again later.'
-        : s.open
-          ? 'Room open'
-          : s.waiting
-            ? 'Setting up… (usually under a minute)'
-            : 'Not set up';
+        : !TOKEN_ROOMS_ENABLED
+          ? s.open
+            ? 'Indexed'
+            : s.waiting
+              ? 'Indexing… (usually under a minute)'
+              : 'Not indexed'
+          : s.open
+            ? 'Room open'
+            : s.waiting
+              ? 'Setting up… (usually under a minute)'
+              : 'Not set up';
   return (
     <div className="mb-2 rounded-xl px-3 py-3" style={{ background: PANEL, border: `1px solid ${LINE}` }}>
       <div className="flex items-center gap-3">
@@ -822,7 +840,8 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           />
         </Section>
       )}
-      {acct && (
+      {/* My tokens offers paid indexing / room set-up: bWalletX only (INDEXING_ENABLED). */}
+      {INDEXING_ENABLED && acct && (
         <Section title="Tokens">
           <Row
             icon={<Coins size={16} />}
@@ -839,7 +858,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           <Row
             icon={<Download size={16} />}
             label="Sweep into this account"
-            description="Move coins, NFTs and tokens from bWalletX, Yours, SimplyCash or any wallet: paste its phrase or private key"
+            description={`Move coins, NFTs and tokens from ${APP_NAME}, Yours, SimplyCash or any wallet: paste its phrase or private key`}
             onClick={() => setScreen('sweep')}
             isFirst
           />
@@ -918,15 +937,20 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="bWeb"
               description="Your dock, your Feed's bApps, what b can see, add-ons"
               onClick={() => setScreen('bweb')}
+              isLast={!INDEXING_ENABLED && !IS_EXTENSION}
             />
-            <Divider />
-            <Row
-              icon={<Coins size={16} />}
-              label="Token indexing"
-              description="One-tap fee for your own tokens"
-              onClick={() => setScreen('indexing')}
-              isLast={!IS_EXTENSION}
-            />
+            {INDEXING_ENABLED && (
+              <>
+                <Divider />
+                <Row
+                  icon={<Coins size={16} />}
+                  label="Token indexing"
+                  description="One-tap fee for your own tokens"
+                  onClick={() => setScreen('indexing')}
+                  isLast={!IS_EXTENSION}
+                />
+              </>
+            )}
             {IS_EXTENSION && (
               <>
                 <Divider />
@@ -1024,8 +1048,8 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
                 label={IS_EXTENSION ? 'Connect the CLI / an AI assistant' : 'Scan to connect'}
                 description={
                   IS_EXTENSION
-                    ? 'Pair the bWalletX CLI or an AI assistant (MCP): paste the link from bwalletx login'
-                    : 'Pair the bWalletX CLI, an AI assistant (MCP) or a website: scan its QR code'
+                    ? `Pair the ${APP_NAME} CLI or an AI assistant (MCP): paste the link from bwalletx login`
+                    : `Pair the ${APP_NAME} CLI, an AI assistant (MCP) or a website: scan its QR code`
                 }
                 onClick={() => setScreen('scan')}
                 isFirst
@@ -1189,7 +1213,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
           </Section>
         </Screen>
       )}
-      {screen === 'indexing' && (
+      {INDEXING_ENABLED && screen === 'indexing' && (
         <Screen title="Token indexing" onBack={() => setScreen(null)}>
           <Section title="Token indexing">
             <Row
@@ -1239,7 +1263,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
               label="Be the wallet websites connect to"
               description={
                 takeCwi
-                  ? 'Sites without a wallet picker connect to bWalletX, even with Yours installed'
+                  ? `Sites without a wallet picker connect to ${APP_NAME}, even with Yours installed`
                   : 'Another wallet (e.g. Yours) answers sites without a picker'
               }
               right={<Toggle label="Be the wallet websites connect to" on={takeCwi} onChange={setTakeCwi} />}
@@ -1321,7 +1345,7 @@ export const FeedSettings = ({ Section, Row, Divider, part }: Props) => {
       {screen === 'bookmarks' && <BookmarksScreen onBack={() => setScreen(null)} />}
       {screen === 'hidden' && <HiddenScreen onBack={() => setScreen(null)} />}
       {screen === 'signins' && <SignInsScreen onBack={() => setScreen(null)} />}
-      {screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
+      {INDEXING_ENABLED && screen === 'tokens' && <MyTokensScreen onBack={() => setScreen(null)} />}
       {screen === 'password' && <ChangePassword onClose={() => setScreen(null)} />}
       {SEEDLESS_ENABLED && screen === 'passkey' && <PasskeySettings onClose={() => setScreen(null)} />}
       {LINK_ACCOUNTS_ENABLED && screen === 'social' && <ConnectSocial onClose={closeSocial} />}

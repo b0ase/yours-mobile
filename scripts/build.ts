@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import chalk from 'chalk';
 import { findNodeModulesLoops } from './lib/nodeModulesLoop';
+import { FEED_AUTHOR_BINDING_HOST_PERMISSION } from '../src/services/feedAuthorRelay';
 
 // ─── Paths ───────────────────────────────────────────────────
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -65,6 +66,8 @@ function brandManifest() {
       'https://api.1sat.app/*',
       ...BAPP_HOSTS,
       'https://chat.bwalletx.com/*',
+      // Feed-author binding: the service worker posts the claim (src/services/feedAuthorRelay.ts).
+      FEED_AUTHOR_BINDING_HOST_PERMISSION,
     ]),
   ];
   manifest.icons = iconSet;

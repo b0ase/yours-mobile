@@ -15,8 +15,20 @@
 import type { OutpointState } from './heldOutpoints';
 import type { InternalizeLock } from './internalizeLock';
 import { normOutpoint, type ChainOutput } from './receiveGuard';
+import { isHeldAsFailed } from './failedRowRepair';
 
-export type GuardIntakeOutcome = 'internalized' | 'no-match' | 'failed' | 'waiting' | 'taken-since' | 'held';
+/**
+ * 'held-failed' (report #385): this device holds the transaction as failed and it is not mined yet (or can't be
+ * repaired here now): left out with its reason, backed off, never a sync failure. Its value still shows as arriving.
+ */
+export type GuardIntakeOutcome =
+  | 'internalized'
+  | 'no-match'
+  | 'failed'
+  | 'waiting'
+  | 'taken-since'
+  | 'held'
+  | 'held-failed';
 
 export type GuardIntakeDeps = {
   /** What the device store holds for each outpoint; undefined when this device's store is not the active one. */
@@ -81,7 +93,7 @@ export async function guardIntake(
       }
     } catch (error) {
       d.backoff.fail(txid, error);
-      out.push({ txid, outcome: 'failed', error });
+      out.push({ txid, outcome: isHeldAsFailed(error) ? 'held-failed' : 'failed', error });
     }
   }
   return out;

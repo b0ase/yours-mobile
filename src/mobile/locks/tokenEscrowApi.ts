@@ -2,6 +2,7 @@
 // approval sheet and runs only when the person taps a button. Keys stay in the BRC-100 wallet: the escrow key and
 // the fee-reserve key are seed-derived (ESCROW_PROTOCOL, keyID = escrow id), so a restore recovers both.
 // bit-sign is only the mailbox (src/lib/commission-store.ts); nothing here is custodial.
+import { assertCommissionsCreateEnabled, COMMISSIONS_CREATE_ENABLED } from '../chat/commissions';
 import { sendBsv21, type OneSatContext } from '@1sat/actions';
 import { P2PKH, PublicKey, Transaction } from '@bsv/sdk';
 import { withExtraOutput } from '../airdrops/note';
@@ -119,7 +120,12 @@ export async function fundEscrow(
     /** This wallet's token receive address (where a refund lands). */
     posterAddress: string;
   },
+  /** New commission escrows are paused (chat/commissions.ts COMMISSIONS_CREATE_ENABLED). */
+  createEnabled: boolean = COMMISSIONS_CREATE_ENABLED,
 ): Promise<{ body: Record<string, unknown>; escrow: Escrow; funding: Funding; refund: WireProposal }> {
+  // Escrow ruling §6: no new escrow with the room arbiter's key. Refused here, before any key is derived or any
+  // token moves, so no caller can create one. Settling a funded escrow does not come through this function.
+  assertCommissionsCreateEnabled(createEnabled);
   const posterKey = await escrowPubKey(ctx, a.escrowId);
   const reserveKey = await reservePubKey(ctx, a.escrowId);
   const keys: RoleKey[] = [

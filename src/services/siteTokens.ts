@@ -39,6 +39,16 @@ import { ONESAT, bsv21, tokenOutputTags, tokenSpends } from '../mobile/market/la
 import { canonicalInputs, canonicalOutpoint } from './canonicalOutpoint';
 import { everyOutput } from './everyOutput';
 import { randomIdTag } from './tokenSendHeal';
+import { APP_NAME, MARKET_ENABLED, SITE_MARKET_ACTIONS_ENABLED, STORE_NAME_NOTE } from '../mobile/storeBuild';
+
+/**
+ * What the token-balance sheet says a site wants. Store wording (CTO decision 9, 16 Nov 2026): reading the balance
+ * only, with no "offer to sell" (MARKET_ENABLED is a literal, so bWalletX's sentence is not in a store bundle).
+ */
+export const balanceAccessText = (site: string, name: string): string =>
+  MARKET_ENABLED
+    ? `${site} wants to see your ${name} balance, so it can offer to sell them for you. It sees how many you hold and where, nothing else. It cannot move them without asking you.`
+    : `${site} wants to see your ${name} balance. It sees how many you hold and where, nothing else. It cannot move them without asking you.`;
 
 /** The receive-key request protocol (a name only: the key answered is a wallet token key, see above). */
 export const SITE_TOKEN_RECEIVE: WalletProtocol = [1, 'bwalletx token receive'];
@@ -49,8 +59,8 @@ export const ORDINAL_BASKET = '1sat';
 const TOKEN_BASKETS = new Set(['bsv21', 'p 1sat bsv21']);
 
 export const RECEIVE_ONLY_REFUSAL = 'bwalletx token receive is for getPublicKey only';
-export const BAD_DELIVERY_REFUSAL = 'bWalletX takes a token into your wallet only to a receive key it gave this site';
-export const SITE_SPENDS_REFUSAL = 'bWalletX signs its own token inputs; a site may not supply them';
+export const BAD_DELIVERY_REFUSAL = `${APP_NAME} takes a token into your wallet only to a receive key it gave this site`;
+export const SITE_SPENDS_REFUSAL = `${APP_NAME} signs its own token inputs; a site may not supply them`;
 export const SELL_REJECTED = 'You said no: nothing was signed';
 export const LIST_REJECTED = 'You said no: this site cannot see that balance';
 export const DEPLOY_NEEDS_TXID =
@@ -278,25 +288,37 @@ export const memoryConsentStore = (now: () => number = Date.now): ListConsentSto
   };
 };
 
-export const LIST_CONSENT_KEY = 'bwalletx.siteTokenListConsent';
+/** Legacy key: one list for every account ("site|tokenId|savedAtMs"). Never read now; cleared on the first write. */
+export const LEGACY_LIST_CONSENT_KEY = 'bwalletx.siteTokenListConsent';
+/** Entries are "accountId|site|tokenId|savedAtMs", so an answer given on one account never reaches another. */
+export const LIST_CONSENT_KEY = 'bwalletx.siteTokenListConsent.v2';
 
-let sharedChromeStore: ListConsentStore | undefined;
+const sharedChromeStores = new Map<string, ListConsentStore>();
 
 /**
- * chrome.storage.local where it exists (extension, mobile shim), else memory. Entries are "site|tokenId|savedAtMs";
- * older entries with no time count as expired (asked again). Failures fall back to asking again.
- * One shared store unless a time source is passed (tests).
+ * chrome.storage.local where it exists (extension, mobile shim), else memory. Consent is per account (b-Aware 318):
+ * pass the account's id and the store sees only that account's answers. With no account id, has/add use a
+ * "no-account" bucket, list() shows every account and forget(site) drops the site on every account.
+ * Entries from before accounts were recorded (legacy key) are dropped: they cannot be tied to an account, so
+ * the site asks again. Failures fall back to asking again. One shared store per account unless a time source is
+ * passed (tests).
  */
-export const chromeConsentStore = (now?: () => number): ListConsentStore =>
-  now ? makeChromeConsentStore(now) : (sharedChromeStore ??= makeChromeConsentStore(Date.now));
+export const chromeConsentStore = (now?: () => number, accountId?: string): ListConsentStore => {
+  if (now) return makeChromeConsentStore(now, accountId);
+  const k = accountId ?? '';
+  let s = sharedChromeStores.get(k);
+  if (!s) sharedChromeStores.set(k, (s = makeChromeConsentStore(Date.now, accountId)));
+  return s;
+};
 
-const makeChromeConsentStore = (now: () => number): ListConsentStore => {
+const makeChromeConsentStore = (now: () => number, accountId?: string): ListConsentStore => {
   type Area = {
     get(k: string): Promise<Record<string, unknown>>;
     set(v: Record<string, unknown>): Promise<void>;
   };
   const local = (globalThis as { chrome?: { storage?: { local?: Area } } }).chrome?.storage?.local;
   if (!local) return memoryConsentStore(now);
+  const mine = accountId === undefined ? undefined : accountId || 'no-account';
   const read = async (): Promise<string[]> => {
     try {
       const r = await local.get(LIST_CONSENT_KEY);
@@ -307,33 +329,55 @@ const makeChromeConsentStore = (now: () => number): ListConsentStore => {
   };
   const write = async (all: string[]) => {
     try {
-      await local.set({ [LIST_CONSENT_KEY]: all.slice(-2000) });
+      // The legacy shared list goes with the first write: it holds answers no account owns.
+      await local.set({ [LIST_CONSENT_KEY]: all.slice(-2000), [LEGACY_LIST_CONSENT_KEY]: [] });
     } catch {
       /* asked again next time */
     }
   };
+  // "account|site|tokenId|at": account ids and sites hold no "|", token ids are outpoint-like ("txid_0").
   const parts = (e: string) => {
     const i = e.lastIndexOf('|');
     const head = e.slice(0, i);
-    return head.includes('|') ? { k: head, at: Number(e.slice(i + 1)) } : { k: e, at: NaN };
+    const j = head.indexOf('|');
+    return j > 0 && head.indexOf('|', j + 1) > 0
+      ? { acct: head.slice(0, j), k: head.slice(j + 1), at: Number(e.slice(i + 1)) }
+      : { acct: '', k: '', at: NaN };
   };
+  const inScope = (e: { acct: string }) => mine === undefined || e.acct === mine;
+  const owner = mine ?? 'no-account';
   return {
-    has: async (site, id) => (await read()).some((e) => parts(e).k === `${site}|${id}` && live(parts(e).at, now())),
+    has: async (site, id) =>
+      (await read()).some((e) => {
+        const p = parts(e);
+        return p.acct === owner && p.k === `${site}|${id}` && live(p.at, now());
+      }),
     add: async (site, id) => {
       const k = `${site}|${id}`;
       const t = now();
-      await write([...(await read()).filter((e) => parts(e).k !== k && live(parts(e).at, t)), `${k}|${t}`]);
+      await write([
+        ...(await read()).filter((e) => {
+          const p = parts(e);
+          return !(p.acct === owner && p.k === k) && live(p.at, t);
+        }),
+        `${owner}|${k}|${t}`,
+      ]);
     },
     list: async () => {
       const t = now();
       const stored = (await read())
         .map(parts)
-        .filter((e) => live(e.at, t))
+        .filter((e) => inScope(e) && live(e.at, t))
         .map((e) => e.k);
       return groupConsents(new Set(stored));
     },
     forget: async (site) => {
-      await write((await read()).filter((e) => !parts(e).k.startsWith(`${site}|`)));
+      await write(
+        (await read()).filter((e) => {
+          const p = parts(e);
+          return !(inScope(p) && p.k.startsWith(`${site}|`));
+        }),
+      );
     },
   };
 };
@@ -564,7 +608,7 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
             baskets: [
               {
                 basket: name,
-                description: `${site} wants to see your ${name} balance, so it can offer to sell them for you. It sees how many you hold and where, nothing else. It cannot move them without asking you.`,
+                description: balanceAccessText(site, name),
                 scope: 'token',
                 value: tokenId,
               },
@@ -600,6 +644,8 @@ export function guardSiteTokens<T extends object>(wallet: T, deps: SiteTokenDeps
         if (asked !== 'ordinal') throw new Error("keyID must be 'ordinal' for an ordinal receive key");
         mint = (ms) => `ordinal-${ms}`;
       } else if (asked === 'deploy') {
+        // Store edition (A10, R2): a site may not have the wallet deploy a fungible token, so it gets no deploy key.
+        if (!SITE_MARKET_ACTIONS_ENABLED) throw new Error(STORE_NAME_NOTE);
         mint = (ms) => `deploy-${ms}`;
       } else {
         const tokenId = asked.replace('.', '_');

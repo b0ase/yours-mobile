@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'fs';
 import { P2PKH, PrivateKey, Script, Transaction } from '@bsv/sdk';
 import {
   feeFromAtomicBeef,
@@ -7,6 +8,8 @@ import {
   NativeSealError,
   inertHtml,
   accountHandles,
+  handlesFromErrorBody,
+  namesLoadError,
   fetchSignedCopy,
   myFields,
   nativeRoomSteps,
@@ -882,5 +885,38 @@ describe('the fee: the sheet shows what the document costs, and the seal never p
     expect(e.message).toBe(SEAL_TOO_BIG_MESSAGE);
     expect(asked).toBe(false);
     expect(log.some((l) => /^(sign|pay)/.test(l))).toBe(false);
+  });
+});
+
+describe('the seal page never hides why your other names are missing (P0, 16 Nov 2026)', () => {
+  test('names inside a 503 body still count (the server listed them with fee_unavailable)', () => {
+    const body = {
+      error: 'Extra names are not switched on yet.',
+      code: 'fee_unavailable',
+      handles: [{ handle: 'b0asex' }, { handle: 'boase' }],
+      primary: 'boase',
+    };
+    expect(accountHandles(body).sort()).toEqual(['b0asex', 'boase']);
+  });
+  test('names in an error body count only for a 5xx status (review S7)', () => {
+    const data = { handles: [{ handle: 'b0asex' }, { handle: 'boase' }], primary: 'boase' };
+    for (const status of [500, 502, 503, 599])
+      expect(handlesFromErrorBody({ status, data }).sort()).toEqual(['b0asex', 'boase']);
+    for (const status of [400, 401, 403, 404, 409, 429, 499, 600, 0, undefined, '503'])
+      expect(handlesFromErrorBody({ status, data })).toEqual([]);
+    expect(handlesFromErrorBody(null)).toEqual([]);
+    expect(handlesFromErrorBody({ status: 503 })).toEqual([]);
+  });
+  test('the seal page reads error-body names only through handlesFromErrorBody', () => {
+    const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
+    expect(page).toContain('const fromBody = handlesFromErrorBody(e);');
+    expect(page).not.toContain('accountHandles(e.data)');
+    // A 401 with no trusted names still signs in again once.
+    expect(page).toMatch(/if \(fromBody\.length\) names = fromBody;\s*else if \(e\.status === 401\) \{/);
+  });
+  test('the reason names the status', () => {
+    expect(namesLoadError({ status: 503 })).toContain('(503)');
+    expect(namesLoadError(new Error('offline'))).toContain("Couldn't load your other names");
+    expect(namesLoadError({ status: 0 })).not.toContain('(0)');
   });
 });

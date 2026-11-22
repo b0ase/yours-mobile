@@ -28,6 +28,7 @@ import { curvePriceUsd, tokenCurve, type TokenCurve } from '../market/tokenPage'
 import { usd as usdLabel } from '../../lib/curves';
 import { roomMeta } from '../market/indexer';
 import { FUND_FEE_RATE, fetchFund, fundFeeSats, hasFundFee, type Fund } from '../p2p/fundFee';
+import { LISTING_VENUES } from '../storeBuild';
 
 const GOLD = 'var(--bw-accent-hi)';
 const BG = '#17191E';
@@ -274,8 +275,8 @@ export const SellSheet = ({
         </div>
 
         <p className="text-[11px] leading-relaxed text-[#667085] m-0">
-          Your {unit} go into an on-chain listing (1Sat OrdLock) visible on the Market and 1sat.market. Cancel any time
-          from My listings to get them back.
+          Your {unit} go into an on-chain listing (1Sat OrdLock) visible on {LISTING_VENUES}. Cancel any time from My
+          listings to get them back.
         </p>
 
         <label className="flex items-center justify-between gap-3 text-xs text-[#98A2B3]">

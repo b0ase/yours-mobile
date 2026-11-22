@@ -10,6 +10,7 @@
 import { Script, Utils } from '@bsv/sdk';
 import { curveLabel, type Curve } from './curves';
 import { fmtBsv, fmtUsd, type Piece } from './schedule';
+import { APP_NAME } from '../storeBuild';
 
 export const RECEIPT_TYPE = 'lock-receipt';
 export const VERIFY_URL = 'https://bwalletx.com/lock/verify';
@@ -160,14 +161,14 @@ export function receiptSvg(r: Receipt): string {
     })
     .join('');
   const h = y + 70;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${h}" viewBox="0 0 640 ${h}"><metadata id="lock-receipt">${esc(JSON.stringify(r))}</metadata><rect width="640" height="${h}" rx="28" fill="#0b0b0c"/><rect x="10" y="10" width="620" height="${h - 20}" rx="22" fill="none" stroke="#F5B800" stroke-width="2"/><g font-family="Helvetica,Arial,sans-serif"><text x="40" y="70" fill="#F5B800" font-size="22" font-weight="700">bWalletX · Lock receipt</text><text x="40" y="135" fill="#F2F2F0" font-size="46" font-weight="800">${esc(amountText(r))}</text>${body}<text x="40" y="${h - 50}" fill="#F5B800" font-size="16">Verify at bwalletx.com/lock/verify</text><text x="40" y="${h - 28}" fill="#667085" font-size="13">Nobody can unlock ${r.token ? 'these tokens' : 'these coins'} before the heights in this receipt.</text></g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="${h}" viewBox="0 0 640 ${h}"><metadata id="lock-receipt">${esc(JSON.stringify(r))}</metadata><rect width="640" height="${h}" rx="28" fill="#0b0b0c"/><rect x="10" y="10" width="620" height="${h - 20}" rx="22" fill="none" stroke="#F5B800" stroke-width="2"/><g font-family="Helvetica,Arial,sans-serif"><text x="40" y="70" fill="#F5B800" font-size="22" font-weight="700">${APP_NAME} · Lock receipt</text><text x="40" y="135" fill="#F2F2F0" font-size="46" font-weight="800">${esc(amountText(r))}</text>${body}<text x="40" y="${h - 50}" fill="#F5B800" font-size="16">Verify at bwalletx.com/lock/verify</text><text x="40" y="${h - 28}" fill="#667085" font-size="13">Nobody can unlock ${r.token ? 'these tokens' : 'these coins'} before the heights in this receipt.</text></g></svg>`;
 }
 
 /** MAP fields for the inscription (MAP values are strings). */
 export const receiptMap = (r: Receipt): Record<string, string> => ({
   app: 'bwalletx',
   type: RECEIPT_TYPE,
-  name: 'bWalletX lock receipt',
+  name: `${APP_NAME} lock receipt`,
   receipt: JSON.stringify(r),
 });
 

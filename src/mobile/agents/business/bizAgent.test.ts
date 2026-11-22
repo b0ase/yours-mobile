@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, ProtoWallet, Transaction } from '@bsv/sdk';
 import {
   bizAgentPay,
@@ -14,6 +14,20 @@ import {
   type BizCoin,
   type BizLogEntry,
 } from './bizAgent';
+import { PAUSED_MESSAGE, resetKillSwitchCache, STATUS_URL } from '../../config/killSwitch';
+
+// The operator pause is read from STATUS_URL: stub it, no network in tests.
+const realFetch = globalThis.fetch;
+let pausedNow = false;
+globalThis.fetch = (async (u: string | URL | Request) => {
+  if (String(u instanceof Request ? u.url : u) === STATUS_URL)
+    return new Response(JSON.stringify({ paused: pausedNow ? ['spending'] : [] }));
+  throw new Error('no network in tests');
+}) as typeof fetch;
+afterAll(() => {
+  globalThis.fetch = realFetch;
+  resetKillSwitchCache();
+});
 
 const DAY = Date.UTC(2026, 9, 16, 12);
 const RATE = 50; // $50 per BSV → 1 USD = 2,000,000 sats
@@ -89,6 +103,8 @@ describe('agent account', () => {
   });
 
   beforeEach(() => {
+    pausedNow = false;
+    resetKillSwitchCache();
     store = memStore();
     coins = [];
     sent = [];
@@ -178,6 +194,47 @@ describe('agent account', () => {
     expect((await bizAgentPay({ ticker: 'SHOP', address: TO, sats: 4_000_000, detail: 'R' }, deps())).ok).toBe(false);
   });
 
+  test('spending paused before the call → refused, logged, nothing broadcast', async () => {
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    await fund(a.address, 50_000_000);
+    pausedNow = true;
+    const r = await bizAgentPay({ ticker: 'SHOP', address: TO, sats: 1000, detail: 'R' }, deps());
+    expect(r).toEqual({ ok: false, reason: PAUSED_MESSAGE });
+    expect(sent.length).toBe(0);
+    const log = getBizLog('SHOP', store);
+    expect(log[0].action).toBe('refused');
+    expect(log[0].detail).toContain(PAUSED_MESSAGE);
+    expect(log.some((e) => e.action === 'pending' || e.action === 'paid')).toBe(false);
+  });
+
+  test('pause turning on after the first check → refused before broadcast', async () => {
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    await fund(a.address, 50_000_000);
+    const r = await bizAgentPay(
+      { ticker: 'SHOP', address: TO, sats: 1000, detail: 'R' },
+      deps({
+        findCoins: async () => {
+          pausedNow = true; // the operator pauses mid-payment
+          resetKillSwitchCache();
+          return coins;
+        },
+      }),
+    );
+    expect(r).toEqual({ ok: false, reason: PAUSED_MESSAGE });
+    expect(sent.length).toBe(0);
+    const log = getBizLog('SHOP', store);
+    expect(log[0].action).toBe('refused');
+    expect(log.some((e) => e.action === 'pending' || e.action === 'paid')).toBe(false);
+  });
+
+  test('not paused → pays as before', async () => {
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    await fund(a.address, 50_000_000);
+    const r = await bizAgentPay({ ticker: 'SHOP', address: TO, sats: 1000, detail: 'R' }, deps());
+    expect(r.ok).toBe(true);
+    expect(sent.length).toBe(1);
+  });
+
   test('no price, bad address or no account → refused', async () => {
     expect((await bizAgentPay({ ticker: 'NONE', address: TO, sats: 1000, detail: 'R' }, deps())).ok).toBe(false);
     await createBizAgent(wallet, 'SHOP', 10, store, DAY);
@@ -186,5 +243,35 @@ describe('agent account', () => {
     ).toBe(false);
     expect((await bizAgentPay({ ticker: 'SHOP', address: 'nope', sats: 1000, detail: 'R' }, deps())).ok).toBe(false);
     expect(getBizAgent('shop', store)?.dailyCapUsd).toBe(10);
+  });
+});
+
+describe('row 212: the daily cap survives the log filling up', () => {
+  const wallet = new ProtoWallet(new PrivateKey(42));
+  test("a flood of refusals pushes today's payment out of the log, but not off the cap", async () => {
+    const store = memStore();
+    const sent: string[] = [];
+    const a = await createBizAgent(wallet, 'SHOP', 10, store, DAY);
+    const src = new Transaction();
+    src.addOutput({ lockingScript: new P2PKH().lock(a.address), satoshis: 100_000_000 });
+    const coins: BizCoin[] = [{ txid: src.id('hex') as string, vout: 0, sats: 100_000_000, sourceTx: src }];
+    const deps = {
+      wallet,
+      findCoins: async () => coins,
+      broadcast: async (raw: string) => void sent.push(raw),
+      usdPerBsv: RATE,
+      stopAll: () => false,
+      store,
+      now: () => DAY,
+    };
+    // $8 of a $10 day.
+    expect((await bizAgentPay({ ticker: 'SHOP', address: TO, sats: 16_000_000, detail: 'R1' }, deps)).ok).toBe(true);
+    // 400 refused calls (bad address): each is logged.
+    for (let i = 0; i < 400; i++)
+      await bizAgentPay({ ticker: 'SHOP', address: 'nope', sats: 1, detail: `spam ${i}` }, deps);
+    // The $8 is still on today's cap: another $8 is refused, nothing more is sent.
+    const r = await bizAgentPay({ ticker: 'SHOP', address: TO, sats: 16_000_000, detail: 'R2' }, deps);
+    expect(r.ok).toBe(false);
+    expect(sent).toHaveLength(1);
   });
 });

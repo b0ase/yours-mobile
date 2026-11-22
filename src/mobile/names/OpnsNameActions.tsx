@@ -32,7 +32,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { useTheme } from '../../hooks/useTheme';
 import { SendConfirmation } from '../../components/SendConfirmation';
 import { moneyNow } from '../money/money';
-import { MARKET_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
+import { APP_NAME, MARKET_ENABLED, TOKENBLASTER_ENABLED } from '../storeBuild';
 import { OpenTokenRoomButton } from '../chat/OpenTokenRoomButton';
 import { getPaymail, ownedFromOutputs, syncAccountNames, type OwnedName } from './accountName';
 import { setLocalAvatar } from './avatar';
@@ -46,6 +46,10 @@ import { setMyName } from './myName';
 import { paymailEnabled } from './paymail';
 import { getPersonalLink, onPersonalChange, personalKey } from './personalToken';
 import { handlePaymail, nameBavatarUri, nameChips, nameIntro, nameOrigin, tokenblasterLaunchUrl } from './nameCard';
+
+// After adopting a name: no selling in a store build. Module level (not inside the try below), so Rollup folds the
+// literal flag and a store bundle drops the bWalletX words (round A8, S5).
+const ADOPTED_NEXT = MARKET_ENABLED ? 'You can link your identity key or sell it.' : 'You can link your identity key.';
 
 const GOLD = 'var(--bw-accent)';
 const MUTED = '#98A2B3';
@@ -191,7 +195,7 @@ export const OpnsNameActions = ({
       const r = await adoptOpnsNft(apiContext.wallet, outpoint, name);
       if ('error' in r) throw new Error(r.error);
       setOwned({ name, id: r.id, published: false });
-      setMsg(`${name} is in your Names now. You can link your identity key or sell it.`);
+      setMsg(`${name} is in your Names now. ${ADOPTED_NEXT}`);
       syncAccountNames(apiContext, identityAddress, { force: true }).catch(() => undefined);
     } catch (e) {
       setMsg(e instanceof Error ? `Not moved: ${e.message}` : 'Not moved. Nothing changed.');
@@ -254,7 +258,7 @@ export const OpnsNameActions = ({
           <Row
             icon={<AtSign size={20} color={GOLD} />}
             title="Use as my $handle"
-            sub={`Get paid at ${pm}. Handles live on the bWalletX name server, separate from the on-chain name, so the next screen checks it is free.`}
+            sub={`Get paid at ${pm}. Handles live on the ${APP_NAME} name server, separate from the on-chain name, so the next screen checks it is free.`}
             action={
               on('handle') ? (
                 <Done>Your $handle</Done>
@@ -301,7 +305,9 @@ export const OpnsNameActions = ({
               owned === undefined
                 ? 'Checking your names…'
                 : canAdopt
-                  ? 'This name came in with your NFTs. Add it to your Names list first, then link it and sell it. Adding is free: no transaction, nothing sent.'
+                  ? MARKET_ENABLED
+                    ? 'This name came in with your NFTs. Add it to your Names list first, then link it and sell it. Adding is free: no transaction, nothing sent.'
+                    : 'This name came in with your NFTs. Add it to your Names list first, then link it. Adding is free: no transaction, nothing sent.'
                   : 'This name came in with your NFTs, not into your Names list, so the wallet can’t sign it yet. It can be added to Names once it shows in Wallet › NFTs.'
             }
             action={
@@ -410,9 +416,13 @@ export const OpnsNameActions = ({
               title={MARKET_ENABLED ? 'Sell it' : 'Give it away'}
               coming={!canAdopt}
               sub={
-                canAdopt
-                  ? 'Selling works for names in your Names list. Use Add to my Names above, then sell it from Wallet › Names.'
-                  : 'Selling works for names in your Names list. A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
+                MARKET_ENABLED
+                  ? canAdopt
+                    ? 'Selling works for names in your Names list. Use Add to my Names above, then sell it from Wallet › Names.'
+                    : 'Selling works for names in your Names list. A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
+                  : canAdopt
+                    ? 'Giving works for names in your Names list. Use Add to my Names above, then give it from Wallet › Names.'
+                    : 'A name received with your NFTs can be sent now, and added to Names once it shows in Wallet › NFTs.'
               }
             />
           )
@@ -432,8 +442,10 @@ export const OpnsNameActions = ({
       </ul>
       {!held && (
         <p className="m-0 text-xs" style={{ color: '#e6d08a' }}>
-          <Sparkles size={12} className="inline" /> It’s at your address. Linking, selling and sending unlock once it
-          shows in Wallet › NFTs.
+          <Sparkles size={12} className="inline" />{' '}
+          {MARKET_ENABLED
+            ? 'It’s at your address. Linking, selling and sending unlock once it shows in Wallet › NFTs.'
+            : 'It’s at your address. Linking and sending unlock once it shows in Wallet › NFTs.'}
         </p>
       )}
       {msg && <p className="m-0 text-sm text-[#98A2B3] break-words">{msg}</p>}

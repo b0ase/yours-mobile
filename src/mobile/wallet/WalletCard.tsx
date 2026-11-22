@@ -62,6 +62,7 @@ import { exchangeRateAgeMs } from '../../utils/exchangeRate';
 import { pendingSatsNow, subscribePendingSats } from '../../utils/pendingBalance';
 import { PendingLine } from './PendingLine';
 import { BalanceTruthLines } from '../../components/BalanceTruthLines';
+import { HeldPayments } from '../../components/HeldPayments';
 import { useDisplayCurrency } from '../../hooks/useDisplayCurrency';
 import { useKyc } from '../kyc/useKyc';
 import { kycValid } from '../kyc/kyc';
@@ -876,8 +877,15 @@ const WalletCardInner = ({
       </div>
       {/* Under the card, one small line each when it applies: held by an unsent payment, arriving from the other device,
           last sync with the other devices (services/balanceTruth.ts, plan fix 5, 13 Nov 2026). */}
+      {/* Not gated on `known`: while a restored wallet moves to this device the balance can't load, and the backup's total shows here. */}
+      <BalanceTruthLines
+        fmt={(n) => (unit === 'usd' && rate > 0 ? formatUSD((n * rate) / 100_000_000) : cardSats(n))}
+        hidden={balanceHidden}
+        refreshKey={sats}
+      />
+      {/* Payments this device holds and never sends by itself (restored from a backup): Send now or Cancel. */}
       {known && (
-        <BalanceTruthLines
+        <HeldPayments
           fmt={(n) => (unit === 'usd' && rate > 0 ? formatUSD((n * rate) / 100_000_000) : cardSats(n))}
           hidden={balanceHidden}
           refreshKey={sats}

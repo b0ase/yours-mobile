@@ -8,6 +8,7 @@ import { mentionNames } from './notify';
 import { startNotify, stopNotify } from './engine';
 import { startPots, stopPots } from '../pots/potsEngine';
 import { PAY_STREAM_ENABLED } from '../storeBuild';
+import { linkAuthorAtUnlock } from '../feed/authorBinding';
 
 /**
  * App-wide, renders nothing: keeps the notification poller (engine.ts) running for the unlocked
@@ -41,6 +42,13 @@ const NotifyEngine = () => {
     });
   }, [apiContext, isLocked, addresses, identity.bapId, names, prefs.twetchUserId]);
   useEffect(() => stopNotify, []);
+  // Feed-author binding (feed/authorBinding.ts): once the wallet is unlocked, and again when the account changes,
+  // link an account that has posted to its $name. Never while locked; fire-and-forget, so unlock never waits on it.
+  const identityAddress = a?.identityAddress;
+  useEffect(() => {
+    if (isLocked || !apiContext?.wallet || !identityAddress) return;
+    linkAuthorAtUnlock(apiContext, identityAddress);
+  }, [apiContext, isLocked, identityAddress]);
   // Pots: pay standing orders that are due on open / resume (pots/payDue.ts).
   useEffect(() => {
     if (isLocked || !chromeStorageService) return stopPots();

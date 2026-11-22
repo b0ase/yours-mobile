@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { singleFlight } from './addressResync';
 import { isRetryable, prioritySync, type PrioritySyncDeps, type SyncOutputLike } from './prioritySync';
 import { consoleGate } from '../testing/captureConsole';
+import { HeldAsFailedError } from './failedRowRepair';
 
 // prioritySync warns once per transaction it could not load (and carries on). The tests that make lookups fail
 // declare exactly those warnings; any other error or warning fails the test.
@@ -367,5 +368,50 @@ describe('prioritySync: the cursor moves when names are not loaded here', () => 
     const slices = deps(outs, coinIds, { namesPerRun: 10 });
     expect((await prioritySync(slices.d)).names.deferred).toBe(40);
     expect(slices.store.score()).toBe(0);
+  });
+});
+
+describe('prioritySync: a transaction held as failed (report #385 review, 4)', () => {
+  const heldList = () => {
+    const s = new Set<string>();
+    return {
+      s,
+      list: async () => [...s],
+      add: async (t: string) => void s.add(t),
+      remove: async (t: string) => void s.delete(t),
+    };
+  };
+
+  test('it is kept aside, never counted as failed, and the cursor still moves; a later run retries it once due', async () => {
+    const coin = txid(1);
+    const outs: SyncOutputLike[] = [{ outpoint: `${coin}_0`, score: 800_000 }];
+    const held = heldList();
+    let refuse = true;
+    let due = false;
+    let tries = 0;
+    const { d, store, balance } = deps(outs, new Set([coin]), {
+      held,
+      heldDue: () => due,
+      internalizeCoin: async () => {
+        tries++;
+        if (refuse) throw new HeldAsFailedError(coin, 'not-mined');
+        balance.sats += 1_000_000;
+      },
+    });
+    const r1 = await prioritySync(d);
+    expect(r1.failed).toBe(0);
+    expect(held.s.has(coin)).toBe(true);
+    expect(store.score()).toBe(800_000); // the cursor moved past it
+    // Not due yet: the next run leaves it alone (no download, no internalize).
+    const r2 = await prioritySync(d);
+    expect(tries).toBe(1);
+    expect(r2.failed).toBe(0);
+    // Due, and now it goes in: taken off the held list.
+    due = true;
+    refuse = false;
+    await prioritySync(d);
+    expect(tries).toBe(2);
+    expect(held.s.has(coin)).toBe(false);
+    expect(balance.sats).toBe(1_000_000);
   });
 });

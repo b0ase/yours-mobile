@@ -883,7 +883,7 @@ function makeHandlers({
         vout: vouts,
         satoshis: sats,
         rate: picked ? picked.rate : 0,
-        rateSource: picked ? picked.source : 'none',
+        rateSource: picked ? picked.source : offers.RATE_UNAVAILABLE,
         rateAt:
           picked && picked.source.startsWith('payer') && meta.rateAt ? String(meta.rateAt).slice(0, 40) : firstSeen,
         usdValue: picked ? offers.usdValueOf(sats, picked.rate) : '0.00',

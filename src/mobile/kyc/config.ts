@@ -9,8 +9,11 @@ import { BCHAT_ORIGIN } from '../chat/api';
  */
 export const BITSIGN_ORIGIN = BCHAT_ORIGIN;
 
-/** bit-sign's account page, where "Verify your identity" starts the Veriff flow. */
-export const KYC_PAGE_URL = `${BITSIGN_ORIGIN}/user/account`;
+/**
+ * bChatX's "Verify your identity" page, where "Start the ID check" starts the Veriff flow. Not /user/account: its
+ * Veriff card only shows for some accounts (15 Nov 2026).
+ */
+export const KYC_PAGE_URL = `${BITSIGN_ORIGIN}/kyc`;
 
 /** Publishes bit-sign's certifier key(s); an imported cert must be signed by one of them. */
 export const ROOT_KEYS_URL = `${BITSIGN_ORIGIN}/.well-known/bit-sign-root-keys.json`;

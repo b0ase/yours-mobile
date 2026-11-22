@@ -48,6 +48,8 @@ interface StorageInfo {
   transactionCount: number;
   syncStates: SyncStateInfo[];
   storageConfig: StorageConfig;
+  /** Remotes that can't be made active, with why (our server before its whole fill ran on this device). */
+  refusedActive?: Record<string, string>;
 }
 
 // Re-export for use in UI rendering
@@ -504,15 +506,21 @@ export const StorageStatus = ({ onBack }: StorageStatusProps) => {
 
           {/* Actions */}
           <div className="flex flex-col gap-2 mt-3">
-            {!isActive && (
-              <Button
-                theme={theme}
-                type="primary"
-                label="Make Active"
-                onClick={() => requestSetActive(isLocal ? 'local' : url)}
-                disabled={busy}
-                loading={busyAction === 'active'}
-              />
+            {!isActive && !isLocal && info?.refusedActive?.[url] ? (
+              <p className="text-[9px] text-center" style={{ color: gray }}>
+                {info.refusedActive[url]}
+              </p>
+            ) : (
+              !isActive && (
+                <Button
+                  theme={theme}
+                  type="primary"
+                  label="Make Active"
+                  onClick={() => requestSetActive(isLocal ? 'local' : url)}
+                  disabled={busy}
+                  loading={busyAction === 'active'}
+                />
+              )
             )}
             {!isLocal && !isActive && (
               <Button

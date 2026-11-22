@@ -3,6 +3,48 @@ import { buyOrdinal, cancelOpnsListing, listOpns, sellOpns, sendOpns, type OneSa
 import { assertOrdLockV2 } from '../market/ordlockVersion';
 import { assertOpnsPayout } from './opnsBuyPrice';
 import { MODULE_FINISHES, purchaseContext, walletOutpoint } from '../market/walletOutpoint';
+import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
+
+export const listingNotTheName = (name: string) =>
+  `This listing isn't the name "${name}" you approved: the coin for sale is a different inscription. Not buying it.`;
+const CANT_CHECK_NAME = "Couldn't check which name this listing is. Try again in a moment.";
+
+const sameOutpoint = (a: string, b: string) => a.replace('_', '.').toLowerCase() === b.replace('_', '.').toLowerCase();
+
+/**
+ * b-Aware row 349: the sheet's name comes from the listing's own metadata, and buyOrdinal trusted it as given. Before
+ * paying, read which inscription the listed coin carries (ORDFS) and check it is THE OpNS name approved: an
+ * application/op-ns inscription whose origin is the name's registered origin (1sat name index) and whose content is
+ * that name. A counterfeit op-ns blob reading the same text has a different origin. Anything unreadable refuses.
+ * Returns the checked origin.
+ */
+export const assertListedName = async (ctx: OneSatContext, outpoint: string, name: string): Promise<string> => {
+  const want = name.trim().toLowerCase();
+  const svc = ctx.services;
+  if (!svc) throw new Error(CANT_CHECK_NAME);
+  let held: { origin?: string; contentType?: string };
+  let registered: string | undefined;
+  try {
+    const [meta, reg] = await Promise.all([svc.ordfs.getMetadata(outpoint, -2), svc.opns.getOrigin(want)]);
+    held = meta;
+    registered = reg?.outpoint;
+  } catch {
+    throw new Error(CANT_CHECK_NAME);
+  }
+  const origin = held?.origin;
+  if (!origin || !registered) throw new Error(CANT_CHECK_NAME);
+  if ((held.contentType ?? '').split(';')[0].trim() !== 'application/op-ns' || !sameOutpoint(origin, registered))
+    throw new Error(listingNotTheName(name));
+  let text: string;
+  try {
+    const c = await svc.ordfs.getContent(origin);
+    text = new TextDecoder().decode(c.data).trim().toLowerCase();
+  } catch {
+    throw new Error(CANT_CHECK_NAME);
+  }
+  if (text !== want) throw new Error(listingNotTheName(name));
+  return origin;
+};
 
 /**
  * Wallet calls for OpNS trading, shared by Get your name, bMint › OpNS names and the Exchange's Names tab.
@@ -19,7 +61,11 @@ export const buyOpnsListing = async (
   rawOutpoint: string,
   name: string,
   approvedSats: number,
+  store: boolean = STORE_BUILD,
 ): Promise<string> => {
+  // Buying a listed name is a marketplace purchase: never in a store build (storeBuild.ts MARKET_ENABLED). It
+  // refuses before anything is read from the network or asked of the wallet.
+  if (store) throw new Error(STORE_NAME_NOTE);
   const outpoint = walletOutpoint(rawOutpoint);
   await assertOrdLockV2(outpoint);
   const [txid, vout] = outpoint.split('.');
@@ -28,9 +74,11 @@ export const buyOpnsListing = async (
   const out = beef.findTxid(txid)?.tx?.outputs[Number(vout)];
   if (!out) throw new Error("Couldn't check this listing's contract. Try again in a moment.");
   assertOpnsPayout(out.lockingScript, approvedSats, { marketFeeSats: 0, approvedTotalSats: approvedSats });
+  const origin = await assertListedName(ctx, outpoint, name);
   const res = await buyOrdinal.execute(purchaseContext(ctx, outpoint), {
     outpoint,
     inputBEEF: beef.toBinary(),
+    origin,
     name: name.slice(0, 64),
     contentType: 'application/op-ns',
     basket: 'opns',
@@ -42,7 +90,15 @@ export const buyOpnsListing = async (
 };
 
 /** List one owned name (a plain P1SAT spend, like registerOpns / cancel: no module flag) (OPNS basket id) for `sats` with an OrdLock v2 listing. */
-export const listOpnsName = async (ctx: OneSatContext, id: string, sats: number): Promise<string> => {
+export const listOpnsName = async (
+  ctx: OneSatContext,
+  id: string,
+  sats: number,
+  store: boolean = STORE_BUILD,
+): Promise<string> => {
+  // Listing a name for sale is marketplace selling: never in a store build (as buyOpnsListing). It refuses before
+  // anything is asked of the wallet.
+  if (store) throw new Error(STORE_NAME_NOTE);
   const res = await sellOpns.execute(ctx, { id, price: sats });
   if (res.error || !res.txid) throw new Error(String(res.error ?? 'Listing failed'));
   return res.txid;

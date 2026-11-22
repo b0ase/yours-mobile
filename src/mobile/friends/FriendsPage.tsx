@@ -53,6 +53,7 @@ import {
   isEmailHandle,
   loadLocal,
   lookalikeWarnings,
+  friendKey,
   maskEmail,
   parseAddInput,
   paymentsWith,
@@ -239,9 +240,7 @@ const AddFriend = ({
       setBusy(true);
       try {
         const r = await resolveRecipient(f, parseRecipient(p.query));
-        const key = (r.pubkey || '').toLowerCase();
-        if (!/^0[23][0-9a-f]{64}$/.test(key))
-          throw new Error(`${maskEmail(r.input)} has no identity key, so it can't be saved as a friend.`);
+        const key = friendKey(r);
         const handle = r.input.startsWith('$')
           ? r.input.slice(1).toLowerCase()
           : r.input.endsWith(`@${data.domain}`)

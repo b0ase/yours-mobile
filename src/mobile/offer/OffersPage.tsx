@@ -7,7 +7,7 @@ import { TopNav } from '../../components/TopNav';
 import { resolveCallee } from '../calls/peer';
 import { SignaturePad } from '../signature/SignaturePad';
 import { SIG_H, SIG_W } from '../signature/signature';
-import { RECEIPT_STATUS_TEXT } from './company';
+import { receiptLine } from './company';
 import {
   HASH_BASIS,
   OFFER_HTML_MAX,
@@ -528,11 +528,10 @@ const Receipts = ({ o }: { o: Offers }) => {
         <div key={r.payment.txid} className="of-receipt">
           <div className="ag-grow">
             <div className="ag-pname">
-              {r.offerRef} · {usd(r.payment.usdValue)}
+              {r.offerRef} · {receiptLine(r).amount}
             </div>
             <div className="ag-fine">
-              {RECEIPT_STATUS_TEXT[r.status]}
-              {r.status === 'received_shortfall' ? ` (short ${usd(r.payment.shortfallUsd)})` : ''} ·{' '}
+              {receiptLine(r).status} ·{' '}
               {r.checks?.subscriberSigValid ? 'signature checks out' : 'signature does not check out'} · allotment: not
               made
             </div>

@@ -9,7 +9,10 @@ import {
   boundHosts,
   normaliseKey,
   crossSiteSignRefusal,
+  BLIND_HASH_SITES,
+  blindHashAllowed,
   guardCrossSiteSigning,
+  malformedSignRefusal,
   sameSite,
   setProvenPairingCheck,
 } from './crossSiteSignGuard';
@@ -194,12 +197,7 @@ describe('b-Aware 24-25 Oct: encoded and blind challenges', () => {
     expect(crossSiteSignRefusal(caller, { hashToDirectlySign: [1, 2, 3] })).toBe(BLIND_SIGN_REFUSAL);
   });
   test('our chat sites may sign a hash (bChatX AIP posts), look-alikes and parents may not', () => {
-    for (const ok of [
-      'https://bchatx.com',
-      'https://www.bchatx.com',
-      'https://chat.bwalletx.com',
-      'https://bit-sign.online',
-    ])
+    for (const ok of ['https://bchatx.com', 'https://www.bchatx.com', 'https://chat.bwalletx.com'])
       expect(crossSiteSignRefusal(ok, { hashToDirectlySign: [1, 2, 3] })).toBeNull();
     for (const bad of [
       'https://bwalletx.com',
@@ -439,10 +437,8 @@ describe('review 13 Nov: the scan is linear and bounded (A1)', () => {
   test.each(worst)('%s: within the character budget and fast', (_name, data) => {
     const { chars } = scanSignData(new Uint8Array(data));
     expect(chars).toBeLessThanOrEqual(MAX_SCAN_CHARS);
-    const t = performance.now();
+    // Bounded work, not bounded time: the scan reads at most MAX_SCAN_CHARS (asserted above), so a loaded machine can't flake this.
     crossSiteSignRefusal('https://app.example', { data });
-    // Measured 2-17 ms on an M-series Mac; the bound is generous so a loaded test machine doesn't flake.
-    expect(performance.now() - t).toBeLessThan(250);
   });
 
   test('more reading than the budget allows is refused, not signed', () => {
@@ -634,7 +630,8 @@ describe('review 13 Nov: readings the first fix missed (A3, A4)', () => {
     ['a mixed-case key', bytes('{"DoMaIn":"good.com"}')],
     ['JSON nested in a JSON string', bytes(JSON.stringify({ payload: JSON.stringify({ domain: 'good.com' }) }))],
     ['a field after another in a query string', bytes('note=1&domain=good.com')],
-    ['0xff + \\u-escaped key', [0xff, ...bytes('{"\\u0064omain":"good\\u002ecom"}')]],
+    // Two 0xff, not one: with one this fixture was exactly 32 bytes, which is now a blind hash for any site.
+    ['0xff + \\u-escaped key', [0xff, 0xff, ...bytes('{"\\u0064omain":"good\\u002ecom"}')]],
   ])('%s: refused for evil.com, allowed for good.com', (_name, data) => {
     expect(crossSiteSignRefusal('https://evil.com', { data })).toContain('good.com');
     expect(crossSiteSignRefusal('https://good.com', { data })).toBeNull();
@@ -884,11 +881,10 @@ describe('B1: userinfo with a space, & or ; still names the host after the @', (
   ])('%s: refused for evil.com', (msg) => {
     expect(crossSiteSignRefusal('https://evil.com', { data: bytes(msg) })).toContain('good.com');
   });
-  test('a long run of soft ends and @s stays fast', () => {
+  test('a long run of soft ends and @s stays within the character budget', () => {
     const data = bytes('@x_url=https:a '.repeat(4500));
-    const t = performance.now();
+    expect(scanSignData(new Uint8Array(data)).chars).toBeLessThanOrEqual(MAX_SCAN_CHARS);
     crossSiteSignRefusal('https://app.example', { data });
-    expect(performance.now() - t).toBeLessThan(250);
   });
 });
 
@@ -916,5 +912,292 @@ describe('polish: a URL followed by an email on the same line names only the URL
     'uri: https://evil.com   @good.com/login',
   ])('%s: still refused for evil.com', (msg) => {
     expect(crossSiteSignRefusal('https://evil.com', { data: bytes(msg) })).toContain('good.com');
+  });
+});
+
+// Review of the feed-author binding, 15 Nov 2026: createSignature signs sha256(data), and a Bitcoin Signed Message
+// digest is sha256(sha256(prefix ‖ message)). So 32 bytes of `data` under the posting protocol ([1,'sigma'], the key
+// that AIP-signs feed posts) is a BSM signature over a message the wallet never saw: hashToDirectlySign by another door.
+describe('32 bytes of data under the posting protocol is a blind hash', () => {
+  const posting = (data: number[], extra: object = {}) => ({
+    protocolID: [1, 'sigma'],
+    keyID: 'identity-1',
+    counterparty: 'self',
+    data,
+    ...extra,
+  });
+  const digest = rand(32, 7);
+
+  test('refused for an outside site, in any spelling of the protocol name', () => {
+    for (const site of ['evil.example', 'https://evil.example', 'https://app.evil.example:8443/x'])
+      expect(crossSiteSignRefusal(site, posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+    expect(crossSiteSignRefusal('evil.example', posting(digest, { protocolID: [1, ' SIGMA '] }))).toBe(
+      BLIND_SIGN_REFUSAL,
+    );
+    expect(crossSiteSignRefusal('evil.example', posting(digest, { keyID: 'identity-7' }))).toBe(BLIND_SIGN_REFUSAL);
+    expect(crossSiteSignRefusal('evil.example', posting(digest, { counterparty: undefined }))).toBe(BLIND_SIGN_REFUSAL);
+    // 32 bytes of readable text is still 32 bytes the wallet would hash once more into a BSM digest.
+    expect(crossSiteSignRefusal('evil.example', posting(bytes('a'.repeat(32))))).toBe(BLIND_SIGN_REFUSAL);
+  });
+
+  test('refused for a caller with no host and for a pairing that did not prove its site', () => {
+    expect(crossSiteSignRefusal('localhost', posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+    setProvenPairingCheck(() => false);
+    expect(crossSiteSignRefusal('bchatx.com.paired.invalid', posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+    setProvenPairingCheck(() => true);
+    expect(crossSiteSignRefusal('bchatx.com.paired.invalid', posting(digest))).toBeNull();
+    expect(crossSiteSignRefusal('evil.example.paired.invalid', posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+    setProvenPairingCheck(() => false);
+  });
+
+  test('our own chat sites keep it, exactly as they keep hashToDirectlySign', () => {
+    for (const site of ['bchatx.com', 'www.bchatx.com', 'chat.bwalletx.com']) {
+      expect(crossSiteSignRefusal(site, posting(digest))).toBeNull();
+      expect(crossSiteSignRefusal(site, { ...posting([]), data: undefined, hashToDirectlySign: digest })).toBeNull();
+    }
+    // A parent or a lookalike is not one of them.
+    for (const site of ['bwalletx.com', 'evilbchatx.com', 'bchatx.com.evil.example'])
+      expect(crossSiteSignRefusal(site, posting(digest))).toBe(BLIND_SIGN_REFUSAL);
+  });
+
+  test('an outside site’s other data under the posting protocol is signed as before', () => {
+    for (const n of [1, 31, 33, 64, 200]) expect(crossSiteSignRefusal('app.example', posting(rand(n, n)))).toBeNull();
+    expect(
+      crossSiteSignRefusal('app.example', posting(bytes('A post of ordinary length, signed by its author.'))),
+    ).toBeNull();
+  });
+
+  // Was "signed as before" until 15 Nov 2026: data = sha256(preimage) under any protocol a site holds is a transaction
+  // signature over a transaction the wallet never saw (review of the pending-sighash fix; pendingSighash.test.ts).
+  test('32 bytes under any other protocol is a blind hash too', () => {
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [2, 'sigma'] }))).toBe(BLIND_SIGN_REFUSAL);
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [1, 'sigmas'] }))).toBe(
+      BLIND_SIGN_REFUSAL,
+    );
+    expect(crossSiteSignRefusal('app.example', posting(digest, { protocolID: [2, 'my app'] }))).toBe(
+      BLIND_SIGN_REFUSAL,
+    );
+    for (const n of [31, 33])
+      expect(crossSiteSignRefusal('app.example', posting(rand(n, n), { protocolID: [2, 'my app'] }))).toBeNull();
+  });
+
+  test('through the guard: the site is refused before the wallet signs; the wallet itself and an HMAC are not', async () => {
+    const calls: string[] = [];
+    const m = guardCrossSiteSigning(
+      {
+        createSignature: async (_a: unknown, o?: string) => (calls.push(`sign:${o}`), { signature: [1] }),
+        createHmac: async (_a: unknown, o?: string) => (calls.push(`hmac:${o}`), { hmac: [1] }),
+      },
+      'wallet-admin',
+    ) as unknown as Record<'createSignature' | 'createHmac', (a: unknown, o?: string) => Promise<unknown>>;
+    await expect(m.createSignature(posting(digest), 'evil.example')).rejects.toThrow(BLIND_SIGN_REFUSAL);
+    expect(calls).toEqual([]);
+    await m.createSignature(posting(digest), 'wallet-admin');
+    await m.createSignature(posting(rand(48, 3)), 'app.example');
+    await m.createHmac(posting(digest), 'app.example');
+    expect(calls).toEqual(['sign:wallet-admin', 'sign:app.example', 'hmac:app.example']);
+  });
+});
+
+// Final check of the feed-author binding, 15 Nov 2026: the guard itself refuses a site's createSignature whose shape
+// it can't read, instead of leaving it to the SDK to throw later.
+describe('a site’s malformed createSignature is refused by the guard', () => {
+  const ok = { protocolID: [2, 'my app'], keyID: '1', counterparty: 'self', data: [0, 1, 254, 255] };
+  const hole: unknown[] = [1, 2, 3];
+  delete hole[1];
+  class Bytes extends Array<number> {}
+  const badData: [string, unknown][] = [
+    ['a sparse array', hole],
+    ['a fraction', [1, 2.5, 3]],
+    ['a negative', [1, -1]],
+    ['over 255', [1, 256]],
+    ['NaN', [1, NaN]],
+    ['a string element', [1, '2']],
+    ['a nested array', [1, [2]]],
+    ['a string', 'abcd'],
+    ['an array-like object', { length: 2, 0: 1, 1: 2 }],
+    ['a typed array', new Uint8Array([1, 2, 3])],
+    ['an Array subclass', Bytes.from([1, 2, 3])],
+    ['null', null],
+  ];
+  const badProtocol: [string, unknown][] = [
+    ['missing', undefined],
+    ['a string', 'my app'],
+    ['one element', [2]],
+    ['three elements', [2, 'my app', 'x']],
+    ['swapped', ['my app', 2]],
+    ['a string level', ['2', 'my app']],
+    ['a fractional level', [1.5, 'my app']],
+    ['an object', { 0: 2, 1: 'my app', length: 2 }],
+  ];
+
+  test('data that is not a plain dense array of bytes', () => {
+    for (const [name, data] of badData) expect([name, malformedSignRefusal({ ...ok, data })]).not.toEqual([name, null]);
+  });
+
+  test('a protocolID that is not a [number, string] pair', () => {
+    for (const [name, protocolID] of badProtocol)
+      expect([name, malformedSignRefusal({ ...ok, protocolID })]).not.toEqual([name, null]);
+    expect(malformedSignRefusal(null)).not.toBeNull();
+  });
+
+  test('well-formed requests are untouched: bytes, an empty array, a hash-only call, any level', () => {
+    expect(malformedSignRefusal(ok)).toBeNull();
+    expect(malformedSignRefusal({ ...ok, data: [] })).toBeNull();
+    expect(malformedSignRefusal({ ...ok, data: undefined, hashToDirectlySign: rand(32, 1) })).toBeNull();
+    expect(malformedSignRefusal({ ...ok, protocolID: [0, 'x'] })).toBeNull();
+    expect(malformedSignRefusal({ ...ok, data: rand(5000, 2) })).toBeNull();
+  });
+
+  test('through the guard: refused for a site before the wallet is reached; the wallet’s own call and an HMAC pass', async () => {
+    const calls: string[] = [];
+    const m = guardCrossSiteSigning(
+      {
+        createSignature: async (_a: unknown, o?: string) => (calls.push(`sign:${o}`), { signature: [1] }),
+        createHmac: async (_a: unknown, o?: string) => (calls.push(`hmac:${o}`), { hmac: [1] }),
+      },
+      'wallet-admin',
+    ) as unknown as Record<'createSignature' | 'createHmac', (a: unknown, o?: string) => Promise<unknown>>;
+    for (const [, data] of badData) await expect(m.createSignature({ ...ok, data }, 'app.example')).rejects.toThrow();
+    for (const [, protocolID] of badProtocol)
+      await expect(m.createSignature({ ...ok, protocolID }, 'app.example')).rejects.toThrow();
+    // A sparse 32-slot array under the posting protocol can't slip past the blind-hash rule as "not 32 bytes".
+    const sparse: unknown[] = [];
+    sparse.length = 32;
+    await expect(
+      m.createSignature(
+        { protocolID: [1, 'sigma'], keyID: 'identity-1', counterparty: 'self', data: sparse },
+        'app.example',
+      ),
+    ).rejects.toThrow();
+    expect(calls).toEqual([]);
+    await m.createSignature(ok, 'app.example');
+    await m.createSignature({ ...ok, data: new Uint8Array([1, 2]) }, 'wallet-admin');
+    await m.createSignature({ ...ok, protocolID: undefined }, 'wallet-admin');
+    await m.createHmac({ ...ok, protocolID: undefined }, 'app.example');
+    expect(calls).toEqual(['sign:app.example', 'sign:wallet-admin', 'sign:wallet-admin', 'hmac:app.example']);
+  });
+});
+
+// Owner, 15 Nov 2026 ("tightening"): the sites that may ask for a signature over a hash are exact hosts.
+// No subdomain of one counts, and bit-sign.online is no longer one (its posting pages redirect to bChatX).
+// bsocialx.com and scammerscartel.com (with www) were added the same day, on the owner's word ("add both").
+describe('blind-hash sites: exact hosts only', () => {
+  const hash = { hashToDirectlySign: rand(32, 5) };
+  const postingDigest = { protocolID: [1, 'sigma'], keyID: 'identity-1', counterparty: 'self', data: rand(32, 6) };
+  const both = (site: string) => [crossSiteSignRefusal(site, hash), crossSiteSignRefusal(site, postingDigest)];
+
+  test('the complete list, exactly: adding or removing a host must change this test (and needs the owner’s word)', () => {
+    expect([...BLIND_HASH_SITES].sort()).toEqual(
+      [
+        'bchatx.com',
+        'bsocialx.com',
+        'chat.bwalletx.com',
+        'scammerscartel.com',
+        'www.bchatx.com',
+        'www.bsocialx.com',
+        'www.scammerscartel.com',
+      ].sort(),
+    );
+    expect(BLIND_HASH_SITES.size).toBe(7);
+  });
+
+  test('each listed host is allowed', () => {
+    for (const site of [
+      'www.bchatx.com',
+      'bchatx.com',
+      'chat.bwalletx.com',
+      'bsocialx.com',
+      'www.bsocialx.com',
+      'scammerscartel.com',
+      'www.scammerscartel.com',
+    ]) {
+      expect(blindHashAllowed(site)).toBe(true);
+      expect(both(site)).toEqual([null, null]);
+    }
+  });
+
+  test('every spelling of a listed host is the same host: scheme, port, path, case, trailing dot', () => {
+    for (const site of [
+      'https://www.bchatx.com',
+      'https://WWW.BCHATX.COM/feed?x=1',
+      'https://bchatx.com:443',
+      'bchatx.com.',
+      'https://WWW.BSocialX.com/feed',
+      'scammerscartel.com:443',
+      'https://chat.bwalletx.com./room',
+      'http://bchatx.com:80',
+    ])
+      expect([site, ...both(site)]).toEqual([site, null, null]);
+  });
+
+  // Was allowed until the final check of 15 Nov 2026 ('CHAT.BWALLETX.COM:8443' stood in the list above): whatever
+  // listens on another port of a listed host is not the site.
+  test('another port of a listed host is refused', () => {
+    for (const site of [
+      'CHAT.BWALLETX.COM:8443',
+      'bchatx.com:8443',
+      'https://bchatx.com:8443/feed',
+      'https://www.bchatx.com:80',
+      'http://bchatx.com:443',
+      'scammerscartel.com:1',
+    ])
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+  });
+
+  test('subdomains are refused', () => {
+    for (const site of [
+      'x.bchatx.com',
+      'evil.chat.bwalletx.com',
+      'app.bchatx.com',
+      'www.www.bchatx.com',
+      'www.chat.bwalletx.com',
+      'https://staging.bchatx.com',
+      'x.bsocialx.com',
+      'evil.scammerscartel.com',
+      'www.www.bsocialx.com',
+    ]) {
+      expect(blindHashAllowed(site)).toBe(false);
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+    }
+  });
+
+  test('bit-sign.online, in any form, is refused', () => {
+    for (const site of ['bit-sign.online', 'www.bit-sign.online', 'https://bit-sign.online', 'app.bit-sign.online'])
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+  });
+
+  test('sites not on the list, parents and look-alikes are refused', () => {
+    for (const site of [
+      'bsocialx.com.evil.example',
+      'scammerscartel.co',
+      'evilbsocialx.com',
+      'bwalletx.com',
+      'web.bwalletx.com',
+      'evilbchatx.com',
+      'bchatx.com.evil.example',
+      'bchatx.co',
+    ])
+      expect([site, ...both(site)]).toEqual([site, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+  });
+
+  test('a phone pairing that proved a listed host still works; a subdomain or unproven one does not', () => {
+    const paired = (host: string) => `${host}.c${'ab'.repeat(22)}.paired.invalid`;
+    setProvenPairingCheck(() => true);
+    for (const host of BLIND_HASH_SITES) expect([host, ...both(paired(host))]).toEqual([host, null, null]);
+    for (const host of ['x.bchatx.com', 'bit-sign.online', 'x.bsocialx.com', 'evil.scammerscartel.com'])
+      expect([host, ...both(paired(host))]).toEqual([host, BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+    setProvenPairingCheck(() => false);
+    expect(both(paired('www.bchatx.com'))).toEqual([BLIND_SIGN_REFUSAL, BLIND_SIGN_REFUSAL]);
+  });
+
+  test('bit-sign.online still signs readable data that names it (its document seal); only the blind hash is gone', () => {
+    const record = JSON.stringify({
+      v: 1,
+      kind: 'nds-seal',
+      docHash: 'ab'.repeat(32),
+      origin: 'https://bit-sign.online',
+    });
+    expect(crossSiteSignRefusal('https://bit-sign.online', { data: bytes(record) })).toBeNull();
   });
 });

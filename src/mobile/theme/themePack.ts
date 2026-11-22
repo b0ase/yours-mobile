@@ -1,6 +1,7 @@
 import { contrast, luminance } from './colour';
 import { THEMES, type Accent, type AccentId } from './accents';
 import { atLeast, type Holding } from '../chat/tokenRooms';
+import { APP_NAME } from '../storeBuild';
 
 /**
  * Theme packs as JSON (docs/THEME-STORE-PLAN.md step 1). A pack is the `Accent` look (accents.ts) plus who made
@@ -75,7 +76,7 @@ export const packOfAccent = (a: Accent): ThemePack => ({
   id: a.id,
   label: a.label,
   ...(a.blurb ? { blurb: a.blurb } : {}),
-  creator: a.edition ?? 'bWalletX',
+  creator: a.edition ?? `${APP_NAME}`,
   tier: 'free',
   preview: [a.bg, a.surface, a.accent],
   look: lookOf(a),
