@@ -24,6 +24,7 @@ import {
   admissionListFor,
 } from './services/inboundSync';
 import { outpointStates } from './services/heldOutpoints';
+import { SYNC_HEALTH_KEY } from './services/storageHealth';
 import { SNAPSHOT_MARK_KEY, SNAPSHOT_SERVER_URL, SPENDABLE_FIRST_KEY } from './services/spendableFirst';
 import { OUR_BACKUP_REBUILDING_REFUSAL, ourBackupCheckKey } from './services/spendableFirstWiring';
 
@@ -567,6 +568,9 @@ describe('initWallet: our server held out for its repair (review of b936a98c, 3,
     const { ChromeStorageService } = await import('./services/ChromeStorage.service');
     const { initWallet } = await import('./initWallet');
     held = await initWallet(new ChromeStorageService(), { startSyncsAfter: () => new Promise(() => undefined) });
+    // Its address sync (fire-and-forget) ends before the tests and the close: nothing of it runs after this file.
+    for (let i = 0; i < 600 && local[SYNC_HEALTH_KEY(address)] === undefined; i++)
+      await new Promise((r) => setTimeout(r, 50));
   }, 60_000);
   afterAll(async () => {
     await held?.close?.().catch(() => undefined);
