@@ -1561,11 +1561,31 @@ export const initWallet = async (
   // every intake fail with "…invalid status failed" on every run. The sync's internalizeAction repairs a mined one
   // with the toolbox's proof-checked UnFail and takes it in; one not mined is left out with its reason
   // (services/failedRowRepair.ts).
+  // A payment of ours that a mined one made impossible (the same coins) is failed by that repair: the user is told
+  // plainly the recipient did not get it (review of fix/385, R1).
   const adminWallet = withFailedRowRepair(withOriginator(wallet, ADMIN_ORIGINATOR), {
     repair: makeUnfailRepair({
       storage: storage as never,
-      monitor: walletMonitor,
+      monitor: walletMonitor as never,
       services: toolboxServices as never,
+      onPaymentsFailed: (payments) => {
+        for (const p of payments) {
+          const sats = Math.abs(p.satoshis ?? 0);
+          const message = `Your payment${sats ? ` of ${sats.toLocaleString('en-GB')} sats` : ''} (${p.txid.slice(0, 8)}…) didn’t go through: another payment from this wallet, now confirmed, used the same coins. The recipient didn’t get it.`;
+          console.warn(`[failedRow] payment ${p.txid} failed: ${message}`);
+          try {
+            chrome.notifications?.create({
+              type: 'basic',
+              iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+              title: 'A payment didn’t go through',
+              message,
+              priority: 2,
+            });
+          } catch (err) {
+            console.warn('[failedRow] notification failed:', err);
+          }
+        }
+      },
     }),
   });
 
@@ -2132,6 +2152,25 @@ export const initWallet = async (
   const guard = () => runReceiveGuard().catch((err) => console.error('[receiveGuard] failed:', err));
   guardSoon = () => void guard();
 
+  // Transactions the address sync keeps aside as held as failed, per account, across restarts (services/prioritySync.ts).
+  const HELD_FAILED_KEY = `bwxHeldFailed:${keys.identityAddress}`;
+  const readHeld = async (): Promise<string[]> => {
+    const v = (await chrome.storage.local.get(HELD_FAILED_KEY).catch(() => undefined))?.[HELD_FAILED_KEY];
+    return Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string' && /^[0-9a-f]{64}$/i.test(t)) : [];
+  };
+  const writeHeld = (list: string[]) => chrome.storage.local.set({ [HELD_FAILED_KEY]: list }).catch(() => undefined);
+  const heldFailedList = {
+    list: readHeld,
+    add: async (txid: string) => {
+      const l = await readHeld();
+      if (!l.includes(txid)) await writeHeld([...l, txid]);
+    },
+    remove: async (txid: string) => {
+      const l = await readHeld();
+      if (l.includes(txid)) await writeHeld(l.filter((t) => t !== txid));
+    },
+  };
+
   // One address sync at a time, shared by the startup run, the background alarm and the refresh button
   // (services/addressResync.ts). A quiet run (the alarm) shows no spinner; its 'complete' still refreshes the balance.
   let quietRun = false;
@@ -2155,6 +2194,11 @@ export const initWallet = async (
         knownTxids: heldTxids,
         foreignSpend: (spenders) => void askPull(spenders),
         onTaken: (ops) => recheck.add(ops),
+        // Held as failed (not mined yet, or a conflict): kept aside, tried again once its back-off is over, and never
+        // counted as a failure, so the address cursor moves on (review of fix/385, 4).
+        held: heldFailedList,
+        heldDue: (txid) => internalizeBackoff.due(txid),
+        heldFailed: (txid, err) => void internalizeBackoff.fail(txid, err),
         onProgress: (p) => {
           if (!quiet)
             sendSyncStatus({

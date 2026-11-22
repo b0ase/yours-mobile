@@ -41,13 +41,24 @@ type Chain = {
   proofsLeft: Map<string, number>;
 };
 
+/**
+ * A's proof: the transaction at index 1 of its block (index 0 is the coinbase, which the SDK's proof check treats as
+ * not spendable for 100 blocks).
+ */
+const pathFor = (txid: string) =>
+  new MerklePath(HEIGHT, [
+    [
+      { offset: 0, hash: 'ce'.repeat(32) },
+      { offset: 1, hash: txid, txid: true },
+    ],
+  ]);
 const proofFor = (txid: string) => ({
   name: 'mock',
-  merklePath: new MerklePath(HEIGHT, [[{ offset: 0, hash: txid, txid: true }]]),
+  merklePath: pathFor(txid),
   header: {
     version: 1,
     previousHash: '00'.repeat(32),
-    merkleRoot: txid,
+    merkleRoot: pathFor(txid).computeRoot(txid),
     time: 1763700000,
     bits: 0x1d00ffff,
     nonce: 0,
@@ -242,7 +253,7 @@ async function device(opts: { mined: boolean; respend?: boolean; beefProof?: boo
     chain.mined.add(txid);
     chain.spent.set(`${fundTxid}.0`, txid);
   }
-  if (opts.beefProof ?? opts.mined) tx.merklePath = new MerklePath(HEIGHT, [[{ offset: 0, hash: txid, txid: true }]]);
+  if (opts.beefProof ?? opts.mined) tx.merklePath = pathFor(txid);
   else tx.inputs[0].sourceTransaction = parent;
   const beef = new Beef();
   beef.mergeTransaction(tx);
@@ -458,7 +469,7 @@ describe('#385 review: a repair never counts a coin twice', () => {
 
   test('a proof the chain tracker rejects: nothing written, B untouched', async () => {
     const dv = await device({ mined: true, respend: true, beefProof: false });
-    dv.chain.rejectRoots.add(dv.txid); // a one-leaf proof's root is the txid
+    dv.chain.rejectRoots.add(pathFor(dv.txid).computeRoot(dv.txid));
     const before = await snapshot(dv);
     const intake = makeCoinIntake({
       wallet: syncWallet(dv) as never,

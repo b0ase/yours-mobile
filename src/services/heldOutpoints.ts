@@ -14,6 +14,7 @@
  *  - 'absent': no row at all.
  * Reads only, straight from the device store: nothing here writes or locks.
  */
+import { Transaction } from '@bsv/sdk';
 import { OWN_PENDING_STATUSES } from './autoCoinResync';
 
 export type OutpointState = 'accounted' | 'stored' | 'absent';
@@ -31,7 +32,12 @@ export type HeldStore = {
     partial: { userId: number; txid?: string; transactionId?: number; status?: string };
     noRawTx?: boolean;
   }): Promise<TxRow[]>;
+  /** A failed transaction keeps its bytes only in its proven-tx request (heldFailedCounted). */
+  findProvenTxReqs?(args: { partial: { txid?: string } }): Promise<{ rawTx?: number[] | null }[]>;
 };
+
+/** Statuses internalizeAction refuses: a transaction of ours the network never took, as far as this device knows. */
+const REFUSED = new Set(['failed', 'invalid']);
 
 /** Transaction states whose outputs the balance reads (listOutputs, inFlightChangeSats). */
 const COUNTED = new Set(['completed', 'unproven', 'sending', 'nosend', 'unprocessed']);
@@ -47,6 +53,13 @@ export async function outpointStates(
   store: HeldStore,
   userId: number,
   outpoints: Iterable<string>,
+  /**
+   * Count an output of a transaction held as failed as 'accounted' when every coin it spent that this wallet holds
+   * still counts here (spendable again, or carried by a later payment): its value is already in the balance, so it is
+   * not "arriving" on top (review of fix/385, 2). For counting only (the balance and the arriving check); the receive
+   * guard's intake leaves it off, so a held transaction is still tried.
+   */
+  opts: { heldFailedCounted?: boolean } = {},
 ): Promise<Map<string, OutpointState>> {
   const out = new Map<string, OutpointState>();
   const statusById = new Map<number, string | undefined>();
@@ -75,11 +88,48 @@ export async function outpointStates(
       );
     return carriesById.get(spender)!;
   };
+  /** Does this output row's value count here: spendable, or spent by a counted payment that carries it? */
+  const counts = async (r: OutputRow) =>
+    COUNTED.has((await status(r.transactionId)) ?? '') &&
+    (r.spendable === true || (COUNTED.has((await status(r.spentBy)) ?? '') && (await carries(r.spentBy!))));
+  const backHere = new Map<string, boolean>();
+  /** A transaction held as failed whose coins of ours all still count here (opts.heldFailedCounted). */
+  const inputsBackHere = async (txid: string) => {
+    if (!backHere.has(txid)) {
+      let ok = false;
+      try {
+        const [req] = (await store.findProvenTxReqs?.({ partial: { txid } })) ?? [];
+        if (req?.rawTx?.length) {
+          let ours = 0;
+          ok = true;
+          for (const input of Transaction.fromBinary(Array.from(req.rawTx)).inputs) {
+            if (!input.sourceTXID) continue;
+            for (const r of await store.findOutputs({
+              partial: { userId, txid: input.sourceTXID, vout: input.sourceOutputIndex },
+              noScript: true,
+            })) {
+              ours++;
+              if (!(await counts(r))) ok = false;
+            }
+          }
+          ok = ok && ours > 0;
+        }
+      } catch {
+        ok = false;
+      }
+      backHere.set(txid, ok);
+    }
+    return backHere.get(txid)!;
+  };
   for (const op of outpoints) {
     const { key, txid, vout } = split(op);
     if (out.has(key) || !txid || !Number.isInteger(vout)) continue;
     // By its transaction first (a row may lack its txid), else by outpoint.
     const [t] = await store.findTransactions({ partial: { userId, txid }, noRawTx: true });
+    if (opts.heldFailedCounted && REFUSED.has(t?.status ?? '') && (await inputsBackHere(txid))) {
+      out.set(key, 'accounted');
+      continue;
+    }
     const rows =
       typeof t?.transactionId === 'number'
         ? await store.findOutputs({ partial: { userId, transactionId: t.transactionId, vout }, noScript: true })
@@ -120,7 +170,7 @@ export const accountedVia =
   async (outpoints: string[]): Promise<string[]> => {
     const r = outpoints.length ? await read() : undefined;
     if (!r) return [];
-    const states = await outpointStates(r.store, r.userId, outpoints);
+    const states = await outpointStates(r.store, r.userId, outpoints, { heldFailedCounted: true });
     return [...states].filter(([, s]) => s === 'accounted').map(([k]) => k);
   };
 

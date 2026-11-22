@@ -19,6 +19,8 @@
  * redoes only what failed. The resume cursor moves only after a run with no failures, as before.
  */
 
+import { isHeldAsFailed } from './heldAsFailed';
+
 export type SyncOutputLike = { outpoint: string; score: number; spendTxid?: string };
 
 export type SyncPart = 'scan' | 'coins' | 'names';
@@ -89,6 +91,16 @@ export type PrioritySyncDeps = {
    * lookups before the first coin with the index rate-limited).
    */
   checkCoin?: (outpoints: string[]) => Promise<void>;
+  /**
+   * Transactions held as failed on this device (services/failedRowRepair.ts; review of fix/385, 4): kept here, not
+   * counted as failures, so the cursor moves on; each run retries the ones `heldDue` says are due, and drops one once it
+   * goes in. Without it a held transaction counts as failed (and holds the cursor) as before.
+   */
+  held?: { list(): Promise<string[]>; add(txid: string): Promise<void>; remove(txid: string): Promise<void> };
+  /** May a held transaction be tried now (the shared internalize back-off)? Default: yes. */
+  heldDue?: (txid: string) => boolean;
+  /** A held transaction was refused again: back it off. */
+  heldFailed?: (txid: string, err: unknown) => void;
 };
 
 export type PrioritySyncResult = {
@@ -198,6 +210,25 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
     if (await store.has(txid)) continue;
     todo.push(txid);
   }
+  // Held ones (behind the cursor now) whose back-off is over: tried again with the coins.
+  // Held ones whose back-off is not over are left alone, even when the stream lists them again.
+  const heldBefore = new Set(deps.held ? await deps.held.list().catch(() => [] as string[]) : []);
+  const heldWaiting = new Set([...heldBefore].filter((t) => !(deps.heldDue?.(t) ?? true)));
+  for (let i = todo.length - 1; i >= 0; i--) if (heldWaiting.has(todo[i])) todo.splice(i, 1);
+  for (const txid of heldBefore) if (!todo.includes(txid) && !heldWaiting.has(txid)) todo.push(txid);
+  let held = 0;
+  /** True when `err` is a held refusal kept aside (not a failure). */
+  const keepHeld = async (txid: string, err: unknown) => {
+    if (!deps.held || !isHeldAsFailed(err)) return false;
+    await deps.held.add(txid).catch(() => undefined);
+    deps.heldFailed?.(txid, err);
+    held++;
+    console.log(`[prioritySync] ${txid} held: ${err instanceof Error ? err.message : String(err)}`);
+    return true;
+  };
+  const released = async (txid: string) => {
+    if (heldBefore.has(txid)) await deps.held?.remove(txid).catch(() => undefined);
+  };
 
   // 2. Coins: classify each (raw tx, parallel) and take the ones paying >1 sat at once.
   let checked = 0;
@@ -234,6 +265,7 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
         if (r === 'skipped') coinsSkipped++;
         else {
           await store.add(txid);
+          await released(txid);
           coinsFound++;
           processed++;
         }
@@ -242,8 +274,10 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
         await deps.classified?.add(txid);
       }
     } catch (err) {
-      coinsFailed++;
-      console.warn(`[prioritySync] coins: ${txid} not loaded:`, err instanceof Error ? err.message : String(err));
+      if (!(await keepHeld(txid, err))) {
+        coinsFailed++;
+        console.warn(`[prioritySync] coins: ${txid} not loaded:`, err instanceof Error ? err.message : String(err));
+      }
     }
     checked++;
     report({ part: 'coins', done: checked, total: todo.length, failed: coinsFailed, message: coinsMsg() });
@@ -263,10 +297,13 @@ export const prioritySync = async (deps: PrioritySyncDeps): Promise<PrioritySync
       const beef = await withRetry(() => deps.fetchBeef(txid), retries, sleep);
       await serial(() => withRetry(() => deps.internalize(txid, beef), retries, sleep));
       await store.add(txid);
+      await released(txid);
       processed++;
     } catch (err) {
-      namesFailed++;
-      console.warn(`[prioritySync] names: ${txid} not loaded:`, err instanceof Error ? err.message : String(err));
+      if (!(await keepHeld(txid, err))) {
+        namesFailed++;
+        console.warn(`[prioritySync] names: ${txid} not loaded:`, err instanceof Error ? err.message : String(err));
+      }
     }
     namesDone++;
     report({ part: 'names', done: namesDone, total: names.length, failed: namesFailed, message: namesMsg() });
