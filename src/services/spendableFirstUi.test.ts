@@ -468,7 +468,10 @@ describe('review 7: flag off never connects or pushes to our server', () => {
   test('wired: both of initWallet’s storage openings filter the backups by the flag', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
-    expect(src.match(/backupsFor\(resolved\.backups, await spendableFirstOn\(/g)?.length).toBe(2);
+    // initWallet reads the flag once (it also picks the reconcile remote with it, review of a95a1ff0, 1).
+    expect(src.match(/backupsFor\(resolved\.backups, await spendableFirstOn\(/g)?.length).toBe(1);
+    expect(src).toContain('const flagOn = await spendableFirstOn(chrome.storage?.local as never);');
+    expect(src.match(/backupsFor\(resolved\.backups, flagOn\)/g)?.length).toBe(1);
   });
 });
 
