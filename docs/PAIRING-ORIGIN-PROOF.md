@@ -53,8 +53,10 @@ sign-in) and build this fragment. A page uses it only once the relay's wallet sa
 binds one wallet to the channel). Then it saves a tab that slept through the relay (iOS freezes it while the user is
 in bWallet, often swallowing hello and ready with its frozen socket), or a NEW tab, from waiting on frames already
 spent. With `ln`/`lx` (the site's sign-in nonce and ISO expiry) on a PROVEN link (a valid `s2`; review 2, 22 Nov 2026), Connect also signs the standard sign-in
-text for the relay-verified origin and the `ready` carries `login: { k, sig }`, so the user is sent to the wallet once,
-not twice. An unproven link never gets that: its sign-in comes as the usual separate request and sheet ("a site that
+text for the relay-verified origin, so the user is sent to the wallet once, not twice. That signature travels ONLY in
+the return's frame (CTO 22 Nov 2026); over the relay the `ready` says `ls: 1` ("signed in, see the return") and
+carries no signature, because whoever holds the site end of the channel (a script can, even with a valid `s2` it
+obtained for its own link) must never see it. No return possible: no fold, and the site asks on the separate sheet. An unproven link never gets that: its sign-in comes as the usual separate request and sheet ("a site that
 claims to be <host>"), because an unproven "site" may be a script relaying a real site's challenge. Without a valid
 `s2` the wallet returns to the origin's ROOT only (the relay's origin is the WebSocket
 `Origin` header: honest from a browser, but any other client can set it), so an unproven link can't pick a path.

@@ -484,8 +484,6 @@ type Live = {
   upgrade?: boolean;
   /** The relay admitted this socket (its verifiedOrigin frame arrived). */
   relayed?: boolean;
-  /** A sign-in signed with Connect: said again in every `ready` until it expires (a sleeping tab may have missed it). */
-  login?: { k: string; sig: string; until: number };
 };
 const live = new Map<string, Live>();
 /** Per channel: which of its candidate claims the next connect brings (connect explains why). Memory only. */
@@ -497,10 +495,8 @@ const claimTry = new Map<string, number>();
  * That is how a v1 session upgrades (review 13 Nov 2026): the relay never lets a v1 claim bind on its own, because
  * whoever saw the QR holds the same claim. Older sites ignore both fields.
  */
-const readyFor = (l: Live): PairMessage => {
-  const login = l.login && Date.now() < l.login.until ? { login: { k: l.login.k, sig: l.login.sig } } : {};
-  return l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session), ...login } : { t: 'ready', ...login };
-};
+const readyFor = (l: Live): PairMessage =>
+  l.session ? { t: 'ready', wcv: 2, nc: claimDigestSync(l.session) } : { t: 'ready' };
 
 /**
  * Our hello again (plaintext, as at pairing). P0 22 Nov 2026: a site tab that slept through the pairing (iOS freezes
@@ -950,8 +946,13 @@ function connectPairing(
       // relay's origin is a header any non-browser client can set, so an unproven "site" could be relaying a real
       // site's challenge; its sign-in goes on the separate sheet, which names the claimed host with the warning. Never
       // for the CLI, whose confirm screen is its own.
+      // CTO 22 Nov 2026: and only when the wallet can return, because the signature travels ONLY in the return (the
+      // fragment the wallet opens in this phone's browser at the exact origin), never over the relay. No return (a
+      // desktop QR, no ret): no fold; the site asks over the relay and gets the separate sheet, as before.
       const loginReq =
-        f.verifiedOrigin === CLI_ORIGIN || !proofs.v2 ? null : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
+        f.verifiedOrigin === CLI_ORIGIN || !proofs.v2 || !returnPlan
+          ? null
+          : foldedLoginRequest(link.ln, link.lx, f.verifiedOrigin);
       // The account this card opened under: Connect signs with it, or not at all (review 2, 22 Nov 2026).
       const cardAccount = agentDeps.currentId;
       // A new pairing starts with nothing. Its key names its own channel, so it never shares another pairing's grants
@@ -1043,15 +1044,18 @@ function connectPairing(
             stored,
             relayed: true,
             session: sessionClaim,
-            ...(login && { login: { ...login, until: Date.parse(link.lx!) } }),
           };
           attach(l);
-          // Sealed here (nothing else is on this fresh channel yet) so the same frame can travel in the return.
-          const frame = await sealer!.seal(readyFor(l));
+          // Over the relay: "paired" and, when Connect signed in, only `ls: 1` ("signed in, see the return"). The
+          // signature goes ONLY in the return's frame (CTO 22 Nov 2026): whoever holds the site end of this channel
+          // (a script can, with a link it got signed) never sees it. That frame is sealed AFTER the relay's, so it has
+          // the higher counter and opens after the relay ready on the same tab.
+          const relayFrame = await sealer!.seal(login ? { ...readyFor(l), ls: 1 } : readyFor(l));
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(frame));
+            ws.send(JSON.stringify(relayFrame));
             update(link.c, { ...sealer!.counters });
           }
+          const frame = login ? await sealer!.seal({ ...readyFor(l), login }) : relayFrame;
           return { wk: P.toPublicKey().toString(), frame };
         },
         cancel: () => {

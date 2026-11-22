@@ -82,7 +82,7 @@ export type PairMessage =
    * checking `nc` against its own derivation) and sends it as `wc` on its next connects, re-binding the wallet role to
    * it; that is also how a pairing that started as v1 upgrades. Older sites ignore both.
    */
-  | { t: 'ready'; wcv?: 2; nc?: string; login?: { k: string; sig: string } }
+  | { t: 'ready'; wcv?: 2; nc?: string; login?: { k: string; sig: string }; ls?: 1 }
   | { t: 'ping' }
   | { t: 'close'; reason: string };
 
