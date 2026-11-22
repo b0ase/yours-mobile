@@ -262,19 +262,38 @@ describe('review 4 Nov 2026', () => {
 
 describe('a send during the copy (never a second copy, refuse within 2 s with progress)', () => {
   const never = () => new Promise<void>(() => undefined);
+  /**
+   * "Within 2 s" is the wait the code asks for, not the wall clock (the full gate run under load took 2.28 s, 22 Nov
+   * 2026): every timer `fn` sets is recorded and fires at once, so the refusal path runs whole and fast under any load.
+   */
+  const timed = async <T>(fn: () => Promise<T>): Promise<{ value: T; waits: number[] }> => {
+    const real = globalThis.setTimeout;
+    const waits: number[] = [];
+    globalThis.setTimeout = ((cb: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => {
+      waits.push(ms ?? 0);
+      return real(cb, 0, ...a);
+    }) as typeof setTimeout;
+    try {
+      return { value: await fn(), waits };
+    } finally {
+      globalThis.setTimeout = real;
+    }
+  };
 
   test('joins the copy already running: start() is never called', async () => {
     let starts = 0;
-    const t0 = Date.now();
-    const ok = await joinOrStartMove({
-      isLocal: () => false,
-      running: () => never(),
-      start: async () => void starts++,
-      waitMs: 50,
-    });
+    const { value: ok, waits } = await timed(() =>
+      joinOrStartMove({
+        isLocal: () => false,
+        running: () => never(),
+        start: async () => void starts++,
+        waitMs: 50,
+      }),
+    );
     expect(ok).toBe(false);
     expect(starts).toBe(0);
-    expect(Date.now() - t0).toBeLessThan(500);
+    // It waits only its own waitMs for the copy already running, never for the copy to finish.
+    expect(waits).toEqual([50]);
   });
 
   test('starts exactly one copy when none runs, and a second send joins it', async () => {
@@ -317,9 +336,10 @@ describe('a send during the copy (never a second copy, refuse within 2 s with pr
       refusal: () => movingMessage({ done: 250, total: 1000, startedAt: Date.now() - 5 * 60_000 }),
       log: () => undefined,
     });
-    const t0 = Date.now();
-    const err = await wallet.createAction({ outputs: [{}] } as never).catch((e) => e);
-    expect(Date.now() - t0).toBeLessThan(2500);
+    const { value: err, waits } = await timed(() => wallet.createAction({ outputs: [{}] } as never).catch((e) => e));
+    // Refused after one wait of SEND_WAIT_MS (2 s at most), never after the copy: the copy here never ends.
+    expect(SEND_WAIT_MS).toBeLessThanOrEqual(2000);
+    expect(waits).toEqual([SEND_WAIT_MS]);
     expect(err).toBeInstanceOf(LocalStoreNeededError);
     expect(err.message).toBe(
       'Moving your wallet to this device: 250 of 1000. You can send in about 15 minutes. Nothing was sent.',
