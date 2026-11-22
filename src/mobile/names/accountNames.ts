@@ -69,7 +69,7 @@ export const accountNamesFor = (identityAddress?: string, accountName = '', prof
  * chain: BAP profile, the opns basket, and the paymail server (which also collects paymail payments).
  */
 export const useAccountNames = (identityAddress?: string, accountName = '', profileName = '', sync = true) => {
-  const { apiContext } = useServiceContext();
+  const { apiContext, chromeStorageService } = useServiceContext();
   const [names, setNames] = useState(() => accountNamesFor(identityAddress, accountName, profileName));
   useEffect(() => {
     const update = () => setNames(accountNamesFor(identityAddress, accountName, profileName));
@@ -78,7 +78,12 @@ export const useAccountNames = (identityAddress?: string, accountName = '', prof
   }, [identityAddress, accountName, profileName]);
   useEffect(() => {
     if (!sync || !apiContext || !identityAddress) return;
-    const run = () => syncAccountNames(apiContext, identityAddress).catch(() => undefined);
+    const run = () => {
+      // This account's own ordinals address, only when the current account is the one being synced.
+      const a = chromeStorageService?.getCurrentAccountObject().account?.addresses;
+      const ordAddress = a?.identityAddress === identityAddress ? a.ordAddress : undefined;
+      return syncAccountNames(apiContext, identityAddress, { ordAddress }).catch(() => undefined);
+    };
     run();
     const t = setInterval(run, 150_000);
     return () => clearInterval(t);

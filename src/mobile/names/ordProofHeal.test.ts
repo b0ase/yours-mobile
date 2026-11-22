@@ -44,7 +44,9 @@ describe("b-Aware 102/250: the owner's wallet signs its own unsigned ord address
     expect(posts).toHaveLength(1);
     const body = posts[0].body as { fields: Record<string, string>; ordProof: unknown };
     // A profile update of their own name: alias + ord address only (no name, no fee), signed by the owner.
-    expect(body.fields).toEqual({ alias: 'alice', ordAddress: MY_ORD });
+    const { nonce, ...fields } = body.fields;
+    expect(fields).toEqual({ alias: 'alice', ordAddress: MY_ORD });
+    expect(typeof nonce).toBe('string');
     expect(await server.verifySigned(body, 'register')).toBeNull();
     expect(await checkOrdProof(KEY, MY_ORD, body.ordProof)).toBe('ok');
   });

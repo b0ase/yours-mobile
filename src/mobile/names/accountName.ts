@@ -3,7 +3,14 @@ import { loadBapIdentity } from '../../utils/bapIdentityCache';
 import { PublicKey, type WalletOutput } from '@bsv/sdk';
 import { getMyName, setMyName } from './myName';
 import { opnsNameOf } from './opnsName';
-import { bindMyNames, collectPaymailInbox, lookupPaymailState, paymailEnabled, type PaymailLookup } from './paymail';
+import {
+  bindMyNames,
+  collectPaymailInbox,
+  lookupPaymailState,
+  paymailEnabled,
+  proveMyOrdAddress,
+  type PaymailLookup,
+} from './paymail';
 import { syncBchatHandle } from './bchatHandle';
 import { authorNameSigned } from '../feed/authorBindingState';
 import { requestBalanceRefresh } from '../../hooks/balanceRefresh';
@@ -192,7 +199,8 @@ export const syncPaymailCache = async (
 export const syncAccountNames = async (
   ctx: OneSatContext,
   identityAddress: string,
-  opts: { force?: boolean; minIntervalMs?: number } = {},
+  /** ordAddress: this account's own ordinals address, signed for its names when the host has no proof (b-Aware 102). */
+  opts: { force?: boolean; minIntervalMs?: number; ordAddress?: string } = {},
 ): Promise<boolean> => {
   if (!identityAddress) return false;
   const now = Date.now();
@@ -235,6 +243,8 @@ export const syncAccountNames = async (
           // A name just signed: a feed-author binding refused for "name not signed" may be tried again.
           .then((signed) => signed > 0 && authorNameSigned(identityAddress))
           .catch(() => undefined);
+        // b-Aware 102/250: payers refuse an unsigned ord address, so sign this account's own one where it has none.
+        void proveMyOrdAddress(f, ctx.wallet, opts.ordAddress).catch(() => undefined);
         await collectPaymailNow(ctx);
       }
     })(),
