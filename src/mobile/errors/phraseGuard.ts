@@ -52,12 +52,85 @@ const FILLER_REPEATS = 3;
 
 /**
  * Letter runs (accents and kana voicing marks stay on the word) or digit runs. Everything else is a separator.
- * Invisible format characters (zero-width space and joiners, word joiner, byte order mark, soft hyphen, direction marks:
- * Unicode Cf) inside a letter run stay in it and are dropped from the word, so "aban\u200Bdon" is still "abandon"
- * (round-3 review of b-Aware row 353: such words got past Ask b every time).
+ * Invisible characters inside a letter run stay in it and are dropped from the word, so "aban\u200Bdon" is still
+ * "abandon": format characters (zero-width space and joiners, word joiner, byte order mark, soft hyphen, direction
+ * marks: Unicode Cf; round-3 review of b-Aware row 353) and the Hangul fillers, which are letters that show nothing
+ * (U+115F, U+1160, U+3164, U+FFA0; round-4 review). When the word without them is no list word, the invisible
+ * characters were joining words ("abandon\u200Bability") and the run is split there instead.
  */
 const TOKEN = /[\p{L}\p{M}][\p{L}\p{M}\p{Cf}]*|\p{N}+/gu;
-const INVISIBLE = /\p{Cf}/gu;
+const INVISIBLE = /[\p{Cf}\u115F\u1160\u3164\uFFA0]/gu;
+const HAS_INVISIBLE = /[\p{Cf}\u115F\u1160\u3164\uFFA0]/u;
+/**
+ * Cyrillic and Greek letters that look like Latin ones. A word whose Cyrillic or Greek letters are all look-alikes
+ * ("аbаndоn" with Cyrillic а and о) is read in Latin letters; a real Russian or Greek word holds other letters too and is
+ * left as it is (round-4 review of b-Aware row 353: look-alikes got past Ask b every time).
+ */
+const LOOK_ALIKES = new Map<string, string>(
+  Object.entries({
+    а: 'a',
+    е: 'e',
+    о: 'o',
+    р: 'p',
+    с: 'c',
+    у: 'y',
+    х: 'x',
+    і: 'i',
+    ј: 'j',
+    ѕ: 's',
+    һ: 'h',
+    ԁ: 'd',
+    ԛ: 'q',
+    ԝ: 'w',
+    ӏ: 'l',
+    А: 'a',
+    В: 'b',
+    Е: 'e',
+    К: 'k',
+    М: 'm',
+    Н: 'h',
+    О: 'o',
+    Р: 'p',
+    С: 'c',
+    Т: 't',
+    У: 'y',
+    Х: 'x',
+    І: 'i',
+    Ј: 'j',
+    Ѕ: 's',
+    ο: 'o',
+    α: 'a',
+    ι: 'i',
+    ν: 'v',
+    ρ: 'p',
+    Α: 'a',
+    Β: 'b',
+    Ε: 'e',
+    Ζ: 'z',
+    Η: 'h',
+    Ι: 'i',
+    Κ: 'k',
+    Μ: 'm',
+    Ν: 'n',
+    Ο: 'o',
+    Ρ: 'p',
+    Τ: 't',
+    Υ: 'y',
+    Χ: 'x',
+  }),
+);
+const CYRILLIC_GREEK = /[\p{Script=Cyrillic}\p{Script=Greek}]/u;
+const latinise = (w: string): string => {
+  if (!CYRILLIC_GREEK.test(w)) return w;
+  let out = '';
+  for (const ch of w) {
+    const latin = LOOK_ALIKES.get(ch);
+    if (latin) out += latin;
+    else if (CYRILLIC_GREEK.test(ch)) return w;
+    else out += ch;
+  }
+  return out;
+};
 const fold = (w: string) => w.normalize('NFKD').toLowerCase();
 const bare = (w: string) => w.replace(/\p{M}/gu, '');
 const LATIN = /^[\p{Script=Latin}\p{M}]+$/u;
@@ -73,6 +146,11 @@ const LISTS: Wordlist[] = Array.from(new Set(Object.values(bip39.wordlists))).ma
   if (latin) for (const w of words) if (!lookup.has(bare(fold(w)))) lookup.set(bare(fold(w)), w);
   return { words, latin, lookup, index: new Map(words.map((w, i) => [w, i])) };
 });
+/** A word of any list, accents typed or not. */
+const anyListWord = (w: string): boolean => {
+  const f = fold(w);
+  return LISTS.some((l) => l.lookup.has(f) || (l.latin && l.lookup.has(bare(f))));
+};
 
 type Raw = { start: number; end: number; text: string; digits: boolean };
 /** `label`: a list word demoted to filler because it repeats ("word" in "my 1st word is X, my 2nd word is Y"). */
@@ -94,11 +172,25 @@ const ORDINAL = /^(?:st|nd|rd|th|er|re|º|ª)$/iu;
 
 const rawTokens = (text: string): Raw[] => {
   const out: Raw[] = [];
+  const push = (piece: string, start: number) => {
+    const word = latinise(piece.replace(INVISIBLE, ''));
+    if (!word) return; // invisible characters on their own separate
+    const prev = out[out.length - 1];
+    const digits = /^\p{N}+$/u.test(word) || (prev?.digits === true && prev.end === start && ORDINAL.test(word));
+    out.push({ start, end: start + piece.length, text: word, digits });
+  };
   for (const m of text.matchAll(TOKEN)) {
     const start = m.index ?? 0;
-    const prev = out[out.length - 1];
-    const digits = /^\p{N}+$/u.test(m[0]) || (prev?.digits === true && prev.end === start && ORDINAL.test(m[0]));
-    out.push({ start, end: start + m[0].length, text: m[0].replace(INVISIBLE, ''), digits });
+    if (!HAS_INVISIBLE.test(m[0]) || anyListWord(latinise(m[0].replace(INVISIBLE, '')))) {
+      push(m[0], start);
+      continue;
+    }
+    // Invisible characters joining words: split there.
+    let at = 0;
+    for (const piece of m[0].split(INVISIBLE)) {
+      push(piece, start + m[0].indexOf(piece, at));
+      at = m[0].indexOf(piece, at) + piece.length;
+    }
   }
   return out;
 };
