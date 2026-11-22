@@ -237,6 +237,8 @@ export async function fillBackup(d: {
   pageGapMs?: number;
   /** Tests: how a pause is taken. */
   sleep?: (ms: number) => Promise<void>;
+  /** The whole two-pass fill, never one from the restore point (the repair: spendableFirstWiring checkOurBackup). */
+  full?: boolean;
 }): Promise<FillReport> {
   try {
     return await fill(d);
@@ -413,7 +415,7 @@ async function fill(d: Parameters<typeof fillBackup>[0]): Promise<FillReport> {
   };
 
   const restoreFrom =
-    lost || (kept?.stage === 'restart' && kept.full === true)
+    lost || d.full === true || (kept?.stage === 'restart' && kept.full === true)
       ? undefined
       : resume?.stage === 'refs' || resume?.stage === 'restore'
         ? resume.since

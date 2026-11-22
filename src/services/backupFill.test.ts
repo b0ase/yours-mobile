@@ -725,3 +725,59 @@ describe('repair of a backup an older build registered half-filled', () => {
     expect(await rows(x.backup)).toEqual(await rows(x.dev));
   });
 });
+
+describe('review of 0c74701d, 6: the repair from a half-filled backup', () => {
+  test('rows missing on our server (a non-default basket, a coin spent here still spendable there) all arrive', async () => {
+    const x = await setup(4);
+    // Our server as an older build left it: filled once, then never told of what follows.
+    await fillBackup({ manager: x.manager, reader: x.dev, writer: x.backup, pageGapMs: 0 });
+    await new Promise((r) => setTimeout(r, 20));
+    const restorePoint = new Date();
+    await new Promise((r) => setTimeout(r, 20));
+    // A token into a basket of its own.
+    const tx = new Transaction();
+    tx.addInput({
+      sourceTXID: Utils.toHex(Random(32)),
+      sourceOutputIndex: 0,
+      unlockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()),
+      sequence: 0xffffffff,
+    });
+    tx.addOutput({ lockingScript: new P2PKH().lock(PrivateKey.fromRandom().toAddress()), satoshis: 1 });
+    const txid = tx.id('hex');
+    tx.merklePath = new MerklePath(++height, [[{ offset: 0, hash: txid, txid: true }]]);
+    const beef = new Beef();
+    beef.mergeTransaction(tx);
+    await x.wallet.internalizeAction({
+      tx: beef.toBinaryAtomic(txid),
+      outputs: [{ outputIndex: 0, protocol: 'basket insertion', insertionRemittance: { basket: 'tokens' } }],
+      description: 'a token',
+    });
+    // A coin spent here (our server still has it spendable).
+    const [coin] = await x.dev.findOutputs({ partial: { spendable: true } });
+    await x.dev.updateOutput(coin.outputId, { spendable: false, updated_at: new Date() } as never);
+    const baskets = async (s: StorageIdb) => {
+      const names = new Map((await s.findOutputBaskets({ partial: {} })).map((b) => [b.basketId, b.name]));
+      return (await s.findOutputs({ partial: {} }))
+        .map((o) => `${o.txid}.${o.vout}:${o.spendable}:${names.get(o.basketId!) ?? '-'}`)
+        .sort();
+    };
+    // Half-filled: the backup differs from the device.
+    expect(await baskets(x.backup)).not.toEqual(await baskets(x.dev));
+    // The repair's fill: whole, from a restart marker, even with a restore point and our server's cursor.
+    const unguard = installInboundSyncGuard(StorageIdb);
+    const r = await fillBackup({
+      manager: x.manager,
+      reader: x.dev,
+      writer: x.backup,
+      restorePoint,
+      marginMs: 0,
+      pageGapMs: 0,
+      resume: { stage: 'restart', offsets: [] },
+      full: true,
+      unfinished: true,
+    }).finally(unguard);
+    expect(r.how).toBe('full');
+    expect(await baskets(x.backup)).toEqual(await baskets(x.dev));
+    expect(await rows(x.backup)).toEqual(await rows(x.dev));
+  });
+});
