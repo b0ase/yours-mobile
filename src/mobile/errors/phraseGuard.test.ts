@@ -261,3 +261,66 @@ describe('ordinary text in other languages, and punctuation-heavy text, is left 
       expect(redactSecrets(p)).not.toContain('[recovery words hidden]');
     });
 });
+
+/** A valid 12-word phrase that does not itself use any of `avoid` (so a test's filler words are only filler). */
+const phraseAvoiding = (avoid: string[]) => {
+  for (;;) {
+    const words = bip39.generateMnemonic(128).split(' ');
+    if (!words.some((w) => avoid.includes(w))) return words;
+  }
+};
+
+describe('filler words that are themselves BIP39 words (review of b-Aware row 353)', () => {
+  const ORD = ['st', 'nd', 'rd'];
+  const CASES: Array<[string, string[], (w: string[]) => string]> = [
+    ['"word N is X."', ['word'], (w) => w.map((x, i) => `word ${i + 1} is ${x}.`).join(' ')],
+    ['"1st word: X,"', ['word'], (w) => w.map((x, i) => `${i + 1}${ORD[i] ?? 'th'} word: ${x},`).join(' ')],
+    ['"the X then"', ['then'], (w) => w.map((x) => `the ${x} then`).join(' ')],
+    ['JSON index/value objects', ['index', 'value'], (w) => JSON.stringify(w.map((x, i) => ({ index: i, value: x })))],
+    ['"first X then"', ['first', 'then'], (w) => w.map((x) => `first ${x} then`).join(' ')],
+    ['"word: X" one per line', ['word'], (w) => w.map((x) => `word: ${x}`).join('\n')],
+  ];
+  for (const [name, avoid, make] of CASES)
+    test(`blocked: ${name}`, () => {
+      for (let run = 0; run < 5; run++) {
+        const words = phraseAvoiding(avoid);
+        expectBlocked(make(words), words);
+      }
+    });
+  test('a 24-word phrase with "word N" labels', () => {
+    let words = bip39.generateMnemonic(256).split(' ');
+    while (words.includes('word')) words = bip39.generateMnemonic(256).split(' ');
+    expectBlocked(words.map((x, i) => `word ${i + 1}: ${x}`).join(', '), words);
+  });
+});
+
+describe('the guard is fast on long word-heavy text (review of b-Aware row 353)', () => {
+  const en = bip39.wordlists.english;
+  // Fixed, not random, so a run is repeatable: every 7th list word.
+  const listWords = (n: number) => Array.from({ length: n }, (_, i) => en[(i * 7) % 2048]);
+  const timed = (f: () => unknown) => {
+    const a = performance.now();
+    f();
+    return performance.now() - a;
+  };
+  // The base (before this branch) took 24ms on 20,000 such words; the first fix took 16s. The bounds leave room for
+  // a loaded machine.
+  test('20,000 list words in a row', () => {
+    const text = listWords(20000).join(' ');
+    expect(timed(() => hidePhrases(text))).toBeLessThan(1500);
+    expect(timed(() => containsPhrase(text))).toBeLessThan(1500);
+  });
+  test('20,000 list words with a different filler after each', () => {
+    const text = listWords(20000)
+      .map((w, i) => `${w} q${i.toString(36)}`)
+      .join(' ');
+    expect(timed(() => hidePhrases(text))).toBeLessThan(1500);
+  });
+  test('a long error is redacted quickly and still hides a phrase near the start', () => {
+    const text = `Restore failed: ${W12.join(' ')}. ${listWords(50000).join(' ')}`;
+    let out = '';
+    expect(timed(() => (out = redactSecrets(text)))).toBeLessThan(1500);
+    expect(out).toContain('[recovery words hidden]');
+    expect(out.length).toBeLessThanOrEqual(1200);
+  });
+});
