@@ -337,3 +337,59 @@ describe('the guard is fast on long word-heavy text (review of b-Aware row 353)'
     expect(out).toContain('done');
   });
 });
+
+/**
+ * A fixed 12-word phrase with `word` at each position in `at` (0 to 10). "balance", and "total" are BIP39 words and also start
+ * the balance redaction ("balance … 9" becomes "balance [amount hidden]"), which ran before the phrase guard and ate the
+ * numbering or label after them, so the guard no longer saw a phrase (random JSON index/value case, 22 Nov 2026).
+ */
+const phraseWith = (word: string, ...at: number[]) => {
+  let bits = '9e41c7b25d08f3a6e17c4b92d05a8f36'.replace(/./g, (h) => parseInt(h, 16).toString(2).padStart(4, '0'));
+  const idx = bip39.wordlists.english.indexOf(word).toString(2).padStart(11, '0');
+  for (const a of at) bits = bits.slice(0, a * 11) + idx + bits.slice(a * 11 + 11);
+  return bip39.entropyToMnemonic(bits.replace(/[01]{4}/g, (n) => parseInt(n, 2).toString(16))).split(' ');
+};
+
+describe('phrase words that start the balance redaction (review of b-Aware row 353)', () => {
+  const CASES: Array<[string, (w: string[]) => string]> = [
+    ['JSON index/value objects', (w) => JSON.stringify(w.map((x, i) => ({ index: i, value: x })))],
+    ['numbered "N. X"', (w) => w.map((x, i) => `${i + 1}. ${x}`).join(' ')],
+    ['"word N is X."', (w) => w.map((x, i) => `word ${i + 1} is ${x}.`).join(' ')],
+  ];
+  for (const word of ['balance', 'total'])
+    for (const [name, make] of CASES)
+      test(`"${word}" in the phrase, ${name}`, () => {
+        const words = phraseWith(word, 8);
+        expect(new Set(words).size).toBe(12);
+        expect(bip39.validateMnemonic(words.join(' '))).toBe(true);
+        expectBlocked(make(words), words);
+      });
+});
+
+describe('phrase words that start the secret-label redaction (review of b-Aware row 353)', () => {
+  // "seed", "pass" and "secret" are BIP39 words: "seed:X:Y…" became "seed: [hidden]" before the phrase guard ran, and
+  // the six words before it were left in the clear. No "Restore failed:" prefix here: "restore" is a list word too and
+  // made up the count.
+  for (const word of ['seed', 'pass', 'secret'])
+    for (const sep of [':', '='])
+      test(`"${word}" in a phrase joined by ${JSON.stringify(sep)}`, () => {
+        const words = phraseWith(word, 6);
+        expect(new Set(words).size).toBe(12);
+        const text = words.join(sep);
+        expect(looksLikeSecret(text)).toBe(true);
+        const out = redactSecrets(text);
+        expect(out).toContain('[recovery words hidden]');
+        expect(leftOverAny(out, words)).toEqual([]);
+      });
+});
+
+describe('ordinal numbering with a phrase that repeats a word (review of b-Aware row 353)', () => {
+  // About 1 valid phrase in 30 repeats a word. "1st word: X, 2nd word: Y" left "st", "nd", "rd" and "th" as four
+  // different fillers, so only the checksum pass (which needs different words) could find it: 1 in 30 escaped, and the
+  // random "1st word" test above failed about 1 run in 6.
+  const repeating = phraseWith('ocean', 2, 9);
+  test('"1st word: X," with a repeated word', () => {
+    expect(new Set(repeating).size).toBe(11);
+    expectBlocked(repeating.map((x, i) => `${i + 1}${['st', 'nd', 'rd'][i] ?? 'th'} word: ${x},`).join(' '), repeating);
+  });
+});
