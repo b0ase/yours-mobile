@@ -12,6 +12,7 @@ import {
   createSpendableFirst,
   holdSendsForSnapshot,
   OUR_BACKUP_RETRY_MS,
+  ourBackupAttempt,
   ourBackupRetryTimer,
   oneSatSnapshotLookups,
   type OurServerClient,
@@ -300,11 +301,61 @@ describe('mainnet 1p test, 22 Nov 2026 (c, d): an unfinished backup to our serve
     expect(log).toEqual([]);
   });
 
-  test('wired: the card reads it, and the background tries again when the back-off is over', async () => {
-    const { readFileSync } = await import('node:fs');
-    const init = readFileSync(new URL('../initWallet.ts', import.meta.url), 'utf8');
-    expect(init).toContain('...(spendableFirst.ourBackup().incomplete ? { ourBackupIncomplete: true } : {})');
-    expect(init).toContain('resume: o?.resume,');
+  test('review of f2de21bd, 1: an unreadable kept state stops the try (never a fill as if nothing were kept)', async () => {
+    const clock = { t: NOW };
+    const { w, log } = make(true, {}, clock, [() => undefined], {
+      kv: {
+        get: async () => {
+          throw new Error('storage unavailable');
+        },
+        set: async () => undefined,
+      },
+    });
+    expect(await w.addOurBackup()).toBe(false);
+    // No fill ran: it would have found our server's cursor from a finished pass and registered a half-filled backup.
+    expect(log).toEqual([]);
+    expect(w.ourBackup()).toEqual({ incomplete: true, retryAt: NOW + OUR_BACKUP_RETRY_MS[0] });
+    // Not before the back-off either.
+    clock.t = NOW + 1_000;
+    expect(await w.addOurBackup()).toBe(false);
+    expect(log).toEqual([]);
+  });
+
+  test('review of f2de21bd, 4: the background’s retry, wired as background.ts wires it (an alarm, a throw retried)', async () => {
+    // background.ts: ourBackupAttempt({ add: ctx.addOurBackup, timer: ourBackupRetryTimer({ setTimer: chrome.alarms }) }).
+    const alarms: { name: string; delayInMinutes: number }[] = [];
+    const clock = { t: NOW };
+    let retryAt: number | undefined;
+    const results: (() => Promise<boolean>)[] = [
+      async () => {
+        retryAt = clock.t + 120_000;
+        throw new Error('setActive: network error 503');
+      },
+      async () => ((retryAt = clock.t + 300_000), false),
+      async () => ((retryAt = undefined), true),
+    ];
+    let tries = 0;
+    let attempt!: () => Promise<boolean>;
+    const timer = ourBackupRetryTimer({
+      retryAt: () => retryAt,
+      run: () => void attempt(),
+      now: () => clock.t,
+      setTimer: (_run, ms) => (alarms.push({ name: 'bwx-our-backup-retry', delayInMinutes: ms / 60_000 }), 'alarm'),
+      clearTimer: () => undefined,
+    });
+    attempt = ourBackupAttempt({ add: () => (tries++, results.shift()!()), timer });
+    // A throw (not a false) still arms the retry, at the back-off.
+    expect(await attempt()).toBe(false);
+    expect(alarms).toEqual([{ name: 'bwx-our-backup-retry', delayInMinutes: 2 }]);
+    // The alarm fires: the next try runs; it doesn't land, so the alarm is armed again.
+    clock.t += 120_000;
+    expect(await attempt()).toBe(false);
+    expect(alarms.at(-1)).toEqual({ name: 'bwx-our-backup-retry', delayInMinutes: 5 });
+    // The try that lands arms nothing more.
+    clock.t += 300_000;
+    expect(await attempt()).toBe(true);
+    expect(alarms).toHaveLength(2);
+    expect(tries).toBe(3);
   });
 
   describe('review 5: the background’s retry timer', () => {

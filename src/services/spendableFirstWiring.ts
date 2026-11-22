@@ -20,7 +20,7 @@ import {
 import { withTimeout } from './restoreProgress';
 import { buildsTransaction, LocalStoreNeededError } from './localFirst';
 import { isInsufficientFunds } from './fundingPrep';
-import { fillError, type FillProgress, type FillReport } from './backupFill';
+import { FillIncompleteError, fillError, type FillProgress, type FillReport } from './backupFill';
 
 const CONNECT_MS = 8_000;
 const COUNT_MS = 8_000;
@@ -87,6 +87,27 @@ export function ourBackupRetryTimer(o: {
       if (timer !== undefined) clearTimer(timer);
       timer = undefined;
     },
+  };
+}
+
+/**
+ * One try at our server's fill, as the background makes it: a try that didn't land (false) or threw arms the retry
+ * timer; one that landed doesn't (review of f2de21bd, 4: a throw used to leave no retry at all).
+ */
+export function ourBackupAttempt(o: {
+  add: () => Promise<boolean>;
+  timer: { schedule(): boolean };
+  log?: (...a: unknown[]) => void;
+}): () => Promise<boolean> {
+  return async () => {
+    let ok = false;
+    try {
+      ok = await o.add();
+    } catch (e) {
+      o.log?.('[spendable-first] our server not added (threw):', e);
+    }
+    if (!ok) o.timer.schedule();
+    return ok;
   };
 }
 
@@ -259,14 +280,20 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
   /** Our server's fill, as kept (kv `${markKey}:ourBackupFill`); read at open, written by every try. */
   const fillKey = `${d.markKey}:ourBackupFill`;
   let fillState: OurBackupFill | null = null;
-  const loadFill = async (): Promise<OurBackupFill | null> => {
+  /**
+   * The kept state, read again. `ok: false`: it couldn't be read, which is never "nothing kept": a fill run as if
+   * nothing were kept would find our server's cursor from a finished pass, answer "not-needed" and register a
+   * half-filled backup (review of f2de21bd, 1).
+   */
+  const loadFill = async (): Promise<{ ok: true; state: OurBackupFill | null } | { ok: false; error: unknown }> => {
     try {
       const v = (await d.kv.get(fillKey))?.[fillKey] as OurBackupFill | undefined;
       fillState = v && typeof v === 'object' && typeof v.deviceSik === 'string' ? v : null;
-    } catch {
-      // unreadable: as none
+      return { ok: true, state: fillState };
+    } catch (error) {
+      log('[spendable-first] could not read the backup fill state:', error);
+      return { ok: false, error };
     }
-    return fillState;
   };
   /** Set by stop(): a closed session's fill writes nothing more (a new session may have saved since). */
   let closed = false;
@@ -391,7 +418,27 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     if (!d.on || closed || !d.deviceActive()) return false;
     const deviceSik = d.device()?.getSettings().storageIdentityKey;
     if (!deviceSik) return false;
-    const kept = await loadFill();
+    const read = await loadFill();
+    if (!read.ok) {
+      // Unreadable is not "nothing kept": no try now, an honest "incomplete" and a retry later (in memory only: the
+      // store just failed).
+      const failures = (fillState?.incomplete?.failures ?? 0) + 1;
+      const at = now();
+      const err = new FillIncompleteError('failed', 'the kept backup fill state could not be read');
+      fillState = {
+        deviceSik,
+        progress: fillState?.progress ?? null,
+        incomplete: {
+          at,
+          retryAt: at + ourBackupRetryMs(err, failures),
+          reason: err.message,
+          kind: err.kind,
+          failures,
+        },
+      };
+      return false;
+    }
+    const kept = read.state;
     const st = kept?.deviceSik === deviceSik ? kept : null;
     // Our server is already a saved backup: nothing to fill, and kept state is stale (a closed session's late write).
     if (registered()) {
@@ -500,7 +547,8 @@ export function createSpendableFirst(d: SpendableFirstWiringDeps) {
     resume: async () => {
       if (!d.on) return;
       // State kept while our server is a saved backup is stale (a closed session's late write): dropped.
-      if ((await loadFill()) && registered()) await saveFill(null);
+      const read = await loadFill();
+      if (read.ok && read.state && registered()) await saveFill(null);
       mark = await loadMark();
       if (mark?.stage !== 'full') return;
       hook();

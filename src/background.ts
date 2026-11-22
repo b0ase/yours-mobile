@@ -144,7 +144,7 @@ import {
   type EnsureLocalResult,
 } from './services/localFirst';
 import { SNAPSHOT_SEND_WAIT, spendableFirstOn, withSnapshotRemote } from './services/spendableFirst';
-import { ourBackupRetryTimer } from './services/spendableFirstWiring';
+import { ourBackupAttempt, ourBackupRetryTimer } from './services/spendableFirstWiring';
 import { markMayBeOut } from './services/refusalRecheck';
 import {
   fundingTimeoutError,
@@ -1122,7 +1122,12 @@ const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
   const before = chromeStorageService.getCurrentAccountObject().account;
   const config = before?.storageConfig as StorageConfig | undefined;
   if (!before || !config || withSnapshotRemote(config, true) === config) return;
-  if (!(await ctx.addOurBackup())) return scheduleOurBackupRetry(ctx);
+  const tryAdd = ourBackupAttempt({
+    add: () => ctx.addOurBackup(),
+    timer: ourBackupTimer,
+    log: (...a) => console.warn('[background]', ...a),
+  });
+  if (!(await tryAdd())) return;
   // Read again: the account may have changed while the fill ran.
   const account = chromeStorageService.getCurrentAccountObject().account;
   if (account?.addresses.identityAddress !== before.addresses.identityAddress) return;
@@ -1135,21 +1140,28 @@ const addSnapshotRemote = async (ctx: NonNullable<typeof accountContext>) => {
 
 /**
  * Our server's first fill didn't finish (refused, stalled or failed; mainnet 1p test, 22 Nov 2026): try again once its
- * back-off (or the server's Retry-After) is over, from where it stopped. One timer; the next open tries too. Never
- * sooner: addOurBackup itself refuses a try before then.
+ * back-off (or the server's Retry-After) is over, from where it stopped. A chrome.alarms alarm, not a setTimeout: the
+ * extension's service worker sleeps long before a minute-plus timer would fire (review of f2de21bd, 4); the alarm wakes
+ * it. A worker woken with no open wallet does nothing, and the next open tries anyway (preferLocalStorage). One alarm;
+ * never sooner than the first back-off step (ourBackupRetryTimer).
  */
-let ourBackupRetry: ReturnType<typeof ourBackupRetryTimer> | undefined;
-const scheduleOurBackupRetry = (ctx: NonNullable<typeof accountContext>) => {
-  ourBackupRetry?.cancel();
-  ourBackupRetry = ourBackupRetryTimer({
-    retryAt: () => ctx.ourBackupRetryAt(),
-    run: () => {
-      if (accountContext !== ctx) return;
-      void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
-    },
-  });
-  ourBackupRetry.schedule();
+const OUR_BACKUP_RETRY_ALARM = 'bwx-our-backup-retry';
+const retryOurBackupNow = () => {
+  const ctx = accountContext;
+  if (ctx) void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
 };
+const ourBackupTimer = ourBackupRetryTimer({
+  retryAt: () => accountContext?.ourBackupRetryAt(),
+  run: retryOurBackupNow,
+  setTimer: (_run, ms) => {
+    void chrome.alarms.create(OUR_BACKUP_RETRY_ALARM, { delayInMinutes: ms / 60_000 });
+    return OUR_BACKUP_RETRY_ALARM;
+  },
+  clearTimer: () => void chrome.alarms.clear(OUR_BACKUP_RETRY_ALARM),
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === OUR_BACKUP_RETRY_ALARM) retryOurBackupNow();
+});
 
 /** Where the move to this device stands, for the "Retry moving this account to this device" notice. */
 const moveStatus = () => {
