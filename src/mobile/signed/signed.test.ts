@@ -7,6 +7,7 @@ import {
   recoverNativeSeals,
   setSealRecordedHook,
   recordedCount,
+  settleUnsureSeal,
   sealKey,
   type PendingSeal,
   type SealApi,
@@ -564,6 +565,38 @@ describe('the recorder: every seal this device records lands in the list', () =>
       { documentId: 'DOC1', identityKey: ME, title: '', signatureId: 'SIG1', txid: TX1, docHash: H1, complete: false },
     ]);
     expect(readHeldSeals(kv)).toEqual([]);
+  });
+});
+
+describe('the hook on the on-screen settle path (#560 settleUnsureSeal)', () => {
+  test('a held payment recorded while the page settles it lands in the list too', async () => {
+    const got: SealRecorded[] = [];
+    setSealRecordedHook((s) => got.push(s));
+    const store = localStore(kv);
+    store.save({
+      documentId: 'DOC1',
+      nonce: 'N1',
+      txid: TX1,
+      beefHex: '0909',
+      attestation: 'ab',
+      savedAt: 1,
+      identityKey: ME,
+    });
+    const api: SealApi = async () => ({
+      ok: true,
+      status: 200,
+      body: { signatureId: 'SIG1', txid: TX1, docHash: H1, complete: true },
+    });
+    const r = await settleUnsureSeal({
+      api,
+      store,
+      nonce: 'N1',
+      ledger: localLedger(kv),
+      sleep: async () => undefined,
+      delaysMs: [0],
+    });
+    expect(r.k).toBe('recorded');
+    expect(got.map((g) => [g.documentId, g.signatureId, g.identityKey])).toEqual([['DOC1', 'SIG1', ME]]);
   });
 });
 
