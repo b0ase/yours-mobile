@@ -90,8 +90,8 @@ import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { asMenuItem } from '../tabs/tabs';
 import { requestIdentityMap } from '../settings/signIns';
 import { LiveTicker } from './live/LiveTicker';
-import { noteAccount, useLive } from './live/liveBus';
-import { displayedSats, refreshDelay } from './live/liveLogic';
+import { liveCardSats, noteAccount, useLive } from './live/liveBus';
+import { refreshDelay } from './live/liveLogic';
 import { useCountUp } from './live/useCountUp';
 import { BALANCE_CARDS_ENABLED } from '../storeBuild';
 import { AddressBookPull } from './AddressBook';
@@ -170,10 +170,14 @@ const WalletCardInner = ({
   const live = useLive();
   const sessionsOpen = Object.keys(live.sessions).length;
   const known = view === 'amount';
-  const pendingSats = sats - displayedSats(sats, live.pending);
+
   // Received and counted, not yet in a block (services/receiveWatch.ts): shown as "pending" under the amount.
   const incoming = useSyncExternalStore(subscribePendingSats, pendingSatsNow, () => 0);
-  const shownSats = known ? sats - pendingSats : sats;
+  // The last real balance read for this account minus the spends not yet in it (liveBus.ts liveCardSats), never the page's
+  // number minus them: the page may already have lowered it (review of #558 round 3).
+  const liveAccount =
+    useServiceContext().chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress;
+  const shownSats = known ? liveCardSats(live, sats, liveAccount) : sats;
   const count = useCountUp(shownSats, known);
   const animSats = known ? count.value : sats;
   // Settled, the card shows `usd` exactly as given (utils/balanceUsd.ts, the extension's figure too); counting up, the

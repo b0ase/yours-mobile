@@ -6411,7 +6411,9 @@ if (!(
       return;
     }
     // Received-but-not-yet-swept deposits count too, and money still arriving, each once (services/depositBalance.ts).
-    // `data` stays the total (sites read it); `pending` is the part not yet in a block, for the card.
+    // `data` stays the total (sites read it); `pending` is the part not yet in a block, for the card; `account` is whose
+    // balance it is, so a read that answers after an account switch never lands on the other card (liveBus.ts).
+    const forAccount = currentAccountId();
     accountContext
       .balanceSplit()
       .then(({ total, pending }) => {
@@ -6420,6 +6422,7 @@ if (!(
           success: true,
           data: total,
           pending,
+          ...(forAccount ? { account: forAccount } : {}),
         });
       })
       .catch((error) => {

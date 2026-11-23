@@ -62,9 +62,12 @@ export const addPending = (list: Pending[], p: Pending): Pending[] =>
  * `readStartedAt` (when the read began, review of #558 round 2): a spend announced before then is in it, because the
  * wallet's own storage takes a spend in before createAction returns. Without it, the old rule: older than `graceMs`.
  *
- * A changed number (`sameValue` false) also drops spends the balance has fallen by since they were announced (`base`),
- * oldest first: without that a fetch landing inside the grace kept a spend the balance already showed, the card took
- * it off twice and read $0 (RB, 23 Nov 2026: 1 BSV paid from ~1.02 BSV).
+ * A changed number (`sameValue` false) may also include spends announced after the read began (storage took them in
+ * before the read, the announcement came later), but only when the balance fell by exactly them since they were
+ * announced (`base`), give or take their fees: more than the spends, by at most feeSlack (cumulative, oldest first).
+ * A fall that merely covers them (an unrelated fall in the same read) never drops them (review of #558 round 3).
+ * Without the match, a fetch landing inside the grace kept a spend the balance already showed, the card took it off
+ * twice and read $0 (RB, 23 Nov 2026: 1 BSV paid from ~1.02 BSV).
  *
  * The same number again proves nothing by itself: the read may predate the payment, or be a slow refresh. Only a read
  * that began after the spend, of a balance other than the one the spend was announced against (`base`), drops it (an
@@ -80,31 +83,26 @@ export const reconcilePending = (
   sameValue = false,
 ): Pending[] => {
   const oldestFirst = [...list].sort((a, b) => a.at - b.at);
-  // How far the balance fell since the oldest spend still pending was announced.
-  const base = oldestFirst.find((p) => typeof p.base === 'number')?.base;
-  const fell = typeof next === 'number' && Number.isFinite(next) && typeof base === 'number' ? base - next : 0;
   const known = typeof readStartedAt === 'number' && Number.isFinite(readStartedAt);
-  let counted = 0;
-  return oldestFirst.filter((p) => {
-    const inRead = known ? p.at < readStartedAt : now - p.at >= graceMs;
-    if (sameValue) {
-      if (known && inRead && typeof p.base === 'number' && p.base !== next) {
-        counted += p.sats;
-        return false;
-      }
-      return true;
-    }
-    // In the read: its sats are part of the fall too.
-    if (inRead) {
-      counted += p.sats;
-      return false;
-    }
-    if (typeof p.base === 'number' && fell >= counted + p.sats) {
-      counted += p.sats;
-      return false;
-    }
-    return true;
-  });
+  const inRead = (p: Pending) => (known ? p.at < readStartedAt : now - p.at >= graceMs);
+  if (sameValue)
+    return oldestFirst.filter(
+      (p) => !(known && inRead(p) && typeof p.base === 'number' && typeof next === 'number' && p.base !== next),
+    );
+  const included = oldestFirst.filter(inRead);
+  const rest = oldestFirst.filter((p) => !inRead(p));
+  // The rest: dropped only as a run (oldest first) the fall since their base matches, fees included.
+  const base = rest[0]?.base;
+  if (typeof base !== 'number' || typeof next !== 'number' || !Number.isFinite(next)) return rest;
+  // Spends in the read that were announced against the same base are part of that fall too.
+  const fell = base - next - included.filter((p) => p.base === base).reduce((t, p) => t + p.sats, 0);
+  let matched = 0;
+  let spent = 0;
+  for (let i = 0; i < rest.length && typeof rest[i].base === 'number'; i++) {
+    spent += rest[i].sats;
+    if (fell > spent && fell - spent <= feeSlack(spent)) matched = i + 1;
+  }
+  return rest.slice(matched);
 };
 
 /**
@@ -132,7 +130,7 @@ export const fallExplainedBy = (
   now: number,
   windowMs = FALL_MATCH_WINDOW_MS,
 ): boolean =>
-  !!drop && now - drop.at < windowMs && spent > 0 && drop.sats >= spent && drop.sats - spent <= feeSlack(spent);
+  !!drop && now - drop.at < windowMs && spent > 0 && drop.sats > spent && drop.sats - spent <= feeSlack(spent);
 
 /** When the oldest pending spend expires (ms from `now`), or null with none. Never negative. */
 export const nextExpiryIn = (list: Pending[], now: number, ttl = PENDING_TTL_MS): number | null =>

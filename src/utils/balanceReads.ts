@@ -3,7 +3,8 @@
  * (mobile/wallet/live/liveBus.ts) reconciles the spends it shows as pending against these only: never against a
  * cached or fallback number, and knowing whether the read began after a spend (review of #558, round 2).
  */
-export type BalanceRead = { sats: number; startedAt: number };
+/** `account`: the identity address the wallet read it for (GET_BALANCE answers with it), when known. */
+export type BalanceRead = { sats: number; startedAt: number; account?: string };
 
 const listeners = new Set<(r: BalanceRead) => void>();
 

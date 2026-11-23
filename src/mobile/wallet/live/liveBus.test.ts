@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, jest, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { __liveState, __resetLive, noteAccount, noteBalance, reportSpend } from './liveBus';
+import { __liveState, __resetLive, liveCardSats, noteAccount, noteBalance, reportSpend } from './liveBus';
 import { publishBalanceRead } from '../../../utils/balanceReads';
 import { displayedSats, PENDING_TTL_MS } from './liveLogic';
 
@@ -161,7 +161,8 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
     expect(card).toContain('useEffect(() => noteAccount(id), [id]);');
     const wallet = readFileSync(resolve(import.meta.dir, '../../../utils/wallet.ts'), 'utf8');
     // Published only after a successful answer, with when the read began.
-    expect(wallet.indexOf('publishBalanceRead({ sats: response.data ?? 0, startedAt })')).toBeGreaterThan(
+    expect(wallet).toContain('sats: response.data ?? 0,\n    startedAt,');
+    expect(wallet.indexOf('publishBalanceRead({')).toBeGreaterThan(
       wallet.indexOf("throw new Error(response.error || 'Failed to get balance')"),
     );
   });
@@ -207,5 +208,61 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
     expect(shown(3_000)).toBe(3_000);
     reportSpend({ sats: 500, label: 'z', account: 'addrB' });
     expect(shown(3_000)).toBe(2_500);
+  });
+
+  test("review of #558 round 3: the wallet's own Send never comes off twice (card ~900, never 0, never 10,000)", () => {
+    __resetLive();
+    noteAccount('addrA');
+    publishBalanceRead({ sats: 10_000, startedAt: Date.now() - 10, account: 'addrA' });
+    // The Send screen's createAction announces the spend (bwxLiveSpend).
+    reportSpend({ sats: 9_000, label: 'Sent', account: 'addrA' });
+    // Whatever number the page holds now (its old one, or one it lowered itself), the card is the real read minus it.
+    for (const prop of [10_000, 1_000]) expect(liveCardSats(__liveState(), prop, 'addrA')).toBe(1_000);
+    // The post-send read settles on the real figure (fee included).
+    publishBalanceRead({ sats: 900, startedAt: Date.now(), account: 'addrA' });
+    expect(liveCardSats(__liveState(), 10_000, 'addrA')).toBe(900);
+    // The page no longer lowers its own number after a send.
+    const page = readFileSync(resolve(import.meta.dir, '../../../pages/BsvWallet.tsx'), 'utf8');
+    expect(page).not.toContain('prev - totalSats / BSV_DECIMAL_CONVERSION');
+    const card = readFileSync(resolve(import.meta.dir, '..', 'WalletCard.tsx'), 'utf8');
+    expect(card).toContain('const shownSats = known ? liveCardSats(live, sats, liveAccount) : sats;');
+  });
+
+  test('review of #558 round 3: before any real read, or for another account, the card uses the page number', () => {
+    __resetLive();
+    noteAccount('addrA');
+    expect(liveCardSats(__liveState(), 4_000, 'addrA')).toBe(4_000);
+    publishBalanceRead({ sats: 10_000, startedAt: Date.now(), account: 'addrA' });
+    expect(liveCardSats(__liveState(), 4_000, 'addrB')).toBe(4_000);
+  });
+
+  test('review of #558 round 3: a read for another account (answered after a switch) is ignored', () => {
+    __resetLive();
+    noteAccount('addrA');
+    publishBalanceRead({ sats: 10_000, startedAt: Date.now(), account: 'addrA' });
+    noteAccount('addrB');
+    publishBalanceRead({ sats: 3_000, startedAt: Date.now(), account: 'addrB' });
+    publishBalanceRead({ sats: 10_000, startedAt: Date.now() - 500, account: 'addrA' }); // A's late answer
+    expect(__liveState().base).toBe(3_000);
+    expect(__liveState().baseFor).toBe('addrB');
+    expect(__liveState().ticks).toHaveLength(0); // no spurious "+7,000 received"
+  });
+
+  test('review of #558 round 3: a read begun before a payment that includes an unrelated equal fall keeps it', () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(2_000_000);
+      __resetLive();
+      noteBalance(10_000, { startedAt: Date.now() - 10 });
+      const readStart = Date.now();
+      jest.setSystemTime(2_000_100);
+      reportSpend({ sats: 1_000, label: 'x' });
+      jest.setSystemTime(2_000_500);
+      noteBalance(9_000, { startedAt: readStart }); // excludes the payment, includes 1,000 that left elsewhere
+      expect(shown(9_000)).toBe(8_000);
+    } finally {
+      __resetLive();
+      jest.useRealTimers();
+    }
   });
 });

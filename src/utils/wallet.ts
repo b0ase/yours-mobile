@@ -8,7 +8,13 @@ export { cachedExchangeRate, fetchExchangeRate, isExchangeRateStale, lastKnownEx
 export async function getWalletBalance(): Promise<number> {
   // When the read began: the live balance only counts spends announced before it as included (utils/balanceReads.ts).
   const startedAt = Date.now();
-  const response = await sendMessageAsync<{ success: boolean; data?: number; pending?: number; error?: string }>({
+  const response = await sendMessageAsync<{
+    success: boolean;
+    data?: number;
+    pending?: number;
+    error?: string;
+    account?: string;
+  }>({
     action: YoursEventName.GET_BALANCE,
   });
   if (!response.success) {
@@ -16,6 +22,10 @@ export async function getWalletBalance(): Promise<number> {
   }
   // The part not yet in a block, for the Wallet card's "pending" line (utils/pendingBalance.ts).
   publishPendingSats(response.pending);
-  publishBalanceRead({ sats: response.data ?? 0, startedAt });
+  publishBalanceRead({
+    sats: response.data ?? 0,
+    startedAt,
+    ...(typeof response.account === 'string' ? { account: response.account } : {}),
+  });
   return response.data ?? 0;
 }

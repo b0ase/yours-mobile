@@ -86,15 +86,26 @@ describe('optimistic spends', () => {
     // No base known: the grace rule alone, as before.
     expect(reconcilePending([{ id: 'x', sats: 5, at: 10_000 }], 10_400, 1_500, 0)).toHaveLength(1);
   });
-  test('several pending spends: only those the fall covers, oldest first; grace-dropped ones count in the fall', () => {
+  test('several pending spends: only a run the fall matches (fees included), oldest first', () => {
     const p = [
       { id: 'a', sats: 100, at: 1_000, base: 1_000 },
-      { id: 'b', sats: 50, at: 1_100, base: 900 },
+      { id: 'b', sats: 50, at: 1_100, base: 1_000 },
     ];
-    expect(reconcilePending(p, 1_200, 1_500, 900).map((x) => x.id)).toEqual(['b']);
-    expect(reconcilePending(p, 1_200, 1_500, 850).map((x) => x.id)).toEqual([]);
-    // 'a' is past the grace (in the balance): a fall of 100 is its own, so 'b' stays.
-    expect(reconcilePending(p, 2_550, 1_500, 900).map((x) => x.id)).toEqual(['b']);
+    // Fell by a + its fee: a goes, b stays.
+    expect(reconcilePending(p, 1_200, 1_500, 880).map((x) => x.id)).toEqual(['b']);
+    // Fell by a + b + fees: both go.
+    expect(reconcilePending(p, 1_200, 1_500, 800).map((x) => x.id)).toEqual([]);
+    // 'a' is past the grace (in the read): a fall of a + fee is its own, so 'b' stays.
+    expect(reconcilePending(p, 2_550, 1_500, 880).map((x) => x.id)).toEqual(['b']);
+  });
+  test('review of #558 round 3: a fall that only covers a spend (an unrelated fall in the same read) never drops it', () => {
+    // Read began before a 1,000 payment and includes an unrelated 1,000 fall: the payment is not in it.
+    const p = [{ id: 'pay', sats: 1_000, at: 2_000_100, base: 10_000 }];
+    expect(reconcilePending(p, 2_000_500, 1_500, 9_000, 2_000_000)).toHaveLength(1);
+    // Nor a much bigger fall.
+    expect(reconcilePending(p, 2_000_500, 1_500, 5_000, 2_000_000)).toHaveLength(1);
+    // The payment and its fee: dropped.
+    expect(reconcilePending(p, 2_000_500, 1_500, 8_900, 2_000_000)).toHaveLength(0);
   });
   test('a fall is matched to announced spends only within a fee slack (review of #558, M3)', () => {
     expect(fallExplainedBy({ sats: 100_000_142, at: 0 }, 100_000_001, 4_000)).toBe(true);

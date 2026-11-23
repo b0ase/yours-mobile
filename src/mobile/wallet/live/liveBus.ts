@@ -5,6 +5,7 @@ import { onBalanceRead } from '../../../utils/balanceReads';
 import {
   addPending,
   allowRate,
+  displayedSats,
   applySessionSpend,
   expirePending,
   FALL_MATCH_WINDOW_MS,
@@ -40,9 +41,17 @@ export type LiveState = {
   pending: Pending[];
   sessions: SessionState;
   lastActivityAt: number;
+  /**
+   * The last real balance read (utils/balanceReads.ts) and the account it is for. The card shows this minus the
+   * spends not yet in it (liveCardSats), never its own props, which the page may have lowered already (review of #558
+   * round 3: a Send took the amount off twice and the card read $0).
+   */
+  base: number | null;
+  baseFor?: string;
 };
 
-let state: LiveState = { ticks: [], pending: [], sessions: {}, lastActivityAt: Date.now() };
+const fresh = (): LiveState => ({ ticks: [], pending: [], sessions: {}, lastActivityAt: Date.now(), base: null });
+let state: LiveState = fresh();
 const subs = new Set<() => void>();
 const set = (next: Partial<LiveState>) => {
   state = { ...state, ...next };
@@ -147,10 +156,23 @@ export const noteAccount = (id: string | undefined) => {
   if (account !== undefined) {
     lastBase = null;
     unclaimedDrop = null;
-    set({ pending: [], ticks: [] });
+    set({ pending: [], ticks: [], base: null, baseFor: undefined });
+  } else if (state.base !== null && state.baseFor === undefined) {
+    // Reads that came back before the card said whose they were are this first account's.
+    set({ baseFor: id });
   }
   account = id;
 };
+
+/**
+ * What the card shows: the last real read for `forAccount` minus the spends announced since that it does not include.
+ * Before any read for this account, the page's own number (`propSats`). Never below 0.
+ */
+export const liveCardSats = (
+  live: Pick<LiveState, 'base' | 'baseFor' | 'pending'>,
+  propSats: number,
+  forAccount?: string,
+) => displayedSats(live.base !== null && live.baseFor === forAccount ? live.base : propSats, live.pending);
 
 /**
  * A real balance read came back (utils/balanceReads.ts: getWalletBalance, never a cached or fallback number), begun at
@@ -165,6 +187,7 @@ export const noteBalance = (sats: number, read: { account?: string; startedAt?: 
   const d = lastBase === sats ? 0 : unexplainedDelta(lastBase, sats, covered);
   const changed = lastBase !== sats;
   lastBase = sats;
+  if (state.base !== sats || state.baseFor !== account) set({ base: sats, baseFor: account });
   if (!changed) {
     // Same number from a later fetch: spends older than the grace are in it (the wallet's storage took them in before
     // createAction returned), so they go now rather than at the ttl. An incoming payment that landed with a spend inside
@@ -187,7 +210,11 @@ export const noteBalance = (sats: number, read: { account?: string; startedAt?: 
 };
 
 // Every real balance read, wherever the page made it (getWalletBalance), with when it began.
-onBalanceRead((r) => noteBalance(r.sats, { startedAt: r.startedAt }));
+// A read begun for another account than the card now shows (it answered after a switch) is ignored.
+onBalanceRead((r) => {
+  if (r.account && account && r.account !== account) return;
+  noteBalance(r.sats, { startedAt: r.startedAt });
+});
 
 const buckets = new Map<string, { sec: number; n: number }>();
 
@@ -278,7 +305,7 @@ export const __liveState = (): LiveState => state;
 
 /** Tests only. */
 export const __resetLive = () => {
-  state = { ticks: [], pending: [], sessions: {}, lastActivityAt: Date.now() };
+  state = fresh();
   lastBase = null;
   unclaimedDrop = null;
   account = undefined;

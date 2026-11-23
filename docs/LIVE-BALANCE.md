@@ -14,14 +14,20 @@ Code: `src/mobile/wallet/live/` (pure logic in `liveLogic.ts`, tested), wired in
 - **Optimistic spends.** `background.ts` sends `bwxLiveSpend` to the wallet page as soon as `createAction` returns
   (dApps, internal sends, paid chat turns). The card takes the requested output sats off straight away, then
   fetches again 1.5 s later and settles on the real figure, fee included.
+- **What the card shows.** The last real balance read for this account minus the spends not yet in it
+  (`liveBus.ts` `liveCardSats`). Before any real read, the page's own number. The wallet's Send screen no longer lowers
+  its own number after a send: with the announced spend that took it off twice (a send of 9,000 from 10,000 showed
+  $0).
 - **Reconciling.** Only real balance reads count (`utils/balanceReads.ts`: every successful `getWalletBalance`, with
-  when it began), never the card's props, which can be a cached or fallback number. A read that began after a spend
-  was announced includes it (the wallet's storage takes a spend in before `createAction` returns), so the spend is
-  dropped; a changed number also drops spends the balance has fallen by since they were announced. The same number
-  again proves nothing by itself (the read may predate the payment, or be a slow refresh): it drops a spend only when
-  the read began after it and the number differs from the one the spend was announced against (an incoming payment
-  that landed with the spend). Anything else waits for a changed number or the 30 s timer, so the card never shows the
-  pre-payment balance.
+  when it began and the account it was read for), never the card's props, which can be a cached or fallback number. A
+  read for another account (it answered after a switch) is ignored. A read that began after a spend was announced
+  includes it (the wallet's storage takes a spend in before `createAction` returns), so the spend is dropped. A changed
+  number drops spends announced after the read began only when the balance fell by exactly them since they were
+  announced, give or take their fees (more than the spends, by at most the fee slack); a fall that merely covers them
+  (an unrelated fall in the same read) never drops them. The same number again proves nothing by itself (the read may
+  predate the payment, or be a slow refresh): it drops a spend only when the read began after it and the number
+  differs from the one the spend was announced against (an incoming payment that landed with the spend). Anything else
+  waits for a changed number or the 30 s timer, so the card never shows the pre-payment balance.
 - **Announced after the fall.** When the poll ran while a payment was broadcasting, the balance already fell before
   the announcement. Spends announced within 10 s of a fall are matched to it together (two quick payments, one fetch),
   only when the fall equals them give or take a fee slack: 10% of the spend, at least 200 and at most 2,000 sats. A

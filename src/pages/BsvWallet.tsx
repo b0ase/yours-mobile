@@ -1358,7 +1358,9 @@ export const BsvWallet = () => {
           return;
         }
 
-        setBsvBalance((prev) => Math.max(0, prev - totalSats / BSV_DECIMAL_CONVERSION));
+        // No optimistic subtraction here: the wallet announces the spend (bwxLiveSpend) and the card takes it off the
+        // last real read until a read includes it. Lowering this number too took it off twice: a send of 9,000 from
+        // 10,000 showed $0 (review of #558 round 3). The refresh below settles the real figure.
         rememberSent(identityAddress, addressOrder);
         // Sent: no reminder, except when the payee's host didn't confirm it (the note stays, 17c H2).
         if (!deliveryUnconfirmed) settleNote(null);
