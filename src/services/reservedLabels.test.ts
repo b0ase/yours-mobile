@@ -107,8 +107,11 @@ describe('reserved action labels', () => {
       expect(isReservedLabel(l)).toBe(false);
     expect(reservedLabelRefusal('listActions', { labels: ['P nosend expiry seconds 3600'] })).toContain('reserved');
     expect(reservedLabelRefusal('listOutputs', { tags: ['P nosend'] })).toContain('reserved');
-    // No grant for a module label is ever stored for a site, in any spelling.
-    expect(isReservedLabelProtocol([1, 'action label P nosend x'])).toBe(true);
+    // The request side gets the name lower-cased: the exact 'p …' form there is not a disguised label (N5). A
+    // disguised spelling never gets this far: it is refused on the label methods and in ensureLabelAccess.
+    expect(isReservedLabelProtocol([1, 'action label p nosend mandala'])).toBe(false);
+    expect(isReservedLabelProtocol([1, 'action label  p nosend mandala '])).toBe(false);
+    expect(isReservedLabelProtocol([1, 'action label Admin month 2026-11'])).toBe(true);
     // The production manager (as initWallet.ts builds it), a sheet that says yes: before, one Allow listed the
     // wallet's own held sends ("p nosend expiry …", stored lower-cased) for a site.
     const reached: unknown[] = [];

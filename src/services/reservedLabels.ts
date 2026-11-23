@@ -77,11 +77,15 @@ export const RESERVED_NAME_REFUSAL = 'Labels, tags and baskets from a site must 
 /** A label or tag no site may send: reserved, a special-operation name, or not plain ASCII. */
 export const isRefusedLabel = (label: unknown): boolean => isReservedLabel(label) || isOddName(label);
 
-/** The manager asks for a label as protocol [1, 'action label <label>']: is this such a request for a refused one? */
+/**
+ * The manager asks for a label as protocol [1, 'action label <label>']: is this such a request for a refused one? The
+ * name arrives lower-cased, so its case can't be judged here (a disguised 'P …' label is refused before any request,
+ * on the label methods and in ensureLabelAccess); the label is trimmed so the exact 'p …' form isn't read as one.
+ */
 export const isReservedLabelProtocol = (protocolID: unknown): boolean => {
   if (!Array.isArray(protocolID) || typeof protocolID[1] !== 'string') return false;
   const name = protocolID[1].trim().toLowerCase();
-  return name.startsWith('action label') && isRefusedLabel(name.slice('action label'.length));
+  return name.startsWith('action label') && isRefusedLabel(name.slice('action label'.length).trim());
 };
 
 /** Wallet methods whose args carry action labels. */
