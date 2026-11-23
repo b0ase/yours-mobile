@@ -949,6 +949,25 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     refreshSignedBadge(ME);
     expect(getSignedBadge()).toBe(0);
     mem.delete('bwx.nativeSeal.support');
+    // A kept drawing from a paid seal (#560 paidRef) is never read here: not held, not signed, not "nothing paid".
+    mem.set(
+      'bwx.nativeSeal.drawings',
+      JSON.stringify([
+        {
+          key: 'k',
+          documentId: '1c377264-aaaa',
+          identityKey: ME,
+          fieldIds: ['f1'],
+          svg: '<svg/>',
+          savedAt: NOW,
+          paidRef: 'seal-abcdef123456',
+        },
+      ]),
+    );
+    expect(readHeldSeals(kv)).toEqual([]);
+    refreshSignedBadge(ME);
+    expect(getSignedBadge()).toBe(0);
+    mem.delete('bwx.nativeSeal.drawings');
     const html = renderToStaticMarkup(
       createElement(HeldBanner, {
         held: [refusedRec],
@@ -990,6 +1009,17 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     expect(busyElsewhere(held(), st, NOW)).toBe(false);
     st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW, until: NOW + 60_000 });
     expect(busyElsewhere(held(), st, NOW)).toBe(true);
+    // A live paying mark (another context is in createAction for it): busy; a stale one is not.
+    expect(
+      busyElsewhere(held({ fieldIds: ['p1'], paying: { by: 'x', at: NOW, until: NOW + 60_000 } }), localStore(kv), NOW),
+    ).toBe(true);
+    expect(
+      busyElsewhere(
+        held({ fieldIds: ['p1'], paying: { by: 'x', at: NOW - 10 * 60_000, until: NOW - 1 } }),
+        localStore(kv),
+        NOW,
+      ),
+    ).toBe(false);
     // A claim whose heartbeat stopped (#560: CLAIM_STALE_MS) belongs to a context that crashed or slept: not busy.
     st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW - 60_000, until: NOW + 60_000 });
     expect(busyElsewhere(held(), st, NOW)).toBe(false);

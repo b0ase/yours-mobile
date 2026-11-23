@@ -3,6 +3,7 @@ import {
   beingSettled,
   claimAlive,
   paidRefusedMessage,
+  payingElsewhere,
   sealKey,
   type PendingSeal,
   type PendingSealStore,
@@ -62,6 +63,8 @@ export const busyElsewhere = (p: PendingSeal, store: PendingSealStore, now: numb
   // Any live settling mark, this context's too (a Sign page settling it in the background). #560's beingSettled treats
   // a mark further ahead than its own span + skew as stale (a clock moved back, bad data).
   if (beingSettled(p, now)) return true;
+  // A live paying mark (#560: a context is in createAction for this record right now), this context's too.
+  if (payingElsewhere(p, now)) return true;
   try {
     const c = p.fieldIds ? store.claims?.get(sealKey(p.identityKey ?? '', p.documentId, p.fieldIds)) : null;
     // A live claim (fresh heartbeat, not from the future) by another context: that window is paying it.
