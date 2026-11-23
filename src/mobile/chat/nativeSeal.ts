@@ -112,6 +112,8 @@ export interface PendingSeal {
    * on a lookup SEAL_FAILED_SEEN_MARGIN_MS after this. Cleared when no failed candidate is seen any more.
    */
   failedSeenAt?: number;
+  /** The fingerprint of the failed, txid-less candidate set failedSeenAt is for (round 7). */
+  failedSetKey?: string;
   /**
    * A context's createAction for this record is still running (review of #560 L2): heart-beaten like a claim
    * (CLAIM_BEAT_MS, dead after CLAIM_STALE_MS). Recovery and settle anywhere treat the record as kept while it lives.
@@ -137,8 +139,11 @@ export interface SealTxLookup {
   find(
     lockingScriptHex: string,
     sinceMs: number,
-    /** `failedSeenAt`: when a lookup first saw a failed, txid-less candidate for this record (PendingSeal). */
-    opts?: { failedSeenAt?: number },
+    /**
+     * `failedSeenAt`: when a lookup first saw the failed, txid-less candidates for this record; `failedSet`: their
+     * fingerprint then (PendingSeal). The clock only runs for the same set.
+     */
+    opts?: { failedSeenAt?: number; failedSet?: string },
   ): Promise<SealLookupAnswer>;
   beef(txid: string): Promise<number[] | null>;
 }
@@ -156,8 +161,13 @@ export type SealLookupAnswer =
   | { found: false; skippedFailed?: true }
   | { found: true; txid: string }
   | { found: 'maybe'; txids: string[]; skippedFailed?: true }
-  /** Unsure ONLY because of a failed, txid-less candidate not yet seen failed for SEAL_FAILED_SEEN_MARGIN_MS. */
-  | { found: 'failed' }
+  /**
+   * Unsure ONLY because of failed, txid-less candidates not yet seen failed (as this same set, `failedSet`) for
+   * SEAL_FAILED_SEEN_MARGIN_MS.
+   */
+  | { found: 'failed'; failedSet?: string }
+  /** Unsure because a candidate with no txid is still live (built, not yet signed or sent): earlier evidence is void. */
+  | { found: 'building' }
   | null;
 
 /** The wallet's listActions, as findSealAction needs it (BRC-100 ListActionsArgs / ListActionsResult, narrowed). */
@@ -208,17 +218,19 @@ export async function findSealAction(
   failedLabel: string,
   now: number = Date.now(),
   failedSeenAt?: number,
+  failedSetKey?: string,
 ): Promise<SealLookupAnswer> {
   const want = lockingScriptHex.toLowerCase();
   // Rounds 5-6: a failed row with no txid is skipped only when BOTH the record is past the toolbox's abandon age +
   // margin, AND a lookup already saw it failed at least SEAL_FAILED_SEEN_MARGIN_MS ago. WalletAction carries no
   // timestamp, so when the row became failed can't be read; when WE first saw it failed is the earliest safe stand-in.
-  const abandonedForSure =
+  // Round 7: the clock is for one SET of failed candidates (failedSetKey); a different set starts it again.
+  const marginPassed =
     now - sinceMs > SEAL_ABANDON_SKIP_AGE_MS &&
     typeof failedSeenAt === 'number' &&
     now - failedSeenAt >= SEAL_FAILED_SEEN_MARGIN_MS;
-  let sawFailed = false;
-  let skippedFailed = false;
+  /** The failed, txid-less candidates' scripts (ours, or '' for a blind one): their set's fingerprint. */
+  const failedScripts: string[] = [];
   const from = `action time from ${Math.max(0, Math.floor(sinceMs - 60_000))}`;
   let unsure = false;
   const maybe = new Set<string>();
@@ -238,7 +250,11 @@ export async function findSealAction(
             (o) => typeof o?.lockingScript === 'string' && o.lockingScript.toLowerCase() === want,
           );
           const descHit = a.description === SEAL_ACTION_DESCRIPTION;
-          if (!scriptHit && !descHit) continue;
+          // A seal by description whose scripts the storage didn't keep (an output with no script): it may be this one.
+          const blind = !outs.length || outs.some((o) => typeof o?.lockingScript !== 'string' || !o.lockingScript);
+          // Round 7: only this seal's exact script, or a BLIND seal row, is a candidate. A seal row whose scripts are
+          // all kept and none is ours is another document's seal: never a candidate, never a clock.
+          if (!scriptHit && !(descHit && blind)) continue;
           const txid = typeof a.txid === 'string' && /^[0-9a-f]{64}$/i.test(a.txid) ? a.txid.toLowerCase() : '';
           if (scriptHit && txid) return { found: true, txid };
           if (!txid) {
@@ -251,23 +267,26 @@ export async function findSealAction(
             // lookup in between: a row flipped to 'failed' in that gap still commits and broadcasts. So only rows
             // surely older than the abandon age + a margin are skipped; a younger one still answers unsure.
             if (a.status === 'failed') {
-              if (abandonedForSure) skippedFailed = true;
-              else sawFailed = true;
+              failedScripts.push(scriptHit ? want : '');
               continue;
             }
             // Built but not yet signed or sent (no txid): it can still go out. Never "none built".
             unsure = true;
             continue;
           }
-          // A seal by description whose scripts the storage didn't keep: it may be this one.
-          const blind = !outs.length || outs.some((o) => typeof o?.lockingScript !== 'string' || !o.lockingScript);
           if (blind) maybe.add(txid);
         }
         if (r.actions.length < SEAL_LOOKUP_PAGE || offset + r.actions.length >= r.totalActions) break;
       }
     }
-    if (unsure) return null;
-    if (sawFailed) return { found: 'failed' };
+    if (unsure) return { found: 'building' };
+    let skippedFailed = false;
+    if (failedScripts.length) {
+      const failedSet = `${failedScripts.length}:${[...failedScripts].sort().join(',')}`;
+      // The same set, seen failed since failedSeenAt for the margin, with the record old enough: skipped.
+      if (!(marginPassed && failedSet === failedSetKey)) return { found: 'failed', failedSet };
+      skippedFailed = true;
+    }
     const skipped = skippedFailed ? { skippedFailed: true as const } : {};
     if (maybe.size) return { found: 'maybe', txids: [...maybe], ...skipped };
     return { found: false, ...skipped };
@@ -1767,19 +1786,42 @@ async function lookUpUnsure(
     const script = p.lockingScriptHex;
     if (!script) return 'unknown';
     const f = await lookup
-      .find(script, p.savedAt, p.failedSeenAt !== undefined ? { failedSeenAt: p.failedSeenAt } : undefined)
+      .find(
+        script,
+        p.savedAt,
+        p.failedSeenAt !== undefined ? { failedSeenAt: p.failedSeenAt, failedSet: p.failedSetKey } : undefined,
+      )
       .catch(() => null);
     if (!f) return 'unknown';
+    /** Round 7: evidence from before a candidate appeared never counts. */
+    const voidEvidence = (q: PendingSeal): PendingSeal => {
+      const { notFound: _a, notFoundFirstAt: _b, notFoundLastAt: _c, ...rest } = q;
+      void _a;
+      void _b;
+      void _c;
+      return rest;
+    };
+    if (f.found === 'building') {
+      if (p.notFound !== undefined || p.notFoundFirstAt !== undefined) store.save(voidEvidence(p));
+      return 'unknown';
+    }
     if (f.found === 'failed') {
-      // First sight of a failed, txid-less candidate: remember when; kept (never evidence) until the margin passes.
-      if (p.failedSeenAt === undefined) store.save({ ...p, failedSeenAt: now() });
+      // Failed, txid-less candidates: the clock runs from when THIS set was first seen; a new set starts it again.
+      // Kept (never evidence) until the margin passes, and earlier evidence is void.
+      const same = p.failedSeenAt !== undefined && p.failedSetKey === f.failedSet;
+      store.save({
+        ...voidEvidence(p),
+        failedSeenAt: same ? p.failedSeenAt : now(),
+        ...(f.failedSet !== undefined ? { failedSetKey: f.failedSet } : {}),
+      });
       return 'unknown';
     }
     // No failed candidate in sight any more (it gained a txid, or is gone): the clock starts again next time.
     const seen = (q: PendingSeal): PendingSeal => {
       if (f.found === true || !('skippedFailed' in f) || !f.skippedFailed) {
-        const { failedSeenAt: _gone, ...rest } = q;
+        const { failedSeenAt: _gone, failedSetKey: _key, ...rest } = q;
         void _gone;
+        void _key;
         return rest;
       }
       return q;

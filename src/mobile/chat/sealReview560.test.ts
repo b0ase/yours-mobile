@@ -1035,10 +1035,10 @@ describe('Round 3 M1 / L1: a seal action that could be this one is never "none b
   const SCRIPT = '006a' + 'ab'.repeat(40);
   const page = (actions: Awaited<ReturnType<ListActionsFn>>['actions']): ListActionsFn =>
     (async () => ({ totalActions: actions.length, actions })) as ListActionsFn;
-  test('PROBE A: built but unsigned (no txid yet) → unsure (null), never { found: false }', async () => {
-    expect(
-      await findSealAction(page([{ txid: '', outputs: [{ lockingScript: SCRIPT }] }]), SCRIPT, 1e12, 'F'),
-    ).toBeNull();
+  test('PROBE A: built but unsigned (no txid yet) → unsure (building), never { found: false }', async () => {
+    expect(await findSealAction(page([{ txid: '', outputs: [{ lockingScript: SCRIPT }] }]), SCRIPT, 1e12, 'F')).toEqual(
+      { found: 'building' },
+    );
     // By the seal's description, script truncated, no txid: unsure too.
     expect(
       await findSealAction(
@@ -1047,7 +1047,7 @@ describe('Round 3 M1 / L1: a seal action that could be this one is never "none b
         1e12,
         'F',
       ),
-    ).toBeNull();
+    ).toEqual({ found: 'building' });
   });
   test('PROBE A2: an unsigned candidate and a signed one with the script → found (the signed one)', async () => {
     const r = await findSealAction(
@@ -1331,7 +1331,7 @@ describe('Round 4: abandoned rows, proven-other seals, and the kept-session canc
     store.save(unsure({ nonce: 'NR4', savedAt: t, lockingScriptHex: SCRIPT }));
     const log: Log = [];
     const lookup: SealTxLookup = {
-      find: (s, since, o) => findSealAction(list, s, since, FAILED, t, o?.failedSeenAt),
+      find: (s, since, o) => findSealAction(list, s, since, FAILED, t, o?.failedSeenAt, o?.failedSet),
       beef,
     };
     const outs: string[] = [];
@@ -1449,13 +1449,16 @@ describe('Rounds 5-6: a failed, txid-less seal row is skipped only after WE saw 
     const t0 = 1_000_000_000_000;
     expect(SEAL_ABANDON_SKIP_AGE_MS).toBe(7 * MIN);
     expect(SEAL_FAILED_SEEN_MARGIN_MS).toBe(2 * MIN);
-    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN)).toEqual({ found: 'failed' }); // never seen
-    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN, t0 + 19 * MIN)).toEqual({ found: 'failed' }); // 1 min
-    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN, t0 + 18 * MIN)).toEqual({
+    const set = `1:${SCRIPT}`;
+    const failed = { found: 'failed', failedSet: set };
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN)).toEqual(failed); // never seen
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN, t0 + 19 * MIN, set)).toEqual(failed); // 1 min
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN, t0 + 18 * MIN, set)).toEqual({
       found: false,
       skippedFailed: true,
     });
-    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 6 * MIN, t0 + 1 * MIN)).toEqual({ found: 'failed' }); // young
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN, t0 + 18 * MIN, '1:')).toEqual(failed); // other set
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 6 * MIN, t0 + 1 * MIN, set)).toEqual(failed); // young
   });
   const run = async (steps: { at: number; row?: { txid: string; status: string } }[], t0: number) => {
     const store = localStore(fakeStorage());
@@ -1469,7 +1472,7 @@ describe('Rounds 5-6: a failed, txid-less seal row is skipped only after WE saw 
         store,
         'D',
         {
-          find: (s, since, o) => findSealAction(la, s, since, 'F', st.at, o?.failedSeenAt),
+          find: (s, since, o) => findSealAction(la, s, since, 'F', st.at, o?.failedSeenAt, o?.failedSet),
           beef: async () => [7],
         },
         { now: () => st.at },
@@ -1510,5 +1513,123 @@ describe('Rounds 5-6: a failed, txid-less seal row is skipped only after WE saw 
     expect(r.outs[0].seenAt).toBe(look);
     expect(r.log).toEqual([]);
     expect(r.store.list()[0].notFound).toBeUndefined();
+  });
+});
+
+describe('Round 7: only exact or blind seal rows hold the clock; the clock is per failed set; stale evidence is void', () => {
+  const SCRIPT = '006a' + 'ab'.repeat(40);
+  const OTHER = '006a' + 'cd'.repeat(40);
+  const FAILED = 'failed-label';
+  const MIN = 60_000;
+  type R = { txid: string; status: string; description: string; outputs: { lockingScript: string }[] };
+  const rig = () => {
+    let rows: R[] = [];
+    const la: ListActionsFn = async ({ labels }) => {
+      const a = rows.filter((r) => (r.status === 'failed') === labels.includes(FAILED));
+      return { totalActions: a.length, actions: a };
+    };
+    const store = localStore(fakeStorage());
+    const t0 = 1_000_000_000_000;
+    let t = t0;
+    store.save(unsure({ nonce: 'N7', savedAt: t0, lockingScriptHex: SCRIPT }));
+    const log: Log = [];
+    const lookup: SealTxLookup = {
+      find: (s, since, o) => findSealAction(la, s, since, FAILED, t, o?.failedSeenAt, o?.failedSet),
+      beef: async () => null,
+    };
+    const run = async () => (await recover(bitsign(log), store, 'D', lookup, { now: () => t }))[0]?.outcome ?? 'gone';
+    return {
+      set: (r: R[]) => void (rows = r),
+      at: (dt: number) => void (t = t0 + dt),
+      step: (dt: number) => void (t += dt),
+      run,
+      store,
+      log,
+    };
+  };
+  const row = (script: string, status: string): R => ({
+    txid: '',
+    status,
+    description: SEAL_ACTION_DESCRIPTION,
+    outputs: [{ lockingScript: script }],
+  });
+
+  test('R5 (ported): our row exists unsigned, then flips to failed: never skipped on an older clock → kept', async () => {
+    // processAction validates an EXISTING 'unsigned' row (validatePlannedTransaction), so Y is there before it flips.
+    const r = rig();
+    const X = row(OTHER, 'failed'); // another document's seal, its full script kept: never a candidate (part 1)
+    r.set([X, row(SCRIPT, 'unsigned')]);
+    r.at(8 * MIN);
+    const a1 = await r.run();
+    r.step(2 * MIN + 1);
+    const a2 = await r.run();
+    r.set([X, row(SCRIPT, 'failed')]); // Y flipped to failed, its commit still pending
+    r.step(6_000);
+    const a3 = await r.run();
+    expect([a1, a2, a3]).toEqual(['kept', 'kept', 'kept']);
+    expect(r.log).toEqual([]);
+    expect(r.store.list()[0].failedSeenAt).toBe(1_000_000_000_000 + 8 * MIN + 2 * MIN + 1 + 6_000); // Y's first sight
+  });
+
+  test('part 2: a blind row (X) starts a clock; our row (Y) joining the failed set restarts it and voids evidence', async () => {
+    const r = rig();
+    r.set([row('', 'failed')]); // blind: may be ours
+    r.at(8 * MIN);
+    expect(await r.run()).toBe('kept'); // first sight of {X}
+    r.step(2 * MIN + 1);
+    expect(await r.run()).toBe('kept'); // {X} skipped: evidence #1
+    expect(r.store.list()[0].notFound).toBe(1);
+    r.set([row('', 'failed'), row(SCRIPT, 'failed')]);
+    r.step(6_000);
+    expect(await r.run()).toBe('kept'); // {X, Y}: a new set → clock restarted, evidence void
+    const p = r.store.list()[0];
+    expect(p.notFound).toBeUndefined();
+    expect(p.failedSetKey).toBe(`2:,${SCRIPT}`);
+    r.step(MIN);
+    expect(await r.run()).toBe('kept'); // within the new margin
+    r.step(MIN + 1);
+    expect(await r.run()).toBe('kept'); // margin passed for {X, Y}: evidence #1 again
+    r.step(RELEASE_SPACING_MS);
+    expect(await r.run()).toBe('released'); // #2, ≥5 s apart
+    expect(r.log).toEqual(['cancel:N7']);
+  });
+
+  test('part 1: a seal row whose scripts are all kept and none is ours is no candidate (unsigned or failed)', async () => {
+    for (const status of ['unsigned', 'failed']) {
+      const la = (async () => ({ totalActions: 1, actions: [row(OTHER, status)] })) as unknown as ListActionsFn;
+      expect(await findSealAction(la, SCRIPT, 0, FAILED, 20 * MIN)).toEqual({ found: false });
+    }
+    // A blind or exact row still is.
+    const blindFailed = (async ({ labels }: { labels: string[] }) =>
+      labels.includes(FAILED)
+        ? { totalActions: 1, actions: [row('', 'failed')] }
+        : { totalActions: 0, actions: [] }) as unknown as ListActionsFn;
+    expect(await findSealAction(blindFailed, SCRIPT, 0, FAILED, 20 * MIN)).toEqual({
+      found: 'failed',
+      failedSet: '1:',
+    });
+    const live = (async () => ({ totalActions: 1, actions: [row(SCRIPT, 'unsigned')] })) as unknown as ListActionsFn;
+    expect(await findSealAction(live, SCRIPT, 0, FAILED, 20 * MIN)).toEqual({ found: 'building' });
+  });
+
+  test('part 3: evidence counted before a live or failed candidate appeared never counts', async () => {
+    const r = rig();
+    r.set([]);
+    r.at(4 * MIN);
+    expect(await r.run()).toBe('kept'); // none built: evidence #1
+    expect(r.store.list()[0].notFound).toBe(1);
+    r.set([row(SCRIPT, 'unsigned')]); // our row appears, still building
+    r.step(10_000);
+    expect(await r.run()).toBe('kept');
+    expect(r.store.list()[0].notFound).toBeUndefined(); // voided
+    r.set([]); // (gone again, e.g. aborted) evidence starts over
+    r.step(10_000);
+    expect(await r.run()).toBe('kept');
+    expect(r.store.list()[0].notFound).toBe(1);
+    r.set([row('', 'failed')]); // a failed candidate appears
+    r.step(10_000);
+    expect(await r.run()).toBe('kept');
+    expect(r.store.list()[0].notFound).toBeUndefined(); // voided again
+    expect(r.log).toEqual([]);
   });
 });

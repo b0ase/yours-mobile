@@ -231,6 +231,7 @@ export const NativeSealPage = () => {
         toolboxSdk.specOpFailedActions,
         Date.now(),
         opts?.failedSeenAt,
+        opts?.failedSet,
       ),
     beef: async (txid) => {
       try {
