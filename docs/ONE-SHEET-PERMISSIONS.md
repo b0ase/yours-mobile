@@ -41,6 +41,14 @@ Status: PLAN. Nothing has been built yet.
   doesn't change. Only what the user sees changes.
 - Requests that arrive while a sheet is open join it (the sheet shows "+1 more"), rather than
   queueing a new window.
+- Except a payment (RB on scammerscartel.com, 23 Nov 2026): it never joins a sheet already on screen. It waits and
+  gets its own PAY sheet as soon as the open one is answered. Joined as an unticked "New: pay" line it turned a history
+  read into a red "Wants more than usual" card whose Allow did not pay.
+- A tap made before a line joined decides only what it showed; the late line gets its own sheet. A history read that
+  lands mid-tap never cancels the payment.
+- An action-label request (`listActions` / `createAction` labels, protocol `[1, 'action label <label>']`, generic use)
+  uses no key: its line reads "See your past payments labelled …" or "Label your payments … in your history", never
+  "Sign and encrypt anything with your … keys".
 
 ### 3b. A grouped sheet for every site
 

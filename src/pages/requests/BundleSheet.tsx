@@ -10,6 +10,7 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { confirmUsbForApproval } from '../../services/usbPresence';
 import {
+  actionLabelOf,
   ALLOWANCE_CHOICES_USD,
   buildSheetModel,
   DEFAULT_ALLOWANCE_USD,
@@ -775,11 +776,13 @@ export const BundleSheet = (props: {
     hero = <ConnectHero site={request.originator} />;
     siteSub = 'Wants to connect';
     title = <>{gold(sheetTitleText('connect', name, model))}</>;
-    const types = new Set(request.items.map((r) => r.type));
+    // An action label (see or label payments in your history) uses no key: never a "Sign posts" tile.
+    const types = new Set(request.items.map((r) => (r.type === 'protocol' && actionLabelOf(r) ? 'history' : r.type)));
     const tiles: { label: string; icon: ReactNode }[] = [
       { label: types.has('certificate') ? 'Your details' : 'Your name', icon: <PersonIcon /> },
     ];
     if (types.has('protocol')) tiles.push({ label: 'Sign posts', icon: <PenIcon /> });
+    if (types.has('history')) tiles.push({ label: 'Payment history', icon: <HistoryIcon /> });
     if (types.has('basket')) tiles.push({ label: 'Keep items', icon: <BagIcon /> });
     body = (
       <>
@@ -866,6 +869,12 @@ const PenIcon = () => (
   <svg {...iconProps}>
     <path d="M12 20h9" />
     <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+const HistoryIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
   </svg>
 );
 const BagIcon = () => (

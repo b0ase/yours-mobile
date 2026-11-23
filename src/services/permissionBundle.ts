@@ -98,6 +98,33 @@ export const sheetHash = (items: Pick<BundleRequest, 'requestID' | 'recipientsHa
   return `${items.length}:${h.toString(16)}`;
 };
 
+/**
+ * The tap's hash is exactly the sheet's lines before some live-joined lines arrived, and the tap answers none of
+ * those late lines: the user's view simply predates them. Never true when an answered or original line changed (a
+ * payment's recipients are in the hash), or when nothing joined live.
+ */
+export const tapPredatesLiveLines = (
+  items: Pick<BundleRequest, 'requestID' | 'recipientsHash' | 'addedLive'>[],
+  decisions: Record<string, boolean>,
+  seenHash: string,
+): boolean => {
+  const late = items.filter((i) => i.addedLive && !(i.requestID in decisions));
+  if (late.length === 0) return false;
+  return sheetHash(items.filter((i) => !late.includes(i))) === seenHash;
+};
+
+/**
+ * May this request join the site's sheet while it is on screen? Not a payment, and not a line that would turn the card
+ * CAREFUL (RB on scammerscartel.com, 23 Nov 2026). The payment joined a history read's sheet as an unticked red "New:
+ * pay" line: the card turned CAREFUL ("Wants more than usual"), its big button became "Not now" under the user's
+ * finger, and the payment came back cancelled. Either kind waits and gets its own sheet once this one is answered.
+ */
+const joinsLive = (items: BundleRequest[], request: BundleRequest): boolean => {
+  if (request.type === 'spending') return false;
+  if (!isRiskyRequest(request)) return true;
+  return buildSheetModel({ originator: request.originator, items }).lines.some((l) => l.risky);
+};
+
 /** Most requests one site may have waiting behind its open sheet. More are refused, so nothing can starve. */
 export const MAX_QUEUED_PER_SITE = 10;
 
@@ -190,7 +217,12 @@ export class PermissionBundler<R extends BundleRequest = BundleRequest> {
       existing.items.push(request);
       return existing;
     }
-    if (existing && !existing.frozen && (existing.liveChanges ?? 0) < MAX_LIVE_CHANGES) {
+    if (
+      existing &&
+      !existing.frozen &&
+      joinsLive(existing.items, request) &&
+      (existing.liveChanges ?? 0) < MAX_LIVE_CHANGES
+    ) {
       existing.items.push({ ...request, addedLive: true });
       existing.liveChanges = (existing.liveChanges ?? 0) + 1;
       this.opts.onUpdate?.(existing);
@@ -290,8 +322,15 @@ export class PermissionBundler<R extends BundleRequest = BundleRequest> {
   ): { granted: R[]; denied: R[]; carried?: PermissionBundle<R>; stale?: boolean } | undefined {
     const bundle = this.bundles.get(id);
     if (!bundle) return undefined;
-    // The tap was for a different set of lines than the sheet now holds: grant nothing.
-    if (seenHash !== undefined && seenHash !== sheetHash(bundle.items)) {
+    // The tap was for a different set of lines than the sheet now holds: grant nothing. Except when the only
+    // difference is lines that joined live after the tap's view was built and that it does not answer: the tap is
+    // bound to exactly what was on screen, so it decides those lines, and the late ones get their own sheet (unseen,
+    // below). A history read joining a payment's sheet mid-tap no longer cancels the payment (RB, 23 Nov 2026).
+    if (
+      seenHash !== undefined &&
+      seenHash !== sheetHash(bundle.items) &&
+      !tapPredatesLiveLines(bundle.items, decisions, seenHash)
+    ) {
       this.forget(id);
       this.promote(bundle.originator);
       return { granted: [], denied: [...bundle.items], stale: true };
@@ -394,6 +433,8 @@ export interface SheetLine {
   privateLabel?: string;
   /** Part of a first post (identity basket or post signature): what the POST card's face describes. */
   post?: boolean;
+  /** An action label (actionLabelOf): the site sees or labels payments in your history; no key is used. */
+  historyLabel?: string;
 }
 
 export interface SheetPayment {
@@ -548,9 +589,38 @@ const PRIVATE_LABELS: [RegExp, string][] = [
   [/\b(history|private|backup|vault|encrypt)/i, 'data'],
 ];
 
+/** How the permissions manager names an action label it asks about: protocol [1, 'action label <label>']. */
+const ACTION_LABEL_PREFIX = 'action label ';
+
+/**
+ * The manager's request to list or apply an action label (toolbox ensureLabelAccess: protocol [1, 'action label
+ * <label>'], counterparty 'self', usageType 'generic'): the label, else undefined. No key is used: it lets the site
+ * read its payments with that label from the wallet's history and put the label on its own. A request under the same
+ * name for any other use (signing, encrypting…) is a key operation and keeps the key wording (streamGrants.ts).
+ */
+export const actionLabelOf = (r: BundleRequest): string | undefined => {
+  if (r.type !== 'protocol' || r.privileged || r.usageType !== 'generic' || protoLevel(r) !== 1) return undefined;
+  if (r.counterparty !== undefined && r.counterparty !== 'self') return undefined;
+  const name = protoName(r);
+  if (!name.startsWith(ACTION_LABEL_PREFIX)) return undefined;
+  return name.slice(ACTION_LABEL_PREFIX.length).trim() || undefined;
+};
+
+/**
+ * An action-label line in plain words. Never "Sign and encrypt anything with your … keys" (RB, scammerscartel.com,
+ * 23 Nov 2026: a read of its own order's history read like a key grant). listActions asks to see; createAction and
+ * internalizeAction ask to apply it (reason = the action's description).
+ */
+const labelLineText = (r: BundleRequest, label: string): string =>
+  r.reason === 'listActions' || r.calls?.includes('listActions')
+    ? `See your past payments labelled "${label}"`
+    : `Label your payments "${label}" in your history`;
+
 /** "Use your wallet keys for your …" label for a key used only on your own data, or undefined. */
 export const privateLabelFor = (r: BundleRequest): string | undefined => {
   if (r.type !== 'protocol' || r.privileged || r.counterparty !== 'self' || isSignInRequest(r)) return undefined;
+  // An action label is no key (actionLabelOf): "history" in a label never makes it "your private data".
+  if (actionLabelOf(r)) return undefined;
   const name = protoName(r);
   return PRIVATE_LABELS.find(([re]) => re.test(name))?.[1];
 };
@@ -622,6 +692,8 @@ const lineText = (r: BundleRequest): string => {
   switch (r.type) {
     case 'protocol': {
       if (isIdentityKeyRequest(r)) return 'See your public identity (the key that names you)';
+      const label = actionLabelOf(r);
+      if (label) return labelLineText(r, label);
       if (isSharedKeyRequest(r)) return sharedLineText(r);
       const op = keyOperation(r);
       const name = protoName(r);
@@ -782,6 +854,7 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
       signIn: isSignInRequest(r),
       privateLabel: privateLabelFor(r),
       ...(isPostSignature(r) || isPostBasket(r) ? { post: true } : {}),
+      ...(actionLabelOf(r) ? { historyLabel: actionLabelOf(r) } : {}),
     });
   }
   const mode: SheetModel['mode'] = payment ? (lines.length ? 'connectAndPay' : 'pay') : 'connect';

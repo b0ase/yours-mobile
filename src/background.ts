@@ -2587,7 +2587,8 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
               Number(request.protocolID[0]),
               String(request.protocolID[1]),
             ]);
-          // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
+          // A request arriving while this site's sheet is open joins it live as a "New" line, unticked (a payment never
+          // does: it waits for its own PAY sheet), or after the user touched it waits for its own sheet (permissionBundle.ts).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
         } catch (error) {
           // The wallet could not put this sheet together (payees unreadable, queue full…): its own code, never "denied".
