@@ -3,41 +3,35 @@ import { addLocal, loadCachedSync, loadLocal, type KV } from './localStore';
 
 /**
  * Writes the wallet's own Signed record every time a seal is recorded on this device (a fresh seal on the native Sign
- * page, or a recovered one: nativeSeal.setSealRecordedHook). Installed once, at startup (signed/SignedMenuRow.tsx).
+ * page, or a recovered one: nativeSeal.setSealRecordedHook). Installed by MobileRoutes (signed/SignedMenu.tsx).
  *
- * The room is not part of the seal, so it is taken from where the seal ran: the Sign page's route
- * (/m/seal/<TICKER>/<doc>), else a row this wallet already knows for that document. Unknown → '' (the next sync with
- * bit-sign fills it in).
+ *   - Filed under the identity key the SEAL carries. A seal saved before keys were stored with it (before 6 Nov) is
+ *     not filed under anyone: it can't be told whose it is, and bit-sign's list shows it to its owner anyway.
+ *   - The room: the hook's own ticker when the seal flow passes one, else a row this wallet already knows for that
+ *     document (its own list, or bit-sign's last list). Unknown → '' until the next sync fills it in. Never the screen
+ *     that happens to be open.
  */
 export interface RecorderEnv {
-  /** The router's current path (the seal page while a seal finishes). */
-  path: () => string;
-  /** The current account's identity key, for a record saved before keys were stored with it. */
-  identityKey: () => string;
   now?: () => number;
   kv?: KV | null;
 }
 
-const SEAL_PATH = /^\/m\/seal\/([^/]+)\/([^/?#]+)/;
-
-export const roomFor = (s: Pick<SealRecorded, 'documentId'>, identityKey: string, env: RecorderEnv): string => {
-  const m = SEAL_PATH.exec(env.path() || '');
-  if (m) {
-    try {
-      return decodeURIComponent(m[1]).replace(/^\$/, '').toUpperCase();
-    } catch {
-      /* fall through */
-    }
-  }
-  const known = [...loadLocal(identityKey, env.kv), ...(loadCachedSync(identityKey, env.kv)?.rows ?? [])].find(
+export const roomFor = (
+  s: Pick<SealRecorded, 'documentId' | 'ticker'>,
+  identityKey: string,
+  kv?: KV | null,
+): string => {
+  const own = (s.ticker || '').trim().replace(/^\$/, '').toUpperCase();
+  if (/^[A-Z0-9][A-Z0-9&._-]{0,31}$/.test(own)) return own;
+  const known = [...loadLocal(identityKey, kv), ...(loadCachedSync(identityKey, kv)?.rows ?? [])].find(
     (r) => r.documentId === s.documentId && r.room,
   );
   return known?.room ?? '';
 };
 
 /** One recorded seal → one local record. Pure over `env` (signed.test.ts). */
-export const recordSeal = (s: SealRecorded, env: RecorderEnv): void => {
-  const identityKey = s.identityKey || env.identityKey();
+export const recordSeal = (s: SealRecorded, env: RecorderEnv = {}): void => {
+  const identityKey = (s.identityKey || '').trim();
   if (!identityKey) return;
   addLocal(
     identityKey,
@@ -46,7 +40,7 @@ export const recordSeal = (s: SealRecorded, env: RecorderEnv): void => {
       documentId: s.documentId,
       docHash: s.docHash,
       sealTxid: s.txid,
-      room: roomFor(s, identityKey, env),
+      room: roomFor(s, identityKey, env.kv),
       title: s.title,
       at: (env.now ?? Date.now)(),
       complete: s.complete,
@@ -55,10 +49,10 @@ export const recordSeal = (s: SealRecorded, env: RecorderEnv): void => {
   );
 };
 
-let env: RecorderEnv | null = null;
-/** Install (or re-point) the recorder. Idempotent: the hook is set once and reads the latest env. */
-export const installSignedRecorder = (next: RecorderEnv): void => {
-  const first = !env;
-  env = next;
-  if (first) setSealRecordedHook((s) => env && recordSeal(s, env));
+let installed = false;
+/** Install the recorder once (idempotent). */
+export const installSignedRecorder = (): void => {
+  if (installed) return;
+  installed = true;
+  setSealRecordedHook((s) => recordSeal(s));
 };

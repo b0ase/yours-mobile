@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { FileSignature } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
@@ -7,7 +7,7 @@ import { setSignedBadge, useSignedBadge } from './badge';
 import { heldFor, readHeldSeals } from './held';
 import { loadCachedSync, loadLocal, onSignedChange } from './localStore';
 import { installSignedRecorder } from './recorder';
-import { quietSyncDue, syncSigned } from './sync';
+import { syncSigned } from './sync';
 import { sessionGet, sessionHandle } from './session';
 import { badgeCount, mergeRows } from './signedList';
 
@@ -15,10 +15,10 @@ import { badgeCount, mergeRows } from './signedList';
  * The always-on half of Signed (bWalletX builds only; mobile, web.bwalletx.com and the extension all use these mounts,
  * vite.config.mobile.ts MOBILE_SWAPS):
  *   - SignedRecorder, mounted by MobileRoutes (every /m/* screen, the Sign page included): installs the recorder
- *     (signed/recorder.ts) with the router's live path, so every seal this device records lands in the wallet's list;
+ *     (signed/recorder.ts), so every seal this device records lands in the wallet's list;
  *   - SignedBadgeKeeper, mounted by the top bar (tabs/TopNav.tsx): keeps the ☰ › Signed badge current (waiting for me
- *     + held) and runs a quiet sync with bit-sign at most every 5 minutes, ONLY when a bChatX session already exists
- *     (it never signs in by itself).
+ *     + this account's held documents) and runs the shared sync with bit-sign (sync.ts: at most once per 5 minutes per
+ *     account, failures included), ONLY when a bChatX session already exists (it never signs in by itself).
  */
 const useIdentityKey = (): string => {
   const { chromeStorageService } = useServiceContext();
@@ -32,13 +32,7 @@ export const refreshSignedBadge = (identityKey: string): void => {
 };
 
 export const SignedRecorder = () => {
-  const { pathname } = useLocation();
-  const identityKey = useIdentityKey();
-  const path = useRef(pathname);
-  const key = useRef(identityKey);
-  path.current = pathname;
-  key.current = identityKey;
-  installSignedRecorder({ path: () => path.current, identityKey: () => key.current });
+  installSignedRecorder();
   return null;
 };
 
@@ -59,7 +53,7 @@ export const SignedBadgeKeeper = () => {
   useEffect(() => {
     refreshSignedBadge(identityKey);
     const get = sessionGet();
-    if (quietSyncDue(identityKey, !!get)) void syncSigned(identityKey, get, sessionHandle());
+    if (identityKey && get) void syncSigned(identityKey, get, sessionHandle());
   }, [identityKey, pathname]);
   return null;
 };

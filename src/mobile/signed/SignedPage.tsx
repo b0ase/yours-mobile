@@ -13,7 +13,7 @@ import type { DocContent } from '../bureau/api';
 import { bureauClient } from '../bureau/session';
 import { heldFor, readHeldSeals } from './held';
 import { loadCachedSync, loadLocal, onSignedChange } from './localStore';
-import { finishHeld, sessionGet, sessionHandle, signInToBchat } from './session';
+import { finishHeld, sessionGet, sessionHandle, signInToBchat, youngHeld } from './session';
 import { refreshSignedBadge } from './SignedMenu';
 import { syncSigned, type SyncState } from './sync';
 import { TABS, mergeRows, rowTitle, rowsIn, type SignedRow, type SignedTab } from './signedList';
@@ -36,12 +36,18 @@ import './signed.css';
  * Signed (/m/signed, ☰ › Signed; owner, 23 Nov 2026): every document this wallet is a party to, in three tabs, with
  * the seals held on this device on top. The list is the wallet's OWN record merged with bit-sign's (signedList.ts),
  * so it shows what this wallet sealed even when bChatX is down or signed out.
+ *
+ * Signing in: opening the page and the shared sync never sign in. Two things may, and only on the user's tap: the Sign
+ * in buttons (the list's, and Finish's when bit-sign wants a fresh session), and opening a signed document, whose
+ * preview (bureau/session.ts) signs in with the wallet's key when there is no session.
  */
 
 const SignedPage = () => {
   const navigate = useNavigate();
   const { apiContext, chromeStorageService } = useServiceContext();
-  const identityKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
+  const account = chromeStorageService.getCurrentAccountObject().account;
+  const identityKey = account?.pubKeys?.identityPubKey ?? '';
+  const identityAddress = account?.addresses?.identityAddress ?? '';
   const [version, setVersion] = useState(0);
   const [sync, setSync] = useState<SyncState>({ k: 'idle' });
   const [serverRows, setServerRows] = useState<SignedRow[] | null>(null);
@@ -53,13 +59,17 @@ const SignedPage = () => {
 
   useEffect(() => onSignedChange(() => setVersion((v) => v + 1)), []);
 
-  const runSync = useCallback(async () => {
-    setSync({ k: 'loading' });
-    const r = await syncSigned(identityKey, sessionGet(), sessionHandle());
-    setSync(r.state);
-    if (r.rows) setServerRows(r.rows);
-    refreshSignedBadge(identityKey);
-  }, [identityKey]);
+  /** The shared, throttled sync (sync.ts); `force` only on the user's own tap. */
+  const runSync = useCallback(
+    async (force = false) => {
+      setSync({ k: 'loading' });
+      const r = await syncSigned(identityKey, sessionGet(), sessionHandle(), { force });
+      setSync(r.state);
+      if (r.rows) setServerRows(r.rows);
+      refreshSignedBadge(identityKey);
+    },
+    [identityKey],
+  );
   useEffect(() => {
     void runSync();
   }, [runSync]);
@@ -74,6 +84,8 @@ const SignedPage = () => {
   );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const held = useMemo(() => heldFor(identityKey, readHeldSeals()), [identityKey, version, finish]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const young = useMemo(() => youngHeld(identityKey), [identityKey, version, finish]);
   const shownTab: SignedTab = tab ?? TABS.find((t) => rowsIn(rows, t.id).length)?.id ?? 'waiting';
   const list = rowsIn(rows, shownTab);
 
@@ -83,12 +95,24 @@ const SignedPage = () => {
   };
 
   const onFinish = async (documentId: string) => {
-    setFinish((f) => ({ ...f, [documentId]: 'working' }));
-    const r = await finishHeld(apiContext, documentId);
+    setFinish((f) => ({ ...f, [documentId]: { k: 'working' } }));
+    const r = await finishHeld(apiContext, documentId, identityKey, identityAddress);
     setFinish((f) => ({ ...f, [documentId]: r }));
     setVersion((v) => v + 1);
     refreshSignedBadge(identityKey);
-    if (r === 'finished') void runSync();
+    if (r.k === 'recorded') void runSync(true);
+  };
+
+  /** Finish asked for a sign-in: the user taps Sign in, then that Finish runs again. */
+  const onFinishSignIn = async (documentId: string) => {
+    setFinish((f) => ({ ...f, [documentId]: { k: 'working' } }));
+    try {
+      await signInToBchat(apiContext);
+    } catch {
+      setFinish((f) => ({ ...f, [documentId]: { k: 'sign_in' } }));
+      return;
+    }
+    await onFinish(documentId);
   };
 
   const onSignIn = async () => {
@@ -99,7 +123,7 @@ const SignedPage = () => {
       setSync({ k: 'error', text: e instanceof Error ? e.message : 'Could not sign in.' });
       return;
     }
-    void runSync();
+    void runSync(true);
   };
 
   const openRow = (r: SignedRow) => {
@@ -142,12 +166,19 @@ const SignedPage = () => {
           <h1 className="sg-title">Signed</h1>
           <p className="sg-sub">Every document you have signed, or been asked to sign.</p>
         </header>
-        <HeldBanner held={held} titleOf={titleOf} onFinish={(id) => void onFinish(id)} states={finish} />
+        <HeldBanner
+          held={held}
+          titleOf={titleOf}
+          onFinish={(id) => void onFinish(id)}
+          onSignIn={(id) => void onFinishSignIn(id)}
+          states={finish}
+          young={young}
+        />
         <SyncNote
           state={sync}
           cachedAt={cached?.at ?? null}
           onSignIn={() => void onSignIn()}
-          onRetry={() => void runSync()}
+          onRetry={() => void runSync(true)}
         />
         {nothing && sync.k !== 'loading' && sync.k !== 'idle' ? (
           <div className="sg-empty" data-testid="signed-empty">
@@ -206,7 +237,7 @@ const SignedPage = () => {
           </div>
           <div className="sg-row-chips sg-detail-chips">
             <HashChip hash={open.docHash} />
-            <SealLink txid={open.sealTxid} />
+            {open.status === 'sealed' && <SealLink txid={open.sealTxid} />}
             {open.status === 'waiting' && !open.room && (
               <span className="sg-note">Open it in its bChatX room to sign it.</span>
             )}

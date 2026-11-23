@@ -2,16 +2,16 @@ import { useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { bavatarSvg } from '../bavatar/bavatar';
 import type { PendingSeal } from '../chat/nativeSeal';
-import type { FinishResult } from './session';
+import type { FinishOutcome } from './session';
 import type { SyncState } from './sync';
-import { rowTitle, shortHash, wocTxUrl, type SignedRow, type SignedTab } from './signedList';
+import { rowTitle, shortHash, waitingLine, wocTxUrl, type SignedRow, type SignedTab } from './signedList';
 
 /** Signed's plain pieces (no data access), so signed.test.ts renders them on their own. */
 
 export const EMPTY_TEXT = 'Nothing signed yet. Documents you sign in bChatX rooms show up here.';
 export const TAB_EMPTY: Record<SignedTab, string> = {
   waiting: 'Nothing is waiting for your signature.',
-  signed: 'Nothing signed and still waiting to be sealed.',
+  signed: 'Nothing signed and still waiting for others or for its seal.',
   sealed: 'Nothing sealed on Bitcoin yet.',
 };
 
@@ -31,24 +31,51 @@ export const fmtDate = (ms: number) =>
 export const fmtTime = (ms: number) =>
   new Date(ms).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export type FinishState = 'idle' | 'working' | FinishResult;
-const FINISH_TEXT: Partial<Record<FinishState, string>> = {
-  working: 'Checking…',
-  finished: 'Recorded. It is in Sealed now.',
-  still_held: 'Not recorded yet. It stays here and is tried again; nothing is paid twice.',
-  failed: 'Could not finish just now. Try again in a minute.',
+export type FinishState = { k: 'idle' } | { k: 'working' } | FinishOutcome;
+/** What the banner says after a Finish: the TRUE outcome, never "Recorded" unless bit-sign recorded it. */
+export const finishText = (st: FinishState): string => {
+  switch (st.k) {
+    case 'working':
+      return 'Checking…';
+    case 'recorded':
+      return 'Recorded. It is in Sealed now.';
+    case 'released':
+      return 'Nothing was paid; you can seal again.';
+    case 'kept':
+      return 'Still checking. It stays here and is tried again; nothing is paid twice.';
+    case 'refused':
+      return st.reason;
+    case 'sign_in':
+      return 'Sign in to bChatX to finish this.';
+    case 'account_changed':
+      return 'You switched accounts. Finish it from the account that sealed it.';
+    case 'offline':
+      return 'You are offline. Finish it when you are back online.';
+    case 'failed':
+      return 'Could not finish just now. Try again in a minute.';
+    default:
+      return '';
+  }
 };
+/** A held seal this young may still be paying in another tab: Finish waits (held.UNSURE_SETTLE_MS). */
+export const YOUNG_TEXT = 'Just paid: still settling. Finish is ready in a few minutes.';
 
 export const HeldBanner = ({
   held,
   titleOf,
   onFinish,
+  onSignIn,
   states,
+  young = new Set<string>(),
 }: {
   held: PendingSeal[];
   titleOf: (documentId: string) => string;
   onFinish: (documentId: string) => void;
+  /** The explicit Sign in tap after Finish asked for it; Finish runs again after it. */
+  onSignIn?: (documentId: string) => void;
   states: Record<string, FinishState>;
+  /** Documents whose held seal is too young to finish safely. */
+  young?: ReadonlySet<string>;
 }) => {
   if (!held.length) return null;
   const docs = [...new Map(held.map((p) => [p.documentId, p])).values()];
@@ -60,23 +87,26 @@ export const HeldBanner = ({
       </p>
       <ul className="sg-held-list">
         {docs.map((p) => {
-          const st = states[p.documentId] ?? 'idle';
+          const st: FinishState = states[p.documentId] ?? { k: 'idle' };
+          const isYoung = young.has(p.documentId) && st.k === 'idle';
+          const text = isYoung ? YOUNG_TEXT : finishText(st);
+          const signIn = st.k === 'sign_in' && !!onSignIn;
           return (
             <li key={p.documentId} className="sg-held-item">
               <span className="sg-row-text">
                 <span className="sg-row-title">{titleOf(p.documentId)}</span>
                 <span className="sg-row-sub">
                   Held since {fmtTime(p.savedAt)}
-                  {FINISH_TEXT[st] ? ` · ${FINISH_TEXT[st]}` : ''}
+                  {text ? ` · ${text}` : ''}
                 </span>
               </span>
               <button
                 type="button"
                 className="sg-btn sg-btn-gold"
-                disabled={st === 'working'}
-                onClick={() => onFinish(p.documentId)}
+                disabled={st.k === 'working' || isYoung}
+                onClick={() => (signIn ? onSignIn!(p.documentId) : onFinish(p.documentId))}
               >
-                {st === 'working' ? 'Finishing…' : 'Finish'}
+                {st.k === 'working' ? 'Finishing…' : signIn ? 'Sign in' : 'Finish'}
               </button>
             </li>
           );
@@ -228,12 +258,13 @@ export const Row = ({ row, onOpen }: { row: SignedRow; onOpen: (r: SignedRow) =>
           {row.room ? `$${row.room} · ` : ''}
           {fmtDate(row.at)}
           {row.status === 'waiting' ? ' · Needs your signature' : ''}
+          {waitingLine(row) ? ` · ${waitingLine(row)}` : ''}
         </span>
       </span>
     </button>
     <span className="sg-row-chips">
       <HashChip hash={row.docHash} />
-      <SealLink txid={row.sealTxid} />
+      {row.status === 'sealed' && <SealLink txid={row.sealTxid} />}
     </span>
   </li>
 );

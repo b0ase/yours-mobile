@@ -1,17 +1,21 @@
-import { isTxid, type LocalSigned, type SignedRow } from './signedList';
+import { ID_MAX, ROOM_MAX, TITLE_MAX, clip, isTxid, type LocalSigned, type SignedRow } from './signedList';
 
 /**
  * The wallet's OWN record of what it has sealed (owner, 23 Nov 2026: the wallet keeps it, so Signed works without our
  * server), and the last list bit-sign gave it (for offline). Stored on this device against the account's identity key,
  * in localStorage like the wallet's other per-identity records (names/opnsVault.ts, kyc/kycWallet.ts):
  *   bwallet.signed.<identity key>        LocalSigned[] (at most MAX_LOCAL, newest kept)
- *   bwallet.signed.sync.<identity key>   { at, rows: SignedRow[] } from the last good sync (at most MAX_CACHED)
+ *   bwallet.signed.sync.<identity key>   { at, rows: SignedRow[] } from the last good sync (at most SYNC_MAX_BYTES)
  * Nothing here is secret: titles, rooms, hashes and txids, the same as the room shows.
+ *
+ * ⚠ BOUNDED, AND NEVER IN THE SEAL'S WAY. The seal flow keeps its held payments in the same localStorage, so this file
+ * caps every field (title 200, room 32, ids 128), the list (MAX_LOCAL) and the sync cache (128 KB). On a quota error the
+ * sync cache is dropped first (it is only a copy of bit-sign's list); a failed write is given up, never retried in a loop.
  */
-export const MAX_LOCAL = 1000;
-export const MAX_CACHED = 500;
+export const MAX_LOCAL = 500;
+export const SYNC_MAX_BYTES = 128 * 1024;
 
-export type KV = Pick<Storage, 'getItem' | 'setItem'>;
+export type KV = Pick<Storage, 'getItem' | 'setItem'> & Partial<Pick<Storage, 'removeItem'>>;
 const ls = (): KV | null => {
   try {
     return localStorage;
@@ -37,12 +41,12 @@ const parseLocal = (v: unknown): LocalSigned | null => {
   if (!v || typeof v !== 'object') return null;
   const o = v as Record<string, unknown>;
   const r: LocalSigned = {
-    signatureId: s(o.signatureId),
-    documentId: s(o.documentId),
-    docHash: s(o.docHash).toLowerCase(),
-    sealTxid: isTxid(o.sealTxid) ? s(o.sealTxid).toLowerCase() : '',
-    room: s(o.room),
-    title: s(o.title),
+    signatureId: clip(o.signatureId, ID_MAX),
+    documentId: clip(o.documentId, ID_MAX),
+    docHash: /^[0-9a-f]{64}$/i.test(s(o.docHash)) ? s(o.docHash).toLowerCase() : '',
+    sealTxid: isTxid(o.sealTxid) ? s(o.sealTxid).trim().toLowerCase() : '',
+    room: clip(o.room, ROOM_MAX),
+    title: clip(o.title, TITLE_MAX),
     at: Number(o.at) || 0,
     ...(typeof o.complete === 'boolean' ? { complete: o.complete } : {}),
   };
@@ -59,17 +63,28 @@ export const loadLocal = (identityKey: string, kv: KV | null = ls()): LocalSigne
   }
 };
 
+/** Drop this account's sync cache (it is only a copy of bit-sign's list): first to go when storage is full. */
+export const dropCachedSync = (identityKey: string, kv: KV | null = ls()): void => {
+  try {
+    kv?.removeItem?.(syncKey(identityKey));
+  } catch {
+    /* nothing more to free */
+  }
+};
+
 /**
- * Add or update one record (same signature id, or same doc hash): fields already known are kept when the new record
- * leaves them blank (a recovered seal has no title). Never throws.
+ * Add or update one record (same signature id; or, for a record without one, the same doc hash): fields already known
+ * are kept when the new record leaves them blank (a recovered seal has no title). Never throws.
  */
 export const addLocal = (identityKey: string, rec: LocalSigned, kv: KV | null = ls()): void => {
   if (!idKey(identityKey)) return;
   const next = parseLocal(rec);
   if (!next) return;
   const list = loadLocal(identityKey, kv);
-  const i = list.findIndex(
-    (l) => (!!next.signatureId && l.signatureId === next.signatureId) || (!!next.docHash && l.docHash === next.docHash),
+  const i = list.findIndex((l) =>
+    next.signatureId
+      ? l.signatureId === next.signatureId || (!l.signatureId && !!next.docHash && l.docHash === next.docHash)
+      : !!next.docHash && l.docHash === next.docHash,
   );
   if (i >= 0) {
     const old = list[i];
@@ -78,10 +93,17 @@ export const addLocal = (identityKey: string, rec: LocalSigned, kv: KV | null = 
       ...Object.fromEntries(Object.entries(next).filter(([, v]) => v !== '' && v !== 0)),
     } as LocalSigned;
   } else list.push(next);
+  const json = JSON.stringify(list.sort((a, b) => a.at - b.at).slice(-MAX_LOCAL));
   try {
-    kv?.setItem(localKey(identityKey), JSON.stringify(list.sort((a, b) => a.at - b.at).slice(-MAX_LOCAL)));
+    kv?.setItem(localKey(identityKey), json);
   } catch {
-    /* storage full or blocked: the server's list still shows it */
+    // Full: the sync cache goes first, then one more try; after that the server's list still shows it.
+    dropCachedSync(identityKey, kv);
+    try {
+      kv?.setItem(localKey(identityKey), json);
+    } catch {
+      /* give up */
+    }
   }
   emit();
 };
@@ -101,12 +123,24 @@ export const loadCachedSync = (identityKey: string, kv: KV | null = ls()): Cache
   }
 };
 
+/** The cache as stored: newest rows first, cut until it fits SYNC_MAX_BYTES. */
+export const cacheJson = (rows: readonly SignedRow[], at: number): string => {
+  let keep = [...rows].sort((a, b) => b.at - a.at);
+  let json = JSON.stringify({ at, rows: keep });
+  while (json.length > SYNC_MAX_BYTES && keep.length) {
+    keep = keep.slice(0, Math.floor(keep.length * 0.8));
+    json = JSON.stringify({ at, rows: keep });
+  }
+  return json;
+};
+
 export const saveCachedSync = (identityKey: string, rows: SignedRow[], at: number, kv: KV | null = ls()): void => {
   if (!idKey(identityKey)) return;
   try {
-    kv?.setItem(syncKey(identityKey), JSON.stringify({ at, rows: rows.slice(0, MAX_CACHED) }));
+    kv?.setItem(syncKey(identityKey), cacheJson(rows, at));
   } catch {
-    /* storage full or blocked: the next sync tries again */
+    // Full: no cache rather than a stale one, and never squeeze the seal store.
+    dropCachedSync(identityKey, kv);
   }
   emit();
 };

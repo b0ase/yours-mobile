@@ -1,15 +1,13 @@
-import type { PendingSeal, PendingSealStore, SealLedger } from '../chat/nativeSeal';
+import { SEAL_HOLD_MAX_MS, type PendingSeal, type PendingSealStore } from '../chat/nativeSeal';
+import { PENDING_SEALS_KEY, localStore } from '../chat/sealStore';
 
 /**
  * Seals held on this device (a payment that may have gone out but isn't recorded on bit-sign yet), for Signed's
- * "Held: needs recovery" banner and its Finish button.
- *
- * ⚠ THE SAME STORAGE AS THE SEAL PAGE (chat/NativeSealPage.tsx STORE_KEY / SEALED_KEY: localStorage, a JSON array).
- * signed.test.ts reads the page's source and fails if those keys move, so this can never quietly read an empty list.
- * Records are written back whole (`{ ...p, … }`), so fields this file doesn't know about survive a Finish.
+ * "Held: needs recovery" banner and its Finish button. The storage is the seal flow's own (chat/sealStore.ts): this
+ * file only READS it directly, and Finish writes through sealStore's store, which keeps every entry it doesn't touch
+ * (unknown or malformed ones included) exactly as it was.
  */
-export const PENDING_SEALS_KEY = 'bwx.nativeSeal.pending';
-export const SEALED_LEDGER_KEY = 'bwx.nativeSeal.sealed';
+export { PENDING_SEALS_KEY };
 
 export type KV = Pick<Storage, 'getItem' | 'setItem'>;
 const ls = (): KV | null => {
@@ -26,7 +24,7 @@ const isPending = (v: unknown): v is PendingSeal =>
   typeof (v as PendingSeal).documentId === 'string' &&
   typeof (v as PendingSeal).nonce === 'string';
 
-/** Read only: every held seal on this device. Unreadable storage → []. */
+/** Read only: every well-formed held seal on this device. Unreadable storage → []. Nothing is written back. */
 export const readHeldSeals = (kv: KV | null = ls()): PendingSeal[] => {
   try {
     const v = JSON.parse(kv?.getItem(PENDING_SEALS_KEY) || '[]');
@@ -36,46 +34,38 @@ export const readHeldSeals = (kv: KV | null = ls()): PendingSeal[] => {
   }
 };
 
-/** The held seals that are this account's: its identity key, or a record saved before keys were stored (6 Nov). */
-export const heldFor = (identityKey: string, list: PendingSeal[]): PendingSeal[] => {
-  const me = (identityKey || '').toLowerCase();
-  return list.filter((p) => !p.identityKey || p.identityKey.toLowerCase() === me);
-};
+const same = (a: string | undefined, b: string) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
-/** The same store the seal page gives recoverNativeSeals (Finish runs exactly that recovery). */
-export const heldSealStore = (kv: KV | null = ls()): PendingSealStore => {
-  const write = (l: PendingSeal[]) => {
-    try {
-      kv?.setItem(PENDING_SEALS_KEY, JSON.stringify(l));
-    } catch {
-      /* storage blocked */
-    }
-  };
-  return {
-    list: () => readHeldSeals(kv),
-    save: (p) => write([...readHeldSeals(kv).filter((x) => x.nonce !== p.nonce), p]),
-    remove: (n) => write(readHeldSeals(kv).filter((x) => x.nonce !== n)),
-  };
-};
+/**
+ * This account's held seals: ONLY records carrying this identity key. A record saved before keys were stored (before
+ * 6 Nov) can't be told apart between accounts, so it is never shown, counted or finished here (the seal page still
+ * finishes it when its own document is opened).
+ */
+export const heldFor = (identityKey: string, list: PendingSeal[]): PendingSeal[] =>
+  list.filter((p) => same(p.identityKey, identityKey));
 
-/** The seal page's double-pay ledger (at most 500 keys), so a seal finished here is never offered again there. */
-export const sealedLedger = (kv: KV | null = ls()): SealLedger => {
-  const read = (): string[] => {
-    try {
-      const v = JSON.parse(kv?.getItem(SEALED_LEDGER_KEY) || '[]');
-      return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
-    } catch {
-      return [];
-    }
-  };
-  return {
-    has: (id) => read().includes(id),
-    add: (id) => {
-      try {
-        kv?.setItem(SEALED_LEDGER_KEY, JSON.stringify([...read().filter((x) => x !== id), id].slice(-500)));
-      } catch {
-        /* storage blocked */
-      }
-    },
-  };
-};
+/** An unsure record (no transaction in hand) this young may still be mid-payment in another tab or window. */
+export const UNSURE_SETTLE_MS = SEAL_HOLD_MAX_MS + 2 * 60_000;
+export const tooYoungToFinish = (p: PendingSeal, now: number): boolean =>
+  !p.beefHex && now - (Number(p.savedAt) || 0) < UNSURE_SETTLE_MS;
+
+/**
+ * The store Finish hands to recoverNativeSeals: list() shows ONLY this account's records for this document that are
+ * old enough to settle (another account's seal for the same document is never touched by this account's session),
+ * while save() and remove() act on the full stored list through the seal flow's own store.
+ */
+export const finishStoreFor = (
+  identityKey: string,
+  documentId: string,
+  now: number,
+  full: PendingSealStore = localStore(),
+): PendingSealStore => ({
+  ...full,
+  list: () =>
+    full
+      .list()
+      .filter(isPending)
+      .filter((p) => p.documentId === documentId && same(p.identityKey, identityKey) && !tooYoungToFinish(p, now)),
+  save: (p) => full.save(p),
+  remove: (n) => full.remove(n),
+});
