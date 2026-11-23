@@ -222,6 +222,7 @@ const txLookup = (ctx: OneSatContext): SealTxLookup => ({
       toolboxSdk.specOpFailedActions,
       Date.now(),
       opts?.failedSeenAt,
+      opts?.failedSet,
     ),
   beef: async (txid) => {
     try {
