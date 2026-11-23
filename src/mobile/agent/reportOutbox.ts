@@ -198,6 +198,18 @@ export const resetBackoff = (
   return n;
 };
 
+/**
+ * May the background runner send this account's reports now? Only while bChatX's session account is this account
+ * (review of #557, round 3): between useAccountSwitch's setChatAccount(B) and its reload, a run for A would post A's
+ * queued reports under B's handle. Also not while offline, nor with nothing queued.
+ */
+export const runnerMaySend = (d: {
+  account: string | null | undefined;
+  chatAccount: string | null | undefined;
+  queued: number;
+  online: boolean;
+}): boolean => d.queued > 0 && d.online && (d.chatAccount ?? null) === (d.account ?? null);
+
 let flushing: Promise<{ sent: number; left: number }> | null = null;
 
 /**

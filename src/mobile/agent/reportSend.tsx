@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import type { ServiceContextProps } from '../../contexts/ServiceContext';
 import { ChatApiError, saveSession, SESSION_EVENT } from '../chat/api';
+import { getChatAccount } from '../chat/chatAccount';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
 import { reportToB, type ReportResult } from './paid';
 import {
@@ -13,6 +14,7 @@ import {
   queuedFor,
   reportMessageId,
   resetBackoff,
+  runnerMaySend,
   type QueuedReport,
 } from './reportOutbox';
 
@@ -81,8 +83,16 @@ export const ReportOutboxRunner = () => {
     if (!apiContext) return;
     const call = agentCaller(apiContext);
     const run = () => {
-      if (!queuedFor(account).length) return;
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      // Never while bChatX's session belongs to another account (mid-switch): A's reports would go under B's handle.
+      if (
+        !runnerMaySend({
+          account,
+          chatAccount: getChatAccount(),
+          queued: queuedFor(account).length,
+          online: typeof navigator === 'undefined' || navigator.onLine !== false,
+        })
+      )
+        return;
       void flushOutbox(account, call).catch(() => {});
     };
     const onVisible = () => document.visibilityState === 'visible' && run();

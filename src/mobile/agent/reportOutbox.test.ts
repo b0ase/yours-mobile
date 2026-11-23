@@ -13,6 +13,7 @@ import {
   readOutbox,
   reportMessageId,
   resetBackoff,
+  runnerMaySend,
 } from './reportOutbox';
 import { parseReport } from './paid';
 
@@ -314,5 +315,26 @@ describe('only real errors count toward the cap; sign-in and coming back online 
     expect(src).toContain("resetBackoff(account, 'signin');");
     expect(src).toContain('window.addEventListener(SESSION_EVENT, onSession);');
     expect(src).toContain('window.removeEventListener(SESSION_EVENT, onSession);');
+  });
+});
+
+describe("the runner never sends one account's reports under another's bChatX handle (round 3)", () => {
+  test("mid-switch (bChatX already on B, the page still on A): A's reports wait", () => {
+    const base = { account: 'A', queued: 4, online: true };
+    expect(runnerMaySend({ ...base, chatAccount: 'A' })).toBe(true);
+    expect(runnerMaySend({ ...base, chatAccount: 'B' })).toBe(false);
+    expect(runnerMaySend({ ...base, chatAccount: null })).toBe(false);
+    expect(runnerMaySend({ ...base, chatAccount: 'A', online: false })).toBe(false);
+    expect(runnerMaySend({ ...base, chatAccount: 'A', queued: 0 })).toBe(false);
+    // No account open and no bChatX account: the device's own reports may go.
+    expect(runnerMaySend({ account: null, chatAccount: null, queued: 1, online: true })).toBe(true);
+  });
+
+  test('wired: every run checks the bChatX account first', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./reportSend.tsx', import.meta.url), 'utf8');
+    const run = src.slice(src.indexOf('const run = () => {'), src.indexOf('const onVisible'));
+    expect(run).toContain('chatAccount: getChatAccount(),');
+    expect(run.indexOf('runnerMaySend(')).toBeLessThan(run.indexOf('flushOutbox('));
   });
 });
