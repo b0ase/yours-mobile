@@ -3,8 +3,20 @@
  * (mobile/wallet/live/liveBus.ts) reconciles the spends it shows as pending against these only: never against a
  * cached or fallback number, and knowing whether the read began after a spend (review of #558, round 2).
  */
-/** `account`: the identity address the wallet read it for (GET_BALANCE answers with it), when known. */
-export type BalanceRead = { sats: number; startedAt: number; account?: string };
+/**
+ * `account`: the identity address the wallet read it for (GET_BALANCE answers with it), when known. `seq`: the read's
+ * place in start order (nextReadSeq, taken when the read began); reads are ordered by it, never by the clock.
+ * `startedAt` (Date.now()) is only for comparing with when spends were announced.
+ */
+export type BalanceRead = { sats: number; startedAt: number; account?: string; seq?: number };
+
+/**
+ * Start order of balance reads: a counter that only goes up. Ordering reads by Date.now() froze the balance when the
+ * device clock went back (a manual change, a large NTP correction): every new read looked older than the newest one
+ * and was dropped until a reload (review of #558 round 6).
+ */
+let readSeq = 0;
+export const nextReadSeq = (): number => ++readSeq;
 
 const listeners = new Set<(r: BalanceRead) => void>();
 
@@ -13,7 +25,7 @@ export const onBalanceRead = (f: (r: BalanceRead) => void): (() => void) => {
   return () => listeners.delete(f);
 };
 
-/** Per account ('' when untagged): when the newest read already published began. */
+/** Per account ('' when untagged): the start-order number of the newest read already published. */
 const newest = new Map<string, number>();
 
 /**
@@ -23,12 +35,15 @@ const newest = new Map<string, number>();
  */
 export const publishBalanceRead = (r: BalanceRead): boolean => {
   if (!Number.isFinite(r.sats) || !Number.isFinite(r.startedAt)) return false;
+  // A read with no number of its own counts as begun now.
+  const seq = typeof r.seq === 'number' && Number.isFinite(r.seq) ? r.seq : nextReadSeq();
   const key = r.account ?? '';
-  if ((newest.get(key) ?? -Infinity) > r.startedAt) return false;
-  newest.set(key, r.startedAt);
+  if ((newest.get(key) ?? -Infinity) > seq) return false;
+  newest.set(key, seq);
+  const read = { ...r, seq };
   listeners.forEach((f) => {
     try {
-      f(r);
+      f(read);
     } catch {
       /* a listener never breaks a balance read */
     }

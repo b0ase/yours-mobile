@@ -12,7 +12,7 @@ import {
   reportSessionSpend,
   reportSpend,
 } from './liveBus';
-import { publishBalanceRead } from '../../../utils/balanceReads';
+import { nextReadSeq, publishBalanceRead } from '../../../utils/balanceReads';
 import { displayedSats, PENDING_TTL_MS } from './liveLogic';
 
 /** What the Wallet card shows for a fetched balance `base` (WalletCard: displayedSats). */
@@ -327,17 +327,18 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
       noteAccount('A');
       expect(publishBalanceRead({ sats: 10_000, startedAt: Date.now() - 20, account: 'A' })).toBe(true);
       const r1Start = Date.now() + 10; // R1 begins
+      const r1Seq = nextReadSeq();
       jest.setSystemTime(2_000_100);
       reportSpend({ sats: 1_000, label: 'send2', account: 'A' }); // a second send after R1 began
       jest.setSystemTime(2_003_000);
       expect(publishBalanceRead({ sats: 8_900, startedAt: Date.now() - 500, account: 'A' })).toBe(true); // R2
       const ticksBefore = __liveState().ticks.length;
       // R1 (older, before send2) lands last: not published, so neither the card nor the page takes it.
-      expect(publishBalanceRead({ sats: 10_000, startedAt: r1Start, account: 'A' })).toBe(false);
+      expect(publishBalanceRead({ sats: 10_000, startedAt: r1Start, account: 'A', seq: r1Seq })).toBe(false);
       expect(liveCardSats(__liveState(), 10_000, 'A')).toBe(8_900);
       expect(__liveState().ticks).toHaveLength(ticksBefore); // no false "+1,100 received"
       // A direct late note is ignored too.
-      noteBalance(10_000, { startedAt: r1Start });
+      noteBalance(10_000, { startedAt: r1Start, seq: r1Seq });
       expect(__liveState().base).toBe(8_900);
     } finally {
       __resetLive();
@@ -378,5 +379,28 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
     const page = readFileSync(resolve(import.meta.dir, '../../../pages/BsvWallet.tsx'), 'utf8');
     expect(page).toContain('const live = useLiveBalance();');
     expect(page).not.toMatch(/\buseLive\(\)/);
+  });
+
+  test('review of #558 round 6: the device clock going back an hour never freezes the balance', () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(10_000_000);
+      __resetLive();
+      noteAccount('A');
+      const first = { sats: 10_000, startedAt: Date.now(), account: 'A', seq: nextReadSeq() };
+      expect(publishBalanceRead(first)).toBe(true);
+      jest.setSystemTime(10_000_000 - 60 * 60 * 1000); // the clock goes back an hour
+      const second = { sats: 8_900, startedAt: Date.now(), account: 'A', seq: nextReadSeq() };
+      expect(publishBalanceRead(second)).toBe(true);
+      expect(__liveState().base).toBe(8_900);
+      expect(liveCardSats(__liveState(), 10_000, 'A')).toBe(8_900);
+      // The page side uses the same answer (readWalletBalance's stale flag is publishBalanceRead's result).
+      const wallet = readFileSync(resolve(import.meta.dir, '../../../utils/wallet.ts'), 'utf8');
+      expect(wallet).toContain('const seq = nextReadSeq();');
+      expect(wallet).toContain('const stale = !publishBalanceRead(read);');
+    } finally {
+      __resetLive();
+      jest.useRealTimers();
+    }
   });
 });

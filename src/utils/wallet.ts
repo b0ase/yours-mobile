@@ -1,7 +1,7 @@
 import { sendMessageAsync } from './chromeHelpers';
 import { YoursEventName } from '../inject';
 import { publishPendingSats } from './pendingBalance';
-import { publishBalanceRead, type BalanceRead } from './balanceReads';
+import { nextReadSeq, publishBalanceRead, type BalanceRead } from './balanceReads';
 
 export { cachedExchangeRate, fetchExchangeRate, isExchangeRateStale, lastKnownExchangeRate } from './exchangeRate';
 
@@ -13,6 +13,8 @@ export { cachedExchangeRate, fetchExchangeRate, isExchangeRateStale, lastKnownEx
 export async function readWalletBalance(): Promise<BalanceRead & { stale: boolean }> {
   // When the read began: the live balance only counts spends announced before it as included (utils/balanceReads.ts).
   const startedAt = Date.now();
+  // Its place in start order: reads are ordered by this, never by the clock (utils/balanceReads.ts nextReadSeq).
+  const seq = nextReadSeq();
   const response = await sendMessageAsync<{
     success: boolean;
     data?: number;
@@ -28,6 +30,7 @@ export async function readWalletBalance(): Promise<BalanceRead & { stale: boolea
   const read: BalanceRead = {
     sats: response.data ?? 0,
     startedAt,
+    seq,
     ...(typeof response.account === 'string' ? { account: response.account } : {}),
   };
   const stale = !publishBalanceRead(read);

@@ -93,8 +93,11 @@ let lastBase: number | null = null;
 let unclaimedDrop: { sats: number; at: number; tickId: string; pendingIds: string[] } | null = null;
 /** Whose balance lastBase is (WalletCard's identity address): another account's numbers never reconcile this one's. */
 let account: string | undefined;
-/** When the newest read applied began: one that began earlier answered late and is ignored (review of #558 round 5). */
-let newestReadAt = -Infinity;
+/**
+ * The start-order number (utils/balanceReads.ts nextReadSeq) of the newest read applied: one that began earlier
+ * answered late and is ignored (review of #558 round 5). Never the clock, which can go back (round 6).
+ */
+let newestReadSeq = -Infinity;
 
 /**
  * Pending spends never outlive PENDING_TTL_MS, even when no later read changes the balance. A read with the same number
@@ -160,7 +163,7 @@ export const noteAccount = (id: string | undefined) => {
   if (account !== undefined || (state.baseFor !== undefined && state.baseFor !== id)) {
     lastBase = null;
     unclaimedDrop = null;
-    newestReadAt = -Infinity;
+    newestReadSeq = -Infinity;
     set({ pending: [], ticks: [], base: null, baseFor: undefined });
   } else if (state.base !== null && state.baseFor === undefined) {
     // Untagged reads that came back before the card said whose they were are this first account's.
@@ -194,12 +197,15 @@ export const liveCardSats = (
  * `read.startedAt`. Drops pending spends it already includes; announces unexplained moves. `read.account` (tests, or a
  * caller that knows) switches accounts first (noteAccount).
  */
-export const noteBalance = (sats: number, read: { account?: string; startedAt?: number; readFor?: string } = {}) => {
+export const noteBalance = (
+  sats: number,
+  read: { account?: string; startedAt?: number; readFor?: string; seq?: number } = {},
+) => {
   if (!Number.isFinite(sats)) return;
   noteAccount(read.account);
-  if (typeof read.startedAt === 'number') {
-    if (read.startedAt < newestReadAt) return;
-    newestReadAt = read.startedAt;
+  if (typeof read.seq === 'number') {
+    if (read.seq < newestReadSeq) return;
+    newestReadSeq = read.seq;
   }
   const now = Date.now();
   const covered = state.pending.reduce((s, p) => s + p.sats, 0);
@@ -234,7 +240,7 @@ export const noteBalance = (sats: number, read: { account?: string; startedAt?: 
 // A read begun for another account than the card now shows (it answered after a switch) is ignored.
 onBalanceRead((r) => {
   if (r.account && account && r.account !== account) return;
-  noteBalance(r.sats, { startedAt: r.startedAt, readFor: r.account });
+  noteBalance(r.sats, { startedAt: r.startedAt, readFor: r.account, seq: r.seq });
 });
 
 const buckets = new Map<string, { sec: number; n: number }>();
@@ -342,7 +348,7 @@ export const __resetLive = () => {
   lastBase = null;
   unclaimedDrop = null;
   account = undefined;
-  newestReadAt = -Infinity;
+  newestReadSeq = -Infinity;
   __resetBalanceReads();
   if (expiryTimer !== null) clearTimeout(expiryTimer);
   expiryTimer = null;
