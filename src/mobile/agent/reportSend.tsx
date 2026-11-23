@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import type { ServiceContextProps } from '../../contexts/ServiceContext';
-import { ChatApiError, saveSession } from '../chat/api';
+import { ChatApiError, saveSession, SESSION_EVENT } from '../chat/api';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
 import { reportToB, type ReportResult } from './paid';
 import {
@@ -12,6 +12,7 @@ import {
   newReportId,
   queuedFor,
   reportMessageId,
+  resetBackoff,
   type QueuedReport,
 } from './reportOutbox';
 
@@ -85,14 +86,24 @@ export const ReportOutboxRunner = () => {
       void flushOutbox(account, call).catch(() => {});
     };
     const onVisible = () => document.visibilityState === 'visible' && run();
-    const onOnline = () => run();
+    // The cause is gone: what waited for it is due now (review of #557, N3).
+    const onOnline = () => {
+      resetBackoff(account, 'offline');
+      run();
+    };
+    const onSession = () => {
+      resetBackoff(account, 'signin');
+      run();
+    };
     run();
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onOnline);
+    window.addEventListener(SESSION_EVENT, onSession);
     const timer = setInterval(run, 60_000);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener(SESSION_EVENT, onSession);
       clearInterval(timer);
     };
   }, [apiContext, account]);

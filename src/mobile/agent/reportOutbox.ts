@@ -9,7 +9,7 @@
 import { redactSecrets } from '../errors/errorReport';
 import { reportToB, type ReportResult } from './paid';
 import { isNetworkError, OFFLINE_TEXT } from '../../utils/offline';
-import { setReportSink, takeWalletReports } from '../../services/reportSink';
+import { newReportId, setReportSink, takeWalletReports } from '../../services/reportSink';
 
 export type OutboxReason = 'offline' | 'signin' | 'error';
 
@@ -20,6 +20,8 @@ export type QueuedReport = {
   text: string;
   at: number;
   tries: number;
+  /** Sends that failed with a real error (not offline, not signed out): what the cap on automatic tries counts. */
+  errors: number;
   /** Not retried automatically before this time (backoff). */
   nextAt: number;
   reason: OutboxReason;
@@ -36,8 +38,8 @@ export const OUTBOX_CAP = 20;
 const MAX_TEXT = 4000;
 export const OUTBOX_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 /**
- * Automatic sends of one report, at most (review of #557, L6): after this it waits, listed in "Your reports", for the
- * person's Retry. With the backoff that is about two hours of tries, never a resend on every open.
+ * Automatic sends of one report that fail with a real error, at most (review of #557, L6): after this it waits, listed
+ * in "Your reports", for the person's Retry. Offline and signed-out failures don't count (N3).
  */
 export const OUTBOX_MAX_AUTO_TRIES = 10;
 
@@ -64,6 +66,7 @@ const parseItem = (v: unknown, now: number): QueuedReport | null => {
     text: redactSecrets(r.text).slice(0, MAX_TEXT),
     at: r.at,
     tries: typeof r.tries === 'number' ? r.tries : 0,
+    errors: typeof r.errors === 'number' ? r.errors : 0,
     nextAt: typeof r.nextAt === 'number' ? r.nextAt : 0,
     reason,
   };
@@ -98,16 +101,7 @@ const writeOutbox = (items: QueuedReport[], store: Store | null) => {
 export const queuedFor = (account: string | null | undefined, store = defaultStore(), now = Date.now()) =>
   readOutbox(store, now).filter((r) => r.account === DEVICE || r.account === account);
 
-/** A new report's id: time plus 64 random bits (the server dedupes on it, so two devices must never share one). */
-export const newReportId = (now = Date.now()): string => {
-  const bytes = new Uint8Array(8);
-  try {
-    globalThis.crypto.getRandomValues(bytes);
-  } catch {
-    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
-  }
-  return `${now.toString(36)}-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
-};
+export { newReportId };
 
 /** The message_id sent with a report: the same for the first send and every resend, so the server can dedupe. */
 export const reportMessageId = (id: string): string => `bwx-report:${id}`;
@@ -133,6 +127,7 @@ export const enqueueReport = (
     text: redactSecrets(text).slice(0, MAX_TEXT),
     at: now,
     tries: 1,
+    errors: 0,
     nextAt: now + backoffMs(1),
     reason,
   };
@@ -183,6 +178,26 @@ export const outboxText = (reason: OutboxReason) =>
       ? `${OFFLINE_TEXT}. Saved on this device; we'll send it to b when you reconnect.`
       : "Saved. We'll send it to b shortly.";
 
+/**
+ * The cause is gone (signed in again, or back online): this account's reports that waited for it are due now, with
+ * their backoff started over (review of #557, N3). Their count of real errors is kept.
+ */
+export const resetBackoff = (
+  account: string | null | undefined,
+  reason: Exclude<OutboxReason, 'error'>,
+  store = defaultStore(),
+  now = Date.now(),
+): number => {
+  let n = 0;
+  const all = readOutbox(store, now).map((r) => {
+    if (r.reason !== reason || (r.account !== DEVICE && r.account !== account)) return r;
+    n++;
+    return { ...r, tries: 1, nextAt: 0 };
+  });
+  if (n) writeOutbox(all, store);
+  return n;
+};
+
 let flushing: Promise<{ sent: number; left: number }> | null = null;
 
 /**
@@ -207,7 +222,7 @@ export const flushOutbox = (
   flushing = (async () => {
     let sent = 0;
     for (const item of queuedFor(account, store, now())) {
-      if (!force && (item.nextAt > now() || item.tries > OUTBOX_MAX_AUTO_TRIES)) continue;
+      if (!force && (item.nextAt > now() || item.errors >= OUTBOX_MAX_AUTO_TRIES)) continue;
       try {
         const r = await send(call, item.text, reportMessageId(item.id));
         // bit-sign answered but could not log it: kept, and tried again after the backoff.
@@ -222,7 +237,16 @@ export const flushOutbox = (
         logQueued(reason, e);
         writeOutbox(
           readOutbox(store, now()).map((r) =>
-            r.id === item.id ? { ...r, tries: r.tries + 1, nextAt: now() + backoffMs(r.tries + 1), reason } : r,
+            r.id === item.id
+              ? {
+                  ...r,
+                  tries: r.tries + 1,
+                  nextAt: now() + backoffMs(r.tries + 1),
+                  reason,
+                  // Only a real error counts toward the cap: offline or signed out is not the report's fault.
+                  errors: r.errors + (reason === 'error' ? 1 : 0),
+                }
+              : r,
           ),
           store,
         );

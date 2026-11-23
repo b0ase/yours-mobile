@@ -12,6 +12,7 @@ import {
   queuedFor,
   readOutbox,
   reportMessageId,
+  resetBackoff,
 } from './reportOutbox';
 import { parseReport } from './paid';
 
@@ -262,4 +263,56 @@ test("Ask b's tellTeam queues a reply that wasn't logged (ok: false), with its i
   const tell = src.slice(src.indexOf('const tellTeam'), src.indexOf('const runFree'));
   expect(tell).toContain('if (r.ok) return r;');
   expect(tell).toContain("enqueueReport(accountId, text, 'error', undefined, undefined, id);");
+});
+
+describe('only real errors count toward the cap; sign-in and coming back online make waiting reports due (N3)', () => {
+  test('offline and signed-out failures never use up the automatic tries', async () => {
+    const store = memStore();
+    enqueueReport('A', 'one', 'offline', store, 0);
+    let t = 0;
+    let posts = 0;
+    const offline = async () => {
+      posts++;
+      throw new TypeError('Failed to fetch');
+    };
+    for (let i = 0; i < 30; i++) {
+      t += 2 * 60 * 60_000;
+      await flushOutbox('A', call, { store, now: () => t, send: offline });
+    }
+    expect(posts).toBe(30);
+    expect(readOutbox(store, t)[0].errors).toBe(0);
+    // Back online, a server error: those count, up to the cap.
+    const broken = async () => {
+      posts++;
+      throw new Error('500');
+    };
+    for (let i = 0; i < 30; i++) {
+      t += 2 * 60 * 60_000;
+      await flushOutbox('A', call, { store, now: () => t, send: broken });
+    }
+    expect(posts).toBe(30 + OUTBOX_MAX_AUTO_TRIES);
+  });
+
+  test('resetBackoff: the waiting reports of that cause are due now, the others keep their wait', () => {
+    const store = memStore();
+    enqueueReport('A', 'offline one', 'offline', store, 0);
+    enqueueReport('A', 'signin one', 'signin', store, 0);
+    enqueueReport('B', 'other account', 'offline', store, 0);
+    expect(resetBackoff('A', 'offline', store, 1000)).toBe(1);
+    const byText = Object.fromEntries(readOutbox(store, 1000).map((r) => [r.text, r]));
+    expect(byText['offline one'].nextAt).toBe(0);
+    expect(byText['offline one'].tries).toBe(1);
+    expect(byText['signin one'].nextAt).toBeGreaterThan(0);
+    expect(byText['other account'].nextAt).toBeGreaterThan(0);
+    expect(resetBackoff('A', 'signin', store, 1000)).toBe(1);
+  });
+
+  test('the runner resets on sign-in (bChatX session event) and on coming back online', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./reportSend.tsx', import.meta.url), 'utf8');
+    expect(src).toContain("resetBackoff(account, 'offline');");
+    expect(src).toContain("resetBackoff(account, 'signin');");
+    expect(src).toContain('window.addEventListener(SESSION_EVENT, onSession);');
+    expect(src).toContain('window.removeEventListener(SESSION_EVENT, onSession);');
+  });
 });

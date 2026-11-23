@@ -46,6 +46,17 @@ const localLocks: Locks = {
 };
 const defaultLocks = (): Locks => (globalThis as { navigator?: { locks?: Locks } }).navigator?.locks ?? localLocks;
 
+/** A new report's id: time plus 64 random bits (the server dedupes on it, so two devices must never share one). */
+export const newReportId = (now = Date.now()): string => {
+  const bytes = new Uint8Array(8);
+  try {
+    globalThis.crypto.getRandomValues(bytes);
+  } catch {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return `${now.toString(36)}-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+};
+
 let sink: Sink | undefined;
 /** This context's writes, in order (two in the same millisecond keep their order). */
 let written = 0;
