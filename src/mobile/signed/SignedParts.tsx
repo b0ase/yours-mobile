@@ -39,6 +39,8 @@ export const finishText = (st: FinishState): string => {
       return 'Checking…';
     case 'recorded':
       return 'Recorded. It is in Sealed now.';
+    case 'orphaned':
+      return 'Another party sealed this document first. Your payment is recorded; nothing more to do.';
     case 'released':
       return 'Nothing was paid; you can seal again.';
     case 'kept':
@@ -57,8 +59,8 @@ export const finishText = (st: FinishState): string => {
       return '';
   }
 };
-/** A held seal this young may still be paying in another tab: Finish waits (held.UNSURE_SETTLE_MS). */
-export const YOUNG_TEXT = 'Just paid: still settling. Finish is ready in a few minutes.';
+/** Another page or window is checking or paying this seal right now (held.busyElsewhere): Finish waits. */
+export const BUSY_TEXT = 'Being checked in another window. Nothing is paid twice.';
 
 export const HeldBanner = ({
   held,
@@ -66,7 +68,7 @@ export const HeldBanner = ({
   onFinish,
   onSignIn,
   states,
-  young = new Set<string>(),
+  busy = new Set<string>(),
 }: {
   held: PendingSeal[];
   titleOf: (documentId: string) => string;
@@ -74,8 +76,8 @@ export const HeldBanner = ({
   /** The explicit Sign in tap after Finish asked for it; Finish runs again after it. */
   onSignIn?: (documentId: string) => void;
   states: Record<string, FinishState>;
-  /** Documents whose held seal is too young to finish safely. */
-  young?: ReadonlySet<string>;
+  /** Documents another page or window is handling now. */
+  busy?: ReadonlySet<string>;
 }) => {
   if (!held.length) return null;
   const docs = [...new Map(held.map((p) => [p.documentId, p])).values()];
@@ -88,8 +90,8 @@ export const HeldBanner = ({
       <ul className="sg-held-list">
         {docs.map((p) => {
           const st: FinishState = states[p.documentId] ?? { k: 'idle' };
-          const isYoung = young.has(p.documentId) && st.k === 'idle';
-          const text = isYoung ? YOUNG_TEXT : finishText(st);
+          const isBusy = busy.has(p.documentId) && st.k === 'idle';
+          const text = isBusy ? BUSY_TEXT : finishText(st);
           const signIn = st.k === 'sign_in' && !!onSignIn;
           return (
             <li key={p.documentId} className="sg-held-item">
@@ -103,7 +105,7 @@ export const HeldBanner = ({
               <button
                 type="button"
                 className="sg-btn sg-btn-gold"
-                disabled={st.k === 'working' || isYoung}
+                disabled={st.k === 'working' || isBusy}
                 onClick={() => (signIn ? onSignIn!(p.documentId) : onFinish(p.documentId))}
               >
                 {st.k === 'working' ? 'Finishing…' : signIn ? 'Sign in' : 'Finish'}

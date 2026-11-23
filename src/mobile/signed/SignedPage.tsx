@@ -13,7 +13,7 @@ import type { DocContent } from '../bureau/api';
 import { bureauClient } from '../bureau/session';
 import { heldFor, readHeldSeals } from './held';
 import { loadCachedSync, loadLocal, onSignedChange } from './localStore';
-import { finishHeld, sessionGet, sessionHandle, signInToBchat, youngHeld } from './session';
+import { busyHeld, finishHeld, sessionGet, sessionHandle, signInToBchat } from './session';
 import { refreshSignedBadge } from './SignedMenu';
 import { syncSigned, type SyncState } from './sync';
 import { TABS, mergeRows, rowTitle, rowsIn, type SignedRow, type SignedTab } from './signedList';
@@ -85,7 +85,7 @@ const SignedPage = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const held = useMemo(() => heldFor(identityKey, readHeldSeals()), [identityKey, version, finish]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const young = useMemo(() => youngHeld(identityKey), [identityKey, version, finish]);
+  const busy = useMemo(() => busyHeld(identityKey), [identityKey, version, finish]);
   const shownTab: SignedTab = tab ?? TABS.find((t) => rowsIn(rows, t.id).length)?.id ?? 'waiting';
   const list = rowsIn(rows, shownTab);
 
@@ -172,7 +172,7 @@ const SignedPage = () => {
           onFinish={(id) => void onFinish(id)}
           onSignIn={(id) => void onFinishSignIn(id)}
           states={finish}
-          young={young}
+          busy={busy}
         />
         <SyncNote
           state={sync}

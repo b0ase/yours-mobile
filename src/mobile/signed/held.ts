@@ -1,4 +1,4 @@
-import { SEAL_HOLD_MAX_MS, type PendingSeal, type PendingSealStore } from '../chat/nativeSeal';
+import { CONTEXT_ID, beingSettled, sealKey, type PendingSeal, type PendingSealStore } from '../chat/nativeSeal';
 import { PENDING_SEALS_KEY, localStore } from '../chat/sealStore';
 
 /**
@@ -44,15 +44,26 @@ const same = (a: string | undefined, b: string) => !!a && !!b && a.toLowerCase()
 export const heldFor = (identityKey: string, list: PendingSeal[]): PendingSeal[] =>
   list.filter((p) => same(p.identityKey, identityKey));
 
-/** An unsure record (no transaction in hand) this young may still be mid-payment in another tab or window. */
-export const UNSURE_SETTLE_MS = SEAL_HOLD_MAX_MS + 2 * 60_000;
-export const tooYoungToFinish = (p: PendingSeal, now: number): boolean =>
-  !p.beefHex && now - (Number(p.savedAt) || 0) < UNSURE_SETTLE_MS;
+/**
+ * Being handled elsewhere right now: settled on screen by a live page (its settling mark), or a kept seal another
+ * window is paying (a live claim by another context). Finish leaves it alone; recoverNativeSeals itself also keeps a
+ * record being settled. (#560's release rule covers the rest: an unsure record is released only when the wallet
+ * answered "no such action" twice, seconds apart, and the record is at least 3 minutes old.)
+ */
+export const busyElsewhere = (p: PendingSeal, store: PendingSealStore, now: number): boolean => {
+  if (beingSettled(p, now)) return true;
+  try {
+    const c = p.fieldIds ? store.claims?.get(sealKey(p.identityKey ?? '', p.documentId, p.fieldIds)) : null;
+    return !!c && c.until > now && c.by !== CONTEXT_ID;
+  } catch {
+    return false;
+  }
+};
 
 /**
- * The store Finish hands to recoverNativeSeals: list() shows ONLY this account's records for this document that are
- * old enough to settle (another account's seal for the same document is never touched by this account's session),
- * while save() and remove() act on the full stored list through the seal flow's own store.
+ * The store Finish hands to recoverNativeSeals (which itself recovers only this identity's records): list() shows ONLY
+ * this account's records for this document that nothing else is handling, while save(), remove() and the claims act on
+ * the full stored list through the seal flow's own store.
  */
 export const finishStoreFor = (
   identityKey: string,
@@ -65,7 +76,7 @@ export const finishStoreFor = (
     full
       .list()
       .filter(isPending)
-      .filter((p) => p.documentId === documentId && same(p.identityKey, identityKey) && !tooYoungToFinish(p, now)),
+      .filter((p) => p.documentId === documentId && same(p.identityKey, identityKey) && !busyElsewhere(p, full, now)),
   save: (p) => full.save(p),
   remove: (n) => full.remove(n),
 });

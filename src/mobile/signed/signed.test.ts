@@ -6,7 +6,8 @@ import {
   nativeSignAndSeal,
   recoverNativeSeals,
   setSealRecordedHook,
-  SEAL_HOLD_MAX_MS,
+  recordedCount,
+  sealKey,
   type PendingSeal,
   type SealApi,
   type SealRecorded,
@@ -39,10 +40,10 @@ import {
   syncKey,
   type KV,
 } from './localStore';
-import { PENDING_SEALS_KEY, UNSURE_SETTLE_MS, finishStoreFor, heldFor, readHeldSeals } from './held';
+import { PENDING_SEALS_KEY, finishStoreFor, heldFor, readHeldSeals } from './held';
 import { recordSeal, roomFor } from './recorder';
 import { SYNC_EVERY_MS, fetchServerRows, resetSyncThrottle, syncFailure, syncSigned } from './sync';
-import { EMPTY_TEXT, HeldBanner, PAGE_STATUS, PageStatus, SyncNote, YOUNG_TEXT, finishText } from './SignedParts';
+import { BUSY_TEXT, EMPTY_TEXT, HeldBanner, PAGE_STATUS, PageStatus, SyncNote, finishText } from './SignedParts';
 import { refreshSignedBadge } from './SignedMenu';
 import { getSignedBadge } from './badge';
 
@@ -556,7 +557,9 @@ describe('the recorder: every seal this device records lands in the list', () =>
       status: 200,
       body: { signatureId: 'SIG1', txid: TX1, docHash: H1, complete: false },
     });
-    expect(await recoverNativeSeals(api, store, 'DOC1', localLedger(kv))).toBe(1);
+    expect(
+      recordedCount(await recoverNativeSeals(api, store, 'DOC1', localLedger(kv), undefined, { identityKey: ME })),
+    ).toBe(1);
     expect(got).toEqual([
       { documentId: 'DOC1', identityKey: ME, title: '', signatureId: 'SIG1', txid: TX1, docHash: H1, complete: false },
     ]);
@@ -576,6 +579,8 @@ const held = (o: Partial<PendingSeal> = {}): PendingSeal => ({
   fieldIds: ['f1'],
   ...o,
 });
+/** An unsure record the wallet already answered "no such action" for once, 10 s ago (#560's release rule needs two). */
+const ONE_NOT_FOUND = { notFound: 1, notFoundFirstAt: NOW - 10_000, notFoundLastAt: NOW - 10_000 };
 const setHeld = (list: unknown[]) => mem.set(PENDING_SEALS_KEY, JSON.stringify(list));
 const stored = () => JSON.parse(mem.get(PENDING_SEALS_KEY) || '[]') as Array<Record<string, unknown>>;
 
@@ -600,15 +605,31 @@ describe('held seals: listing, and the store Finish hands to recovery', () => {
     expect(stored()).toEqual([odd, { ...held({ nonce: 'N2', identityKey: OTHER }), drawing: 'M 0 0' }]);
   });
 
-  test('H1: the view lists only this identity’s records for this document; M2: young unsure ones wait', () => {
+  test('H1: the view lists only this identity’s records for this document; nothing another page or window is handling', () => {
     setHeld([
       held(),
       held({ nonce: 'N2', identityKey: OTHER }),
       held({ nonce: 'N3', identityKey: undefined }),
       held({ nonce: 'N4', documentId: 'other-doc' }),
-      held({ nonce: 'N5', txid: '', beefHex: '', savedAt: NOW - SEAL_HOLD_MAX_MS }),
-      held({ nonce: 'N6', txid: '', beefHex: '', savedAt: NOW - UNSURE_SETTLE_MS - 1 }),
+      // Being settled on screen by a live page: its.
+      held({
+        nonce: 'N5',
+        fieldIds: ['f5'],
+        txid: '',
+        beefHex: '',
+        settling: { by: 'another-page', until: NOW + 30_000 },
+      }),
+      // A stale settling mark: Finish may take it.
+      held({ nonce: 'N6', fieldIds: ['f6'], txid: '', beefHex: '', settling: { by: 'another-page', until: NOW - 1 } }),
+      // A kept seal another window is paying (a live claim by another context).
+      held({ nonce: 'N7', fieldIds: ['f7'] }),
     ]);
+    localStore(kv).claims!.save({
+      key: sealKey(ME, '1c377264-aaaa', ['f7']),
+      by: 'another-window',
+      at: NOW,
+      until: NOW + 60_000,
+    });
     expect(
       finishStoreFor(ME, '1c377264-aaaa', NOW, localStore(kv))
         .list()
@@ -629,20 +650,15 @@ describe('held seals: listing, and the store Finish hands to recovery', () => {
       finishStoreFor(ME, '1c377264-aaaa', NOW, localStore(kv)),
       '1c377264-aaaa',
       localLedger(kv),
+      undefined,
+      { identityKey: ME, now: () => NOW },
     );
     expect(calls).toEqual(['recover:nA']);
     expect(readHeldSeals(kv).map((p) => p.nonce)).toEqual(['nB']);
 
     setHeld([
-      held({ nonce: 'uA', txid: '', beefHex: '', lockingScriptHex: '00', savedAt: NOW - UNSURE_SETTLE_MS - 1 }),
-      held({
-        nonce: 'uB',
-        identityKey: OTHER,
-        txid: '',
-        beefHex: '',
-        lockingScriptHex: '01',
-        savedAt: NOW - UNSURE_SETTLE_MS - 1,
-      }),
+      held({ nonce: 'uA', txid: '', beefHex: '', lockingScriptHex: '00', ...ONE_NOT_FOUND }),
+      held({ nonce: 'uB', identityKey: OTHER, txid: '', beefHex: '', lockingScriptHex: '01', ...ONE_NOT_FOUND }),
     ]);
     calls.length = 0;
     await recoverNativeSeals(
@@ -654,6 +670,7 @@ describe('held seals: listing, and the store Finish hands to recovery', () => {
         find: async () => ({ found: false }),
         beef: async () => null,
       },
+      { identityKey: ME, now: () => NOW },
     );
     expect(calls).toEqual(['cancel:uA']);
     expect(readHeldSeals(kv).map((p) => p.nonce)).toEqual(['uB']);
@@ -704,7 +721,7 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
   });
 
   test('M1: released (never built: nothing paid), kept (in progress), refused (with the reason), orphaned', async () => {
-    setHeld([held({ txid: '', beefHex: '', lockingScriptHex: '00' })]);
+    setHeld([held({ txid: '', beefHex: '', lockingScriptHex: '00', ...ONE_NOT_FOUND })]);
     const r1 = deps({ lookup: { find: async () => ({ found: false }), beef: async () => null } });
     expect(await finish(r1.d)).toEqual({ k: 'released' });
     expect(finishText({ k: 'released' })).toBe('Nothing was paid; you can seal again.');
@@ -723,7 +740,14 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     const r4 = deps({
       replies: () => ({ ok: true, status: 200, body: { orphaned: true, message: 'Another party sealed it first.' } }),
     });
-    expect(await finish(r4.d)).toEqual({ k: 'refused', reason: 'Another party sealed it first.' });
+    expect(await finish(r4.d)).toEqual({ k: 'orphaned' });
+    expect(finishText({ k: 'orphaned' })).toContain('Your payment is recorded');
+
+    // The first "no such action" answer only counts: kept, never released on one look (#560's release rule).
+    setHeld([held({ txid: '', beefHex: '', lockingScriptHex: '00' })]);
+    const r5 = deps({ lookup: { find: async () => ({ found: false }), beef: async () => null } });
+    expect(await finish(r5.d)).toEqual({ k: 'kept' });
+    expect(r5.calls).toEqual([]);
   });
 
   test('H2 (probe 561): an expired session is cleared and asks for Sign in; the held seal is never erased', async () => {
@@ -766,35 +790,60 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     expect(await finish(during.d)).toEqual({ k: 'account_changed' });
   });
 
-  test('M2: a young unsure seal is left alone (another tab may be paying it); offline says so', async () => {
-    setHeld([held({ txid: '', beefHex: '', savedAt: NOW - 60_000 })]);
+  test('M2: a seal another page is settling, or another window is paying, is left alone; offline says so', async () => {
+    setHeld([held({ settling: { by: 'another-page', until: NOW + 30_000 } })]);
     const y = deps();
     expect(await finish(y.d)).toEqual({ k: 'kept' });
     expect(y.calls).toEqual([]);
     setHeld([held()]);
+    localStore(kv).claims!.save({
+      key: sealKey(ME, '1c377264-aaaa', ['f1']),
+      by: 'another-window',
+      at: NOW,
+      until: NOW + 60_000,
+    });
+    const c = deps();
+    expect(await finish(c.d)).toEqual({ k: 'kept' });
+    expect(c.calls).toEqual([]);
+    mem.delete('bwx.nativeSeal.claims');
     expect(await finish(deps({ check: async () => 0 }).d)).toEqual({ k: 'offline' });
   });
 
-  test('the banner: one line per document, Finish, Sign in after an auth refusal, young ones wait', () => {
+  test('Finish passes this identity key to recovery, never keyless', async () => {
+    setHeld([held()]);
+    const seen: unknown[] = [];
+    const { d } = deps({
+      recover: (async (...args: Parameters<typeof recoverNativeSeals>) => {
+        seen.push(args[5]);
+        return [];
+      }) as typeof recoverNativeSeals,
+    });
+    expect(await finish(d)).toEqual({ k: 'kept' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ identityKey: ME });
+    expect((seen[0] as { keyless?: boolean }).keyless).toBeUndefined();
+  });
+
+  test('the banner: one line per document, Finish, Sign in after an auth refusal, busy ones wait', () => {
     const html = renderToStaticMarkup(
       createElement(HeldBanner, {
         held: [
           held(),
           held({ nonce: 'N2' }),
           held({ documentId: 'other', nonce: 'N3' }),
-          held({ documentId: 'young', nonce: 'N4' }),
+          held({ documentId: 'busy', nonce: 'N4' }),
         ],
         titleOf: (id: string) => `Doc ${id}`,
         onFinish: () => undefined,
         onSignIn: () => undefined,
         states: { other: { k: 'sign_in' } },
-        young: new Set(['young']),
+        busy: new Set(['busy']),
       }),
     );
     expect(html).toContain('Held: needs recovery');
     expect(html.match(/>Finish</g)).toHaveLength(2);
     expect(html.match(/>Sign in</g)).toHaveLength(1);
-    expect(html).toContain(YOUNG_TEXT);
+    expect(html).toContain(BUSY_TEXT);
     expect(html).toContain('Doc 1c377264-aaaa');
     expect(
       renderToStaticMarkup(

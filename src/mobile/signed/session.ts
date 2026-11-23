@@ -15,7 +15,7 @@ import {
   type SealTxLookup,
 } from '../chat/nativeSeal';
 import { localLedger, localStore } from '../chat/sealStore';
-import { finishStoreFor, heldFor, readHeldSeals, tooYoungToFinish } from './held';
+import { busyElsewhere, finishStoreFor, heldFor, readHeldSeals } from './held';
 import type { Get } from './sync';
 
 /**
@@ -48,9 +48,11 @@ export const signInToBchat = async (ctx: OneSatContext): Promise<void> => {
 export type FinishOutcome =
   /** Recorded on bit-sign: it is in Sealed now. */
   | { k: 'recorded' }
+  /** Another party sealed the document first; this payment is recorded against the session. */
+  | { k: 'orphaned' }
   /** The wallet proved no payment was ever built: released, nothing was paid. */
   | { k: 'released' }
-  /** Not settled yet (in progress, network, or too young to check safely): it stays held and is tried again. */
+  /** Not settled yet (in progress, a fault, not proven unpaid yet, or handled elsewhere): it stays held. */
   | { k: 'kept' }
   /** bit-sign refused it for good, with its reason. */
   | { k: 'refused'; reason: string }
@@ -79,15 +81,15 @@ export interface FinishDeps {
   now?: () => number;
 }
 
-/** An auth refusal on a seal route: never "done" (the payment stays held until a signed-in Finish). */
+/** An answer that means "this session isn't the right one" (#560 keeps the record on these; Finish asks to sign in). */
 const authRefusal = (r: SealApiReply) =>
   r.status === 401 || r.status === 403 || (r.status === 404 && r.body?.code === 'not_yours');
 
 /**
- * Finish ONE held document for THIS account: the seal flow's own recoverNativeSeals over a store view that lists only
- * this identity's records for that document, old enough to settle (held.finishStoreFor). Never signs in, never runs
- * for another account, never counts an auth refusal as done, and reports the true outcome per record, read from the
- * replies it saw. Never throws.
+ * Finish ONE held document for THIS account: the seal flow's own recoverNativeSeals (#560) with this identity key (never
+ * `keyless`), over a store view that lists only this identity's records for that document that no other page or
+ * window is handling (held.finishStoreFor). Never signs in, never runs for another account, never counts an auth
+ * refusal as done, and reports what recovery says it did (its RecoverResult per record). Never throws.
  */
 export async function finishHeldWith(documentId: string, d: FinishDeps): Promise<FinishOutcome> {
   const now = d.now ?? Date.now;
@@ -96,8 +98,7 @@ export async function finishHeldWith(documentId: string, d: FinishDeps): Promise
   const s = d.session();
   if (!s || (s.account && s.account !== d.account)) return { k: 'sign_in' };
   const view = finishStoreFor(d.identityKey, documentId, now(), d.store);
-  const targets = view.list().map((p) => p.nonce);
-  if (!targets.length) return { k: 'kept' };
+  if (!view.list().length) return { k: 'kept' };
   let status: number;
   try {
     status = await d.check();
@@ -111,21 +112,21 @@ export async function finishHeldWith(documentId: string, d: FinishDeps): Promise
   if (status === 0) return { k: 'offline' };
   if (!sameAccount()) return { k: 'account_changed' };
 
-  const seen = new Map<string, { path: string; r: SealApiReply }>();
+  const reasons = new Map<string, string>();
   let authFailed = false;
   const api: SealApi = async (path, body) => {
-    let r = await d.post(path, body);
-    if (authRefusal(r)) {
-      authFailed = true;
-      // Kept by the seal flow (status 0 = no answer): an auth failure is never treated as done.
-      r = { ok: false, status: 0, body: { error: 'sign in again' } };
-    }
-    const nonce = String(body.nonce ?? '');
-    if (nonce && (path === 'recover' || path === 'cancel')) seen.set(nonce, { path, r });
+    const r = await d.post(path, body);
+    if (authRefusal(r)) authFailed = true;
+    const why = r.body?.error ?? r.body?.message;
+    if (path === 'recover' && !r.ok && typeof why === 'string' && why) reasons.set(String(body.nonce ?? ''), why);
     return r;
   };
+  let results: Awaited<ReturnType<typeof recoverNativeSeals>>;
   try {
-    await (d.recover ?? recoverNativeSeals)(api, view, documentId, d.ledger, d.lookup);
+    results = await (d.recover ?? recoverNativeSeals)(api, view, documentId, d.ledger, d.lookup, {
+      identityKey: d.identityKey,
+      now,
+    });
   } catch {
     return { k: 'failed' };
   }
@@ -134,20 +135,14 @@ export async function finishHeldWith(documentId: string, d: FinishDeps): Promise
     d.clearSession();
     return { k: 'sign_in' };
   }
-  const still = new Set(d.store.list().map((p) => p.nonce));
-  const per = targets.map((n): FinishOutcome => {
-    const s = seen.get(n);
-    if (still.has(n)) return { k: 'kept' };
-    if (s?.path === 'cancel') return { k: 'released' };
-    if (s?.path === 'recover' && s.r.ok && s.r.body.orphaned !== true) return { k: 'recorded' };
-    const why = s?.r.body?.message ?? s?.r.body?.error;
-    return { k: 'refused', reason: typeof why === 'string' && why ? why.slice(0, 200) : 'bChatX could not record it.' };
-  });
-  return (
-    per.find((o) => o.k === 'recorded') ??
-    per.find((o) => o.k === 'refused') ??
-    per.find((o) => o.k === 'released') ?? { k: 'kept' }
-  );
+  const mine = results.filter((r) => r.documentId === documentId);
+  if (mine.some((r) => r.outcome === 'recorded' && !r.orphaned)) return { k: 'recorded' };
+  const refused = mine.find((r) => r.outcome === 'refused');
+  if (refused)
+    return { k: 'refused', reason: (reasons.get(refused.nonce) ?? 'bChatX could not record it.').slice(0, 200) };
+  if (mine.some((r) => r.outcome === 'recorded' && r.orphaned)) return { k: 'orphaned' };
+  if (mine.some((r) => r.outcome === 'released')) return { k: 'released' };
+  return { k: 'kept' };
 }
 
 /** The seal routes with the CURRENT session only (as NativeSealPage `api`, minus its silent sign-in). */
@@ -217,10 +212,10 @@ export const finishHeld = (
     lookup: txLookup(ctx),
   });
 
-/** Held documents of this account that Finish can't safely touch yet (an unsure seal may still be mid-payment). */
-export const youngHeld = (identityKey: string, now = Date.now()): Set<string> =>
+/** Held documents of this account that another page or window is handling now (Finish waits for it). */
+export const busyHeld = (identityKey: string, now = Date.now(), store: PendingSealStore = localStore()): Set<string> =>
   new Set(
     heldFor(identityKey, readHeldSeals())
-      .filter((p) => tooYoungToFinish(p, now))
+      .filter((p) => busyElsewhere(p, store, now))
       .map((p) => p.documentId),
   );
