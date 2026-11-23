@@ -9,6 +9,7 @@ import {
   SEAL_CLAIM_MS,
   SEAL_RECOVERY_WINDOW_MS,
   SETTLE_MARK_MS,
+  SEAL_ABANDON_SKIP_AGE_MS,
   SEAL_ACTION_DESCRIPTION,
   UNSAVED_MESSAGE,
   archiveRefusedSeal,
@@ -1427,5 +1428,49 @@ describe('Round 4: abandoned rows, proven-other seals, and the kept-session canc
     await nativeSignAndSeal(base({ log, store: localStore(storage, now), documentId: 'L4', api, now, resume }));
     expect(log[from]).toBe('cancel:N1');
     expect(count(log, 'pay')).toBe(2);
+  });
+});
+
+describe('Round 5: a failed, txid-less seal row is skipped only when surely past the abandon age', () => {
+  const SCRIPT = '006a' + 'ab'.repeat(40);
+  const failedRow = (labels: string[]) =>
+    labels.length === 2
+      ? { totalActions: 1, actions: [{ txid: '', status: 'failed', outputs: [{ lockingScript: SCRIPT }] }] }
+      : { totalActions: 0, actions: [] };
+  const la = (async ({ labels }: { labels: string[] }) => failedRow(labels)) as unknown as ListActionsFn;
+  test('younger than 5 min (the toolbox default) + 2 min: still unsure (null), so never released', async () => {
+    const savedAt = 1_000_000_000_000;
+    expect(SEAL_ABANDON_SKIP_AGE_MS).toBe(7 * 60_000);
+    expect(await findSealAction(la, SCRIPT, savedAt, 'F', savedAt + SEAL_ABANDON_SKIP_AGE_MS)).toBeNull();
+    expect(await findSealAction(la, SCRIPT, savedAt, 'F', savedAt + 4 * 60_000)).toBeNull();
+    expect(await findSealAction(la, SCRIPT, savedAt, 'F', savedAt + SEAL_ABANDON_SKIP_AGE_MS + 1)).toEqual({
+      found: false,
+    });
+  });
+  test('through recovery: kept while the record is under 7 min old, released by the one rule after', async () => {
+    const store = localStore(fakeStorage());
+    const savedAt = 1_000_000_000_000;
+    store.save(unsure({ nonce: 'N5', savedAt, lockingScriptHex: SCRIPT }));
+    const log: Log = [];
+    const outs: string[] = [];
+    for (const age of [
+      3 * 60_000 + 1,
+      3 * 60_000 + 10_000,
+      6 * 60_000,
+      SEAL_ABANDON_SKIP_AGE_MS + 1,
+      SEAL_ABANDON_SKIP_AGE_MS + 10_000,
+    ]) {
+      const at = savedAt + age;
+      const rs = await recover(
+        bitsign(log),
+        store,
+        'D',
+        { find: (s, since) => findSealAction(la, s, since, 'F', at), beef: async () => null },
+        { now: () => at },
+      );
+      outs.push(rs[0].outcome);
+    }
+    expect(outs).toEqual(['kept', 'kept', 'kept', 'kept', 'released']);
+    expect(log).toEqual(['cancel:N5']);
   });
 });

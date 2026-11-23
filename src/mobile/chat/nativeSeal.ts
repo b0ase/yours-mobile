@@ -159,6 +159,12 @@ export type ListActionsFn = (args: {
   actions: { txid: string; description?: string; status?: string; outputs?: { lockingScript?: string }[] }[];
 }>;
 
+/**
+ * The toolbox's abandon age (wallet-toolbox 2.14.5 src/monitor/Monitor.ts:124, `abandonedMsecs: 1000 * 60 * 5`) plus a
+ * 2-minute margin: a failed, txid-less seal row is ignored only when the record is older than this.
+ */
+export const SEAL_ABANDON_SKIP_AGE_MS = 5 * 60_000 + 2 * 60_000;
+
 /** The description every native seal's createAction carries (the lookup also finds seals by it). */
 export const SEAL_ACTION_DESCRIPTION = 'bit-sign: sign and seal a document';
 
@@ -182,8 +188,12 @@ export async function findSealAction(
   lockingScriptHex: string,
   sinceMs: number,
   failedLabel: string,
+  now: number = Date.now(),
 ): Promise<SealLookupAnswer> {
   const want = lockingScriptHex.toLowerCase();
+  // Round 5: a failed row with no txid is skipped only once it is surely past the toolbox's abandon age. WalletAction
+  // carries no timestamp, so the record's own age stands in for the row's (the row can only be younger).
+  const abandonedForSure = now - sinceMs > SEAL_ABANDON_SKIP_AGE_MS;
   const from = `action time from ${Math.max(0, Math.floor(sinceMs - 60_000))}`;
   let unsure = false;
   const maybe = new Set<string>();
@@ -212,8 +222,10 @@ export async function findSealAction(
             // transaction in one storage write BEFORE any broadcast, and refuses rows that aren't 'unsigned' or
             // 'unprocessed' (wallet-toolbox 2.14.5 src/storage/methods/processAction.ts: commit :127 before share
             // :151, validatePlannedTransaction :474-479, txid written :568/:656). So a failed row with no txid can
-            // never go out: no candidate.
-            if (a.status === 'failed') continue;
+            // never go out: no candidate. But processAction validates the row before its commit, with a chain-height
+            // lookup in between: a row flipped to 'failed' in that gap still commits and broadcasts. So only rows
+            // surely older than the abandon age + a margin are skipped; a younger one still answers unsure.
+            if (a.status === 'failed' && abandonedForSure) continue;
             // Built but not yet signed or sent (no txid): it can still go out. Never "none built".
             unsure = true;
             continue;
