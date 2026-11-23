@@ -461,9 +461,51 @@ export function mergeRows(local: readonly LocalSigned[], server: readonly Signed
 
 export const rowsIn = (rows: readonly SignedRow[], tab: SignedTab): SignedRow[] => rows.filter((r) => r.status === tab);
 
-/** The menu badge: documents waiting for my signature, plus this account's held documents (each needs a tap). */
-export const badgeCount = (rows: readonly SignedRow[], heldCount: number): number =>
-  rows.filter((r) => r.status === 'waiting').length + Math.max(0, heldCount);
+/**
+ * The menu badge: documents waiting for my signature plus documents with a seal held on this device, each document
+ * ONCE (a held document is usually also still "waiting" on bit-sign until its seal is recorded).
+ */
+export const badgeCount = (rows: readonly SignedRow[], heldDocs: ReadonlySet<string>): number => {
+  const docs = new Set(heldDocs);
+  for (const r of rows) if (r.status === 'waiting') docs.add(r.documentId || r.signatureId);
+  return docs.size;
+};
+
+/** A row read back from storage (the sync cache), checked as strictly as a live one; anything else → null. */
+export const parseSignedRow = (v: unknown): SignedRow | null => {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const status = o.status === 'waiting' || o.status === 'signed' || o.status === 'sealed' ? o.status : null;
+  const signatureId = clip(o.signatureId, ID_MAX);
+  const documentId = clip(o.documentId, ID_MAX);
+  if (!status || !(signatureId || documentId)) return null;
+  const seal = isTxid(o.sealTxid) ? o.sealTxid.trim().toLowerCase() : null;
+  const others = o.others === true;
+  return {
+    key: clip(o.key, ID_MAX) || signatureId || documentId,
+    signatureId,
+    documentId,
+    title: clip(o.title, TITLE_MAX),
+    room: cleanRoom(o.room),
+    at: Number.isFinite(Number(o.at)) ? Number(o.at) : 0,
+    docHash: hash64(o.docHash),
+    sealTxid: seal,
+    // Sealed needs a real seal txid.
+    status: status === 'sealed' && !seal ? 'signed' : status,
+    ...(others
+      ? {
+          others: true,
+          waitingOn: Array.isArray(o.waitingOn)
+            ? o.waitingOn
+                .filter((h): h is string => typeof h === 'string')
+                .slice(0, 10)
+                .map((h) => clip(normHandle(h), 64))
+            : [],
+        }
+      : {}),
+    source: 'server',
+  };
+};
 
 /** The title a row shows: its own, else a plain name from its hash or id. */
 export const rowTitle = (r: Pick<SignedRow, 'title' | 'docHash' | 'documentId' | 'signatureId'>): string =>

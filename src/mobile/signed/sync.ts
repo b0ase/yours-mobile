@@ -102,10 +102,17 @@ export function syncSigned(
   const last = lastAttempt.get(key);
   if (!opts.force && last !== undefined && now() - last < SYNC_EVERY_MS)
     return Promise.resolve({ state: lastState.get(key) ?? { k: 'idle' }, rows: null });
+  const prev = lastAttempt.get(key);
   lastAttempt.set(key, now());
   const p = runSync(identityKey, get, sessionHandle, now, opts.account).then((r) => {
-    lastState.set(key, r.state);
     inFlight.delete(key);
+    // Discarded (another account was current): no request counted against this one, nothing remembered.
+    if (r.state.k === 'idle') {
+      if (prev === undefined) lastAttempt.delete(key);
+      else lastAttempt.set(key, prev);
+      return r;
+    }
+    lastState.set(key, r.state);
     return r;
   });
   inFlight.set(key, p);

@@ -44,8 +44,9 @@ import {
 import { PENDING_SEALS_KEY, finishStoreFor, heldFor, readHeldSeals } from './held';
 import { recordSeal, roomFor } from './recorder';
 import { SYNC_EVERY_MS, fetchServerRows, resetSyncThrottle, syncFailure, syncSigned } from './sync';
-import { BUSY_TEXT, EMPTY_TEXT, HeldBanner, PAGE_STATUS, PageStatus, SyncNote, finishText } from './SignedParts';
-import { refreshSignedBadge } from './SignedMenu';
+import { HeldBanner, OlderHeldNote, PageStatus, Row, SyncNote } from './SignedParts';
+import { BUSY_TEXT, EMPTY_TEXT, OLDER_HELD_TEXT, PAGE_STATUS, finishText } from './text';
+import { refreshSignedBadge } from './refresh';
 import { getSignedBadge } from './badge';
 
 /** One in-memory storage, installed as localStorage for this file (stubGlobals puts the old one back). */
@@ -367,9 +368,11 @@ describe('merging the wallet’s own list with bit-sign’s', () => {
     );
     expect(rowsIn(rows, 'waiting').map((r) => r.signatureId)).toEqual(['W']);
     expect(rowsIn(rows, 'sealed').map((r) => r.signatureId)).toEqual(['SIG1']);
-    expect(badgeCount(rows, 0)).toBe(1);
-    expect(badgeCount(rows, 2)).toBe(3);
-    expect(badgeCount([], -1)).toBe(0);
+    expect(badgeCount(rows, new Set())).toBe(1);
+    expect(badgeCount(rows, new Set(['H1', 'H2']))).toBe(3);
+    // L5: a document both held here and still waiting on bit-sign counts once.
+    expect(badgeCount(rows, new Set(['W']))).toBe(1);
+    expect(badgeCount([], new Set())).toBe(0);
   });
 
   test('a row with no title is named by its short hash, never left blank', () => {
@@ -1202,6 +1205,101 @@ describe('sync with bit-sign: throttled, shared, and plain about failures', () =
   });
 });
 
+describe('final verify of #561', () => {
+  test('L1: a refused record keeps its support reference when a later Finish is kept, offline or asks to sign in', () => {
+    const refusedRec = held({ nonce: 'abcdef1234567890', refused: { at: NOW, status: 410, error: 'x' } });
+    const text = "Paid, but bChatX wouldn't record it. Contact support (ref seal-abcdef123456).";
+    for (const st of [{ k: 'kept' }, { k: 'sign_in' }, { k: 'offline' }, { k: 'failed' }] as const) {
+      const html = renderToStaticMarkup(
+        createElement(HeldBanner, {
+          held: [refusedRec],
+          titleOf: () => 'Doc',
+          onFinish: () => undefined,
+          states: { [refusedRec.documentId]: st },
+          refusedText: () => text,
+        }),
+      );
+      expect(html).toContain('Contact support (ref seal-abcdef123456)');
+    }
+    // A Finish that recorded it says so instead.
+    const done = renderToStaticMarkup(
+      createElement(HeldBanner, {
+        held: [refusedRec],
+        titleOf: () => 'Doc',
+        onFinish: () => undefined,
+        states: { [refusedRec.documentId]: { k: 'recorded' } },
+        refusedText: () => text,
+      }),
+    );
+    expect(done).toContain('Recorded. It is in Sealed now.');
+  });
+
+  test('L2: a key-less held seal from an older version gets a neutral line, and is still never counted', async () => {
+    const { olderHeld } = await import('./held');
+    setHeld([held({ identityKey: undefined })]);
+    expect(olderHeld(readHeldSeals(kv))).toBe(true);
+    expect(olderHeld([held()])).toBe(false);
+    expect(renderToStaticMarkup(createElement(OlderHeldNote, { show: true }))).toContain(OLDER_HELD_TEXT);
+    expect(OLDER_HELD_TEXT).toBe('A seal from an older version is held. Open its document to finish.');
+    expect(renderToStaticMarkup(createElement(OlderHeldNote, { show: false }))).toBe('');
+    refreshSignedBadge(ME);
+    expect(getSignedBadge()).toBe(0);
+  });
+
+  test('L4: a sync discarded for an account switch does not use up the 5-minute window', async () => {
+    let acct = '1Other';
+    let asked = 0;
+    const get = async (p: string) => (asked++, p.endsWith('/signatures') ? { signatures: [] } : { handles: [] });
+    const account = { account: '1Me', chatAccount: () => acct };
+    expect((await syncSigned(ME, get, 'b', { account, now: () => 1_000 })).state).toEqual({ k: 'idle' });
+    acct = '1Me';
+    expect((await syncSigned(ME, get, 'b', { account, now: () => 2_000 })).state).toEqual({ k: 'ok', at: 2_000 });
+    expect(asked).toBe(2);
+  });
+
+  test('L5: a held document’s row says Finishing, not "Needs your signature"; cached rows are re-checked', () => {
+    const w = srow({ key: 'W', signatureId: 'W', documentId: 'W', status: 'waiting', sealTxid: null });
+    const r = (finishing: boolean) =>
+      renderToStaticMarkup(createElement(Row, { row: w, onOpen: () => undefined, finishing }));
+    expect(r(true)).toContain('Finishing');
+    expect(r(true)).not.toContain('Needs your signature');
+    expect(r(false)).toContain('Needs your signature');
+    mem.set(
+      syncKey(ME),
+      JSON.stringify({
+        at: 5,
+        rows: [
+          { ...srow(), title: 'x'.repeat(999), room: '$' + 'R'.repeat(99) },
+          { ...srow({ key: 'B', signatureId: 'B' }), status: 'sealed', sealTxid: 'pending-1' },
+          { key: 'J', status: 'bogus' },
+          null,
+        ],
+      }),
+    );
+    const c = loadCachedSync(ME)!;
+    expect(c.rows.map((x) => [x.signatureId, x.status, x.title.length, x.room.length, x.sealTxid])).toEqual([
+      ['SIG1', 'sealed', 200, 32, TX1],
+      ['B', 'signed', 16, 5, null],
+    ]);
+  });
+
+  test('M2: the recorder and the ☰ row each sit in their own Suspense and a boundary that renders nothing', async () => {
+    const { QuietBoundary } = await import('./QuietBoundary');
+    // A child that throws (a lazy chunk that failed to load): the boundary renders nothing, never the error screen.
+    const b = new QuietBoundary({ name: 't', children: 'child' });
+    expect(b.render()).toBe('child');
+    b.state = QuietBoundary.getDerivedStateFromError();
+    expect(b.render()).toBeNull();
+    const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+    expect(src('../tabs/MobileRoutes.tsx')).toMatch(
+      /<QuietBoundary name="Signed recorder">\s*<Suspense fallback=\{null\}>\s*<SignedRecorder \/>\s*<\/Suspense>\s*<\/QuietBoundary>/,
+    );
+    const top = src('../tabs/TopNav.tsx');
+    expect(top).toMatch(/<QuietBoundary name="Signed menu row">\s*<Suspense fallback=\{null\}>/);
+    expect(top).toMatch(/<QuietBoundary name="Signed badge">\s*<Suspense fallback=\{null\}>/);
+  });
+});
+
 describe('the page: copy, status checklist, and where it is mounted', () => {
   const src = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
   test('the empty state and the live / coming checklist', () => {
@@ -1242,7 +1340,6 @@ describe('the page: copy, status checklist, and where it is mounted', () => {
     expect(src('../../../vite.config.web.ts')).toMatch(/import mobileConfig from '\.\/vite\.config\.mobile'/);
     const routes = src('../tabs/MobileRoutes.tsx');
     expect(routes).toContain('<Route path="signed" element={<SignedPage />} />');
-    expect(routes).toContain('{SignedRecorder && <SignedRecorder />}');
     expect(src('../wide/WideShell.tsx')).toMatch(
       /id: 'signed',\s*label: 'Signed',[\s\S]*?to: '\/m\/signed',\s*badge: signedBadge/,
     );

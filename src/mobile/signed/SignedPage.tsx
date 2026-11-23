@@ -12,25 +12,14 @@ import { openDappBrowser } from '../dappBrowser';
 import { DocView } from '../bureau/DocView';
 import type { DocContent } from '../bureau/api';
 import { bureauClient } from '../bureau/session';
-import { heldFor, paidRefusedFor, readHeldSeals } from './held';
+import { heldFor, olderHeld, paidRefusedFor, readHeldSeals } from './held';
 import { loadCachedSync, loadLocal, onSignedChange } from './localStore';
 import { busyHeld, finishHeld, sessionGet, sessionHandle, signInToBchat } from './session';
-import { refreshSignedBadge } from './SignedMenu';
+import { refreshSignedBadge } from './refresh';
 import { syncSigned, type SyncState } from './sync';
 import { TABS, mergeRows, rowTitle, rowsIn, type SignedRow, type SignedTab } from './signedList';
-import {
-  EMPTY_TEXT,
-  HashChip,
-  HeldBanner,
-  PageStatus,
-  Row,
-  SealLink,
-  SyncNote,
-  TAB_EMPTY,
-  artFor,
-  fmtDate,
-  type FinishState,
-} from './SignedParts';
+import { HashChip, HeldBanner, OlderHeldNote, PageStatus, Row, SealLink, SyncNote } from './SignedParts';
+import { EMPTY_TEXT, TAB_EMPTY, artFor, fmtDate, type FinishState } from './text';
 import './signed.css';
 
 /**
@@ -90,6 +79,20 @@ const SignedPage = () => {
   const held = useMemo(() => heldFor(identityKey, readHeldSeals()), [identityKey, version, finish]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const busy = useMemo(() => busyHeld(identityKey), [identityKey, version, finish]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const older = useMemo(() => olderHeld(readHeldSeals()), [version]);
+  const heldDocs = useMemo(() => new Set(held.map((p) => p.documentId)), [held]);
+  // Held seals change in other tabs and windows (settled, claimed, paid): re-read them on a storage event, and every
+  // 10 s while any are shown.
+  useEffect(() => {
+    const bump = () => setVersion((v) => v + 1);
+    window.addEventListener('storage', bump);
+    const t = held.length ? setInterval(bump, 10_000) : null;
+    return () => {
+      window.removeEventListener('storage', bump);
+      if (t) clearInterval(t);
+    };
+  }, [held.length]);
   const shownTab: SignedTab = tab ?? TABS.find((t) => rowsIn(rows, t.id).length)?.id ?? 'waiting';
   const list = rowsIn(rows, shownTab);
 
@@ -179,6 +182,7 @@ const SignedPage = () => {
           busy={busy}
           refusedText={(id) => paidRefusedFor(id, held)}
         />
+        <OlderHeldNote show={older} />
         <SyncNote
           state={sync}
           cachedAt={cached?.at ?? null}
@@ -213,7 +217,12 @@ const SignedPage = () => {
             {list.length ? (
               <ul className="sg-list">
                 {list.map((r) => (
-                  <Row key={r.key} row={r} onOpen={openRow} />
+                  <Row
+                    key={r.key}
+                    row={r}
+                    onOpen={openRow}
+                    finishing={heldDocs.has(r.documentId) || heldDocs.has(r.signatureId)}
+                  />
                 ))}
               </ul>
             ) : (

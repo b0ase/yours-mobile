@@ -4,13 +4,12 @@ import { FileSignature } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import { getChatAccount } from '../chat/chatAccount';
 import { badgeLabel, badgeText } from '../tabs/tabBadges';
-import { setSignedBadge, useSignedBadge } from './badge';
-import { heldFor, readHeldSeals } from './held';
-import { loadCachedSync, loadLocal, onSignedChange } from './localStore';
+import { useSignedBadge } from './badge';
+import { onSignedChange } from './localStore';
 import { installSignedRecorder } from './recorder';
 import { syncSigned } from './sync';
 import { sessionGet, sessionHandle } from './session';
-import { badgeCount, mergeRows } from './signedList';
+import { refreshSignedBadge } from './refresh';
 
 /**
  * The always-on half of Signed (bWalletX builds only; mobile, web.bwalletx.com and the extension all use these mounts,
@@ -28,12 +27,6 @@ const useIdentityKey = (): string => {
 const useIdentityAddress = (): string => {
   const { chromeStorageService } = useServiceContext();
   return chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
-};
-
-export const refreshSignedBadge = (identityKey: string): void => {
-  if (!identityKey) return setSignedBadge(0);
-  const rows = mergeRows(loadLocal(identityKey), loadCachedSync(identityKey)?.rows ?? []);
-  setSignedBadge(badgeCount(rows, new Set(heldFor(identityKey, readHeldSeals()).map((p) => p.documentId)).size));
 };
 
 export const SignedRecorder = () => {

@@ -6,6 +6,7 @@ import { BannerActions } from '../../web/BannerActions';
 import { ReportOutboxRunner } from '../agent/reportSend';
 import { setAgentDraft } from '../agent/handoff';
 import { OpenPartnerRequest } from '../placement/partnership/OpenPartnerRequest';
+import { QuietBoundary } from '../signed/QuietBoundary';
 import {
   ARTIST_PROGRAMME_ENABLED,
   BPOSITIVE_ENABLED,
@@ -144,7 +145,14 @@ const MobileRoutes = () => (
       {/* A tapped shared-account request push opens the Lock page (placement/partnership/openRequest.ts). */}
       <OpenPartnerRequest />
       {/* Signed: every seal this device records is kept in the wallet's own list (signed/recorder.ts). */}
-      {SignedRecorder && <SignedRecorder />}
+      {/* Its own Suspense and a boundary that renders nothing: a pending or failed chunk never blanks the routes. */}
+      {SignedRecorder && (
+        <QuietBoundary name="Signed recorder">
+          <Suspense fallback={null}>
+            <SignedRecorder />
+          </Suspense>
+        </QuietBoundary>
+      )}
       <Routes>
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}

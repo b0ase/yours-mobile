@@ -1,4 +1,13 @@
-import { ID_MAX, ROOM_MAX, TITLE_MAX, clip, isTxid, type LocalSigned, type SignedRow } from './signedList';
+import {
+  ID_MAX,
+  ROOM_MAX,
+  TITLE_MAX,
+  clip,
+  isTxid,
+  parseSignedRow,
+  type LocalSigned,
+  type SignedRow,
+} from './signedList';
 
 /**
  * The wallet's OWN record of what it has sealed (owner, 23 Nov 2026: the wallet keeps it, so Signed works without our
@@ -116,8 +125,11 @@ export interface CachedSync {
 export const loadCachedSync = (identityKey: string, kv: KV | null = ls()): CachedSync | null => {
   if (!idKey(identityKey)) return null;
   try {
-    const v = JSON.parse(kv?.getItem(syncKey(identityKey)) || 'null') as CachedSync | null;
-    return v && Array.isArray(v.rows) && Number(v.at) > 0 ? { at: Number(v.at), rows: v.rows } : null;
+    const v = JSON.parse(kv?.getItem(syncKey(identityKey)) || 'null') as { at?: unknown; rows?: unknown } | null;
+    if (!v || !Array.isArray(v.rows) || !(Number(v.at) > 0)) return null;
+    // Re-checked as strictly as a live row: the cache is only a copy and may be old or damaged.
+    const rows = v.rows.map(parseSignedRow).filter((r): r is SignedRow => !!r);
+    return { at: Number(v.at), rows };
   } catch {
     return null;
   }

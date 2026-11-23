@@ -1,76 +1,21 @@
 import { useState } from 'react';
 import { ExternalLink } from 'lucide-react';
-import { bavatarSvg } from '../bavatar/bavatar';
 import type { PendingSeal } from '../chat/nativeSeal';
-import type { FinishOutcome } from './session';
 import type { SyncState } from './sync';
-import { rowTitle, shortHash, waitingLine, wocTxUrl, type SignedRow, type SignedTab } from './signedList';
+import { rowTitle, shortHash, waitingLine, wocTxUrl, type SignedRow } from './signedList';
+import {
+  BUSY_TEXT,
+  FINISHING_ROW_TEXT,
+  OLDER_HELD_TEXT,
+  PAGE_STATUS,
+  artFor,
+  finishText,
+  fmtDate,
+  fmtTime,
+  type FinishState,
+} from './text';
 
-/** Signed's plain pieces (no data access), so signed.test.ts renders them on their own. */
-
-export const EMPTY_TEXT = 'Nothing signed yet. Documents you sign in bChatX rooms show up here.';
-export const TAB_EMPTY: Record<SignedTab, string> = {
-  waiting: 'Nothing is waiting for your signature.',
-  signed: 'Nothing signed and still waiting for others or for its seal.',
-  sealed: 'Nothing sealed on Bitcoin yet.',
-};
-
-/** The page's own live / coming checklist (owner, 15 Oct 2026: every feature page shows one). */
-export const PAGE_STATUS: { label: string; live: boolean }[] = [
-  { label: 'Waiting for me', live: true },
-  { label: 'Signed', live: true },
-  { label: 'Sealed on Bitcoin, with a link to the seal', live: true },
-  { label: 'Held seals: Finish', live: true },
-  { label: 'Kept on this device, works offline', live: true },
-  { label: 'Search', live: false },
-  { label: 'Export', live: false },
-];
-
-export const fmtDate = (ms: number) =>
-  ms ? new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Date unknown';
-export const fmtTime = (ms: number) =>
-  new Date(ms).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-
-export type FinishState = { k: 'idle' } | { k: 'working' } | FinishOutcome;
-/** What the banner says after a Finish: the TRUE outcome, never "Recorded" unless bit-sign recorded it. */
-const alsoText = (n?: number) =>
-  n ? ` ${n === 1 ? 'One other seal for it was' : `${n} other seals for it were`} recorded.` : '';
-export const finishText = (st: FinishState): string => {
-  switch (st.k) {
-    case 'working':
-      return 'Checking…';
-    case 'recorded':
-      return 'Recorded. It is in Sealed now.';
-    case 'orphaned':
-      return 'Another party sealed this document first. Your payment is recorded; nothing more to do.';
-    case 'replayed':
-      return "Already recorded with an earlier payment; this one wasn't needed.";
-    case 'released':
-      return 'Nothing was paid; you can seal again.';
-    case 'kept':
-      return 'Still checking. It stays here and is tried again; nothing is paid twice.' + alsoText(st.alsoRecorded);
-    case 'wrong_handle':
-      return (
-        `bChatX doesn't know this seal for the handle you're signed in as (${st.handle ? `$${st.handle.replace(/^[$@]/, '')}` : 'this one'}). ` +
-        'It stays held. Sign in as the handle that sealed it.' +
-        alsoText(st.alsoRecorded)
-      );
-    case 'refused':
-      return st.reason + alsoText(st.alsoRecorded);
-    case 'sign_in':
-      return 'Sign in to bChatX to finish this.';
-    case 'account_changed':
-      return 'You switched accounts. Finish it from the account that sealed it.';
-    case 'offline':
-      return 'You are offline. Finish it when you are back online.';
-    case 'failed':
-      return 'Could not finish just now. Try again in a minute.';
-    default:
-      return '';
-  }
-};
-/** Another page or window is checking or paying this seal right now (held.busyElsewhere): Finish waits. */
-export const BUSY_TEXT = 'Being checked in another window. Nothing is paid twice.';
+/** Signed's plain components (no data access), so signed.test.ts renders them on their own. Words: text.ts. */
 
 export const HeldBanner = ({
   held,
@@ -104,7 +49,10 @@ export const HeldBanner = ({
         {docs.map((p) => {
           const st: FinishState = states[p.documentId] ?? { k: 'idle' };
           const isBusy = busy.has(p.documentId) && st.k === 'idle';
-          const paidRefused = st.k === 'idle' ? refusedText(p.documentId) : null;
+          // Paid and refused stays the headline unless this Finish recorded it or said why it was refused (a 5xx or 401
+          // on a refused record still shows its support reference).
+          const paidRefused =
+            st.k === 'recorded' || st.k === 'refused' || st.k === 'working' ? null : refusedText(p.documentId);
           const text = isBusy ? BUSY_TEXT : (paidRefused ?? finishText(st));
           const signIn = st.k === 'sign_in' && !!onSignIn;
           return (
@@ -131,6 +79,14 @@ export const HeldBanner = ({
     </section>
   );
 };
+
+/** A held seal from an older version (no identity key): a neutral line, never counted or finished here. */
+export const OlderHeldNote = ({ show }: { show: boolean }) =>
+  show ? (
+    <p className="sg-note" data-testid="signed-older-held">
+      {OLDER_HELD_TEXT}
+    </p>
+  ) : null;
 
 export const SyncNote = ({
   state,
@@ -197,18 +153,6 @@ export const PageStatus = () => (
   </section>
 );
 
-const art = new Map<string, string>();
-/** Gold by default: a bAvatar seeded by the room (or the title), never a grey tile. */
-export const artFor = (seed: string, size: number) => {
-  const k = `${size}:${seed}`;
-  let a = art.get(k);
-  if (!a) {
-    a = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(bavatarSvg(seed || 'signed', { size }));
-    art.set(k, a);
-  }
-  return a;
-};
-
 const openOutside = (url: string) => {
   try {
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -264,7 +208,16 @@ export const SealLink = ({ txid }: { txid: string | null }) => {
   );
 };
 
-export const Row = ({ row, onOpen }: { row: SignedRow; onOpen: (r: SignedRow) => void }) => (
+export const Row = ({
+  row,
+  onOpen,
+  finishing = false,
+}: {
+  row: SignedRow;
+  onOpen: (r: SignedRow) => void;
+  /** A seal of this document is held on this device: it is being finished, not waiting for a signature. */
+  finishing?: boolean;
+}) => (
   <li className="sg-row" data-testid="signed-row">
     <button type="button" className="sg-row-main" onClick={() => onOpen(row)}>
       <img className="sg-art" src={artFor(row.room || row.title, 72)} alt="" width={36} height={36} />
@@ -273,7 +226,7 @@ export const Row = ({ row, onOpen }: { row: SignedRow; onOpen: (r: SignedRow) =>
         <span className="sg-row-sub">
           {row.room ? `$${row.room} · ` : ''}
           {fmtDate(row.at)}
-          {row.status === 'waiting' ? ' · Needs your signature' : ''}
+          {finishing ? ` · ${FINISHING_ROW_TEXT}` : row.status === 'waiting' ? ' · Needs your signature' : ''}
           {waitingLine(row) ? ` · ${waitingLine(row)}` : ''}
         </span>
       </span>

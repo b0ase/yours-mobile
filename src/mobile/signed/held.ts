@@ -59,6 +59,9 @@ export const heldFor = (identityKey: string, list: PendingSeal[]): PendingSeal[]
  * record being settled. (#560's release rule covers the rest: an unsure record is released only when the wallet
  * answered "no such action" twice, seconds apart, and the record is at least 3 minutes old.)
  */
+/** Is a seal saved before identity keys were stored (pre-6 Nov) held on this device? Whose it is can't be told here. */
+export const olderHeld = (list: readonly PendingSeal[]): boolean => list.some((p) => !p.identityKey);
+
 export const busyElsewhere = (p: PendingSeal, store: PendingSealStore, now: number): boolean => {
   // Any live settling mark, this context's too (a Sign page settling it in the background). #560's beingSettled treats
   // a mark further ahead than its own span + skew as stale (a clock moved back, bad data).
