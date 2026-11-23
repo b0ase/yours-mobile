@@ -206,17 +206,43 @@ export const NOT_YET_RETRY_MS = [3000, 6000] as const;
  * words b shows: the ack with a reference, or a note that it could not be logged.
  */
 export type ReportResult = { ok: boolean; ack: string; ref?: string };
+/** What b shows when the server logged a report but had no words for it (a question: its ack is empty). */
+export const loggedAck = (ref?: string) => (ref ? `Passed to the team. Ref ${ref}.` : 'Passed to the team.');
+/**
+ * The reply to a report. `ok: true` is the server saying it logged it, with or without an ack: bit-sign's ackText is
+ * empty for a report it files as a question (or a safety report), and that used to read as a failure here, so the
+ * outbox kept the report and sent it again on every open (owner's phone, 22 Nov 2026: 4 reports, 52 rows in a day).
+ */
 export const parseReport = (v: unknown): ReportResult => {
   const o = obj(v);
   const ack = typeof o.ack === 'string' && o.ack.trim() ? o.ack.trim() : '';
+  const ref =
+    typeof o.ref === 'string' && o.ref.trim()
+      ? o.ref.trim()
+      : typeof o.id === 'number' && o.id > 0
+        ? `#F-${o.id}`
+        : undefined;
+  const withRef = ref ? { ref } : {};
+  if (o.ok === true) return { ok: true, ack: ack || loggedAck(ref), ...withRef };
   if (!ack) throw new Error(typeof o.error === 'string' ? o.error : 'b could not take that just now.');
-  return { ok: o.ok === true, ack, ...(typeof o.ref === 'string' ? { ref: o.ref } : {}) };
+  return { ok: false, ack, ...withRef };
 };
+/**
+ * Send a report to b. `messageId` names this report (the same on every resend from the outbox) so the server can
+ * tell a resend from a new report (bit-sign dedupes by handle + message_id once its route reads it).
+ */
 export const reportToB = async (
   call: (method: 'GET' | 'POST', path: string, body?: unknown) => Promise<unknown>,
   text: string,
+  messageId?: string,
 ): Promise<ReportResult> =>
-  parseReport(await call('POST', '/api/bitsign/agent/feedback', { text, client: clientInfo() }));
+  parseReport(
+    await call('POST', '/api/bitsign/agent/feedback', {
+      text,
+      client: clientInfo(),
+      ...(messageId ? { message_id: messageId } : {}),
+    }),
+  );
 
 /** What b says in place of an answer when it has no key: the ack, then how to get answers. */
 export const noKeyReply = (r: ReportResult, providerLabel: string) =>

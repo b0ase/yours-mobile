@@ -93,16 +93,34 @@ const writeOutbox = (items: QueuedReport[], store: Store | null) => {
 export const queuedFor = (account: string | null | undefined, store = defaultStore(), now = Date.now()) =>
   readOutbox(store, now).filter((r) => r.account === DEVICE || r.account === account);
 
-/** Keep a report that couldn't be sent. Returns the queued item. */
+/** A new report's id: time plus 64 random bits (the server dedupes on it, so two devices must never share one). */
+export const newReportId = (now = Date.now()): string => {
+  const bytes = new Uint8Array(8);
+  try {
+    globalThis.crypto.getRandomValues(bytes);
+  } catch {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return `${now.toString(36)}-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+};
+
+/** The message_id sent with a report: the same for the first send and every resend, so the server can dedupe. */
+export const reportMessageId = (id: string): string => `bwx-report:${id}`;
+
+/**
+ * Keep a report that couldn't be sent. Returns the queued item. `id`: the id its first send already used (so a resend
+ * carries the same message_id); a new one otherwise.
+ */
 export const enqueueReport = (
   account: string | null | undefined,
   text: string,
   reason: OutboxReason,
   store = defaultStore(),
   now = Date.now(),
+  id = newReportId(now),
 ): QueuedReport => {
   const item: QueuedReport = {
-    id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    id,
     account: account || DEVICE,
     text: redactSecrets(text).slice(0, MAX_TEXT),
     at: now,
@@ -161,7 +179,9 @@ let flushing: Promise<{ sent: number; left: number }> | null = null;
 
 /**
  * Send what's due for this account. `force` ignores the backoff (Retry button, coming back online, sign-in).
- * A failed send stays queued with a longer wait; nothing is ever removed without a reply from bit-sign.
+ * A failed send stays queued with a longer wait; nothing is ever removed without a reply from bit-sign saying it has
+ * the report (parseReport: ok, with or without an ack). A reply that says it could not log it (ok: false) stays queued
+ * too. Every send names the report (message_id) so the server can drop a resend it already has.
  */
 export const flushOutbox = (
   account: string | null | undefined,
@@ -170,7 +190,7 @@ export const flushOutbox = (
     force?: boolean;
     store?: Store | null;
     now?: () => number;
-    send?: (call: Call, text: string) => Promise<ReportResult>;
+    send?: (call: Call, text: string, messageId: string) => Promise<ReportResult>;
   },
 ) => {
   if (flushing) return flushing;
@@ -179,7 +199,9 @@ export const flushOutbox = (
     for (const item of queuedFor(account, store, now())) {
       if (!force && item.nextAt > now()) continue;
       try {
-        await send(call, item.text);
+        const r = await send(call, item.text, reportMessageId(item.id));
+        // bit-sign answered but could not log it: kept, and tried again after the backoff.
+        if (r?.ok === false) throw new Error(r.ack || 'b could not log that just now.');
         sent++;
         writeOutbox(
           readOutbox(store, now()).filter((r) => r.id !== item.id),

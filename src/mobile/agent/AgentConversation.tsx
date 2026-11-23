@@ -43,7 +43,7 @@ import {
   reportToB,
   type ReportResult,
 } from './paid';
-import { enqueueReport, failureReason, logQueued, outboxText } from './reportOutbox';
+import { enqueueReport, failureReason, logQueued, newReportId, outboxText, reportMessageId } from './reportOutbox';
 import { MARKET_ENABLED, STORE_BUILD } from '../storeBuild';
 import { agentAccountPrompt, parseActions, runAgentActionSerial } from '../agents/agentTrade';
 import { consentTarget, grantConsent, hasConsent } from './consent';
@@ -453,12 +453,14 @@ export const AgentConversation = ({
 
   /** Pass a message to the team (bit-sign /agent/feedback). Offline or signed out: it waits in the outbox. */
   const tellTeam = async (text: string): Promise<ReportResult | { queued: string }> => {
+    // One id for the first send and any resend from the outbox (the server's dedupe key).
+    const id = newReportId();
     try {
-      return await reportToB((m, p, b) => withClient((c) => c.agentCall(m, p, b)), text);
+      return await reportToB((m, p, b) => withClient((c) => c.agentCall(m, p, b)), text, reportMessageId(id));
     } catch (e) {
       const reason = failureReason(e);
       logQueued(reason, e);
-      enqueueReport(accountId, text, reason);
+      enqueueReport(accountId, text, reason, undefined, undefined, id);
       return { queued: `${outboxText(reason)} You'll see it in Your reports as Waiting to send.` };
     }
   };

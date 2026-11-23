@@ -6,10 +6,13 @@ import {
   enqueueReport,
   failureReason,
   flushOutbox,
+  newReportId,
   outboxText,
   queuedFor,
   readOutbox,
+  reportMessageId,
 } from './reportOutbox';
+import { parseReport } from './paid';
 
 const memStore = () => {
   const m = new Map<string, string>();
@@ -149,4 +152,55 @@ describe('failureReason: offline even when navigator says online', () => {
     expect(failureReason(Object.assign(new Error('x'), { status: 401 }), true)).toBe('signin');
   });
   test("offline text says You're offline", () => expect(outboxText('offline').startsWith("You're offline")).toBe(true));
+});
+
+describe('acknowledged reports leave the outbox; resends carry one message_id (5.2.62)', () => {
+  test("bit-sign's reply for a question (ok, empty ack) drops the item: no resend on the next open", async () => {
+    const store = memStore();
+    for (const t of ['r1', 'r2', 'r3', 'r4']) enqueueReport('A', t, 'error', store, 0);
+    let posts = 0;
+    // The real parser over the route's real reply: { ok: true, id, ref, ack: '' } (b-feedback-rules ackText).
+    const send = async () => parseReport({ ok: true, id: 400 + ++posts, ref: `#F-${400 + posts}`, ack: '' });
+    expect(await flushOutbox('A', call, { store, force: true, now: () => 1000, send })).toEqual({ sent: 4, left: 0 });
+    // Ten more opens: nothing left to send.
+    for (let i = 0; i < 10; i++) await flushOutbox('A', call, { store, force: true, now: () => 2000 + i, send });
+    expect(posts).toBe(4);
+  });
+
+  test('a reply that says it was not logged (ok: false) stays queued with a backoff', async () => {
+    const store = memStore();
+    enqueueReport('A', 'one', 'error', store, 0);
+    const r = await flushOutbox('A', call, {
+      store,
+      force: true,
+      now: () => 1000,
+      send: async () => parseReport({ ok: false, ack: "I couldn't log that just now." }),
+    });
+    expect(r).toEqual({ sent: 0, left: 1 });
+    const [left] = readOutbox(store, 1000);
+    expect(left.reason).toBe('error');
+    expect(left.nextAt).toBe(1000 + backoffMs(2));
+  });
+
+  test('every send of one report carries the same message_id; the first send can name it', async () => {
+    const store = memStore();
+    const queued = enqueueReport('A', 'one', 'offline', store, 0, 'firstsend-id');
+    expect(queued.id).toBe('firstsend-id');
+    const ids: string[] = [];
+    const send = async (_c: unknown, _t: string, messageId: string) => {
+      ids.push(messageId);
+      if (ids.length < 3) throw new Error('500');
+      return { ok: true, ack: 'Noted.' };
+    };
+    for (let i = 0; i < 3; i++) await flushOutbox('A', call, { store, force: true, now: () => 1000 + i, send });
+    expect(ids).toEqual(Array(3).fill(reportMessageId('firstsend-id')));
+    expect(readOutbox(store, 2000)).toEqual([]);
+  });
+
+  test('report ids are unique enough to dedupe on', () => {
+    const ids = new Set(Array.from({ length: 1000 }, () => newReportId(0)));
+    expect(ids.size).toBe(1000);
+    expect(newReportId(0)).toMatch(/^0-[0-9a-f]{16}$/);
+    expect(reportMessageId('x')).toBe('bwx-report:x');
+  });
 });

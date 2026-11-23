@@ -4,7 +4,16 @@ import type { ServiceContextProps } from '../../contexts/ServiceContext';
 import { ChatApiError, saveSession } from '../chat/api';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
 import { reportToB, type ReportResult } from './paid';
-import { enqueueReport, failureReason, flushOutbox, logQueued, queuedFor, type QueuedReport } from './reportOutbox';
+import {
+  enqueueReport,
+  failureReason,
+  flushOutbox,
+  logQueued,
+  newReportId,
+  queuedFor,
+  reportMessageId,
+  type QueuedReport,
+} from './reportOutbox';
 
 type ApiContext = NonNullable<ServiceContextProps['apiContext']>;
 
@@ -40,13 +49,17 @@ export const sendOrQueueReport = async (
   account: string | null,
   text: string,
 ): Promise<{ sent: ReportResult } | { queued: QueuedReport }> => {
-  if (!apiContext) return { queued: enqueueReport(account, text, 'signin') };
+  const id = newReportId();
+  if (!apiContext) return { queued: enqueueReport(account, text, 'signin', undefined, undefined, id) };
   try {
-    return { sent: await reportToB(agentCaller(apiContext), text) };
+    const sent = await reportToB(agentCaller(apiContext), text, reportMessageId(id));
+    // bit-sign answered but could not log it: it waits in the outbox (same id), never shown as sent.
+    if (!sent.ok) return { queued: enqueueReport(account, text, 'error', undefined, undefined, id) };
+    return { sent };
   } catch (e) {
     const reason = failureReason(e);
     logQueued(reason, e);
-    return { queued: enqueueReport(account, text, reason) };
+    return { queued: enqueueReport(account, text, reason, undefined, undefined, id) };
   }
 };
 

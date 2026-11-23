@@ -151,6 +151,39 @@ describe('tell b without a key (14 Oct 2026)', () => {
   });
 });
 
+describe('a logged report with no ack is still logged (5.2.62 reportOutbox resends)', () => {
+  test("ok with an empty ack (bit-sign's ack for a question) is taken, with the ref", async () => {
+    const { parseReport, loggedAck } = await import('./paid');
+    // What bit-sign's route sends for a report it files as a question: ackText is ''.
+    expect(parseReport({ ok: true, id: 402, ref: '#F-402', ack: '' })).toEqual({
+      ok: true,
+      ack: 'Passed to the team. Ref #F-402.',
+      ref: '#F-402',
+    });
+    expect(parseReport({ ok: true, id: 7, ack: '' })).toEqual({ ok: true, ack: loggedAck('#F-7'), ref: '#F-7' });
+    expect(parseReport({ ok: true, ticket: 3, ref: 'T-3', ack: 'Opened ticket T-3.' }).ack).toBe('Opened ticket T-3.');
+    expect(parseReport({ ok: true })).toEqual({ ok: true, ack: 'Passed to the team.' });
+    // Not logged: still an answer (b shows it), never a throw; an error body still throws.
+    expect(parseReport({ ok: false, ack: "I couldn't log that just now." })).toEqual({
+      ok: false,
+      ack: "I couldn't log that just now.",
+    });
+    expect(() => parseReport({ ok: false, ack: '' })).toThrow();
+    expect(() => parseReport({ error: 'Too many messages.' })).toThrow('Too many messages.');
+    expect(() => parseReport('<html>')).toThrow();
+  });
+
+  test('the report names itself with message_id (the dedupe key), only when given', async () => {
+    const { reportToB } = await import('./paid');
+    const bodies: unknown[] = [];
+    const call = async (_m: string, _p: string, b?: unknown) => (bodies.push(b), { ok: true, id: 1, ack: '' });
+    await reportToB(call, 'hello', 'bwx-report:abc');
+    await reportToB(call, 'hello');
+    expect((bodies[0] as { message_id?: string }).message_id).toBe('bwx-report:abc');
+    expect(bodies[1]).not.toHaveProperty('message_id');
+  });
+});
+
 describe('paymentFailedText', () => {
   test('names the reason and says the message was not sent', () => {
     const t = paymentFailedText(
