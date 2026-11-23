@@ -37,7 +37,7 @@ import { topBarBappForPath } from '../phone/bappBarModel';
 import { startAgentCreate } from '../agents/agentCreate';
 import { AGENT_TOOLS_TITLE, AgentToolsSheet } from '../agents/AgentToolsSheet';
 import { AirdropsNavButton } from '../airdrops/AirdropsNavButton';
-import { TWETCH_POST_ENABLED, isBWalletX } from '../storeBuild';
+import { SIGNED_ENABLED, TWETCH_POST_ENABLED, isBWalletX } from '../storeBuild';
 import { IS_EXTENSION } from '../extension';
 import { initPairing, setAgentPairDeps } from '../pair/sessions';
 import { onPairLink, takePairLink } from '../pair/links';
@@ -52,6 +52,13 @@ import { BitsignHost } from '../pair/BitsignHost';
 import { TwetchHost } from '../twetch/TwetchHost';
 import { PairLoginHost } from '../pair/PairLoginHost';
 
+// ☰ › Signed (signed/): a lazy bWalletX-only chunk, so a store bundle has none of it (storeBuild.ts SIGNED_ENABLED).
+const SignedMenuRow = SIGNED_ENABLED
+  ? lazy(() => import('../signed/SignedMenu').then((m) => ({ default: m.SignedMenuRow })))
+  : null;
+const SignedBadgeKeeper = SIGNED_ENABLED
+  ? lazy(() => import('../signed/SignedMenu').then((m) => ({ default: m.SignedBadgeKeeper })))
+  : null;
 const PairSheet = lazy(() => import('../pair/PairSheet'));
 const ScanSheet = lazy(() => import('../scan/ScanSheet'));
 import { useTheme } from '../../hooks/useTheme';
@@ -536,6 +543,17 @@ const TopNavBar = () => {
                 ))}
               </div>
               <div className="shrink-0 border-t border-white/5 px-2 pt-2 pb-2">
+                {/* Signed (owner, 23 Nov 2026): a top-level item, first, with what's waiting for me. */}
+                {SignedMenuRow && (
+                  <Suspense fallback={null}>
+                    <SignedMenuRow
+                      onOpen={() => {
+                        setDrawer(false);
+                        navigate('/m/signed');
+                      }}
+                    />
+                  </Suspense>
+                )}
                 {/* Owner, 9 Oct 2026: Add account, Add agent account, Connect CLI & MCP, then Settings. */}
                 {action(<Plus size={16} color="#fff" />, 'Add account', () => go('restore-account'))}
                 {X_MARK &&
@@ -721,6 +739,12 @@ const TopNavBar = () => {
             setPairOpen(true);
           }}
         />
+      )}
+      {/* The ☰ › Signed badge (waiting for me + held), kept current (signed/SignedMenu.tsx). */}
+      {SignedBadgeKeeper && (
+        <Suspense fallback={null}>
+          <SignedBadgeKeeper />
+        </Suspense>
       )}
       {!phoneLayoutOn() && <AuthRequestHost />}
       {!phoneLayoutOn() && <BrowseLinkHost />}

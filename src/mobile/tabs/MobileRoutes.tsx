@@ -13,6 +13,7 @@ import {
   BUREAU_ENABLED,
   NATIVE_SEAL_ENABLED,
   OFFERS_ENABLED,
+  SIGNED_ENABLED,
   DIRECT_UPDATE_ENABLED,
   MARKET_ENABLED,
   PAY_STREAM_ENABLED,
@@ -61,6 +62,12 @@ const BitSignImportPage = BUREAU_ENABLED ? lazy(() => import('../bureau/BitSignI
 // Native Review & sign: bWalletX only (storeBuild.ts NATIVE_SEAL_ENABLED); not built for the stores (review 24, S1).
 const NativeSealPage = NATIVE_SEAL_ENABLED
   ? lazy(() => import('../chat/NativeSealPage').then((m) => ({ default: m.NativeSealPage })))
+  : null;
+// ☰ › Signed: every document this wallet is a party to. bWalletX only (storeBuild.ts SIGNED_ENABLED).
+const SignedPage = SIGNED_ENABLED ? lazy(() => import('../signed/SignedPage')) : null;
+// Its recorder: on every /m/* screen (the Sign page included), so each seal lands in the wallet's own list.
+const SignedRecorder = SIGNED_ENABLED
+  ? lazy(() => import('../signed/SignedMenu').then((m) => ({ default: m.SignedRecorder })))
   : null;
 // bMail › Agreements › Offers: company offers accepted by signing to pay. bWalletX only (storeBuild.ts OFFERS_ENABLED).
 const OffersPage = OFFERS_ENABLED ? lazy(() => import('../offer/OffersPage')) : null;
@@ -136,6 +143,8 @@ const MobileRoutes = () => (
       <ReportOutboxRunner />
       {/* A tapped shared-account request push opens the Lock page (placement/partnership/openRequest.ts). */}
       <OpenPartnerRequest />
+      {/* Signed: every seal this device records is kept in the wallet's own list (signed/recorder.ts). */}
+      {SignedRecorder && <SignedRecorder />}
       <Routes>
         <Route path="settings" element={<SettingsHub />} />
         {/* The top bar's Play button: music & video. */}
@@ -189,6 +198,7 @@ const MobileRoutes = () => (
         <Route path="bapp/:slug" element={<BappLinkPage />} />
         {/* Review & sign, natively (chat/NativeSealPage.tsx): phone signing never goes through a web page. */}
         {NativeSealPage && <Route path="seal/:ticker/:doc" element={<NativeSealPage />} />}
+        {SignedPage && <Route path="signed" element={<SignedPage />} />}
         {/* Phone layout app screens 2, 3… (phone/pager.tsx renders them; this is the fallback with the switch off). */}
         <Route path="screen/:n" element={<BrowserPage only="apps" />} />
         {/* Store build: no Games page (GAMES_ENABLED); an old link lands on Apps. */}
