@@ -2,11 +2,12 @@ import { useState } from 'react';
 import type { Theme } from '../../theme.types';
 import { sheet } from '../biometricUnlock';
 import { YoursNative } from '../native';
-import { wipeLocalWallet } from './wipe';
+import { forgotPasswordWipe, wipeLocalWallet } from './wipe';
 
 /** Unlock-screen escape hatch: wipe this device's wallet and restore from the 12 words. */
 export const ForgotPassword = ({ theme }: { theme: Theme }) => {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   const run = async () => {
     if (busy) return;
@@ -18,23 +19,37 @@ export const ForgotPassword = ({ theme }: { theme: Theme }) => {
     );
     if (!ok) return;
     setBusy(true);
-    try {
-      await wipeLocalWallet({ chrome, native: YoursNative });
-    } finally {
-      // Same as upstream's sign-out: start fresh; the router opens the restore screen.
-      window.location.reload();
+    setError('');
+    const failed = await forgotPasswordWipe(
+      () => wipeLocalWallet({ chrome, native: YoursNative }),
+      () => window.location.reload(),
+    );
+    if (failed) {
+      setError(failed);
+      setBusy(false);
     }
   };
 
   return (
-    <button
-      type="button"
-      onClick={() => void run()}
-      disabled={busy}
-      className="text-xs bg-transparent border-none p-2 mt-4 underline underline-offset-2 disabled:opacity-50"
-      style={{ color: theme.color.global.gray, fontFamily: "'Inter', Arial, Helvetica, sans-serif" }}
-    >
-      {busy ? 'Removing wallet...' : 'Forgot password? Restore with recovery phrase'}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy}
+        className="text-xs bg-transparent border-none p-2 mt-4 underline underline-offset-2 disabled:opacity-50"
+        style={{ color: theme.color.global.gray, fontFamily: "'Inter', Arial, Helvetica, sans-serif" }}
+      >
+        {busy ? 'Removing wallet...' : error ? 'Try again' : 'Forgot password? Restore with recovery phrase'}
+      </button>
+      {error && (
+        <p
+          role="alert"
+          className="text-xs px-4 text-center"
+          style={{ color: '#ff6b6b', fontFamily: "'Inter', Arial, Helvetica, sans-serif" }}
+        >
+          {error}
+        </p>
+      )}
+    </>
   );
 };

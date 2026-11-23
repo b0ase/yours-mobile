@@ -9,6 +9,8 @@ import { clearConsents } from '../agent/consent';
 import { clearUgcLocal, normHandle } from '../ugc/ugc';
 import { clearHelpDeskUnpin } from '../chat/helpDeskPin';
 import { bsvLockScanKeys } from '../locks/lockFinder';
+import { settleWithin, within } from '../../utils/settleWithin';
+import { CLOSE_FOR_RELOAD_CAP_MS } from './closeForReload';
 
 /**
  * Settings › Delete account (Apple 5.1.1(v); Google Play account deletion).
@@ -137,4 +139,71 @@ export const deleteAccount = async (
     }
   }
   return { paymail, bchatHandle, notes };
+};
+
+/** Longest each step of "Remove it from this phone" may take before the screen shows an error and Try again. */
+export const REMOVE_STEP_CAP_MS = 15_000;
+
+/**
+ * Which account Delete account removes, and the one the phone switches to: pinned once, when the server-side delete
+ * succeeds, and never re-derived from the selection (key-wipe review of 04f9513b, H1: after the switch to B, a Try
+ * again that re-read "current" would have switched back to A and forgotten B, or wiped the whole wallet).
+ */
+export type RemoveTarget = { deleted?: string; next?: string };
+
+/** Identity addresses of the real accounts in a fresh read of storage.local `accounts` (isRealAccount's test). */
+const realAccounts = (accounts: Record<string, unknown>) =>
+  Object.entries(accounts)
+    .filter(([, a]) => !!(a as { addresses?: { identityAddress?: string } } | null)?.addresses?.identityAddress)
+    .map(([id]) => id);
+
+/**
+ * The last step of Delete account: take the pinned account off the phone, or the whole wallet when a fresh read shows
+ * no other real account, then start again from the reload. Safe to run again (Try again): each step checks storage
+ * first. Switch and forget are capped; the wipe has no outer cap, since its own steps are capped (forgot/wipe.ts
+ * WIPE_CAPS) and an outer one shorter than their sum would abandon a slow wipe that a Try again then runs twice (M2).
+ * Every failure is thrown, so the button ends in the reload or an error with Try again (5.2.61 build 155: it did
+ * nothing).
+ */
+export const removeFromDevice = async (d: {
+  target: RemoveTarget;
+  /** A fresh read of storage.local `accounts` (not the page's cached copy). */
+  readAccounts: () => Promise<Record<string, unknown>>;
+  /** Select `address` for the reload. */
+  select: (address: string) => Promise<void>;
+  /** Close the wallet in this page, so no background writer saves the account back after it is forgotten (M1). */
+  closeWallet?: () => unknown;
+  /** Remove the account (its encrypted keys) from storage. */
+  forget: (address: string) => Promise<void>;
+  /** Best effort: the account's local caches. */
+  dropCaches?: (address: string) => void;
+  /** The whole wallet off this device (forgot/wipe.ts); throws if any key may remain. */
+  wipeWallet: () => Promise<void>;
+  /** Close the wallet and reload (the welcome screen, or the other account). */
+  reload: () => unknown;
+  capMs?: number;
+}) => {
+  const cap = d.capMs ?? REMOVE_STEP_CAP_MS;
+  const { deleted } = d.target;
+  const read = () => within(d.readAccounts, cap, 'Reading the accounts on this phone');
+  const accounts = await read();
+  const others = realAccounts(accounts).filter((id) => id !== deleted);
+  if (others.length === 0) {
+    await d.wipeWallet();
+    return void (await d.reload());
+  }
+  if (!deleted) throw new Error("Couldn't tell which account to remove, so nothing was removed.");
+  const next = d.target.next && others.includes(d.target.next) ? d.target.next : others[0];
+  await within(() => d.select(next), cap, 'Switching to your other account');
+  if (deleted in accounts) {
+    if (d.closeWallet) await settleWithin(d.closeWallet, CLOSE_FOR_RELOAD_CAP_MS);
+    await within(() => d.forget(deleted), cap, 'Removing this account');
+    if (deleted in (await read())) throw new Error('This account is still on this phone.');
+  }
+  try {
+    d.dropCaches?.(deleted);
+  } catch {
+    /* best effort */
+  }
+  await d.reload();
 };
