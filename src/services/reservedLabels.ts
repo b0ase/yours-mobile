@@ -36,7 +36,9 @@ export const RESERVED_LABEL_PREFIXES: readonly string[] = [
   'paymail', // received paymail payments (mobile/names/paymail.ts, utils/actionNet.ts PAYMAIL_LABEL)
   'recovered', // coins found again (services/recoverByTxid.ts, services/seedChangeWiring.ts)
   'bshares', // share placements (mobile/placement/actions.ts)
-  'bwx-partnership', // partnership accounts (mobile/placement/partnership)
+  // Partnership accounts (mobile/placement/partnership). Not in store builds: those screens aren't there, so the wallet
+  // never writes this label, and the store bundle must not carry the word (docs/STORE-AUDIT.md grep).
+  ...(import.meta.env.VITE_STORE_BUILD === '1' ? [] : ['bwx-partnership']),
   'btrust', // bTrust funding (mobile/btrust/fund.ts)
   'bmintx', // private media, archives and batches (mobile/private/privateMint.ts)
   'bchat reveal', // private reveals (mobile/private/privateMint.ts REVEAL_LABEL)
