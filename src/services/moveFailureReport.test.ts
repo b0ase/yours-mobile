@@ -8,10 +8,10 @@ import {
   recordMoveOutcome,
   redactMoveReason,
   reportMoveFailure,
-  sameAsNow,
+  sameAccountStillOpen,
   type MoveReportStore,
 } from './moveFailureReport';
-import type { EnsureLocalResult } from './localFirst';
+import { ensureLocalStore, type EnsureLocalResult } from './localFirst';
 
 /** chrome.storage.local as it outlives a service-worker start or app launch: the same map, new callers. */
 const persistent = () => {
@@ -46,6 +46,21 @@ describe('move failures reach b once a day per reason, across restarts (review o
     );
     // The id is reportOutbox's form, so the outbox sends it as message_id bwx-report:<id>.
     expect(sent[0].id).toMatch(/^[0-9a-z]+-[0-9a-f]{16}$/);
+    // Random, never derived from the account or reason (N2): the server can't link a handle to a wallet address.
+    const { store: other } = persistent();
+    const ids = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      await other.set({ [`${MOVE_REPORT_PREFIX}1Acct`]: { entries: [] } });
+      await reportMoveFailure({
+        r: failed('backup short'),
+        account: '1Acct',
+        failures: 1,
+        store: other,
+        send: (_a, _t, id) => void ids.add(id),
+        now: t0,
+      });
+    }
+    expect(ids.size).toBe(5);
     // A day later it may be reported again, under a new id.
     expect(
       await reportMoveFailure({
@@ -89,6 +104,37 @@ describe('move failures reach b once a day per reason, across restarts (review o
     expect((seenAtSend as { entries: unknown[] }).entries.length).toBe(1);
   });
 
+  test('a report the outbox did not take is not marked as reported (N4)', async () => {
+    const { m, store } = persistent();
+    const tries: string[] = [];
+    const r1 = await reportMoveFailure({
+      r: failed('timeout'),
+      account: 'A',
+      failures: 1,
+      store,
+      send: (_a, _t, id) => (tries.push(id), false),
+      now: 10,
+    });
+    expect(r1).toBe('none');
+    expect((m.get(`${MOVE_REPORT_PREFIX}A`) as { entries: unknown[] }).entries).toEqual([]);
+    // A throwing hand-off likewise.
+    const r2 = await reportMoveFailure({
+      r: failed('timeout'),
+      account: 'A',
+      failures: 2,
+      store,
+      send: () => {
+        throw new Error('no outbox');
+      },
+      now: 20,
+    });
+    expect(r2).toBe('none');
+    // The next failure is reported.
+    expect(
+      await reportMoveFailure({ r: failed('timeout'), account: 'A', failures: 3, store, send: () => true, now: 30 }),
+    ).toBe('sent');
+  });
+
   test('only a failed move is reported; no account, no report', async () => {
     const { store } = persistent();
     const send = () => {
@@ -121,15 +167,15 @@ describe('move failures reach b once a day per reason, across restarts (review o
 });
 
 describe("a move's outcome is filed under the account it ran for (review of #557, M2)", () => {
-  test('an account switch (or lock) during the move: no report, no backoff reason written for either account', async () => {
-    let account = 'A';
-    let gen = 1;
-    const ctx = {};
-    let current: object | null = ctx;
-    const still = sameAsNow(() => [current, gen, account]);
+  test('an account switch, lock or sign-out during the move: no report, no backoff reason written for either account', async () => {
+    let account: string | undefined = 'A';
+    let open = true;
+    const still = sameAccountStillOpen(
+      () => account,
+      () => open,
+    );
     // The move runs; meanwhile the user switches to B.
     account = 'B';
-    current = {};
     const failures = new Map([
       ['A', { failures: 2, nextAt: 0 }],
       ['B', { failures: 1, nextAt: 0, reason: 'B own reason' }],
@@ -146,11 +192,55 @@ describe("a move's outcome is filed under the account it ran for (review of #557
     expect(reported).toEqual([]);
     expect(failures.get('A')).toEqual({ failures: 2, nextAt: 0 });
     expect(failures.get('B')?.reason).toBe('B own reason');
-    // A lock alone (same account, new lock generation) counts too.
+    // Back on A but locked (no wallet open): still not current.
     account = 'A';
-    current = ctx;
-    gen = 2;
+    open = false;
     expect(still()).toBe(false);
+    open = true;
+    expect(still()).toBe(true);
+  });
+
+  test('N1: a failed switch that reopens the wallet for the same account is still reported, with its reason', async () => {
+    // The background's state: the open account, its wallet context and the lock generation.
+    const failures = new Map<string, { failures: number; nextAt: number; reason?: string }>();
+    let context: object | null = {};
+    let lockGeneration = 0;
+    const account = () => (context ? 'A' : undefined);
+    const still = sameAccountStillOpen(account, () => context !== null);
+    // The move, as settleLocalStore runs it: the verified switch fails, and onFailed (recoverAfterFailedSwitch) notes
+    // the failure and reopens the wallet: initializeWallet drops the old context (lockGeneration++) for a new one.
+    const r = await ensureLocalStore({
+      account: () => ({ id: 'A', config: { activeRemote: 'https://wallet.1sat.app', remotes: [] } }),
+      failedThisSession: () => false,
+      backupInFlight: () => false,
+      isLocalActive: () => false,
+      switchVerified: async () => ({
+        ok: false,
+        reason: 'backup short: 3 of 120 outputs missing',
+        activeIsRemote: true,
+      }),
+      localIsEmpty: async () => false,
+      pullIntoLocal: async () => undefined,
+      save: async () => undefined,
+      onFailed: async (id) => {
+        failures.set(id, { failures: (failures.get(id)?.failures ?? 0) + 1, nextAt: 0 });
+        lockGeneration++;
+        context = {};
+      },
+    });
+    expect(r).toEqual({ ok: false, how: 'failed', reason: 'backup short: 3 of 120 outputs missing' });
+    expect(lockGeneration).toBe(1);
+    const reported: [string, number][] = [];
+    const out = await recordMoveOutcome({
+      r,
+      account: 'A',
+      stillCurrent: still,
+      failures,
+      report: async (a, n) => void reported.push([a, n]),
+    });
+    expect(out).toBe('noted');
+    expect(reported).toEqual([['A', 1]]);
+    expect(failures.get('A')?.reason).toBe('backup short: 3 of 120 outputs missing');
   });
 
   test('still the same wallet: the reason is noted on that account and reported with its try count', async () => {
@@ -183,7 +273,7 @@ describe("a move's outcome is filed under the account it ran for (review of #557
     const bg = readFileSync('src/background.ts', 'utf8');
     const once = bg.slice(bg.indexOf('const preferLocalStorageOnce'), bg.indexOf('const addSnapshotRemote'));
     const captured = once.indexOf(
-      'const stillCurrent = sameAsNow(() => [accountContext, lockGeneration, currentAccountId()]);',
+      'const stillCurrent = sameAccountStillOpen(currentAccountId, () => accountContext !== null);',
     );
     const idRead = once.indexOf('const id = currentAccountId();');
     const moved = once.indexOf('await settleLocalStore(ctx)');

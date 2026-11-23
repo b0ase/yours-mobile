@@ -7,12 +7,14 @@
  *  - the memory is kept in storage (chrome.storage.local), per account, for MOVE_REPORT_TTL_MS;
  *  - two failures are "the same" when their reasons match with ids, query strings and digits taken out;
  *  - at most MOVE_REPORTS_PER_DAY different reasons per account in that window;
- *  - each report carries a message_id made from that key (reportOutbox's `bwx-report:<base36>-<16 hex>` form), so a
- *    resend of it is the same report to the server.
+ *  - each report carries a random id (reportOutbox's `bwx-report:<base36>-<16 hex>` form), kept with the entry, so a
+ *    resend of it is the same report to the server; random, so the server can't link a handle to a wallet address (N2).
+ *  - a report the outbox didn't take is not marked as reported (N4).
  * And (M2) the outcome is recorded only for the account and unlocked wallet the move started under.
  */
 import { Hash, Utils } from '@bsv/sdk';
 import type { EnsureLocalResult } from './localFirst';
+import { newReportId } from './reportSink';
 
 export const MOVE_REPORT_TTL_MS = 24 * 60 * 60_000;
 export const MOVE_REPORTS_PER_DAY = 3;
@@ -76,43 +78,57 @@ export async function reportMoveFailure(d: {
   send: (account: string, text: string, reportId: string) => unknown;
   now?: number;
 }): Promise<'sent' | 'seen' | 'capped' | 'none'> {
-  if (d.r.ok || d.r.how !== 'failed' || !d.account) return 'none';
+  const account = d.account;
+  if (d.r.ok || d.r.how !== 'failed' || !account) return 'none';
   const now = d.now ?? Date.now();
   const reason = redactMoveReason(d.r.reason ?? '') || 'no reason given';
   const k = moveReasonKey(reason);
-  const key = `${MOVE_REPORT_PREFIX}${d.account}`;
+  const key = `${MOVE_REPORT_PREFIX}${account}`;
   try {
     const entries = entriesOf((await d.store.get(key))?.[key], now);
     if (entries.some((e) => e.k === k)) return 'seen';
     if (entries.length >= MOVE_REPORTS_PER_DAY) return 'capped';
-    // The report's id: stable for this account and reason in this window (the outbox's id form).
-    const id = `${now.toString(36)}-${hex16(`${d.account}\n${k}`)}`;
+    // The report's id: random (never derived from the account), kept with the entry.
+    const id = newReportId(now);
     // Kept before sending: a crash between the two loses one report, never sends it twice.
     await d.store.set({ [key]: { entries: [...entries, { k, at: now, id }] } });
-    await d.send(
-      d.account,
-      `Moving this account to this device didn't finish (try ${Math.max(1, d.failures)}): ${reason}`,
-      id,
+    // A hand-off that throws (even before it returns a promise) or answers false: not taken.
+    const taken = await (async () =>
+      d.send(
+        account,
+        `Moving this account to this device didn't finish (try ${Math.max(1, d.failures)}): ${reason}`,
+        id,
+      ))().then(
+      (v) => v !== false,
+      () => false,
     );
-    return 'sent';
+    if (taken) return 'sent';
+    // Not handed to the outbox: not "reported" either, so the next failure tries again (the outbox keeps one per id).
+    await d.store.set({ [key]: { entries } }).catch(() => undefined);
+    return 'none';
   } catch {
     return 'none';
   }
 }
 
-/** Captures `parts()` now; the check it returns is true while every part is still the same (Object.is). */
-export const sameAsNow = (parts: () => readonly unknown[]): (() => boolean) => {
-  const then = parts();
-  return () => {
-    const now = parts();
-    return now.length === then.length && now.every((v, i) => Object.is(v, then[i]));
-  };
+/**
+ * Captures the open account now; the check it returns is true while that account is still the one open (review of
+ * #557, M2). Not the wallet context itself: a failed switch reopens the wallet for the SAME account
+ * (recoverAfterFailedSwitch → initializeWallet, which drops the old context and bumps lockGeneration), and that is the
+ * failure b most needs to hear about (N1). A switch to another account, a lock or a sign-out (no wallet open) is not.
+ */
+export const sameAccountStillOpen = (
+  account: () => string | null | undefined,
+  open: () => boolean,
+): (() => boolean) => {
+  const then = account();
+  return () => open() && !!then && account() === then;
 };
 
 /**
  * After a move: a success clears the account's failures; a failure records its reason and reports it, but only while
- * the wallet is still the one the move started under (same context, lock generation and account; review M2). A switch
- * mid-move would otherwise file account A's failure, and its backoff reason, under account B.
+ * the account the move started under is still the one open (sameAccountStillOpen; review M2, N1). A switch mid-move
+ * would otherwise file account A's failure, and its backoff reason, under account B.
  */
 export async function recordMoveOutcome(d: {
   r: EnsureLocalResult;

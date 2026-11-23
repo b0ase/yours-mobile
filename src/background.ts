@@ -144,7 +144,12 @@ import {
   retryMoveAnswer,
   type EnsureLocalResult,
 } from './services/localFirst';
-import { recordMoveOutcome, reportMoveFailure, sameAsNow, type MoveReportStore } from './services/moveFailureReport';
+import {
+  recordMoveOutcome,
+  reportMoveFailure,
+  sameAccountStillOpen,
+  type MoveReportStore,
+} from './services/moveFailureReport';
 import { reportFromWallet } from './services/reportSink';
 import {
   SNAPSHOT_SEND_WAIT,
@@ -1137,10 +1142,11 @@ const currentAccountId = () => chromeStorageService.getCurrentAccountObject().ac
 const preferLocalStorage = (ctx: NonNullable<typeof accountContext>) =>
   moveProgress.track(() => preferLocalStorageOnce(ctx));
 const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) => {
-  // The account and unlocked wallet this move runs under, read BEFORE it starts: a switch or lock mid-move must not file
-  // this account's failure (or its backoff reason) under the next one (review of #557, M2).
+  // The account this move runs under, read BEFORE it starts: a switch, lock or sign-out mid-move must not file this
+  // account's failure (or its backoff reason) under the next one (review of #557, M2). A failed switch reopening the
+  // wallet for the same account (recoverAfterFailedSwitch) is still this account: reported (N1).
   const id = currentAccountId();
-  const stillCurrent = sameAsNow(() => [accountContext, lockGeneration, currentAccountId()]);
+  const stillCurrent = sameAccountStillOpen(currentAccountId, () => accountContext !== null);
   const r = await settleLocalStore(ctx);
   // In the background: our server's first fill can take a while, and nothing here waits for it.
   if (r.ok) void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
