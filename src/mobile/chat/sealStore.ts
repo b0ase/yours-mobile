@@ -13,6 +13,8 @@ import {
   DRAWING_MAX_CHARS,
   type PendingSeal,
   type PendingSealStore,
+  type SealClaim,
+  type SealClaimStore,
   type SealDrawing,
   type SealDrawingStore,
   type SealLedger,
@@ -22,6 +24,11 @@ type Store = Pick<Storage, 'getItem' | 'setItem'>;
 
 export const PENDING_SEALS_KEY = 'bwx.nativeSeal.pending';
 export const SEAL_DRAWINGS_KEY = 'bwx.nativeSeal.drawings';
+/**
+ * Pay-only retries running now, by sealKey (nativeSeal.SealClaim): shared by every context on this origin (an
+ * extension popup and a tab), so two of them never both pay one kept seal (review of #560 M3).
+ */
+export const SEAL_CLAIMS_KEY = 'bwx.nativeSeal.claims';
 /** Seals recorded from this device by sealKey (identity · document · blocks; nativeSeal.SealLedger). At most 500. */
 export const SEALED_KEY = 'bwx.nativeSeal.sealed';
 export const DRAWINGS_CAP = 10;
@@ -90,6 +97,26 @@ export const localDrawings = (store: Store | null = defaultStore(), now: () => n
   };
 };
 
+const isClaim = (c: unknown): c is SealClaim => {
+  const x = c as SealClaim | null;
+  return !!x && typeof x.key === 'string' && typeof x.by === 'string' && typeof x.until === 'number';
+};
+export const localClaims = (store: Store | null = defaultStore(), now: () => number = Date.now): SealClaimStore => {
+  // Stale claims are dropped on every write, so the list stays tiny.
+  const read = () => readList<unknown>(store, SEAL_CLAIMS_KEY).filter((c): c is SealClaim => isClaim(c));
+  const live = () => read().filter((c) => c.until > now());
+  return {
+    get: (key) => read().find((c) => c.key === key) ?? null,
+    save: (c) => writeList(store, SEAL_CLAIMS_KEY, [...live().filter((x) => x.key !== c.key), c]),
+    remove: (key, by) =>
+      writeList(
+        store,
+        SEAL_CLAIMS_KEY,
+        live().filter((x) => !(x.key === key && x.by === by)),
+      ),
+  };
+};
+
 export const localStore = (store: Store | null = defaultStore(), now: () => number = Date.now): PendingSealStore => {
   const read = () => readList<PendingSeal>(store, PENDING_SEALS_KEY);
   return {
@@ -102,6 +129,7 @@ export const localStore = (store: Store | null = defaultStore(), now: () => numb
         read().filter((x) => x.nonce !== n),
       ),
     drawings: localDrawings(store, now),
+    claims: localClaims(store, now),
   };
 };
 

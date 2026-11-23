@@ -23,15 +23,38 @@ export const SEAL_REPORT_MESSAGE_MAX = 300;
 /** What the on-screen check found after an unclear payment (nativeSeal.settleUnsureSeal). */
 export type SealSettled = 'recorded' | 'not_paid' | 'unknown' | 'failed';
 
-/** Scrub, then cut: hex (txids, keys, BEEF, attestations) and long base64-ish runs out, then the wallet's redaction. */
+const B58 = '1-9A-HJ-NP-Za-km-z';
+/** A BSV / Bitcoin address (Base58, 25-35 characters, starting 1 or 3). */
+const ADDRESS = new RegExp(`(?<![${B58}])[13][${B58}]{24,34}(?![${B58}])`, 'g');
+/** Hex split by spaces or colons ("ab12cd34 ef56ab78 90cd12ef"): three or more groups. */
+const SPLIT_HEX = /(?<![0-9a-f])[0-9a-f]{4,}(?:[\s:]+[0-9a-f]{4,}){2,}(?![0-9a-f])/gi;
+
+/**
+ * Scrub, then cut (review of #560 L4): JWTs (any eyJ… segment), credentials after token/bearer/auth/session/key
+ * labels, paymails, $handles, hex (txids, keys, BEEF, attestations, also split by spaces), BSV addresses and long
+ * base64-ish runs out, then the wallet's own redaction (recovery words, WIF, labelled secrets, amounts).
+ */
 export const scrubSealText = (raw: string): string =>
   redactSecrets(
     raw
+      .replace(/eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*)*/g, '[token]')
+      .replace(/\b(bearer)\s+\S+/gi, '$1 [hidden]')
+      .replace(/\b(token|auth(?:orization)?|session|api[_-]?key|jwt|cookie)\s*[=:]\s*\S+/gi, '$1: [hidden]')
+      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, '[paymail]')
+      .replace(/\$[A-Za-z0-9][A-Za-z0-9_.-]*/g, '[handle]')
+      .replace(SPLIT_HEX, (m) => (/\d/.test(m) ? '…' : m))
       .replace(/(?:0x)?[0-9a-f]{16,}/gi, '…')
+      .replace(ADDRESS, '[address]')
       .replace(/[A-Za-z0-9+/_=-]{40,}/g, '…')
       .replace(/\s+/g, ' ')
       .trim(),
   ).slice(0, SEAL_REPORT_MESSAGE_MAX);
+
+/** Reports already sent from this context, by nonce + kind (+ the check's result): one each (review of #560 L4). */
+const reported = new Set<string>();
+const REPORTED_CAP = 500;
+/** Tests: forget what was reported. */
+export const resetSealReports = () => reported.clear();
 
 const rawText = (e: unknown): string => {
   if (typeof e === 'string') return e;
@@ -97,6 +120,12 @@ export function reportSealFailure(
 ): void {
   try {
     const x = sealFailureFacts(f);
+    if (f.nonce) {
+      const k = `${f.nonce}|${x.kind}|${deps.settled ?? '-'}`;
+      if (reported.has(k)) return;
+      if (reported.size >= REPORTED_CAP) reported.clear();
+      reported.add(k);
+    }
     (deps.warn ?? console.warn)(
       SEAL_FAILURE_PREFIX,
       `${x.outcome}${deps.settled ? `/${deps.settled}` : ''} step=${x.step} kind=${x.kind} moneyMoved=${x.moneyMoved}: ${x.message}`,

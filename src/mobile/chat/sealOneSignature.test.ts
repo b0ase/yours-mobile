@@ -6,12 +6,17 @@ import {
   HELD_FOR_REOPEN_MESSAGE,
   NOT_SENT_AFTER_CHECK_MESSAGE,
   PASSWORD_NOT_PAID_MESSAGE,
+  RELEASE_MIN_AGE_MS,
+  RELEASE_SPACING_MS,
   RESUME_MARGIN_MS,
   SEAL_NONCE_TTL_MS,
   SETTLE_DELAYS_MS,
+  SETTLE_MAX_MS,
+  settleSchedule,
   drawingUsable,
   nativeSignAndSeal,
   recoverNativeSeals,
+  recordedCount,
   resumeUsable,
   sealKey,
   sealStateHere,
@@ -38,6 +43,24 @@ import { consoleGate } from '../../testing/captureConsole';
  * settled on the same screen, the drawing survives a relaunch, and no retry path can pay twice.
  */
 const gate = consoleGate(['error', 'warn', 'info']);
+
+/** recoverNativeSeals as this account (SEAL_KEY; key-less records allowed for one document), counting recorded seals. */
+type RecoverArgs = Parameters<typeof recoverNativeSeals>;
+const recover = async (
+  api: RecoverArgs[0],
+  store: RecoverArgs[1],
+  documentId?: RecoverArgs[2],
+  ledger?: RecoverArgs[3],
+  lookup?: RecoverArgs[4],
+  opts: Partial<RecoverArgs[5]> = {},
+): Promise<number> =>
+  recordedCount(
+    await recoverNativeSeals(api, store, documentId, ledger ?? null, lookup, {
+      identityKey: SEAL_KEY,
+      keyless: true,
+      ...opts,
+    }),
+  );
 
 const TX = 'ab'.repeat(32);
 const T2 = 'ef'.repeat(32);
@@ -183,7 +206,7 @@ describe('Face ID / passcode did not complete: plain words, nothing paid, Try ag
 });
 
 describe('a createAction that proves nothing went out: Try again pays once, on the same seal', () => {
-  test('spent coin (healed in the background) → Try again: no prepare, compose or signature again; one payment', async () => {
+  test('spent coin (built, then refused) → Try again prepares a NEW session from the same drawing; one payment', async () => {
     gate.expectLines('warn [nativeSeal] pay failed Some of your coins were already spent from another device.');
     const log: Log = [];
     const store = localStore(fakeStorage());
@@ -192,8 +215,23 @@ describe('a createAction that proves nothing went out: Try again pays once, on t
     const e = (await seal({ log, store, documentId: 'P1', keys, api }).catch((x) => x)) as NativeSealError;
     expect(e.code).toBe('spent_elsewhere');
     expect(retryAllowed(e, true)).toBe(true);
-    await seal({ log, store, documentId: 'P1', keys, api, resume: e.drawing!.resume });
-    expect(log).toEqual(['prepare:', 'compose:N1', 'sign', 'pay', 'pay', 'receipt', 'commit']);
+    // Review of #560 M2: a refusal after building may leave an action with this output script, so no pay-only retry.
+    expect(e.drawing?.resume).toBeUndefined();
+    expect(e.drawing?.svg).toBe(SVG);
+    await seal({ log, store, documentId: 'P1', keys, api, svg: e.drawing!.svg, resume: e.drawing!.resume });
+    expect(log).toEqual([
+      'prepare:',
+      'compose:N1',
+      'sign',
+      'pay',
+      'cancel:N1',
+      'prepare:',
+      'compose:N2',
+      'sign',
+      'pay',
+      'receipt',
+      'commit',
+    ]);
     expect(store.drawings!.get(sealKey(SEAL_KEY, 'P1', ['f1']))).toBeNull(); // cleared on success
   });
 
@@ -249,7 +287,7 @@ describe('a createAction that proves nothing went out: Try again pays once, on t
 });
 
 describe('an unclear payment is settled on the same screen (never left at "failed")', () => {
-  const unclear = async (documentId: string, err = new Error('Failed to fetch')) => {
+  const unclear = async (documentId: string, err = new Error('Failed to fetch'), now?: () => number) => {
     const log: Log = [];
     const storage = fakeStorage();
     const store = localStore(storage);
@@ -262,6 +300,7 @@ describe('an unclear payment is settled on the same screen (never left at "faile
       api,
       keys: wallet(log, [err]),
       onFailure: (f) => failures.push(f),
+      ...(now ? { now } : {}),
     }).catch((x) => x)) as NativeSealError;
     return { log, storage, store, api, e, failures };
   };
@@ -286,21 +325,32 @@ describe('an unclear payment is settled on the same screen (never left at "faile
     expect((await seal({ log, store, documentId: 'U1', ledger }).catch((x) => x)).code).toBe('already_sealed');
   });
 
-  test('"not found" (twice, seconds apart) → nonce cancelled → Try again with the SAME drawing pays once', async () => {
+  test('"not found" released ONLY by the one rule (≥2 answers ≥5 s apart, ≥3 min old) → Try again, same drawing', async () => {
     gate.expectLines('warn [nativeSeal] pay failed Failed to fetch');
-    const { log, store, api, e } = await unclear('U2');
-    const waits: number[] = [];
-    let asked = 0;
+    let t = 1_000_000;
+    const now = () => t;
+    const { log, store, api, e } = await unclear('U2', undefined, now);
+    const savedAt = store.list()[0].savedAt;
+    const seen: { at: number; kept: boolean }[] = [];
     const r = await settleUnsureSeal({
       api,
       store,
       nonce: e.nonce!,
-      lookup: { find: async () => (asked++, { found: false }), beef: async () => null },
-      sleep: async (ms) => void waits.push(ms),
+      now,
+      lookup: {
+        find: async () => {
+          seen.push({ at: t - savedAt, kept: store.list().length === 1 });
+          return { found: false };
+        },
+        beef: async () => null,
+      },
+      sleep: async (ms) => void (t += ms),
     });
     expect(r.k).toBe('not_paid');
-    expect(asked).toBe(2);
-    expect(waits).toEqual(SETTLE_DELAYS_MS.slice(0, 2));
+    // Never released while the record was under 3 minutes old, however many answers came back.
+    expect(seen.every((x) => x.kept)).toBe(true);
+    expect(t - savedAt).toBeGreaterThanOrEqual(RELEASE_MIN_AGE_MS);
+    expect(seen.filter((x) => x.at < RELEASE_MIN_AGE_MS).length).toBeGreaterThanOrEqual(2);
     expect(count(log, 'cancel')).toBe(1);
     expect(store.list()).toEqual([]);
     const d = (r as { drawing: { svg: string } }).drawing;
@@ -325,6 +375,8 @@ describe('an unclear payment is settled on the same screen (never left at "faile
     });
     expect(r.k).toBe('recorded');
     expect(count(log, 'cancel')).toBe(0);
+    expect(count(log, 'recover')).toBe(1); // the late find still goes to /recover: the record was kept
+    expect(store.list()).toEqual([]);
   });
 
   test('still unknown after polling → held: "Finishing your seal…", no Sign button, never a second seal', async () => {
@@ -340,8 +392,10 @@ describe('an unclear payment is settled on the same screen (never left at "faile
       sleep: async (ms) => void waits.push(ms),
     });
     expect(r.k).toBe('unknown');
-    expect(waits).toEqual([...SETTLE_DELAYS_MS]); // bounded: ≈28 s, growing
-    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(30_000);
+    expect(waits).toEqual(settleSchedule()); // bounded, growing: 2, 3, 5, 8, 10 s, then every 20 s
+    expect(waits.slice(0, 5)).toEqual([...SETTLE_DELAYS_MS]);
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(SETTLE_MAX_MS);
+    expect(store.list()[0].settling).toBeUndefined(); // the settling mark is cleared when it ends
     expect(count(log, 'cancel') + count(log, 'recover')).toBe(0);
     expect(store.list()).toMatchObject([{ documentId: 'U4', beefHex: '', svg: SVG }]);
     expect(sealStateHere(SEAL_KEY, 'U4', ['f1'], store)).toBe('unsure');
@@ -405,10 +459,11 @@ describe('the drawing is kept on this device and restored after a relaunch', () 
     // The app dies here. A NEW store instance over the same device storage (a relaunch):
     const after = localStore(storage);
     expect(after.list()).toMatchObject([{ documentId: 'R1', svg: SVG, fieldIds: ['f1'] }]);
-    await recoverNativeSeals(api, after, 'R1', localLedger(storage), {
-      find: async () => ({ found: false }),
-      beef: async () => null,
-    });
+    const none = { find: async () => ({ found: false as const }), beef: async () => null };
+    const t0 = after.list()[0].savedAt + RELEASE_MIN_AGE_MS;
+    await recover(api, localStore(storage), 'R1', localLedger(storage), none, { now: () => t0 });
+    expect(localStore(storage).list()).toHaveLength(1); // one answer: kept
+    await recover(api, localStore(storage), 'R1', localLedger(storage), none, { now: () => t0 + RELEASE_SPACING_MS });
     const reopened = localStore(storage);
     expect(reopened.list()).toEqual([]);
     const key = sealKey(SEAL_KEY, 'R1', ['f1']);
@@ -549,7 +604,7 @@ describe('the createAction error is reported to b, with no secrets', () => {
     ]);
     // The failure carries only the error: never the attestation or the BEEF.
     expect(JSON.stringify(got.map((f) => Object.keys(f)))).toBe(
-      '[["outcome","step","error"],["outcome","step","error"]]',
+      '[["outcome","step","error","nonce"],["outcome","step","error","nonce"]]',
     );
     const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
     expect(page).toContain('reportSealFailure(f, {');
@@ -566,7 +621,9 @@ describe('the page wires one signature per document (NativeSealPage.tsx)', () =>
     expect(page).toContain("setPhase({ k: 'held', text: HELD_FOR_REOPEN_MESSAGE })");
   });
   test('Try again / Seal again send the kept drawing (and kept seal); the restored drawing is checked first', () => {
-    expect(page).toContain('onClick={() => void signAndSeal(phase.drawing.svg, phase.drawing.resume)}');
+    expect(page).toMatch(
+      /retryDrawingFits\(phase\.drawing, currentKey\)\s*\? void signAndSeal\(phase\.drawing\.svg, phase\.drawing\.resume\)\s*: backToPad\(\)/,
+    );
     expect(page).toMatch(/drawingUsable\(d, key, Date\.now\(\)\) && !checkStrictSvg\(d\.svg\)/);
     expect(page).toMatch(/if \(!svg \|\| checkStrictSvg\(svg\) \|\| !press\.take\(\)\) return;/);
     expect(page).toContain('label: SEAL_AGAIN_LABEL');

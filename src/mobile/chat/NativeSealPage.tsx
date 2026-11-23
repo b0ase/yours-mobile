@@ -12,6 +12,7 @@ import { approveSealPaymentResult, approveSealWithSheetOutcome } from './sealApp
 import { reportSealFailure, type SealSettled } from './sealReport';
 import { currentAccountId, sendOrQueueReport } from '../agent/reportSend';
 import { localLedger, localStore } from './sealStore';
+import { createRetryHold } from './sealRetryHold';
 import { useSheetPrice } from '../../components/DollarAmount';
 import { sendMessageAsync } from '../../utils/chromeHelpers';
 import { SealPaySheet } from './SealPaySheet';
@@ -25,6 +26,7 @@ import {
   openingNotice,
   primaryHandleFrom,
   retryAllowed,
+  retryDrawingFits,
   retryLabel,
   sealButtonLabel,
   sealProgress,
@@ -35,13 +37,17 @@ import {
 } from './sealScreen';
 import {
   CHECKING_PAYMENT_LINE,
+  CHECKING_PAYMENT_NOTE,
   HELD_FOR_REOPEN_MESSAGE,
   NOT_SENT_AFTER_CHECK_MESSAGE,
   NativeSealError,
   RESTORED_DRAWING_MESSAGE,
   abandonSeal,
   drawingUsable,
+  heldSupportMessage,
+  heldTooLong,
   settleUnsureSeal,
+  type RecoverResult,
   inertHtml,
   fetchSignedCopy,
   accountHandles,
@@ -161,28 +167,27 @@ export const NativeSealPage = () => {
   /** This account's identity key: part of the seal's key, so another account on this phone signs on its own. */
   const myKey = chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
   /** Recovery of this document's saved payments, started on open (the opening notice waits for it). */
-  const recovery = useRef<Promise<number> | null>(null);
+  const recovery = useRef<Promise<RecoverResult[]> | null>(null);
   /** The key a press is holding; released on unmount when its payment has not started (nativeSeal.abandonSeal). */
   const holdKey = useRef<string | null>(null);
+  /** False once the page has unmounted: the on-screen check stops at its next step (settleUnsureSeal `stopped`). */
+  const mounted = useRef(true);
   /**
-   * The seal kept for a pay-only retry while the Try again screen is up. Leaving the page gives its bit-sign session
-   * back (cancel), so a co-signer is never held up; the drawing stays on the device and a reopen prepares afresh.
+   * The kept session while the Try again / Seal again screen is up (sealRetryHold.ts, review of #560 L2): given back to
+   * bit-sign when the page unmounts or after 2 minutes on the screen, whichever is first. The drawing stays.
    */
-  const liveResume = useRef<SealDrawing | null>(null);
+  const retryHold = useRef(
+    createRetryHold({
+      cancel: (nonce) => void api('cancel', { nonce }).catch(() => undefined),
+      drawings: () => localStore().drawings,
+      onGiveBack: (d) => setPhase((p) => (p.k === 'retry' && p.drawing.key === d.key ? { ...p, drawing: d } : p)),
+    }),
+  ).current;
   useEffect(
     () => () => {
+      mounted.current = false;
       if (holdKey.current) abandonSeal(holdKey.current);
-      const d = liveResume.current;
-      if (d?.resume) {
-        void api('cancel', { nonce: d.resume.prepared.nonce }).catch(() => undefined);
-        try {
-          const ds = localStore().drawings;
-          const cur = ds?.get(d.key);
-          if (cur?.resume) ds?.save({ ...cur, resume: undefined });
-        } catch {
-          /* storage blocked */
-        }
-      }
+      retryHold.giveBack();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -204,12 +209,13 @@ export const NativeSealPage = () => {
    * chain services. Any failure → null (held, never dropped).
    */
   const txLookup = (): SealTxLookup => ({
-    find: (script, sinceMs) =>
+    find: (script, sinceMs, opts) =>
       findSealAction(
         (args) => apiContext.wallet.listActions(args) as ReturnType<ListActionsFn>,
         script,
         sinceMs,
         toolboxSdk.specOpFailedActions,
+        opts,
       ),
     beef: async (txid) => {
       try {
@@ -276,7 +282,11 @@ export const NativeSealPage = () => {
           manifest: p.manifest ?? null,
         });
         setPhase({ k: 'ready' });
-        recovery.current = recoverNativeSeals(api, localStore(), p.documentId, localLedger(), txLookup());
+        // This account's records only; key-less ones (saved before 6 Nov) here, on the document opened under it.
+        recovery.current = recoverNativeSeals(api, localStore(), p.documentId, localLedger(), txLookup(), {
+          identityKey: myKey,
+          keyless: true,
+        });
       } catch (e) {
         if (live) setPhase({ k: 'error', text: e instanceof Error ? e.message : 'Could not open the document.' });
       }
@@ -365,9 +375,14 @@ export const NativeSealPage = () => {
     opened.current = key;
     let live = true;
     const show = (recovered: boolean) => {
-      const n = openingNotice(sealStateHere(myKey, doc.documentId, ids, localStore(), localLedger()), recovered);
-      // A seal that proved unpaid kept its drawing: one tap, "Seal again", never a redraw (owner, 23 Nov 2026).
+      let n = openingNotice(sealStateHere(myKey, doc.documentId, ids, localStore(), localLedger()), recovered);
+      // Still not recorded a day after it was saved: a reference for support. Never cancelled (review of #560 M2).
+      const stuck = recovered && n ? heldTooLong(localStore(), myKey, doc.documentId, ids, Date.now()) : null;
+      if (stuck) n = { text: heldSupportMessage(stuck), busy: false };
+      // A seal that proved unpaid kept its drawing: one tap, "Seal again", never a redraw (owner, 23 Nov 2026). Its
+      // kept session (if any) is held only while this screen is up (L2).
       const d = n ? null : keptDrawing(key);
+      if (d) retryHold.hold(d);
       setPhase((p) =>
         p.k !== 'ready' && p.k !== 'notice'
           ? p
@@ -380,15 +395,15 @@ export const NativeSealPage = () => {
       return n;
     };
     if (show(false)?.busy)
-      void (recovery.current ?? Promise.resolve(0))
-        .catch(() => 0)
+      void (recovery.current ?? Promise.resolve([]))
+        .catch(() => [])
         .then(() => {
           if (live) show(true);
         });
     return () => {
       live = false;
     };
-  }, [doc, mine, myKey]);
+  }, [doc, mine, myKey, retryHold]);
   const fingerprint = useMemo(
     () => (doc ? Utils.toHex(Hash.sha256(Utils.toArray(doc.html, 'utf8'))).slice(0, 8) : ''),
     [doc],
@@ -506,7 +521,8 @@ export const NativeSealPage = () => {
     // Checked before use, a kept drawing read back from storage included.
     if (!svg || checkStrictSvg(svg) || !press.take()) return;
     reachedPay.current = false;
-    liveResume.current = null;
+    // The seal owns the kept session from here (its 2-minute give-back stops).
+    retryHold.take();
     holdKey.current = sealKey(
       myKey,
       doc.documentId,
@@ -597,7 +613,10 @@ export const NativeSealPage = () => {
           nonce: e.nonce,
           lookup: txLookup(),
           ledger: localLedger(),
+          // Left: the check stops; the record stays and recovery on the next open applies the same rule.
+          stopped: () => !mounted.current,
         });
+        if (!mounted.current) return;
         if (failure) reportFailure(failure, settled.k);
         if (settled.k === 'recorded') return void (await finishDone(settled.out, fee));
         if (settled.k === 'failed') return setPhase({ k: 'failed', text: settled.message });
@@ -617,7 +636,7 @@ export const NativeSealPage = () => {
         press.release();
         const d = unpaidAfterCheck || (e instanceof NativeSealError ? (e.drawing ?? null) : null);
         if (d) {
-          liveResume.current = d.resume ? d : null;
+          retryHold.hold(d);
           setPhase({
             k: 'retry',
             text: unpaidAfterCheck ? NOT_SENT_AFTER_CHECK_MESSAGE : text,
@@ -638,8 +657,7 @@ export const NativeSealPage = () => {
     } catch {
       /* storage blocked */
     }
-    if (d.resume) void api('cancel', { nonce: d.resume.prepared.nonce }).catch(() => undefined);
-    liveResume.current = null;
+    retryHold.giveBack();
     kept.current = undefined;
     setView('pad');
     setPhase({ k: 'ready' });
@@ -647,7 +665,7 @@ export const NativeSealPage = () => {
 
   /** Sealed: the receipt, the room's steps and the signed copy. Never throws (the seal itself is done). */
   const finishDone = async (out: NativeSealOutcome, feeSats: number | null) => {
-    liveResume.current = null;
+    retryHold.take();
     setPhase({ k: 'done', out, roomError: null, feeSats });
     try {
       await tellRoom(out, feeSats);
@@ -673,6 +691,29 @@ export const NativeSealPage = () => {
       setPhase({ k: 'done', out, roomError: e instanceof Error ? e.message : 'The room did not update.', feeSats });
     }
   };
+
+  /**
+   * This account's key for this seal now. The retry screen's drawing must still be its own (review of #560 L3): after
+   * an account switch it goes back to the pad (the other account's drawing stays stored for it; its session goes back).
+   */
+  const currentKey =
+    doc && mine.length
+      ? sealKey(
+          myKey,
+          doc.documentId,
+          mine.map((f) => f.id),
+        )
+      : '';
+  const backToPad = () => {
+    retryHold.giveBack();
+    kept.current = undefined;
+    setView('pad');
+    setPhase({ k: 'ready' });
+  };
+  useEffect(() => {
+    if (phase.k === 'retry' && !retryDrawingFits(phase.drawing, currentKey)) backToPad();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, currentKey]);
 
   const progress: SealProgress | null = phase.k === 'working' ? phase.step : phase.k === 'done' ? 'done' : null;
   const showPad = phase.k === 'ready' && !!doc && mine.length > 0 && view === 'pad';
@@ -728,6 +769,9 @@ export const NativeSealPage = () => {
         {phase.k === 'checking' && (
           <p role="status" aria-live="polite" className="text-[14px]" data-testid="seal-checking">
             {CHECKING_PAYMENT_LINE}
+            <span className="mt-1 block text-[12px]" style={{ color: '#a1a1aa' }}>
+              {CHECKING_PAYMENT_NOTE}
+            </span>
           </p>
         )}
         {phase.k === 'held' && (
@@ -749,7 +793,12 @@ export const NativeSealPage = () => {
             <button
               type="button"
               data-testid="seal-try-again"
-              onClick={() => void signAndSeal(phase.drawing.svg, phase.drawing.resume)}
+              onClick={() =>
+                // Still this account's seal (L3): an account switch on this screen goes back to the pad.
+                retryDrawingFits(phase.drawing, currentKey)
+                  ? void signAndSeal(phase.drawing.svg, phase.drawing.resume)
+                  : backToPad()
+              }
               className="min-h-12 w-full rounded-lg text-[15px] font-semibold"
               style={{ background: '#F5B800', color: '#0b0b0d' }}
             >

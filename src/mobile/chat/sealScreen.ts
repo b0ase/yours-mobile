@@ -70,6 +70,13 @@ export const SLOW_COMMIT_MS = 10_000;
 
 const satsWord = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'sat' : 'sats'}`;
 
+/**
+ * Is the drawing on the retry screen still this seal's (review of #560 L3)? An account switch changes the signer: then
+ * the screen goes back to the pad instead of sending another account's drawing or kept session.
+ */
+export const retryDrawingFits = (d: { key: string } | null | undefined, key: string): boolean =>
+  !!d && !!key && d.key === key;
+
 /** The retry button: "Try again · ~72 sats" / "Seal again · ~72 sats" (the same drawing; the sheet still asks). */
 export const retryLabel = (label: string, feeSats: number | null): string =>
   feeSats ? `${label} · ~${satsWord(feeSats)}` : label;
@@ -149,6 +156,8 @@ export const retryAllowed = (error: unknown, reachedPay: boolean): boolean => {
   if (error instanceof NativeSealError && error.code === 'already_sealed') return false;
   // This version is out of date (signer_race): the page offers the latest version instead of the same button.
   if (error instanceof NativeSealError && error.code === 'newer_version') return false;
+  // Being paid in another window (review of #560 M3): never a second payment from here.
+  if (error instanceof NativeSealError && error.code === 'elsewhere') return false;
   if (
     error instanceof NativeSealError &&
     (error.code === 'pending_recovery' || error.code === 'failed' || error.code === 'orphaned')

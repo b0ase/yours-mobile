@@ -15,6 +15,7 @@ import {
   nativeRoomSteps,
   nativeSignAndSeal,
   recoverNativeSeals,
+  recordedCount,
   SEAL_SPENT_MESSAGE,
   SEAL_TOO_BIG_MESSAGE,
   MAY_HAVE_PAID_MESSAGE,
@@ -41,6 +42,24 @@ import { consoleGate } from '../../testing/captureConsole';
 // nativeSeal logs every refusal and failure it handles (console.warn / console.info). Each test declares exactly the
 // lines its scenario causes; any other line, or a missing one, fails that test.
 const gate = consoleGate(['error', 'warn', 'info']);
+
+/** recoverNativeSeals as this account (SEAL_KEY; key-less records allowed for one document), counting recorded seals. */
+type RecoverArgs = Parameters<typeof recoverNativeSeals>;
+const recover = async (
+  api: RecoverArgs[0],
+  store: RecoverArgs[1],
+  documentId?: RecoverArgs[2],
+  ledger?: RecoverArgs[3],
+  lookup?: RecoverArgs[4],
+  opts: Partial<RecoverArgs[5]> = {},
+): Promise<number> =>
+  recordedCount(
+    await recoverNativeSeals(api, store, documentId, ledger ?? null, lookup, {
+      identityKey: SEAL_KEY,
+      keyless: true,
+      ...opts,
+    }),
+  );
 
 const memStore = () => {
   const m = new Map<string, PendingSeal>();
@@ -203,7 +222,7 @@ describe("nativeSignAndSeal: the web client's exact protocol, with the wallet's 
     }).catch((x) => x);
     expect(e.code).toBe('pending_recovery');
     expect(store.m.size).toBe(1);
-    const n = await recoverNativeSeals(api([]), store, 'D');
+    const n = await recover(api([]), store, 'D');
     expect(n).toBe(1);
     expect(store.m.size).toBe(0);
   });
@@ -647,7 +666,7 @@ describe('the broadcast receipt and in-progress (bit-sign fix/seal-receipt-sweep
     const one = async (reply: { ok: boolean; status: number; body: Record<string, unknown> }) => {
       const store = memStore();
       store.save({ documentId: 'D', nonce: 'N1', txid: TX, beefHex: '00', attestation: 'aa', savedAt: 1 });
-      const done = await recoverNativeSeals(async () => reply, store, 'D');
+      const done = await recover(async () => reply, store, 'D');
       return { done, kept: store.m.size };
     };
     expect(await one(inProgress(15))).toEqual({ done: 0, kept: 1 });

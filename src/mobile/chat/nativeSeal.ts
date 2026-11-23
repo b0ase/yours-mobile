@@ -91,6 +91,21 @@ export interface PendingSeal {
    * instead of a redraw. On this device only; gone with the record (success or cancel).
    */
   svg?: string;
+  /**
+   * The release rule's evidence (unpaidProven, review of #560 M1): how many times the wallet answered "no such action",
+   * spaced RELEASE_SPACING_MS apart, and when the first and last of those answers came.
+   */
+  notFound?: number;
+  notFoundFirstAt?: number;
+  notFoundLastAt?: number;
+  /**
+   * Paid on a kept (resumed) session (review of #560 M2): its output script is the earlier attempt's, so the lookup
+   * searches from savedAt exactly (no back-off window) and skips the earlier attempts' txids.
+   */
+  resumed?: boolean;
+  excludeTxids?: string[];
+  /** A context is settling this record on screen right now (settleUnsureSeal): recovery elsewhere leaves it alone. */
+  settling?: { by: string; until: number };
 }
 
 /**
@@ -100,8 +115,15 @@ export interface PendingSeal {
  * when it could not tell. `beef`: the AtomicBEEF for a txid, null when it can't be had yet.
  */
 export interface SealTxLookup {
-  /** `sinceMs`: when the record was saved; the search starts a minute before it. */
-  find(lockingScriptHex: string, sinceMs: number): Promise<{ found: false } | { found: true; txid: string } | null>;
+  /**
+   * `sinceMs`: when the record was saved; the search starts a minute before it, or exactly at it with `exact`.
+   * `exclude`: txids that are not this attempt's (an earlier attempt of a resumed seal).
+   */
+  find(
+    lockingScriptHex: string,
+    sinceMs: number,
+    opts?: { exact?: boolean; exclude?: readonly string[] },
+  ): Promise<{ found: false } | { found: true; txid: string } | null>;
   beef(txid: string): Promise<number[] | null>;
 }
 
@@ -133,9 +155,11 @@ export async function findSealAction(
   lockingScriptHex: string,
   sinceMs: number,
   failedLabel: string,
+  opts: { exact?: boolean; exclude?: readonly string[] } = {},
 ): Promise<{ found: false } | { found: true; txid: string } | null> {
   const want = lockingScriptHex.toLowerCase();
-  const from = `action time from ${Math.max(0, Math.floor(sinceMs - 60_000))}`;
+  const skip = new Set((opts.exclude ?? []).map((t) => t.toLowerCase()));
+  const from = `action time from ${Math.max(0, Math.floor(sinceMs - (opts.exact ? 0 : 60_000)))}`;
   try {
     for (const labels of [[from], [from, failedLabel]]) {
       for (let offset = 0; offset < 1_000_000; offset += SEAL_LOOKUP_PAGE) {
@@ -146,7 +170,10 @@ export async function findSealAction(
           limit: SEAL_LOOKUP_PAGE,
           offset,
         });
-        const hit = r.actions.find((a) => a.outputs?.some((o) => o.lockingScript?.toLowerCase() === want));
+        const hit = r.actions.find(
+          (a) =>
+            !skip.has(String(a.txid).toLowerCase()) && a.outputs?.some((o) => o.lockingScript?.toLowerCase() === want),
+        );
         if (hit?.txid) return { found: true, txid: hit.txid };
         if (r.actions.length < SEAL_LOOKUP_PAGE || offset + r.actions.length >= r.totalActions) break;
       }
@@ -162,7 +189,81 @@ export interface PendingSealStore {
   remove(nonce: string): void;
   /** Drawings kept for one-tap "Seal again" after a seal that proved unpaid (same device store; optional). */
   drawings?: SealDrawingStore;
+  /**
+   * Pay-only retries running now in ANY context sharing this store (an extension popup and a tab share localStorage;
+   * review of #560 M3). A kept session has no compose step, so bit-sign's composeHold can't stop a second context.
+   */
+  claims?: SealClaimStore;
 }
+
+/** "This context is paying this kept seal": who, and until when (then it is stale and ignored). */
+export interface SealClaim {
+  key: string;
+  by: string;
+  at: number;
+  until: number;
+}
+export interface SealClaimStore {
+  get(key: string): SealClaim | null;
+  save(c: SealClaim): void;
+  /** Removes it only when `by` still owns it. */
+  remove(key: string, by: string): void;
+}
+
+/** This JS context (page, popup, tab): owner of claims and settling marks. Random, never stored beyond them. */
+export const CONTEXT_ID: string = (() => {
+  const b = new Uint8Array(8);
+  try {
+    globalThis.crypto.getRandomValues(b);
+  } catch {
+    for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+})();
+/** A claim lasts at most bit-sign's session (approval + payment fit well inside). */
+export const SEAL_CLAIM_MS = 10 * 60_000;
+/** Shown in a second window that finds the kept seal being paid in another. Nothing was signed or paid here. */
+export const ELSEWHERE_MESSAGE = 'Already being sealed in another window. Nothing was paid here.';
+
+const liveClaim = (store: PendingSealStore, key: string, now: number): SealClaim | null => {
+  try {
+    const c = store.claims?.get(key) ?? null;
+    return c && c.until > now ? c : null;
+  } catch {
+    return null;
+  }
+};
+/**
+ * Is the claim on this kept seal still this context's? True too when the store keeps no claims, or can't be read
+ * (blocked storage: then no other context can be using it either, and this context's in-flight hold remains).
+ */
+const claimIsMine = (store: PendingSealStore, key: string, now: number): boolean => {
+  if (!store.claims) return true;
+  let c: SealClaim | null;
+  try {
+    c = store.claims.get(key);
+  } catch {
+    return true;
+  }
+  return !!c && c.until > now && c.by === CONTEXT_ID;
+};
+const dropClaim = (store: PendingSealStore, key: string) => {
+  try {
+    store.claims?.remove(key, CONTEXT_ID);
+  } catch {
+    /* storage blocked: the claim times out */
+  }
+};
+/** A record for this seal in the SHARED store (another context's unsure or paid record), whatever this context holds. */
+const storeHasSeal = (store: PendingSealStore, key: string): boolean => {
+  try {
+    return store
+      .list()
+      .some((p) => p.fieldIds !== undefined && sealKey(p.identityKey ?? '', p.documentId, p.fieldIds) === key);
+  } catch {
+    return false;
+  }
+};
 
 /**
  * ONE SIGNATURE PER DOCUMENT (owner, 23 Nov 2026: "having to do it twice is not good"). What a seal that proved unpaid
@@ -181,6 +282,8 @@ export interface SealResume {
   attestation: string;
   /** When bit-sign's signing session for the nonce ends (ms since epoch). */
   expiresAt: number;
+  /** Txids of earlier attempts on this session, if any were named: never this attempt's (review of #560 M2). */
+  failedTxids?: string[];
 }
 
 export interface SealDrawing {
@@ -209,6 +312,67 @@ export const RESUME_MARGIN_MS = 90_000;
 export const DRAWING_MAX_AGE_MS = 24 * 60 * 60_000;
 /** A drawing bigger than this is not kept on the device (the pad's own cap is 8 KB of path). */
 export const DRAWING_MAX_CHARS = 16 * 1024;
+
+// ── ONE release rule for an unsure record (review of #560 M1) ───────────────────────────────────────────────────────
+/** "No such action" must be answered at least this many times… */
+export const RELEASE_NOT_FOUND_TIMES = 2;
+/** …each at least this long after the last one counted… */
+export const RELEASE_SPACING_MS = 5_000;
+/** …and the record must be at least this old (a remote storage commit or a failover can lag behind the payment). */
+export const RELEASE_MIN_AGE_MS = 3 * 60_000;
+/** A held record with no transaction this long after it was saved: the page says "Contact support" (never cancels). */
+export const HELD_SUPPORT_AFTER_MS = 24 * 60 * 60_000;
+
+/** Pure: has the wallet proved, by the one rule, that this unsure record's payment was never built? */
+export const unpaidProven = (p: PendingSeal, now: number): boolean =>
+  !p.beefHex &&
+  !p.txid &&
+  (p.notFound ?? 0) >= RELEASE_NOT_FOUND_TIMES &&
+  (p.notFoundLastAt ?? 0) - (p.notFoundFirstAt ?? 0) >= RELEASE_SPACING_MS * (RELEASE_NOT_FOUND_TIMES - 1) &&
+  now - p.savedAt >= RELEASE_MIN_AGE_MS;
+
+/** Pure: one more "no such action" answer, counted only when RELEASE_SPACING_MS after the last one counted. */
+export const withNotFound = (p: PendingSeal, now: number): PendingSeal => {
+  const n = p.notFound ?? 0;
+  if (!n || p.notFoundFirstAt === undefined || p.notFoundLastAt === undefined)
+    return { ...p, notFound: 1, notFoundFirstAt: now, notFoundLastAt: now };
+  if (now - p.notFoundLastAt < RELEASE_SPACING_MS) return p;
+  return { ...p, notFound: n + 1, notFoundLastAt: now };
+};
+
+/** A record being settled on screen by a live context (its mark not yet stale). */
+export const beingSettled = (p: PendingSeal, now: number): boolean => !!p.settling && p.settling.until > now;
+
+/**
+ * A held seal of this signer, document and blocks still not recorded HELD_SUPPORT_AFTER_MS after it was saved (no
+ * transaction found, or bit-sign refused its payment), if any: the page says "Contact support"; nothing is cancelled.
+ */
+export const heldTooLong = (
+  store: PendingSealStore,
+  identityKey: string,
+  documentId: string,
+  fieldIds: readonly string[],
+  now: number,
+): PendingSeal | null => {
+  const key = sealKey(identityKey, documentId, fieldIds);
+  try {
+    return (
+      store
+        .list()
+        .find(
+          (p) =>
+            p.documentId === documentId &&
+            now - p.savedAt > HELD_SUPPORT_AFTER_MS &&
+            (p.fieldIds === undefined || sealKey(p.identityKey ?? '', p.documentId, p.fieldIds) === key),
+        ) ?? null
+    );
+  } catch {
+    return null;
+  }
+};
+/** The words for a held seal past HELD_SUPPORT_AFTER_MS: a reference support can find; nothing is cancelled. */
+export const heldSupportMessage = (p: Pick<PendingSeal, 'nonce'>): string =>
+  `This seal still isn't confirmed after a day. Contact support with reference seal-${p.nonce.slice(0, 12)}. Don't sign it again: no money is cancelled.`;
 
 /** Pure: is this stored drawing still usable for this seal? */
 export const drawingUsable = (d: SealDrawing | null | undefined, key: string, now: number): d is SealDrawing =>
@@ -379,6 +543,8 @@ export interface SealFailure {
   outcome: 'pending_recovery' | 'not_paid';
   step: SealStep;
   error: unknown;
+  /** The seal's session: reports are sent once per nonce and error kind (sealReport.ts). Never shown or reported. */
+  nonce?: string;
 }
 
 const tellFailure = (input: { onFailure?: (f: SealFailure) => void }, f: SealFailure) => {
@@ -390,13 +556,31 @@ const tellFailure = (input: { onFailure?: (f: SealFailure) => void }, f: SealFai
 };
 
 /** The words for a createAction that proved nothing went out: the wallet's own, always saying nothing was paid. */
-const notPaidText = (e: unknown): string => {
+export const notPaidText = (e: unknown): string => {
   const info = classifySendError(e, 'send');
   if (info.kind === 'cancelled') return 'You cancelled the payment. Nothing was paid.';
   const raw = (e instanceof Error ? e.message : typeof e === 'string' ? e : '').trim();
   if (!raw) return REFUSED_NOT_PAID_MESSAGE;
-  return /nothing (was|has been) (sent|paid)/i.test(raw) ? raw : `${raw.replace(/\s*$/, '')} Nothing was paid.`;
+  // One "Nothing was paid." (review of #560 L5): the wallet's own "Nothing was sent." becomes it, never both.
+  const said = raw.replace(/\bnothing (?:was|has been) (?:sent|paid)\b\.?/gi, 'Nothing was paid.');
+  return /nothing was paid/i.test(said) ? said : `${said.replace(/\s*$/, '')} Nothing was paid.`;
 };
+
+/**
+ * createAction refusals that happen before ANYTHING is built (review of #560 M2): only these keep the session for a
+ * pay-only retry. A refusal after building (spent elsewhere, a refused broadcast…) may have left an action with the
+ * same output script in the wallet, so its retry prepares a new session (new nonce, new script) from the same drawing.
+ */
+const PRE_BUILD_KINDS = new Set<SendErrorKind>([
+  'locked',
+  'worker-restarted',
+  'device-not-active',
+  'insufficient-funds',
+]);
+const isUsbRefusal = (e: unknown) =>
+  e instanceof Error && (e.name === 'UsbKeyAbsentError' || /^Insert your USB key to continue$/.test(e.message));
+export const refusedBeforeBuild = (e: unknown): boolean =>
+  provablyNotPaid(e) && (isUsbRefusal(e) || PRE_BUILD_KINDS.has(classifySendError(e, 'send').kind));
 /** How long a cancel may take at most before the seal goes on without it (it is best effort). */
 export const CANCEL_TIMEOUT_MS = 3_000;
 
@@ -426,8 +610,7 @@ export const provablyNotPaid = (e: unknown): boolean => {
   if (e && typeof e === 'object' && typeof (e as { txid?: unknown }).txid === 'string') return false;
   // The extension's USB-key gate (services/usbPresence.ts gateWalletOnUsb) refuses on the PAGE, before the call is even
   // sent to the background: nothing can have been built (23 Nov 2026 audit of what createAction throws).
-  if (e instanceof Error && (e.name === 'UsbKeyAbsentError' || /^Insert your USB key to continue$/.test(e.message)))
-    return true;
+  if (isUsbRefusal(e)) return true;
   const info = classifySendError(e, 'send');
   return info.moneyMoved === 'no' && !info.txid && NOTHING_SENT_KINDS.has(info.kind);
 };
@@ -485,7 +668,9 @@ export class NativeSealError extends Error {
       | 'failed'
       | 'spent_elsewhere'
       | 'not_paid'
-      | 'orphaned',
+      | 'orphaned'
+      /** A kept seal is being paid in another window (review of #560 M3): nothing here, never retried from here. */
+      | 'elsewhere',
     readonly status = 0,
     extra: { drawing?: SealDrawing; nonce?: string } = {},
   ) {
@@ -565,9 +750,17 @@ export const retryAfterMs = (r: Pick<SealApiReply, 'body'>): number => {
   const s = Number(r.body.retryAfter);
   return (Number.isFinite(s) && s > 0 ? Math.min(s, 120) : DEFAULT_RETRY_AFTER_S) * 1000;
 };
-/** After payment: keep the saved payment for later (network fault, server fault, in progress)? */
+/**
+ * After payment, is bit-sign's answer FINAL for the saved payment (#561 review B)? Only "recorded" (2xx, orphaned
+ * included) or "this session was already committed" (409 replayed). Everything else keeps the paid record: a network or
+ * server fault, in progress, 401 / 403 (a stale or rotated bChatX session), 404 (not_yours: asked as the wrong
+ * account) and any other refusal. Money is never forgotten on an answer that could change.
+ */
+const finalForPayment = (r: Pick<SealApiReply, 'ok' | 'status' | 'body'>): boolean =>
+  r.ok || (r.status === 409 && r.body.code === 'replayed');
+/** Keep it, and ask again later, without calling it refused: faults, in progress, and the answers of a wrong session. */
 const keepsPayment = (r: Pick<SealApiReply, 'status' | 'body'>): boolean =>
-  r.status === 0 || r.status >= 500 || isInProgress(r);
+  r.status === 0 || r.status >= 500 || isInProgress(r) || r.status === 401 || r.status === 403 || r.status === 404;
 /** Another party sealed the document first: the payment is recorded against the session, nothing to retry. */
 const isOrphaned = (b: Record<string, unknown>): boolean => b.orphaned === true;
 
@@ -599,7 +792,7 @@ async function sendReceipt(api: SealApi, body: Record<string, unknown>, timeoutM
 const SEAL_RETRY_FUTILE = [SPENT_ELSEWHERE_STUCK_MESSAGE, SPENT_ELSEWHERE_SHORT_MESSAGE];
 
 /** Shown when the seal's payment hit a coin already spent elsewhere. Plain words, never the toolbox text. */
-export const SEAL_SPENT_MESSAGE = 'A coin was already spent on another device. Tap Seal & pay again.';
+export const SEAL_SPENT_MESSAGE = 'A coin was already spent on another device. Nothing was paid. Tap Try again.';
 
 /**
  * Pure: did the seal's payment fail because a coin was already spent (same seed on another device)? Owner's iPhone,
@@ -726,6 +919,8 @@ export async function nativeSignAndSeal(input: {
       forgetDrawing(input.store, key);
     throw e;
   } finally {
+    // A pay-only retry's claim (review of #560 M3) ends with it: its unsure or paid record now speaks for it.
+    dropClaim(input.store, key);
     release();
     settle();
   }
@@ -748,15 +943,20 @@ function saveUnsure(
   attestation: string,
   lockingScriptHex: string,
   txid = '',
+  resumed?: SealResume | null,
 ) {
   try {
+    // The same record saved again (with a txid learnt): it keeps its first time, which the lookup and the release
+    // rule both measure from.
+    const before = input.store.list().find((x) => x.nonce === nonce);
     input.store.save({
       documentId: input.documentId,
       nonce,
       txid,
       beefHex: '',
       attestation,
-      savedAt: (input.now ?? Date.now)(),
+      savedAt: before?.savedAt ?? (input.now ?? Date.now)(),
+      ...(resumed ? { resumed: true, excludeTxids: [...(resumed.failedTxids ?? [])] } : {}),
       identityKey: input.identityKey ?? '',
       fieldIds: [...input.fieldIds],
       lockingScriptHex,
@@ -803,6 +1003,9 @@ export const resumeUsable = (
   }).ok;
 };
 
+/** Thrown inside afterPrepare when a kept session ran out during the approval (L1): prepare afresh, no second sheet. */
+class SessionRanOut extends Error {}
+
 async function signAndSealOnce(
   input: Parameters<typeof nativeSignAndSeal>[0],
   hold: Hold,
@@ -818,31 +1021,55 @@ async function signAndSealOnce(
     if (resumeUsable(input, kept, now())) reuse = kept;
     else if (kept.prepared?.nonce) await cancelSeal(input.api, kept.prepared.nonce, input.clock);
   }
-  let prepared: PreparedSeal;
-  let expiresAt: number;
   if (reuse) {
-    prepared = reuse.prepared;
-    expiresAt = reuse.expiresAt;
-  } else {
-    step('preparing');
-    const preparedAt = now();
-    prepared = (await call(input.api, 'prepare', {
-      documentId: input.documentId,
-      fieldIds: input.fieldIds,
-    })) as unknown as PreparedSeal;
-    expiresAt = sessionEnd(prepared, preparedAt);
+    // ⚠ TWO WINDOWS, ONE KEPT SEAL (review of #560 M3): there is no compose step to hold the session, so a claim in the
+    // shared store says who is paying it. Another live claim → this window stops, nothing signed or paid here.
+    const c = liveClaim(input.store, key, now());
+    if (c && c.by !== CONTEXT_ID) throw new NativeSealError(ELSEWHERE_MESSAGE, 'elsewhere');
+    try {
+      input.store.claims?.save({ key, by: CONTEXT_ID, at: now(), until: now() + SEAL_CLAIM_MS });
+    } catch {
+      /* storage blocked: this context's in-flight hold remains */
+    }
   }
+  /** Approved already in this call (a kept session that ran out during its approval): never a second sheet. */
+  let approved = false;
+  for (;;) {
+    let prepared: PreparedSeal;
+    let expiresAt: number;
+    if (reuse) {
+      prepared = reuse.prepared;
+      expiresAt = reuse.expiresAt;
+    } else {
+      step('preparing');
+      const preparedAt = now();
+      prepared = (await call(input.api, 'prepare', {
+        documentId: input.documentId,
+        fieldIds: input.fieldIds,
+      })) as unknown as PreparedSeal;
+      expiresAt = sessionEnd(prepared, preparedAt);
+    }
 
-  /** Set once createAction may have built or broadcast something: from then on the nonce is only cancelled on proof. */
-  let mayHavePaid = false;
-  try {
-    return await afterPrepare(input, hold, key, prepared, expiresAt, reuse, () => (mayHavePaid = true));
-  } catch (e) {
-    // Nothing can have been paid (before the payment, or a refusal that proves it): free the nonce, unless the failure
-    // kept this seal for a pay-only retry (its drawing carries the resume).
-    const keptForRetry = e instanceof NativeSealError && !!e.drawing?.resume;
-    if (!mayHavePaid && !keptForRetry) await cancelSeal(input.api, prepared.nonce, input.clock);
-    throw e;
+    /** Set once createAction may have built or broadcast something: from then on the nonce is only cancelled on proof. */
+    let mayHavePaid = false;
+    try {
+      return await afterPrepare(input, hold, key, prepared, expiresAt, reuse, approved, () => (mayHavePaid = true));
+    } catch (e) {
+      if (e instanceof SessionRanOut) {
+        // L1: the kept session ended while the sheet was up. Give it back and prepare a new one from the same drawing,
+        // without asking again: the approval was for this very seal of this document, at this fee.
+        await cancelSeal(input.api, prepared.nonce, input.clock);
+        dropClaim(input.store, key);
+        reuse = null;
+        approved = true;
+        continue;
+      }
+      // Nothing can have been paid (before the payment, or a refusal that proves it): free the nonce, unless the
+      // failure kept this seal for a pay-only retry (its drawing carries the resume), or another window is paying it.
+      const keptForRetry = e instanceof NativeSealError && (!!e.drawing?.resume || e.code === 'elsewhere');
+      if (!mayHavePaid && !keptForRetry) await cancelSeal(input.api, prepared.nonce, input.clock);
+      throw e;
+    }
   }
 }
 
@@ -853,6 +1080,7 @@ async function afterPrepare(
   prepared: PreparedSeal,
   expiresAt: number,
   reuse: SealResume | null,
+  preApproved: boolean,
   paymentMayHaveGoneOut: () => void,
 ): Promise<NativeSealOutcome> {
   const step = (s: SealStep) => input.onStep?.(s);
@@ -886,9 +1114,10 @@ async function afterPrepare(
     console.warn('[nativeSeal] refused before approval: seal too big', { refChars: ref.length, shownFee });
     throw new NativeSealError(SEAL_TOO_BIG_MESSAGE, 'refused');
   }
-  step('approving');
-  // EVERY payment, a retry too: the sheet, then Face ID / passcode or the wallet password (sealApproval.ts).
-  const answer = await input.approve(prepared, shownFee);
+  // EVERY payment, a retry too: the sheet, then Face ID / passcode or the wallet password (sealApproval.ts). The one
+  // exception is a kept session that ran out during THIS call's approval (SessionRanOut): approved once is enough.
+  if (!preApproved) step('approving');
+  const answer = preApproved ? true : await input.approve(prepared, shownFee);
   if (answer !== true && answer !== 'approved') {
     // Nothing was paid. A kept seal stays kept (its nonce is not cancelled) unless the person said no on the sheet.
     const declined = answer === false || answer === 'declined';
@@ -902,6 +1131,8 @@ async function afterPrepare(
         : FACE_ID_NOT_PAID_MESSAGE;
     throw new NativeSealError(text, 'cancelled', 0, { drawing: drawing(declined ? undefined : (reuse ?? undefined)) });
   }
+  // L1: the sheet can sit open for minutes. A kept session that ran out meanwhile is never paid on.
+  if (reuse && !(now() < reuse.expiresAt - RESUME_MARGIN_MS)) throw new SessionRanOut();
 
   if (input.coins?.pending()) {
     step('healing');
@@ -957,13 +1188,24 @@ async function afterPrepare(
     attestation = toHex(signature);
   }
   /** This seal, kept for a pay-only retry when the payment proves it went nowhere. */
-  const resume: SealResume = { key, svg, prepared, composed, attestation, expiresAt };
+  const resume: SealResume = {
+    key,
+    svg,
+    prepared,
+    composed,
+    attestation,
+    expiresAt,
+    ...(reuse?.failedTxids?.length ? { failedTxids: [...reuse.failedTxids] } : {}),
+  };
 
   // Left (abandonSeal) or held too long: stop here, before any money moves. From here the hold stays until settled.
   if (hold.abandoned)
     throw new NativeSealError(hold.abandoned === 'left' ? LEFT_PAGE_MESSAGE : EXPIRED_HOLD_MESSAGE, 'cancelled');
+  // ⚠ M3, right before any money moves: still this window's claim, and no other window's record for this seal.
+  if (reuse && (!claimIsMine(input.store, key, now()) || storeHasSeal(input.store, key)))
+    throw new NativeSealError(ELSEWHERE_MESSAGE, 'elsewhere');
   // ⚠ BEFORE ANY MONEY MOVES: an unsure record, so nothing that happens next can leave this seal unaccounted for.
-  saveUnsure(input, prepared.nonce, attestation, lockingScriptHex);
+  saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, '', reuse);
   hold.paying = true;
   step('paying');
   let paid: Awaited<ReturnType<SealKeys['createAction']>>;
@@ -978,29 +1220,32 @@ async function afterPrepare(
   } catch (e) {
     console.warn('[nativeSeal] pay failed', e instanceof Error ? e.message : e);
     if (provablyNotPaid(e)) {
-      // Refused before anything went out: nothing paid, the unsure record goes. The nonce, the composed record and the
-      // attestation are KEPT (not cancelled) so Try again only approves and pays: one signature per document.
+      // Refused before anything went out: nothing paid, the unsure record goes. Refused before anything was BUILT
+      // (refusedBeforeBuild): the nonce, the composed record and the attestation are KEPT so Try again only approves
+      // and pays. Any other refusal (review of #560 M2): the drawing only; the nonce is cancelled and Try again
+      // prepares a new session, so its output script can never be confused with this attempt's.
       input.store.remove(prepared.nonce);
-      const kept = keepDrawing(input.store, drawing(resume));
-      tellFailure(input, { outcome: 'not_paid', step: 'paying', error: e });
+      const kept = keepDrawing(input.store, refusedBeforeBuild(e) ? drawing(resume) : drawing());
+      tellFailure(input, { outcome: 'not_paid', step: 'paying', error: e, nonce: prepared.nonce });
       if (isSpentCoinError(e)) throw new NativeSealError(SEAL_SPENT_MESSAGE, 'spent_elsewhere', 0, { drawing: kept });
       throw new NativeSealError(notPaidText(e), 'not_paid', 0, { drawing: kept });
     }
     // ⚠ ANY DOUBT: it may have gone out. Never cancel the nonce, never offer a retry; this seal is held on this phone
     // (with the drawing) until its transaction is found in the wallet's own storage, or proved never built.
     paymentMayHaveGoneOut();
-    if (txidIn(e)) saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, txidIn(e));
-    tellFailure(input, { outcome: 'pending_recovery', step: 'paying', error: e });
+    if (txidIn(e)) saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, txidIn(e), reuse);
+    tellFailure(input, { outcome: 'pending_recovery', step: 'paying', error: e, nonce: prepared.nonce });
     throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery', 0, { nonce: prepared.nonce });
   }
   if (!paid?.txid || !paid.tx) {
     // A txid with no transaction (or neither): it may well have gone out. The unsure record stays (with the txid).
     paymentMayHaveGoneOut();
     const t = typeof paid?.txid === 'string' && /^[0-9a-f]{64}$/i.test(paid.txid) ? paid.txid.toLowerCase() : '';
-    if (t) saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, t);
+    if (t) saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, t, reuse);
     tellFailure(input, {
       outcome: 'pending_recovery',
       step: 'paying',
+      nonce: prepared.nonce,
       error: new Error(t ? 'createAction answered a txid without its transaction' : 'createAction answered no txid'),
     });
     throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery', 0, { nonce: prepared.nonce });
@@ -1067,10 +1312,10 @@ async function afterPrepare(
         lastErr = typeof r.body.error === 'string' ? r.body.error : 'being recorded right now';
         if (i < IN_PROGRESS_TRIES - 1) waitMs = retryAfterMs(r);
       } else if (keepsPayment(r)) {
-        break; // network / server fault: kept for the next open
+        break; // network / server fault, or a session that can change: kept for the next open
       } else {
-        // A definitive refusal (4xx other than 429): retrying later will not help.
-        input.store.remove(prepared.nonce);
+        // A refusal. Only "already committed" (replayed) lets the paid record go; any other is kept for support.
+        if (finalForPayment(r)) input.store.remove(prepared.nonce);
         throw new NativeSealError(
           typeof r.body.error === 'string' ? r.body.error : 'The seal could not be recorded.',
           'failed',
@@ -1093,6 +1338,7 @@ async function afterPrepare(
       outcome: 'pending_recovery',
       step: 'committing',
       error: new Error(lastErr || 'not recorded'),
+      nonce: prepared.nonce,
     });
     throw new NativeSealError(
       `Paid (${txid.slice(0, 12)}…) but not recorded yet${lastErr ? ` (${lastErr})` : ''}. It is saved on this phone and will be finished the next time you open this document.`,
@@ -1112,8 +1358,9 @@ async function afterPrepare(
 }
 
 /**
- * An unsure record proved unpaid (the wallet never built its transaction): the record goes, the nonce is cancelled
- * (bit-sign never recovers a cancelled nonce) and the drawing is kept for "Seal again". Returns that drawing, if any.
+ * An unsure record proved unpaid by the ONE rule (unpaidProven): the record goes, the nonce is cancelled (bit-sign
+ * never composes a cancelled nonce again, but still records a paid BEEF for it, so a late find is not lost on the
+ * server) and the drawing is kept for "Seal again". Returns that drawing, if any.
  */
 async function releaseUnpaid(
   api: SealApi,
@@ -1137,22 +1384,29 @@ async function releaseUnpaid(
 /**
  * An unsure record (no BEEF): look its transaction up in this wallet's own storage. 'found': saved with its BEEF as an
  * ordinary paid record, which /recover then records (bit-sign records a paid seal even on a cancelled session).
- * 'not_found': the wallet answered and none was ever built (the record is left for the caller to release). 'unknown':
- * no lookup, no script, the lookup failed, or the BEEF is not to be had yet; held, never dropped while a transaction
- * might exist (a txid learnt is kept).
+ * 'not_found': the wallet answered "no such action"; the answer is counted ON the record (withNotFound), and the record
+ * is released only when unpaidProven says so. 'unknown': no lookup, no script, the lookup failed, or the BEEF is not to
+ * be had yet; held (a txid learnt is kept). A record paid on a kept session is searched from its own time exactly,
+ * skipping earlier attempts' txids (review of #560 M2).
  */
 async function lookUpUnsure(
   store: PendingSealStore,
   p: PendingSeal,
   lookup: SealTxLookup | undefined,
+  now: () => number,
 ): Promise<'found' | 'not_found' | 'unknown'> {
   if (!lookup) return 'unknown';
   let txid = p.txid;
   if (!txid) {
     if (!p.lockingScriptHex) return 'unknown';
-    const f = await lookup.find(p.lockingScriptHex, p.savedAt).catch(() => null);
+    const f = await lookup
+      .find(p.lockingScriptHex, p.savedAt, p.resumed ? { exact: true, exclude: p.excludeTxids ?? [] } : undefined)
+      .catch(() => null);
     if (!f) return 'unknown';
-    if (!f.found) return 'not_found';
+    if (!f.found) {
+      store.save(withNotFound(p, now()));
+      return 'not_found';
+    }
     txid = f.txid.toLowerCase();
   }
   const tx = await lookup.beef(txid).catch(() => null);
@@ -1164,72 +1418,147 @@ async function lookUpUnsure(
   return 'found';
 }
 
+/** What recovery did with one saved record (so a caller can say the true thing). */
+export type RecoverOutcome =
+  /** bit-sign recorded it (orphaned: another party sealed first; the payment is recorded against the session). */
+  | 'recorded'
+  /** Proven never built (unpaidProven): released, nonce cancelled, drawing kept. */
+  | 'released'
+  /** Still held: unknown, in flight, being settled, a fault, or an answer that can change (401 / 403 / 404). */
+  | 'kept'
+  /** bit-sign refused it with an answer that won't change on its own. Kept on the phone (never forgotten): support. */
+  | 'refused';
+export interface RecoverResult {
+  nonce: string;
+  documentId: string;
+  outcome: RecoverOutcome;
+  orphaned?: true;
+}
+/** How many records recovery recorded (orphaned ones not counted). */
+export const recordedCount = (rs: readonly RecoverResult[]): number =>
+  rs.filter((r) => r.outcome === 'recorded' && !r.orphaned).length;
+
 /**
- * Finish seals saved on this phone (for this document, or all): paid-but-unrecorded ones through /recover, unsure ones
- * through the wallet's own storage first (lookUpUnsure). One the wallet never built is released as unpaid (its drawing
- * kept for "Seal again"). A seal running right now is left alone. Never throws.
+ * Finish seals saved on this phone for THIS account (#561 review A): records saved by another identity key are never
+ * touched (their recovery would ask bit-sign as the wrong account, or search the wrong wallet). Records with no
+ * identity key (saved before 6 Nov 2026) are recovered only with `keyless` for one document, from the seal page opened
+ * under the right account; never in bulk. Paid-but-unrecorded ones go through /recover; unsure ones through the
+ * wallet's own storage first (lookUpUnsure) and are released only by unpaidProven. A seal running or being settled
+ * right now is left alone. Never throws.
  */
 export async function recoverNativeSeals(
   api: SealApi,
   store: PendingSealStore,
-  documentId?: string,
-  ledger?: SealLedger | null,
-  lookup?: SealTxLookup,
-): Promise<number> {
-  let done = 0;
-  for (const saved of store.list()) {
-    let p = saved;
+  documentId: string | undefined,
+  ledger: SealLedger | null | undefined,
+  lookup: SealTxLookup | undefined,
+  opts: { identityKey: string; keyless?: boolean; now?: () => number },
+): Promise<RecoverResult[]> {
+  const now = opts.now ?? Date.now;
+  const me = (opts.identityKey || '').toLowerCase();
+  const out: RecoverResult[] = [];
+  let saved: PendingSeal[] = [];
+  try {
+    saved = store.list();
+  } catch {
+    return out;
+  }
+  for (const s0 of saved) {
+    let p = s0;
     if (documentId && p.documentId !== documentId) continue;
-    // Still being paid in this app (a page left mid-payment): its own flow settles it.
-    if (p.fieldIds && inFlight.has(sealKey(p.identityKey ?? '', p.documentId, p.fieldIds))) continue;
+    if (p.identityKey === undefined || p.identityKey === '') {
+      if (!(opts.keyless && documentId)) continue;
+    } else if (!me || p.identityKey.toLowerCase() !== me) continue;
+    const result = (outcome: RecoverOutcome, orphaned = false) =>
+      out.push({ nonce: p.nonce, documentId: p.documentId, outcome, ...(orphaned ? { orphaned: true as const } : {}) });
+    // Still being paid in this app (a page left mid-payment), or settled on screen by a live context: theirs.
+    if (p.fieldIds && inFlight.has(sealKey(p.identityKey ?? '', p.documentId, p.fieldIds))) {
+      result('kept');
+      continue;
+    }
+    if (beingSettled(p, now())) {
+      result('kept');
+      continue;
+    }
     try {
       if (!p.beefHex) {
-        const r = await lookUpUnsure(store, p, lookup);
-        if (r === 'not_found') await releaseUnpaid(api, store, p);
-        if (r !== 'found') continue;
-        p = store.list().find((x) => x.nonce === saved.nonce) ?? p;
-        if (!p.beefHex) continue;
+        const r = await lookUpUnsure(store, p, lookup, now);
+        p = store.list().find((x) => x.nonce === s0.nonce) ?? p;
+        if (r === 'not_found' && unpaidProven(p, now())) {
+          await releaseUnpaid(api, store, p, now);
+          result('released');
+          continue;
+        }
+        if (r !== 'found' || !p.beefHex) {
+          result('kept');
+          continue;
+        }
       }
       const r = await api('recover', { nonce: p.nonce, attestation: p.attestation, txid: p.txid, beefHex: p.beefHex });
-      // In progress (429 / commit_in_progress), network or server fault: keep it for the next open or the sweep.
-      if (keepsPayment(r)) continue;
-      // Success (idempotent too), an orphaned result, or a definitive refusal: done with it.
+      if (keepsPayment(r)) {
+        result('kept');
+        continue;
+      }
+      if (!finalForPayment(r)) {
+        result('refused'); // kept on the phone: "Contact support" after HELD_SUPPORT_AFTER_MS
+        continue;
+      }
       store.remove(p.nonce);
       const key = sealKey(p.identityKey ?? '', p.documentId, p.fieldIds ?? []);
-      // Recorded (or sealed first by another party): sealed either way, never offered again from here.
-      if (r.ok) {
-        markSealed(ledger, key);
-        forgetDrawing(store, key);
-      }
-      if (r.ok && !isOrphaned(r.body)) done++;
+      // Recorded (or sealed first by another party, or committed already): never offered again from here.
+      markSealed(ledger, key);
+      forgetDrawing(store, key);
+      result('recorded', r.ok ? isOrphaned(r.body) : true);
     } catch {
-      /* next time */
+      result('kept');
     }
   }
-  return done;
+  return out;
 }
 
-/** The on-screen check after an unclear payment: waits before each look (≈28 s in all, growing). */
+/** The on-screen check after an unclear payment: waits before each look, growing, then every SETTLE_LATER_MS. */
 export const SETTLE_DELAYS_MS = [2_000, 3_000, 5_000, 8_000, 10_000] as const;
-/** "Not built" counts only when the wallet says so this many times in a row, seconds apart. */
-export const SETTLE_NOT_FOUND_TIMES = 2;
+export const SETTLE_LATER_MS = 20_000;
+/**
+ * The check runs at most this long: long enough for the release rule (RELEASE_MIN_AGE_MS since the record was saved)
+ * to decide on screen. Leaving the screen stops it; recovery on the next open applies the same rule.
+ */
+export const SETTLE_MAX_MS = 4 * 60_000;
+/** A settling mark lasts this long unless refreshed (each look refreshes it). */
+export const SETTLE_MARK_MS = 60_000;
 export const CHECKING_PAYMENT_LINE = 'Checking whether the payment went out…';
+/** Under the line: why it can take a while, and that leaving is safe. */
+export const CHECKING_PAYMENT_NOTE =
+  "This can take up to 3 minutes. You can leave this screen: it's finished when you open it again.";
+
+/** The schedule of waits: SETTLE_DELAYS_MS, then SETTLE_LATER_MS until about SETTLE_MAX_MS. */
+export const settleSchedule = (): number[] => {
+  const out: number[] = [...SETTLE_DELAYS_MS];
+  let total = out.reduce((a, b) => a + b, 0);
+  while (total + SETTLE_LATER_MS <= SETTLE_MAX_MS) {
+    out.push(SETTLE_LATER_MS);
+    total += SETTLE_LATER_MS;
+  }
+  return out;
+};
 
 export type SettleResult =
   /** Found in the wallet and recorded by /recover: one payment, signature recorded. */
   | { k: 'recorded'; out: NativeSealOutcome }
-  /** The wallet never built it: the nonce is cancelled and the drawing kept (Try again, no redraw). */
+  /** Proven never built (unpaidProven): the nonce is cancelled and the drawing kept (Try again, no redraw). */
   | { k: 'not_paid'; drawing: SealDrawing | null }
-  /** Still unknown: held on this phone, finished by recovery on the next open. Never sign again. */
+  /** Still unknown (or the screen was left): held on this phone, finished by recovery on the next open. */
   | { k: 'unknown' }
-  /** Found and paid, but bit-sign refused it for good, or another party sealed first. Nothing to retry. */
+  /** Found and paid, but bit-sign refused it with an answer that won't change, or another party sealed first. */
   | { k: 'failed'; code: 'failed' | 'orphaned'; message: string };
 
 /**
- * Resolve an unclear seal payment ON THE SAME SCREEN instead of leaving the person at "failed" (owner, 23 Nov 2026):
- * looks for its transaction in this wallet's own storage a few times over about half a minute (bounded, with backoff).
- * Found → /recover with its BEEF (no second payment). Proved never built (SETTLE_NOT_FOUND_TIMES answers in a row, not
- * merely a failed lookup) → released as unpaid, drawing kept. Otherwise it stays held. Never pays, never throws.
+ * Resolve an unclear seal payment ON THE SAME SCREEN instead of leaving the person at "failed" (owner, 23 Nov 2026).
+ * Looks for its transaction in this wallet's own storage on settleSchedule() (bounded, with backoff), marking the
+ * record as being settled so recovery in another page or window leaves it alone. Found → /recover with its BEEF (no
+ * second payment). Released only by the ONE rule (unpaidProven: ≥2 "no such action" answers ≥5 s apart, and the record
+ * ≥3 minutes old); until then the record is kept, so a late find still goes to /recover. `stopped()` (the page left)
+ * ends it at the next step, keeping the record. Never pays, never throws.
  */
 export async function settleUnsureSeal(o: {
   api: SealApi;
@@ -1240,37 +1569,68 @@ export async function settleUnsureSeal(o: {
   sleep?: (ms: number) => Promise<void>;
   delaysMs?: readonly number[];
   now?: () => number;
+  stopped?: () => boolean;
 }): Promise<SettleResult> {
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  let notFound = 0;
-  for (const wait of o.delaysMs ?? SETTLE_DELAYS_MS) {
-    await sleep(wait);
+  const now = o.now ?? Date.now;
+  const find = () => {
     try {
-      let p = o.store.list().find((x) => x.nonce === o.nonce);
-      // Gone: another page's recovery took it. What it did is not known here; the card shows the real state on open.
-      if (!p) return { k: 'unknown' };
-      const key = sealKey(p.identityKey ?? '', p.documentId, p.fieldIds ?? []);
-      // Never while this seal is paying again in this app.
-      if (p.fieldIds && inFlight.has(key)) return { k: 'unknown' };
-      if (!p.beefHex) {
-        const r = await lookUpUnsure(o.store, p, o.lookup);
-        if (r === 'not_found') {
-          if (++notFound < SETTLE_NOT_FOUND_TIMES) continue;
-          return { k: 'not_paid', drawing: await releaseUnpaid(o.api, o.store, p, o.now) };
+      return o.store.list().find((x) => x.nonce === o.nonce);
+    } catch {
+      return undefined;
+    }
+  };
+  const mark = (until: number | null) => {
+    const p = find();
+    if (!p) return;
+    try {
+      if (until === null) {
+        if (p.settling?.by === CONTEXT_ID) {
+          const { settling: _gone, ...rest } = p;
+          void _gone;
+          o.store.save(rest);
         }
-        notFound = 0;
-        if (r !== 'found') continue;
-        p = o.store.list().find((x) => x.nonce === o.nonce);
-        if (!p?.beefHex) continue;
-      }
-      const body = { nonce: p.nonce, attestation: p.attestation, txid: p.txid, beefHex: p.beefHex };
-      const r = await o.api('recover', body).catch(() => null);
-      if (!r || keepsPayment(r)) continue; // in progress, network or server fault: look again
-      o.store.remove(p.nonce);
-      if (r.ok) {
+      } else o.store.save({ ...p, settling: { by: CONTEXT_ID, until } });
+    } catch {
+      /* storage blocked: recovery may run alongside; both only ever keep or record */
+    }
+  };
+  try {
+    for (const wait of o.delaysMs ?? settleSchedule()) {
+      mark(now() + wait + SETTLE_MARK_MS);
+      await sleep(wait);
+      if (o.stopped?.()) return { k: 'unknown' };
+      try {
+        let p = find();
+        // Gone: another page's recovery took it. What it did is not known here; the card shows the real state on open.
+        if (!p) return { k: 'unknown' };
+        const key = sealKey(p.identityKey ?? '', p.documentId, p.fieldIds ?? []);
+        // Never while this seal is paying again in this app.
+        if (p.fieldIds && inFlight.has(key)) return { k: 'unknown' };
+        if (!p.beefHex) {
+          const r = await lookUpUnsure(o.store, p, o.lookup, now);
+          p = find();
+          if (!p) return { k: 'unknown' };
+          if (r === 'not_found') {
+            if (!unpaidProven(p, now())) continue;
+            return { k: 'not_paid', drawing: await releaseUnpaid(o.api, o.store, p, o.now) };
+          }
+          if (r !== 'found' || !p.beefHex) continue;
+        }
+        const body = { nonce: p.nonce, attestation: p.attestation, txid: p.txid, beefHex: p.beefHex };
+        const r = await o.api('recover', body).catch(() => null);
+        if (!r || keepsPayment(r)) continue; // in progress, a fault, or a session that can change: look again
+        if (!finalForPayment(r))
+          return {
+            k: 'failed',
+            code: 'failed',
+            message:
+              typeof r.body.error === 'string' && r.body.error ? r.body.error : 'The seal could not be recorded.',
+          };
+        o.store.remove(p.nonce);
         markSealed(o.ledger, key);
         forgetDrawing(o.store, key);
-        if (isOrphaned(r.body))
+        if (!r.ok || isOrphaned(r.body))
           return {
             k: 'failed',
             code: 'orphaned',
@@ -1292,17 +1652,14 @@ export async function settleUnsureSeal(o: {
             ...(feeSats != null ? { feeSats } : {}),
           },
         };
+      } catch {
+        /* look again */
       }
-      return {
-        k: 'failed',
-        code: 'failed',
-        message: typeof r.body.error === 'string' && r.body.error ? r.body.error : 'The seal could not be recorded.',
-      };
-    } catch {
-      /* look again */
     }
+    return { k: 'unknown' };
+  } finally {
+    mark(null);
   }
-  return { k: 'unknown' };
 }
 
 // ── The drawn signature, in exactly the web pad's format (bit-sign InPlaceSignaturePad / SovereignSignature) ──────────
