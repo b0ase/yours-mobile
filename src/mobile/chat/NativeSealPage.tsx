@@ -49,8 +49,10 @@ import {
   archiveRefusedSeal,
   heldSupportMessage,
   heldTooLong,
+  paidAgainDrawingMessage,
   paidRefusedMessage,
   refusedRecordFor,
+  sealBusyElsewhere,
   settleUnsureSeal,
   type RecoverResult,
   inertHtml,
@@ -189,6 +191,8 @@ export const NativeSealPage = () => {
   const retryHold = useRef(
     createRetryHold({
       cancel: (nonce) => void api('cancel', { nonce }).catch(() => undefined),
+      // Never cancel a session another window is paying on (review of #560 L4).
+      busyElsewhere: (key) => sealBusyElsewhere(localStore(), key, Date.now()),
       drawings: () => localStore().drawings,
       onGiveBack: (d) => setPhase((p) => (p.k === 'retry' && p.drawing.key === d.key ? { ...p, drawing: d } : p)),
     }),
@@ -410,7 +414,13 @@ export const NativeSealPage = () => {
           : n
             ? { k: 'notice', text: n.text, busy: n.busy }
             : d
-              ? { k: 'retry', text: RESTORED_DRAWING_MESSAGE, drawing: d, label: SEAL_AGAIN_LABEL }
+              ? {
+                  k: 'retry',
+                  // A paid seal set aside for support (L6) is never "Nothing was paid".
+                  text: d.paidRef ? paidAgainDrawingMessage(d.paidRef) : RESTORED_DRAWING_MESSAGE,
+                  drawing: d,
+                  label: SEAL_AGAIN_LABEL,
+                }
               : { k: 'ready' },
       );
       return n;
@@ -703,7 +713,12 @@ export const NativeSealPage = () => {
     const d = keptDrawing(currentKey);
     if (d) {
       retryHold.hold(d);
-      setPhase({ k: 'retry', text: PAY_AGAIN_CONFIRM_MESSAGE, drawing: d, label: SEAL_AGAIN_LABEL });
+      setPhase({
+        k: 'retry',
+        text: d.paidRef ? paidAgainDrawingMessage(d.paidRef) : PAY_AGAIN_CONFIRM_MESSAGE,
+        drawing: d,
+        label: SEAL_AGAIN_LABEL,
+      });
     } else setPhase({ k: 'ready' });
   };
 

@@ -124,6 +124,34 @@ export const localClaims = (store: Store | null = defaultStore(), now: () => num
   };
 };
 
+/** A support entry's BEEF is dropped this long after it was archived (the txid and reference stay for good). */
+export const SUPPORT_BEEF_MAX_AGE_MS = 90 * 24 * 60 * 60_000;
+/** The support list's BEEFs together stay under this; past it the oldest entries' BEEFs go first. */
+export const SUPPORT_BEEF_MAX_CHARS = 256 * 1024;
+
+/**
+ * Keep the support list small without ever losing an entry (review of #560 L5): every refused-paid entry stays, with
+ * its nonce, txid, reference, refusal and attestation. Only the BEEF (the bulk, and fetchable again by txid) is
+ * dropped: from entries archived over SUPPORT_BEEF_MAX_AGE_MS ago, then oldest first while the list's BEEFs pass
+ * SUPPORT_BEEF_MAX_CHARS. Pure.
+ */
+export const boundSupport = (list: PendingSeal[], now: number): PendingSeal[] => {
+  const out = list.map((p) =>
+    p.beefHex && now - (p.archivedAt ?? p.savedAt) > SUPPORT_BEEF_MAX_AGE_MS ? { ...p, beefHex: '' } : p,
+  );
+  let total = out.reduce((n, p) => n + (p.beefHex?.length ?? 0), 0);
+  const oldestFirst = [...out.keys()].sort(
+    (a, b) => (out[a].archivedAt ?? out[a].savedAt) - (out[b].archivedAt ?? out[b].savedAt),
+  );
+  for (const i of oldestFirst) {
+    if (total <= SUPPORT_BEEF_MAX_CHARS) break;
+    if (!out[i].beefHex) continue;
+    total -= out[i].beefHex.length;
+    out[i] = { ...out[i], beefHex: '' };
+  }
+  return out;
+};
+
 export const localStore = (store: Store | null = defaultStore(), now: () => number = Date.now): PendingSealStore => {
   const read = () => readList<PendingSeal>(store, PENDING_SEALS_KEY);
   return {
@@ -140,10 +168,14 @@ export const localStore = (store: Store | null = defaultStore(), now: () => numb
     support: {
       list: () => readList<PendingSeal>(store, SEAL_SUPPORT_KEY),
       save: (p) =>
-        writeList(store, SEAL_SUPPORT_KEY, [
-          ...readList<PendingSeal>(store, SEAL_SUPPORT_KEY).filter((x) => x.nonce !== p.nonce),
-          p,
-        ]),
+        writeList(
+          store,
+          SEAL_SUPPORT_KEY,
+          boundSupport(
+            [...readList<PendingSeal>(store, SEAL_SUPPORT_KEY).filter((x) => x.nonce !== p.nonce), p],
+            now(),
+          ),
+        ),
     },
   };
 };

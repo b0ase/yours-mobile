@@ -100,21 +100,32 @@ password, every time) → compose → `createSignature` → `createAction` (one 
     saved shows "Contact support with reference seal-…"; money is never cancelled automatically.
   - Every record is looked up from a minute before it was saved: a remote storage stamps actions with its own clock,
     so an exact window could miss the real payment.
+  - A **candidate** is any action with the seal's script or the seal's description ("bit-sign: sign and seal a
+    document"). "No such action" means no candidate at all. A candidate with no txid yet (built, not signed) makes the
+    answer unsure; one found by description whose script the storage kept truncated ('' for scripts over ~1 KB) is
+    checked against its own transaction, and if none carries this seal's script the answer stays unsure. An unsure
+    answer is never evidence for release.
+  - While a window's createAction runs, its record carries a heart-beaten "paying" mark (same timings as the claim);
+    recovery and settle in any window leave the record alone while it lives.
 - **Recovery** (`recoverNativeSeals`) only touches the open account's records (key-less records from before 6 Nov only
   from the seal page, for that one document) and says what it did per record: recorded, released, kept or refused. A
   paid record is removed only when bit-sign says it is recorded (or the session was committed: 409 replayed); 401, 403,
   404 (not_yours), faults and in-progress keep it. Any other refusal (a 422, say) puts it in its own **refused** state:
   "Paid, but bChatX wouldn't record it. Contact support (ref seal-…)", never "Already sealed". /recover is asked
-  again on each open only inside bit-sign's window (24 h after the session ends). Under the message, **Seal again
+  again on each open until bit-sign itself answers 410 (its window closed); the phone's clock never decides that. Under the message, **Seal again
   (you'll pay again)**, after a confirm, moves the record to the support list (`bwx.nativeSeal.support`, never deleted)
-  and starts a new seal with the same drawing. The room card says "Paid · contact support".
+  and starts a new seal with the same drawing, worded as paid ("Your first payment is with support (ref …)"), never
+  "Nothing was paid". Support entries are never removed; only their BEEFs go, after 90 days or oldest first past
+  256 KB in all (the txid and reference stay). The room card says "Paid · contact support".
 - **The drawing is kept on the device** (`src/mobile/chat/sealStore.ts`): with the held record
   (`bwx.nativeSeal.pending`, field `svg`), and after a not-paid seal in `bwx.nativeSeal.drawings` (at most 10, 24 h,
   16 KB each). Reopening after a crash or relaunch that recovery proves unpaid offers **Seal again** with that same
   drawing. Cleared on success, on Cancel at the sheet and on Draw again. A restored drawing is checked
   (`checkStrictSvg`) before it is used.
 - **Never double-pay:** no Try again while the money may have moved; the in-flight hold, the claim and one live seal per
-  signer, document and blocks (`sealStateHere`) apply to every retry; the on-screen check never pays and leaves a seal
+  signer, document and blocks (`sealStateHere`) apply to every retry; right before ANY seal pays, another window's
+  live claim or record for it stops it, and a record the store didn't keep (storage full) means no payment; the retry
+  screen never cancels a session another window is paying on; the on-screen check never pays and leaves a seal
   that is paying again alone.
 - **Reported to b:** every pending_recovery / not_paid seal sends one report per nonce and error kind through "Report to
   b" (`sendOrQueueReport`: b_feedback, or the outbox) with the `createAction` error's kind and moneyMoved

@@ -103,10 +103,15 @@ export interface PendingSeal {
    * ('refused'), "Contact support", and an explicit "Seal again (you'll pay again)" that archives it (never deletes).
    */
   refused?: { at: number; status: number; error: string };
-  /** When the seal's bit-sign session ends (ms): /recover is asked only until SEAL_RECOVERY_WINDOW_MS after it. */
+  /** When the seal's bit-sign session ends (ms): kept for support. Whether /recover still works is bit-sign's answer. */
   sessionEndsAt?: number;
   /** A context is settling this record on screen right now (settleUnsureSeal): recovery elsewhere leaves it alone. */
   settling?: { by: string; until: number };
+  /**
+   * A context's createAction for this record is still running (review of #560 L2): heart-beaten like a claim
+   * (CLAIM_BEAT_MS, dead after CLAIM_STALE_MS). Recovery and settle anywhere treat the record as kept while it lives.
+   */
+  paying?: { by: string; at: number; until: number };
   /** The room's ticker, when the seal flow knew it: a recovered seal tells the Signed list (SealRecorded) with it. */
   ticker?: string;
   /** In the support list: when "Seal again (you'll pay again)" archived it. */
@@ -124,9 +129,23 @@ export interface SealTxLookup {
    * `sinceMs`: when the record was saved; the search starts a minute before it. Always (review of #560 N1): the
    * phone's clock is compared with the storage's created_at, which a remote storage stamps with its own clock.
    */
-  find(lockingScriptHex: string, sinceMs: number): Promise<{ found: false } | { found: true; txid: string } | null>;
+  find(lockingScriptHex: string, sinceMs: number): Promise<SealLookupAnswer>;
   beef(txid: string): Promise<number[] | null>;
 }
+
+/**
+ * What the wallet's own storage says about an unsure seal:
+ *  - { found: true, txid }: its action, with a txid (recovery fetches the BEEF and records it);
+ *  - { found: 'maybe', txids }: seal actions whose output scripts the storage didn't keep (a script over the toolbox's
+ *    maxOutputScript comes back ''); recovery checks each one's own transaction for this seal's script;
+ *  - { found: false }: no seal action at all in the window (the ONLY answer that counts toward release);
+ *  - null: can't tell (an error, or a seal action with no txid yet: built, not yet signed or sent).
+ */
+export type SealLookupAnswer =
+  | { found: false }
+  | { found: true; txid: string }
+  | { found: 'maybe'; txids: string[] }
+  | null;
 
 /** The wallet's listActions, as findSealAction needs it (BRC-100 ListActionsArgs / ListActionsResult, narrowed). */
 export type ListActionsFn = (args: {
@@ -137,8 +156,11 @@ export type ListActionsFn = (args: {
   offset: number;
 }) => Promise<{
   totalActions: number;
-  actions: { txid: string; outputs?: { lockingScript?: string }[] }[];
+  actions: { txid: string; description?: string; status?: string; outputs?: { lockingScript?: string }[] }[];
 }>;
+
+/** The description every native seal's createAction carries (the lookup also finds seals by it). */
+export const SEAL_ACTION_DESCRIPTION = 'bit-sign: sign and seal a document';
 
 /** One listActions page while looking for a seal. */
 export const SEAL_LOOKUP_PAGE = 100;
@@ -148,17 +170,23 @@ export const SEAL_LOOKUP_PAGE = 100;
  * (toolbox BRC-114 label "action time from <ms>"), paged to the end. Searched TWICE: the ordinary list, which omits
  * actions marked failed, and the failed ones (toolbox specOpFailedActions, read only: never 'unfail', which rewrites
  * their status). ARC can still mine a "failed" transaction, so one found there is NOT "none built".
- * { found: false } only when BOTH lists answered to the end with no match; any error (a storage that rejects the time
- * filter, a closed database) → null, and the seal stays held.
+ *
+ * A CANDIDATE is any action with this seal's script, or with the seal's description (SEAL_ACTION_DESCRIPTION): the
+ * toolbox keeps scripts over maxOutputScript truncated, so a long seal's script comes back '' (review of #560 L1).
+ * A candidate with no txid (built, not yet signed: M1) or one by description whose script is empty or missing makes
+ * the answer unsure: null, or 'maybe' with the txids to check. { found: false } only when BOTH lists answered to the
+ * end with NO candidate at all; any error (a storage that rejects the time filter, a closed database) → null.
  */
 export async function findSealAction(
   listActions: ListActionsFn,
   lockingScriptHex: string,
   sinceMs: number,
   failedLabel: string,
-): Promise<{ found: false } | { found: true; txid: string } | null> {
+): Promise<SealLookupAnswer> {
   const want = lockingScriptHex.toLowerCase();
   const from = `action time from ${Math.max(0, Math.floor(sinceMs - 60_000))}`;
+  let unsure = false;
+  const maybe = new Set<string>();
   try {
     for (const labels of [[from], [from, failedLabel]]) {
       for (let offset = 0; offset < 1_000_000; offset += SEAL_LOOKUP_PAGE) {
@@ -169,11 +197,29 @@ export async function findSealAction(
           limit: SEAL_LOOKUP_PAGE,
           offset,
         });
-        const hit = r.actions.find((a) => a.outputs?.some((o) => o.lockingScript?.toLowerCase() === want));
-        if (hit?.txid) return { found: true, txid: hit.txid };
+        for (const a of r.actions) {
+          const outs = Array.isArray(a.outputs) ? a.outputs : [];
+          const scriptHit = outs.some(
+            (o) => typeof o?.lockingScript === 'string' && o.lockingScript.toLowerCase() === want,
+          );
+          const descHit = a.description === SEAL_ACTION_DESCRIPTION;
+          if (!scriptHit && !descHit) continue;
+          const txid = typeof a.txid === 'string' && /^[0-9a-f]{64}$/i.test(a.txid) ? a.txid.toLowerCase() : '';
+          if (scriptHit && txid) return { found: true, txid };
+          // Built but not yet signed or sent (no txid): it can still go out. Never "none built".
+          if (!txid) {
+            unsure = true;
+            continue;
+          }
+          // A seal by description whose scripts the storage didn't keep: it may be this one.
+          const blind = !outs.length || outs.some((o) => typeof o?.lockingScript !== 'string' || !o.lockingScript);
+          if (blind) maybe.add(txid);
+        }
         if (r.actions.length < SEAL_LOOKUP_PAGE || offset + r.actions.length >= r.totalActions) break;
       }
     }
+    if (unsure) return null;
+    if (maybe.size) return { found: 'maybe', txids: [...maybe] };
     return { found: false };
   } catch {
     return null;
@@ -238,6 +284,9 @@ export const claimAlive = (c: SealClaim | null | undefined, now: number): c is S
   c.at - now <= CLAIM_SKEW_MS;
 /** Shown in a second window that finds the kept seal being paid in another. Nothing was signed or paid here. */
 export const ELSEWHERE_MESSAGE = 'Already being sealed in another window. Nothing was paid here.';
+/** L5: the seal's record couldn't be saved on this device, so the payment never started. */
+export const UNSAVED_MESSAGE =
+  "This device couldn't save the seal before paying (storage full or blocked), so nothing was paid. Free some space and try again.";
 
 const liveClaim = (store: PendingSealStore, key: string, now: number): SealClaim | null => {
   try {
@@ -318,6 +367,11 @@ export interface SealDrawing {
   savedAt: number;
   /** Present while the nonce is kept for a pay-only retry; dropped once that session is cancelled or expires. */
   resume?: SealResume;
+  /**
+   * The drawing of a seal that WAS paid but bit-sign refused, set aside by "Seal again (you'll pay again)" (review of
+   * #560 L6): its support reference. The page then never says "Nothing was paid".
+   */
+  paidRef?: string;
 }
 
 export interface SealDrawingStore {
@@ -367,6 +421,29 @@ export const withNotFound = (p: PendingSeal, now: number): PendingSeal => {
   return { ...p, notFound: n + 1, notFoundLastAt: now };
 };
 
+/** A record whose createAction is still running in a live context (its paying mark heart-beaten, not stale). */
+export const payingElsewhere = (p: PendingSeal, now: number): boolean =>
+  !!p.paying && claimAlive({ key: '', ...p.paying }, now);
+const markPaying = (store: PendingSealStore, nonce: string, now: number | null) => {
+  try {
+    const p = store.list().find((x) => x.nonce === nonce);
+    if (!p) return;
+    if (now === null) {
+      if (p.paying?.by !== CONTEXT_ID) return;
+      const { paying: _gone, ...rest } = p;
+      void _gone;
+      store.save(rest);
+    } else store.save({ ...p, paying: { by: CONTEXT_ID, at: now, until: now + SEAL_CLAIM_MS } });
+  } catch {
+    /* storage blocked: this context's in-flight hold remains */
+  }
+};
+/** A live claim by ANOTHER context on this seal, or a record for it in the shared store (L3/L4): someone else's. */
+export const sealBusyElsewhere = (store: PendingSealStore, key: string, now: number): boolean => {
+  const c = liveClaim(store, key, now);
+  return (!!c && c.by !== CONTEXT_ID) || storeHasSeal(store, key);
+};
+
 /** A record being settled on screen by a live context (its mark not yet stale). */
 export const beingSettled = (p: PendingSeal, now: number): boolean =>
   !!p.settling && p.settling.until > now && p.settling.until - now <= SETTLE_MARK_MS + CLAIM_SKEW_MS;
@@ -408,13 +485,6 @@ export const sealRef12 = (p: Pick<PendingSeal, 'nonce'>): string => `seal-${p.no
 // ── Paid, but bit-sign refused it for good (review of #560 N2) ─────────────────────────────────────────────────────
 /** bit-sign's /recover window: a paid seal can be recorded up to this long after its session ends. */
 export const SEAL_RECOVERY_WINDOW_MS = 24 * 60 * 60_000;
-/**
- * Pure: is this record past bit-sign's /recover window (then /recover is never asked again)? Only for records that know
- * when their session ends (saved from 5.2.63 on); an older record keeps being asked, and shows "Contact support" a day
- * after it was saved (heldTooLong).
- */
-export const pastRecoverWindow = (p: Pick<PendingSeal, 'sessionEndsAt'>, now: number): boolean =>
-  typeof p.sessionEndsAt === 'number' && now > p.sessionEndsAt + SEAL_RECOVERY_WINDOW_MS;
 /** The words for a paid record bit-sign won't record: support, with its reference. Never "Already sealed". */
 export const paidRefusedMessage = (p: Pick<PendingSeal, 'nonce'>): string =>
   `Paid, but bChatX wouldn't record it. Contact support (ref ${sealRef12(p)}).`;
@@ -478,6 +548,7 @@ export const archiveRefusedSeal = (store: PendingSealStore, nonce: string, now: 
         fieldIds: [...p.fieldIds],
         svg: p.svg,
         savedAt: now,
+        paidRef: sealRef12(p),
       });
     return true;
   } catch {
@@ -687,6 +758,9 @@ export const REFUSED_NOT_PAID_MESSAGE = 'The payment was refused before anything
 export const NOT_SENT_AFTER_CHECK_MESSAGE = "The payment didn't go out. Nothing was paid.";
 /** On reopen, a seal that proved unpaid: the drawing is offered again. */
 export const RESTORED_DRAWING_MESSAGE = "Your last seal didn't go through. Nothing was paid. Your signature is kept.";
+/** L6: the kept drawing of a PAID seal bit-sign refused, set aside for support: sealing again pays again. */
+export const paidAgainDrawingMessage = (ref: string): string =>
+  `Your first payment is with support (ref ${ref}). Your signature is kept: sealing again pays the fee again.`;
 /** Still unknown after the on-screen check: held, and finished by recovery on the next open. */
 export const HELD_FOR_REOPEN_MESSAGE = "We'll finish this automatically when you reopen it. Don't sign it again.";
 
@@ -1236,7 +1310,7 @@ async function signAndSealOnce(
       }
       // Nothing can have been paid (before the payment, or a refusal that proves it): free the nonce, unless the
       // failure kept this seal for a pay-only retry (its drawing carries the resume), or another window is paying it.
-      const keptForRetry = e instanceof NativeSealError && (!!e.drawing?.resume || e.code === 'elsewhere');
+      const keptForRetry = e instanceof NativeSealError && (!!e.drawing?.resume || (e.code === 'elsewhere' && !!reuse));
       if (!mayHavePaid && !keptForRetry) await cancelSeal(input.api, prepared.nonce, input.clock);
       throw e;
     }
@@ -1374,24 +1448,40 @@ async function afterPrepare(
   // Left (abandonSeal) or held too long: stop here, before any money moves. From here the hold stays until settled.
   if (hold.abandoned)
     throw new NativeSealError(hold.abandoned === 'left' ? LEFT_PAGE_MESSAGE : EXPIRED_HOLD_MESSAGE, 'cancelled');
-  // ⚠ M3, right before any money moves: still this window's claim, and no other window's record for this seal.
-  if (reuse && (!claimIsMine(input.store, key, now()) || storeHasSeal(input.store, key)))
+  // ⚠ M3 / L3, right before ANY seal's money moves: no other window's live claim or record for this seal, and (on a
+  // pay-only retry) still this window's own claim.
+  if (sealBusyElsewhere(input.store, key, now()) || (reuse && !claimIsMine(input.store, key, now())))
     throw new NativeSealError(ELSEWHERE_MESSAGE, 'elsewhere');
   if (reuse) beatClaim(input.store, key, now());
   // ⚠ BEFORE ANY MONEY MOVES: an unsure record, so nothing that happens next can leave this seal unaccounted for.
   saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, '', expiresAt);
+  // L5: a store that didn't keep it (storage full or blocked) means no payment: a payment with no record could not be
+  // finished or found again.
+  let recordKept = false;
+  try {
+    recordKept = input.store.list().some((x) => x.nonce === prepared.nonce && !x.beefHex);
+  } catch {
+    recordKept = false;
+  }
+  if (!recordKept) throw new NativeSealError(UNSAVED_MESSAGE, 'refused');
   hold.paying = true;
   step('paying');
+  // L2: while createAction runs, its record carries a heart-beaten "paying" mark, so no other window releases it.
+  markPaying(input.store, prepared.nonce, now());
+  const payBeat = setInterval(() => markPaying(input.store, prepared.nonce, now()), CLAIM_BEAT_MS);
+  (payBeat as { unref?: () => void }).unref?.();
   let paid: Awaited<ReturnType<SealKeys['createAction']>>;
   try {
     paid = await input.keys.createAction({
-      description: 'bit-sign: sign and seal a document',
+      description: SEAL_ACTION_DESCRIPTION,
       outputs: [
         { satoshis: 0, lockingScript: lockingScriptHex, outputDescription: 'Document seal (OP_RETURN, hashes only)' },
       ],
       options: { acceptDelayedBroadcast: false, randomizeOutputs: false },
     });
   } catch (e) {
+    clearInterval(payBeat);
+    markPaying(input.store, prepared.nonce, null);
     console.warn('[nativeSeal] pay failed', e instanceof Error ? e.message : e);
     if (provablyNotPaid(e)) {
       // Refused before anything went out: nothing paid, the unsure record goes. Refused before anything was BUILT
@@ -1411,6 +1501,8 @@ async function afterPrepare(
     tellFailure(input, { outcome: 'pending_recovery', step: 'paying', error: e, nonce: prepared.nonce });
     throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery', 0, { nonce: prepared.nonce });
   }
+  clearInterval(payBeat);
+  markPaying(input.store, prepared.nonce, null);
   if (!paid?.txid || !paid.tx) {
     // A txid with no transaction (or neither): it may well have gone out. The unsure record stays (with the txid).
     paymentMayHaveGoneOut();
@@ -1590,13 +1682,23 @@ async function releaseUnpaid(
   });
 }
 
+/** Pure: does this AtomicBEEF's transaction have an output with exactly this script? False when it doesn't parse. */
+export const txCarriesScript = (tx: number[], lockingScriptHex: string): boolean => {
+  try {
+    const want = lockingScriptHex.toLowerCase();
+    return Transaction.fromAtomicBEEF(tx).outputs.some((o) => o.lockingScript.toHex().toLowerCase() === want);
+  } catch {
+    return false;
+  }
+};
+
 /**
  * An unsure record (no BEEF): look its transaction up in this wallet's own storage. 'found': saved with its BEEF as an
  * ordinary paid record, which /recover then records (bit-sign records a paid seal even on a cancelled session).
  * 'not_found': the wallet answered "no such action"; the answer is counted ON the record (withNotFound), and the record
  * is released only when unpaidProven says so. 'unknown': no lookup, no script, the lookup failed, or the BEEF is not to
- * be had yet; held (a txid learnt is kept). A record paid on a kept session is searched from its own time exactly,
- * skipping earlier attempts' txids (review of #560 M2).
+ * be had yet, or a seal action that could be this one but can't be confirmed; held (a txid learnt is kept). Every
+ * record is searched from a minute before it was saved (findSealAction), a pay-only retry's too (review of #560 N1).
  */
 async function lookUpUnsure(
   store: PendingSealStore,
@@ -1610,9 +1712,20 @@ async function lookUpUnsure(
     if (!p.lockingScriptHex) return 'unknown';
     const f = await lookup.find(p.lockingScriptHex, p.savedAt).catch(() => null);
     if (!f) return 'unknown';
-    if (!f.found) {
+    if (f.found === false) {
       store.save(withNotFound(p, now()));
       return 'not_found';
+    }
+    if (f.found === 'maybe') {
+      // Seal actions whose scripts weren't kept (L1): this seal is the one whose own transaction carries its script.
+      for (const t of f.txids) {
+        const tx = await lookup.beef(t).catch(() => null);
+        if (tx?.length && txCarriesScript(tx, p.lockingScriptHex)) {
+          store.save({ ...p, txid: t.toLowerCase(), beefHex: toHex(tx) });
+          return 'found';
+        }
+      }
+      return 'unknown'; // never "not built" while a seal action could be this one
     }
     txid = f.txid.toLowerCase();
   }
@@ -1683,7 +1796,8 @@ export async function recoverNativeSeals(
       result('kept');
       continue;
     }
-    if (beingSettled(p, now())) {
+    // Being settled on screen, or its createAction still running, in a live context (L2): theirs.
+    if (beingSettled(p, now()) || payingElsewhere(p, now())) {
       result('kept');
       continue;
     }
@@ -1701,9 +1815,9 @@ export async function recoverNativeSeals(
           continue;
         }
       }
-      // Past bit-sign's /recover window (N2): never asked again; refused, kept for support.
-      if (pastRecoverWindow(p, now())) {
-        if (!p.refused) markRefused(store, p.nonce, 410, 'past the recovery window', now());
+      // bit-sign said its /recover window is closed (a 410): never asked again; refused, kept for support. The phone's
+      // clock never decides this (review of #560 L7): the server's answer does.
+      if (p.refused?.status === 410) {
         result('refused');
         continue;
       }
@@ -1824,6 +1938,8 @@ export async function settleUnsureSeal(o: {
         const key = sealKey(p.identityKey ?? '', p.documentId, p.fieldIds ?? []);
         // Never while this seal is paying again in this app.
         if (p.fieldIds && inFlight.has(key)) return { k: 'unknown' };
+        // Its createAction still running in another live context (L2): look again later, never count or release.
+        if (payingElsewhere(p, now())) continue;
         if (!p.beefHex) {
           const r = await lookUpUnsure(o.store, p, o.lookup, now);
           p = find();

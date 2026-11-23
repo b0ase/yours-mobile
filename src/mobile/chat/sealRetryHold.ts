@@ -24,6 +24,11 @@ export interface RetryHold {
 
 export function createRetryHold(deps: {
   cancel: (nonce: string) => void;
+  /**
+   * Another context is paying this seal now (a live claim or a record of it in the shared store; review of #560 L4):
+   * then its session is NOT cancelled from here, only dropped from this screen.
+   */
+  busyElsewhere?: (key: string) => boolean;
   drawings: () => SealDrawingStore | undefined;
   /** Called with the drawing as it is after the give-back (no resume): the screen keeps showing it. */
   onGiveBack?: (d: SealDrawing) => void;
@@ -44,11 +49,18 @@ export function createRetryHold(deps: {
     const d = live;
     live = null;
     if (!d?.resume) return;
+    let busy = false;
     try {
-      deps.cancel(d.resume.prepared.nonce);
+      busy = !!deps.busyElsewhere?.(d.key);
     } catch {
-      /* best effort: the session times out on its own */
+      busy = true; // can't tell: never cancel a session another window may be paying on
     }
+    if (!busy)
+      try {
+        deps.cancel(d.resume.prepared.nonce);
+      } catch {
+        /* best effort: the session times out on its own */
+      }
     const { resume: _gone, ...bare } = d;
     void _gone;
     try {
