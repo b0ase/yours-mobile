@@ -4,10 +4,12 @@ import { loadConnectionLog } from '../connectionLog';
 import {
   addPending,
   allowRate,
+  alreadyInBalance,
   applySessionSpend,
   expirePending,
   fundedWithin,
   liveTicks,
+  nextExpiryIn,
   parseSessionSpend,
   pruneSessions,
   pushTick,
@@ -71,6 +73,29 @@ export const appName = (origin: string): string => {
 // Payments seen this session per origin, so a session meter works before the connection log write lands.
 const paidHere = new Map<string, { at: number; sats: number }[]>();
 
+let lastBase: number | null = null;
+/** The last fall of the fetched balance that no announced spend explained (its 'sent' tick's id), if any. */
+let unclaimedDrop: { sats: number; at: number; tickId: string } | null = null;
+
+/**
+ * Pending spends never outlive PENDING_TTL_MS, even when no later fetch changes the balance. WalletCard reports a
+ * balance only when the number changes, so a spend kept by one fetch used to stay on the card until a reload (RB,
+ * 23 Nov 2026: $0 shown after paying 1 BSV from ~1.02 BSV).
+ */
+let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+const armExpiry = () => {
+  if (expiryTimer !== null) clearTimeout(expiryTimer);
+  expiryTimer = null;
+  const wait = nextExpiryIn(state.pending, Date.now());
+  if (wait === null) return;
+  expiryTimer = setTimeout(() => {
+    expiryTimer = null;
+    const pending = expirePending(state.pending, Date.now());
+    if (pending.length !== state.pending.length) set({ pending });
+    armExpiry();
+  }, wait + 50);
+};
+
 /** The wallet signed a spend of `sats` (outputs to others). Ticks the card down at once. */
 export const reportSpend = (p: { sats: number; label: string; txid?: string; origin?: string }) => {
   if (!Number.isSafeInteger(p.sats) || p.sats <= 0) return;
@@ -79,14 +104,26 @@ export const reportSpend = (p: { sats: number; label: string; txid?: string; ori
     const h = hostOf(p.origin);
     paidHere.set(h, [...(paidHere.get(h) ?? []), { at: now, sats: p.sats }].slice(-50));
   }
+  // A fetch already showed this spend (the balance fell before createAction returned): not taken off again, and its
+  // unexplained "sent" tick gives way to this named one.
+  const counted = alreadyInBalance(unclaimedDrop, p.sats, now);
+  const ticks = counted && unclaimedDrop ? state.ticks.filter((t) => t.id !== unclaimedDrop!.tickId) : state.ticks;
+  if (counted) unclaimedDrop = null;
   set({
-    ticks: pushTick(state.ticks, { id: nextId(), sats: -p.sats, label: p.label, at: now, txid: p.txid }),
-    pending: addPending(expirePending(state.pending, now), { id: nextId(), sats: p.sats, at: now, txid: p.txid }),
+    ticks: pushTick(ticks, { id: nextId(), sats: -p.sats, label: p.label, at: now, txid: p.txid }),
+    pending: counted
+      ? expirePending(state.pending, now)
+      : addPending(expirePending(state.pending, now), {
+          id: nextId(),
+          sats: p.sats,
+          at: now,
+          txid: p.txid,
+          base: lastBase,
+        }),
     lastActivityAt: now,
   });
+  armExpiry();
 };
-
-let lastBase: number | null = null;
 
 /** WalletCard: a balance was fetched. Drops pending spends it already includes; announces unexplained moves. */
 export const noteBalance = (sats: number) => {
@@ -102,13 +139,17 @@ export const noteBalance = (sats: number) => {
     if (pending.length !== state.pending.length) set({ pending });
     return;
   }
+  const tickId = nextId();
+  // A fall no announced spend explains: remembered briefly, in case the spend's announcement is still on its way.
+  unclaimedDrop = d < 0 ? { sats: -d, at: now, tickId } : null;
   set({
-    pending: reconcilePending(state.pending, now),
+    pending: reconcilePending(state.pending, now, undefined, sats),
     ticks: d
-      ? pushTick(state.ticks, { id: nextId(), sats: d, label: d > 0 ? 'received' : 'sent', at: now })
+      ? pushTick(state.ticks, { id: tickId, sats: d, label: d > 0 ? 'received' : 'sent', at: now })
       : state.ticks,
     lastActivityAt: d ? now : state.lastActivityAt,
   });
+  armExpiry();
 };
 
 const buckets = new Map<string, { sec: number; n: number }>();
@@ -195,9 +236,15 @@ export const useLive = (): LiveState => useSyncExternalStore(subscribe, snapshot
 export const visibleTicks = (s: LiveState, now: number) => liveTicks(s.ticks, now);
 
 /** Tests only. */
+export const __liveState = (): LiveState => state;
+
+/** Tests only. */
 export const __resetLive = () => {
   state = { ticks: [], pending: [], sessions: {}, lastActivityAt: Date.now() };
   lastBase = null;
+  unclaimedDrop = null;
+  if (expiryTimer !== null) clearTimeout(expiryTimer);
+  expiryTimer = null;
   paidHere.clear();
   buckets.clear();
 };

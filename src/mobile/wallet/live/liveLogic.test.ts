@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   addPending,
+  alreadyInBalance,
+  nextExpiryIn,
   allowRate,
   applySessionSpend,
   displayedSats,
@@ -70,6 +72,47 @@ describe('optimistic spends', () => {
     ];
     expect(reconcilePending(p, 10_000).map((x) => x.id)).toEqual(['new']);
     expect(expirePending(p, 30_500).map((x) => x.id)).toEqual(['new']);
+  });
+  test('regression (RB, 23 Nov 2026): a fetch inside the grace that already shows the spend drops it', () => {
+    // 1 BSV + 1 sat paid from ~1.0237 BSV; the post-spend balance (0.0237 BSV) lands 400 ms after the announcement.
+    const p = addPending([], { id: 'pay', sats: 100_000_001, at: 10_000, base: 102_370_000 });
+    const next = 102_370_000 - 100_000_142; // fee and the 1 sat marker included
+    const kept = reconcilePending(p, 10_400, 1_500, next);
+    expect(kept).toHaveLength(0);
+    expect(displayedSats(next, kept)).toBe(next); // was 0 (taken off twice, clamped)
+    // A fetch that started before the spend (balance not fallen yet) still keeps it.
+    expect(reconcilePending(p, 10_400, 1_500, 102_370_000)).toHaveLength(1);
+    // No base known: the grace rule alone, as before.
+    expect(reconcilePending([{ id: 'x', sats: 5, at: 10_000 }], 10_400, 1_500, 0)).toHaveLength(1);
+  });
+  test('several pending spends: only those the fall covers, oldest first; grace-dropped ones count in the fall', () => {
+    const p = [
+      { id: 'a', sats: 100, at: 1_000, base: 1_000 },
+      { id: 'b', sats: 50, at: 1_100, base: 900 },
+    ];
+    expect(reconcilePending(p, 1_200, 1_500, 900).map((x) => x.id)).toEqual(['b']);
+    expect(reconcilePending(p, 1_200, 1_500, 850).map((x) => x.id)).toEqual([]);
+    // 'a' is past the grace (in the balance): a fall of 100 is its own, so 'b' stays.
+    expect(reconcilePending(p, 2_550, 1_500, 900).map((x) => x.id)).toEqual(['b']);
+  });
+  test('a spend announced after the balance already fell by it is not taken off again', () => {
+    expect(alreadyInBalance({ sats: 100_000_142, at: 0 }, 100_000_001, 4_000)).toBe(true);
+    expect(alreadyInBalance({ sats: 100, at: 0 }, 101, 4_000)).toBe(false);
+    expect(alreadyInBalance({ sats: 200, at: 0 }, 100, 31_000)).toBe(false);
+    expect(alreadyInBalance(null, 100, 0)).toBe(false);
+  });
+  test('the next expiry is the oldest spend plus the ttl, never negative', () => {
+    expect(nextExpiryIn([], 0)).toBeNull();
+    expect(
+      nextExpiryIn(
+        [
+          { id: 'a', sats: 1, at: 1_000 },
+          { id: 'b', sats: 1, at: 500 },
+        ],
+        1_000,
+      ),
+    ).toBe(29_500);
+    expect(nextExpiryIn([{ id: 'a', sats: 1, at: 0 }], 99_000)).toBe(0);
   });
   test('unexplained delta: incoming, covered spend, unknown spend', () => {
     expect(unexplainedDelta(null, 5, 0)).toBe(0);

@@ -38,7 +38,14 @@ export const tickText = (t: Pick<Tick, 'sats' | 'label'>): string =>
 
 // ─── Optimistic spends ──────────────────────────────────────────────────────
 
-export type Pending = { id: string; sats: number; at: number; txid?: string };
+export type Pending = {
+  id: string;
+  sats: number;
+  at: number;
+  txid?: string;
+  /** The fetched balance when the spend was announced (null/undefined: none yet). */
+  base?: number | null;
+};
 
 export const PENDING_TTL_MS = 30_000;
 
@@ -50,12 +57,48 @@ export const addPending = (list: Pending[], p: Pending): Pending[] =>
   p.sats > 0 && !(p.txid && list.some((x) => x.txid === p.txid)) ? [...list, p] : list;
 
 /**
- * A fresh balance arrived at `now`: spends signed more than `graceMs` before it are in that balance (the wallet
+ * A fresh balance `next` arrived at `now`: spends signed more than `graceMs` before it are in that balance (the wallet
  * updates its own storage before createAction returns), so they are dropped. Very recent ones stay until the next
- * fetch or `PENDING_TTL_MS`, in case that fetch started before the spend.
+ * fetch or `PENDING_TTL_MS`, in case that fetch started before the spend; unless the balance already fell by them
+ * since they were announced (`base`), oldest first. Without that, a fetch landing within the grace kept a spend the
+ * balance already showed, the card took it off twice and read $0 (RB, 23 Nov 2026: 1 BSV paid from ~1.02 BSV).
  */
-export const reconcilePending = (list: Pending[], now: number, graceMs = 1_500): Pending[] =>
-  list.filter((p) => now - p.at < graceMs);
+export const reconcilePending = (list: Pending[], now: number, graceMs = 1_500, next?: number): Pending[] => {
+  const oldestFirst = [...list].sort((a, b) => a.at - b.at);
+  // How far the balance fell since the oldest spend still pending was announced.
+  const base = oldestFirst.find((p) => typeof p.base === 'number')?.base;
+  const fell = typeof next === 'number' && Number.isFinite(next) && typeof base === 'number' ? base - next : 0;
+  let counted = 0;
+  return oldestFirst.filter((p) => {
+    // Older than the grace: in the balance. Its sats are part of the fall too.
+    if (now - p.at >= graceMs) {
+      counted += p.sats;
+      return false;
+    }
+    if (typeof p.base === 'number' && fell >= counted + p.sats) {
+      counted += p.sats;
+      return false;
+    }
+    return true;
+  });
+};
+
+/**
+ * A spend is announced (createAction returned) after the balance already fell by at least its sats with no spend to
+ * explain the fall (`drop`, within `windowMs`): that fetch ran after the wallet's own storage took the spend in, so
+ * the balance includes it and the card must not take it off again (RB, 23 Nov 2026: a 1 BSV payment whose broadcast
+ * outlasted the 5 s poll showed $0 until reload).
+ */
+export const alreadyInBalance = (
+  drop: { sats: number; at: number } | null | undefined,
+  sats: number,
+  now: number,
+  windowMs = PENDING_TTL_MS,
+): boolean => !!drop && now - drop.at < windowMs && drop.sats >= sats && sats > 0;
+
+/** When the oldest pending spend expires (ms from `now`), or null with none. Never negative. */
+export const nextExpiryIn = (list: Pending[], now: number, ttl = PENDING_TTL_MS): number | null =>
+  list.length ? Math.max(0, Math.min(...list.map((p) => p.at + ttl)) - now) : null;
 
 export const expirePending = (list: Pending[], now: number, ttl = PENDING_TTL_MS): Pending[] =>
   list.filter((p) => now - p.at < ttl);
