@@ -10,6 +10,7 @@ import {
   SEAL_RECOVERY_WINDOW_MS,
   SETTLE_MARK_MS,
   SEAL_ABANDON_SKIP_AGE_MS,
+  SEAL_FAILED_SEEN_MARGIN_MS,
   SEAL_ACTION_DESCRIPTION,
   UNSAVED_MESSAGE,
   archiveRefusedSeal,
@@ -1329,7 +1330,10 @@ describe('Round 4: abandoned rows, proven-other seals, and the kept-session canc
     const now = () => t;
     store.save(unsure({ nonce: 'NR4', savedAt: t, lockingScriptHex: SCRIPT }));
     const log: Log = [];
-    const lookup: SealTxLookup = { find: (s, since) => findSealAction(list, s, since, FAILED), beef };
+    const lookup: SealTxLookup = {
+      find: (s, since, o) => findSealAction(list, s, since, FAILED, t, o?.failedSeenAt),
+      beef,
+    };
     const outs: string[] = [];
     for (let i = 0; i < 5; i++) {
       t += RELEASE_MIN_AGE_MS + 10_000 * (i + 1);
@@ -1358,7 +1362,8 @@ describe('Round 4: abandoned rows, proven-other seals, and the kept-session canc
     const r = await runRecovery(
       la([{ txid: '', status: 'failed', description: SEAL_ACTION_DESCRIPTION, outputs: [{ lockingScript: SCRIPT }] }]),
     );
-    expect(r.outs.slice(0, 2)).toEqual(['kept', 'released']); // the first answer counts, the second releases
+    // First sight of the failed row (kept), seen again too soon (kept), then skipped: two counted answers → released.
+    expect(r.outs.slice(0, 4)).toEqual(['kept', 'kept', 'kept', 'released']);
     expect(r.log).toEqual(['cancel:NR4']);
   });
   test("R3-B: another document's abandoned seal row no longer blocks this one", async () => {
@@ -1431,46 +1436,79 @@ describe('Round 4: abandoned rows, proven-other seals, and the kept-session canc
   });
 });
 
-describe('Round 5: a failed, txid-less seal row is skipped only when surely past the abandon age', () => {
+describe('Rounds 5-6: a failed, txid-less seal row is skipped only after WE saw it failed for 2 min (and the record is >7 min old)', () => {
   const SCRIPT = '006a' + 'ab'.repeat(40);
-  const failedRow = (labels: string[]) =>
-    labels.length === 2
-      ? { totalActions: 1, actions: [{ txid: '', status: 'failed', outputs: [{ lockingScript: SCRIPT }] }] }
-      : { totalActions: 0, actions: [] };
-  const la = (async ({ labels }: { labels: string[] }) => failedRow(labels)) as unknown as ListActionsFn;
-  test('younger than 5 min (the toolbox default) + 2 min: still unsure (null), so never released', async () => {
-    const savedAt = 1_000_000_000_000;
-    expect(SEAL_ABANDON_SKIP_AGE_MS).toBe(7 * 60_000);
-    expect(await findSealAction(la, SCRIPT, savedAt, 'F', savedAt + SEAL_ABANDON_SKIP_AGE_MS)).toBeNull();
-    expect(await findSealAction(la, SCRIPT, savedAt, 'F', savedAt + 4 * 60_000)).toBeNull();
-    expect(await findSealAction(la, SCRIPT, savedAt, 'F', savedAt + SEAL_ABANDON_SKIP_AGE_MS + 1)).toEqual({
+  const MIN = 60_000;
+  let row: { txid: string; status: string } = { txid: '', status: 'failed' };
+  const la = (async ({ labels }: { labels: string[] }) =>
+    labels.length === 2 || row.status !== 'failed'
+      ? { totalActions: 1, actions: [{ ...row, outputs: [{ lockingScript: SCRIPT }] }] }
+      : { totalActions: 0, actions: [] }) as unknown as ListActionsFn;
+  test('directly: never skipped without a first sight 2 min ago, nor while the record is under 7 min old', async () => {
+    row = { txid: '', status: 'failed' };
+    const t0 = 1_000_000_000_000;
+    expect(SEAL_ABANDON_SKIP_AGE_MS).toBe(7 * MIN);
+    expect(SEAL_FAILED_SEEN_MARGIN_MS).toBe(2 * MIN);
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN)).toEqual({ found: 'failed' }); // never seen
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN, t0 + 19 * MIN)).toEqual({ found: 'failed' }); // 1 min
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 20 * MIN, t0 + 18 * MIN)).toEqual({
       found: false,
+      skippedFailed: true,
     });
+    expect(await findSealAction(la, SCRIPT, t0, 'F', t0 + 6 * MIN, t0 + 1 * MIN)).toEqual({ found: 'failed' }); // young
   });
-  test('through recovery: kept while the record is under 7 min old, released by the one rule after', async () => {
+  const run = async (steps: { at: number; row?: { txid: string; status: string } }[], t0: number) => {
     const store = localStore(fakeStorage());
-    const savedAt = 1_000_000_000_000;
-    store.save(unsure({ nonce: 'N5', savedAt, lockingScriptHex: SCRIPT }));
+    store.save(unsure({ nonce: 'N6', savedAt: t0, lockingScriptHex: SCRIPT }));
     const log: Log = [];
-    const outs: string[] = [];
-    for (const age of [
-      3 * 60_000 + 1,
-      3 * 60_000 + 10_000,
-      6 * 60_000,
-      SEAL_ABANDON_SKIP_AGE_MS + 1,
-      SEAL_ABANDON_SKIP_AGE_MS + 10_000,
-    ]) {
-      const at = savedAt + age;
+    const outs: { outcome: string; seenAt?: number }[] = [];
+    for (const st of steps) {
+      if (st.row) row = st.row;
       const rs = await recover(
         bitsign(log),
         store,
         'D',
-        { find: (s, since) => findSealAction(la, s, since, 'F', at), beef: async () => null },
-        { now: () => at },
+        {
+          find: (s, since, o) => findSealAction(la, s, since, 'F', st.at, o?.failedSeenAt),
+          beef: async () => [7],
+        },
+        { now: () => st.at },
       );
-      outs.push(rs[0].outcome);
+      outs.push({ outcome: rs[0].outcome, seenAt: store.list()[0]?.failedSeenAt });
     }
-    expect(outs).toEqual(['kept', 'kept', 'kept', 'kept', 'released']);
-    expect(log).toEqual(['cancel:N5']);
+    return { outs, log, store };
+  };
+  test('first sight → kept; +1 min → kept; +2 min → counts; +5 s → released by the one rule', async () => {
+    row = { txid: '', status: 'failed' };
+    const t0 = 1_000_000_000_000;
+    const first = t0 + 8 * MIN;
+    const r = await run(
+      [{ at: first }, { at: first + MIN }, { at: first + 2 * MIN }, { at: first + 2 * MIN + RELEASE_SPACING_MS }],
+      t0,
+    );
+    expect(r.outs.map((o) => o.outcome)).toEqual(['kept', 'kept', 'kept', 'released']);
+    expect(r.outs[0].seenAt).toBe(first);
+    expect(r.outs[1].seenAt).toBe(first); // the clock is from the FIRST sight
+    expect(r.log).toEqual(['cancel:N6']);
+  });
+  test('a row that gains a txid → found and recorded (no release, no cancel)', async () => {
+    row = { txid: '', status: 'failed' };
+    const t0 = 1_000_000_000_000;
+    const r = await run(
+      [{ at: t0 + 8 * MIN }, { at: t0 + 9 * MIN, row: { txid: 'cd'.repeat(32), status: 'unproven' } }],
+      t0,
+    );
+    expect(r.outs.map((o) => o.outcome)).toEqual(['kept', 'recorded']);
+    expect(r.log).toEqual(['recover']);
+  });
+  test('the late build: record t0, row built at t0+4 min, abandoned at t0+9 min, looked at t0+9:02 → kept', async () => {
+    row = { txid: '', status: 'failed' };
+    const t0 = 1_000_000_000_000;
+    const look = t0 + 9 * MIN + 2_000;
+    const r = await run([{ at: look }, { at: look + RELEASE_SPACING_MS }, { at: look + MIN }], t0);
+    expect(r.outs.map((o) => o.outcome)).toEqual(['kept', 'kept', 'kept']);
+    expect(r.outs[0].seenAt).toBe(look);
+    expect(r.log).toEqual([]);
+    expect(r.store.list()[0].notFound).toBeUndefined();
   });
 });

@@ -223,12 +223,14 @@ export const NativeSealPage = () => {
    * chain services. Any failure → null (held, never dropped).
    */
   const txLookup = (): SealTxLookup => ({
-    find: (script, sinceMs) =>
+    find: (script, sinceMs, opts) =>
       findSealAction(
         (args) => apiContext.wallet.listActions(args) as ReturnType<ListActionsFn>,
         script,
         sinceMs,
         toolboxSdk.specOpFailedActions,
+        Date.now(),
+        opts?.failedSeenAt,
       ),
     beef: async (txid) => {
       try {

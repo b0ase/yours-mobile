@@ -107,9 +107,10 @@ password, every time) → compose → `createSignature` → `createAction` (one 
     candidate; if any couldn't be read, the answer stays unsure. A row the toolbox abandoned (status 'failed', no
     txid) is no candidate either: processAction writes the txid before any broadcast and never processes a failed row
     (wallet-toolbox 2.14.5 `src/storage/methods/processAction.ts`, commit at line 127 before the broadcast at 151;
-    `validatePlannedTransaction`, lines 474-479), but only once the record is older than the toolbox's abandon age
-    (5 min, `Monitor.ts` line 124) plus 2 minutes: a row flipped to 'failed' between processAction's validation and
-    its commit could still go out. An unsure answer is never evidence for release.
+    `validatePlannedTransaction`, lines 474-479), but only on a lookup at least 2 minutes after a lookup FIRST saw it
+    failed (`failedSeenAt` on the record), and only once the record is older than the toolbox's abandon age (5 min,
+    `Monitor.ts` line 124) plus 2 minutes: a row flipped to 'failed' between processAction's validation and its commit
+    could still go out, and the action carries no timestamp of its own. An unsure answer is never evidence for release.
   - While a window's createAction runs, its record carries a heart-beaten "paying" mark (same timings as the claim);
     recovery and settle in any window leave the record alone while it lives.
 - **Recovery** (`recoverNativeSeals`) only touches the open account's records (key-less records from before 6 Nov only

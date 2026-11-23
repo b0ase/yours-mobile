@@ -108,6 +108,11 @@ export interface PendingSeal {
   /** A context is settling this record on screen right now (settleUnsureSeal): recovery elsewhere leaves it alone. */
   settling?: { by: string; until: number };
   /**
+   * When a lookup first saw a failed, txid-less seal action for this record (round 6): such a candidate is ignored only
+   * on a lookup SEAL_FAILED_SEEN_MARGIN_MS after this. Cleared when no failed candidate is seen any more.
+   */
+  failedSeenAt?: number;
+  /**
    * A context's createAction for this record is still running (review of #560 L2): heart-beaten like a claim
    * (CLAIM_BEAT_MS, dead after CLAIM_STALE_MS). Recovery and settle anywhere treat the record as kept while it lives.
    */
@@ -129,7 +134,12 @@ export interface SealTxLookup {
    * `sinceMs`: when the record was saved; the search starts a minute before it. Always (review of #560 N1): the
    * phone's clock is compared with the storage's created_at, which a remote storage stamps with its own clock.
    */
-  find(lockingScriptHex: string, sinceMs: number): Promise<SealLookupAnswer>;
+  find(
+    lockingScriptHex: string,
+    sinceMs: number,
+    /** `failedSeenAt`: when a lookup first saw a failed, txid-less candidate for this record (PendingSeal). */
+    opts?: { failedSeenAt?: number },
+  ): Promise<SealLookupAnswer>;
   beef(txid: string): Promise<number[] | null>;
 }
 
@@ -142,9 +152,12 @@ export interface SealTxLookup {
  *  - null: can't tell (an error, or a seal action with no txid yet: built, not yet signed or sent).
  */
 export type SealLookupAnswer =
-  | { found: false }
+  /** `skippedFailed`: a failed, txid-less candidate was ignored (seen failed long enough, round 5). */
+  | { found: false; skippedFailed?: true }
   | { found: true; txid: string }
-  | { found: 'maybe'; txids: string[] }
+  | { found: 'maybe'; txids: string[]; skippedFailed?: true }
+  /** Unsure ONLY because of a failed, txid-less candidate not yet seen failed for SEAL_FAILED_SEEN_MARGIN_MS. */
+  | { found: 'failed' }
   | null;
 
 /** The wallet's listActions, as findSealAction needs it (BRC-100 ListActionsArgs / ListActionsResult, narrowed). */
@@ -164,6 +177,11 @@ export type ListActionsFn = (args: {
  * 2-minute margin: a failed, txid-less seal row is ignored only when the record is older than this.
  */
 export const SEAL_ABANDON_SKIP_AGE_MS = 5 * 60_000 + 2 * 60_000;
+/**
+ * A failed, txid-less candidate is ignored only on a lookup at least this long after a lookup FIRST saw it failed
+ * (PendingSeal.failedSeenAt): processAction may still be between its validation and its commit when the row flips.
+ */
+export const SEAL_FAILED_SEEN_MARGIN_MS = 2 * 60_000;
 
 /** The description every native seal's createAction carries (the lookup also finds seals by it). */
 export const SEAL_ACTION_DESCRIPTION = 'bit-sign: sign and seal a document';
@@ -189,11 +207,18 @@ export async function findSealAction(
   sinceMs: number,
   failedLabel: string,
   now: number = Date.now(),
+  failedSeenAt?: number,
 ): Promise<SealLookupAnswer> {
   const want = lockingScriptHex.toLowerCase();
-  // Round 5: a failed row with no txid is skipped only once it is surely past the toolbox's abandon age. WalletAction
-  // carries no timestamp, so the record's own age stands in for the row's (the row can only be younger).
-  const abandonedForSure = now - sinceMs > SEAL_ABANDON_SKIP_AGE_MS;
+  // Rounds 5-6: a failed row with no txid is skipped only when BOTH the record is past the toolbox's abandon age +
+  // margin, AND a lookup already saw it failed at least SEAL_FAILED_SEEN_MARGIN_MS ago. WalletAction carries no
+  // timestamp, so when the row became failed can't be read; when WE first saw it failed is the earliest safe stand-in.
+  const abandonedForSure =
+    now - sinceMs > SEAL_ABANDON_SKIP_AGE_MS &&
+    typeof failedSeenAt === 'number' &&
+    now - failedSeenAt >= SEAL_FAILED_SEEN_MARGIN_MS;
+  let sawFailed = false;
+  let skippedFailed = false;
   const from = `action time from ${Math.max(0, Math.floor(sinceMs - 60_000))}`;
   let unsure = false;
   const maybe = new Set<string>();
@@ -225,7 +250,11 @@ export async function findSealAction(
             // never go out: no candidate. But processAction validates the row before its commit, with a chain-height
             // lookup in between: a row flipped to 'failed' in that gap still commits and broadcasts. So only rows
             // surely older than the abandon age + a margin are skipped; a younger one still answers unsure.
-            if (a.status === 'failed' && abandonedForSure) continue;
+            if (a.status === 'failed') {
+              if (abandonedForSure) skippedFailed = true;
+              else sawFailed = true;
+              continue;
+            }
             // Built but not yet signed or sent (no txid): it can still go out. Never "none built".
             unsure = true;
             continue;
@@ -238,8 +267,10 @@ export async function findSealAction(
       }
     }
     if (unsure) return null;
-    if (maybe.size) return { found: 'maybe', txids: [...maybe] };
-    return { found: false };
+    if (sawFailed) return { found: 'failed' };
+    const skipped = skippedFailed ? { skippedFailed: true as const } : {};
+    if (maybe.size) return { found: 'maybe', txids: [...maybe], ...skipped };
+    return { found: false, ...skipped };
   } catch {
     return null;
   }
@@ -1733,9 +1764,27 @@ async function lookUpUnsure(
   if (!lookup) return 'unknown';
   let txid = p.txid;
   if (!txid) {
-    if (!p.lockingScriptHex) return 'unknown';
-    const f = await lookup.find(p.lockingScriptHex, p.savedAt).catch(() => null);
+    const script = p.lockingScriptHex;
+    if (!script) return 'unknown';
+    const f = await lookup
+      .find(script, p.savedAt, p.failedSeenAt !== undefined ? { failedSeenAt: p.failedSeenAt } : undefined)
+      .catch(() => null);
     if (!f) return 'unknown';
+    if (f.found === 'failed') {
+      // First sight of a failed, txid-less candidate: remember when; kept (never evidence) until the margin passes.
+      if (p.failedSeenAt === undefined) store.save({ ...p, failedSeenAt: now() });
+      return 'unknown';
+    }
+    // No failed candidate in sight any more (it gained a txid, or is gone): the clock starts again next time.
+    const seen = (q: PendingSeal): PendingSeal => {
+      if (f.found === true || !('skippedFailed' in f) || !f.skippedFailed) {
+        const { failedSeenAt: _gone, ...rest } = q;
+        void _gone;
+        return rest;
+      }
+      return q;
+    };
+    p = seen(p);
     if (f.found === false) {
       store.save(withNotFound(p, now()));
       return 'not_found';
@@ -1745,7 +1794,7 @@ async function lookUpUnsure(
       let allChecked = true;
       for (const t of f.txids) {
         const tx = await lookup.beef(t).catch(() => null);
-        const has = tx?.length ? scriptInTx(tx, p.lockingScriptHex) : null;
+        const has = tx?.length ? scriptInTx(tx, script) : null;
         if (has === true) {
           store.save({ ...p, txid: t.toLowerCase(), beefHex: toHex(tx!) });
           return 'found';
