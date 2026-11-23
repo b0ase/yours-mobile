@@ -568,6 +568,31 @@ describe('the recorder: every seal this device records lands in the list', () =>
   });
 });
 
+describe('the room comes from the seal flow’s ticker (#560)', () => {
+  test('a recovered held record carrying its ticker files the seal under that room', async () => {
+    const { installSignedRecorder } = await import('./recorder');
+    installSignedRecorder();
+    const store = localStore(kv);
+    store.save({
+      documentId: 'DOC7',
+      nonce: 'N7',
+      txid: TX1,
+      beefHex: '0909',
+      attestation: 'ab',
+      savedAt: 1,
+      identityKey: ME,
+      ticker: 'bcorp',
+    } as PendingSeal);
+    const api: SealApi = async () => ({
+      ok: true,
+      status: 200,
+      body: { signatureId: 'SIG7', txid: TX1, docHash: H1, complete: true },
+    });
+    await recoverNativeSeals(api, store, 'DOC7', localLedger(kv), undefined, { identityKey: ME });
+    expect(loadLocal(ME).find((l) => l.signatureId === 'SIG7')?.room).toBe('BCORP');
+  });
+});
+
 describe('the hook on the on-screen settle path (#560 settleUnsureSeal)', () => {
   test('a held payment recorded while the page settles it lands in the list too', async () => {
     const got: SealRecorded[] = [];

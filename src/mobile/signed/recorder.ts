@@ -7,9 +7,9 @@ import { addLocal, loadCachedSync, loadLocal, type KV } from './localStore';
  *
  *   - Filed under the identity key the SEAL carries. A seal saved before keys were stored with it (before 6 Nov) is
  *     not filed under anyone: it can't be told whose it is, and bit-sign's list shows it to its owner anyway.
- *   - The room: the hook's own ticker when the seal flow passes one, else a row this wallet already knows for that
- *     document (its own list, or bit-sign's last list). Unknown → '' until the next sync fills it in. Never the screen
- *     that happens to be open.
+ *   - The room: the hook's own ticker (#560 fills it from the seal and from held records). A record without one (held
+ *     before tickers were stored) takes it from a row this wallet already knows for that document; unknown → '' until
+ *     the next sync fills it in. Never the screen that happens to be open.
  */
 export interface RecorderEnv {
   now?: () => number;
@@ -22,7 +22,7 @@ export const roomFor = (
   kv?: KV | null,
 ): string => {
   const own = (s.ticker || '').trim().replace(/^\$/, '').toUpperCase();
-  if (/^[A-Z0-9][A-Z0-9&._-]{0,31}$/.test(own)) return own;
+  if (/^[A-Z0-9_.&-]{1,64}$/.test(own)) return own; // the seal flow's own ticker (#560); stored clipped to 32
   const known = [...loadLocal(identityKey, kv), ...(loadCachedSync(identityKey, kv)?.rows ?? [])].find(
     (r) => r.documentId === s.documentId && r.room,
   );
