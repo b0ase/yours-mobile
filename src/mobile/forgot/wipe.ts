@@ -165,11 +165,31 @@ const sweepSecure = async (native: Deps['native'], everyItem: boolean, ms: numbe
     for (const key of (await list()).keys.filter(mine)) {
       await within(() => native.secureRemove({ key }), ms, 'Removing a secure item').catch(() => undefined);
     }
-    left = (await list()).keys.filter((k) => k.startsWith(LOCAL_PREFIX));
+    // Delete account: nothing at all may be left (review L2). Forgot password: no wallet key.
+    left = (await list()).keys.filter((k) => everyItem || k.startsWith(LOCAL_PREFIX));
   } catch (e) {
     throw new WipeError(`Could not remove the wallet from this phone (${e instanceof Error ? e.message : String(e)})`);
   }
   if (left.length) throw new WipeError('Could not remove the wallet keys from this phone.');
+};
+
+/** What the screens add to a failed wipe (review L7): a Try again, and the way out if the wallet won't reopen. */
+export const WIPE_FAILED_HINT =
+  "Tap Try again. If the wallet won't reopen, restart the app. If it keeps failing, email support@bwalletx.com.";
+
+/**
+ * Forgot password's wipe: reload only after a wipe that worked (review L1); otherwise the message to show, and no
+ * reload, which would quietly reopen the unlock screen with the keys still there. '' = reloading.
+ */
+export const forgotPasswordWipe = async (wipe: () => Promise<void>, reload: () => void): Promise<string> => {
+  try {
+    await wipe();
+  } catch (e) {
+    return `${e instanceof Error ? e.message : String(e)} ${WIPE_FAILED_HINT}`;
+  }
+  // Same as upstream's sign-out: start fresh; the router opens the restore screen.
+  reload();
+  return '';
 };
 
 /** MemoryRouter's first entry: the restore screen once, right after a wipe. */

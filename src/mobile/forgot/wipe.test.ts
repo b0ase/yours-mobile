@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { RESTORE_ROUTE, initialRoute, wipeLocalWallet } from './wipe';
+import { RESTORE_ROUTE, WipeError, forgotPasswordWipe, initialRoute, wipeLocalWallet } from './wipe';
 
 const makeFakes = () => {
   const log: string[] = [];
@@ -246,5 +246,38 @@ describe('wipeLocalWallet over fake-indexeddb', () => {
       closeWallet: async () => wallet.close(),
     });
     expect((await idb.databases()).map((d) => d.name)).toEqual(['blockHeaders']);
+  });
+});
+
+describe('round 2 (key-wipe review of 04f9513b)', () => {
+  test('L2: Delete account requires secure storage to list EMPTY afterwards', async () => {
+    const f = makeFakes();
+    f.secure.set('agent:key:anthropic', 'sk-x');
+    f.native.secureRemove = async ({ key }: { key: string }) => {
+      if (key === 'agent:key:anthropic') throw new Error('Secure remove failed (-25244)');
+      f.secure.delete(key);
+    };
+    let err: unknown;
+    await wipeLocalWallet({
+      ...f,
+      restore: false,
+      wait: async () => undefined,
+      closeWallet: async () => undefined,
+    }).catch((e) => (err = e));
+    expect(err).toBeInstanceOf(WipeError);
+  });
+
+  test('L1: Forgot password reloads only after a wipe that worked; a failure is shown instead', async () => {
+    const log: string[] = [];
+    const reload = () => void log.push('reload');
+    expect(await forgotPasswordWipe(async () => undefined, reload)).toBe('');
+    expect(log).toEqual(['reload']);
+    log.length = 0;
+    const msg = await forgotPasswordWipe(async () => {
+      throw new WipeError('Could not remove the wallet keys from this phone.');
+    }, reload);
+    expect(msg).toMatch(/Could not remove the wallet keys/);
+    expect(msg).toMatch(/restart the app/i);
+    expect(log).toEqual([]);
   });
 });

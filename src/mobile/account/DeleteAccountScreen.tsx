@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { useBackClose } from '../backStack';
@@ -7,12 +7,14 @@ import { useServiceContext } from '../../hooks/useServiceContext';
 import { loadSession } from '../chat/api';
 import { walletSigner } from '../chat/signer';
 import { YoursNative } from '../native';
-import { wipeLocalWallet } from '../forgot/wipe';
+import { WIPE_FAILED_HINT, wipeLocalWallet } from '../forgot/wipe';
 import { deleteKey } from '../agent/keyStore';
 import { PROVIDER_IDS } from '../agent/providers';
 import { openDappBrowser } from '../dappBrowser';
 import { DELETE_ACCOUNT_URL, SUPPORT_EMAIL } from '../ugc/ugc';
-import { confirmMatches, deleteAccount, removeFromDevice, type DeleteStep } from './deleteAccount';
+import { confirmMatches, deleteAccount, removeFromDevice, type DeleteStep, type RemoveTarget } from './deleteAccount';
+import { CLOSE_FOR_RELOAD_ACTION } from './closeForReload';
+import { IS_EXTENSION } from '../extension';
 import { closeAndReload, releaseGraphics } from './accountSwitch';
 import { settleWithin } from '../../utils/settleWithin';
 import { ErrorActions } from '../errors/ErrorActions';
@@ -70,37 +72,47 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
   const accounts: { addresses: { identityAddress: string } }[] = chromeStorageService?.getAllAccounts?.() ?? [];
   const current: string | undefined = chromeStorageService?.getCurrentAccountObject?.()?.selectedAccount;
   const others = accounts.filter((a) => a.addresses.identityAddress !== current);
+  /**
+   * The account deleted and the one to switch to, pinned once when the server-side delete succeeds. Never re-read from
+   * the selection: after the switch it names the account being KEPT (key-wipe review of 04f9513b, H1).
+   */
+  const target = useRef<RemoveTarget | null>(null);
 
   /**
    * Last step: take the account off this phone (the whole wallet when it is the only one). Capped and checked
    * (deleteAccount.ts removeFromDevice): it ends in the reload, or in an error with Try again, never in nothing.
    */
   const removeFromPhone = async () => {
-    if (removing) return;
+    if (removing || !target.current) return;
     setRemoving(true);
     setRemoveError('');
+    const chrome = (globalThis as any).chrome;
+    let wholeWallet = false;
     try {
       await removeFromDevice({
-        current,
-        next: others[0]?.addresses.identityAddress,
+        target: target.current,
+        readAccounts: async () =>
+          ((await chrome.storage.local.get('accounts'))?.accounts ?? {}) as Record<string, unknown>,
         select: (a) => chromeStorageService.switchAccountForReload(a),
+        closeWallet: IS_EXTENSION
+          ? undefined
+          : () => chrome.runtime.sendMessage({ action: CLOSE_FOR_RELOAD_ACTION }) as Promise<unknown>,
         forget: (a) => chromeStorageService.removeNested('accounts', a),
         dropCaches: (a) => void indexedDB.deleteDatabase(`txos-${a}-${chromeStorageService.getNetwork()}`),
         wipeWallet: async () => {
+          wholeWallet = true;
           for (const p of PROVIDER_IDS) await settleWithin(() => deleteKey(p), 3_000);
-          await wipeLocalWallet({ chrome: (globalThis as any).chrome, native: YoursNative, restore: false });
+          await wipeLocalWallet({ chrome, native: YoursNative, restore: false });
         },
         reload: () => {
-          if (others.length) return closeAndReload(wallet);
+          if (!wholeWallet) return closeAndReload(wallet);
           releaseGraphics();
           window.location.reload();
         },
       });
     } catch (e) {
       setRemoving(false);
-      setRemoveError(
-        `${e instanceof Error ? e.message : String(e)} Tap Try again. If it keeps failing, email ${SUPPORT_EMAIL}.`,
-      );
+      setRemoveError(`${e instanceof Error ? e.message : String(e)} ${WIPE_FAILED_HINT}`);
     }
   };
 
@@ -109,7 +121,10 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
     setBusy(true);
     setError('');
     try {
+      const deleted = current; // the account apiContext signs for, read before anything switches
+      const next = others[0]?.addresses.identityAddress;
       const r = await deleteAccount(apiContext, { onStep: setStep });
+      target.current ??= { deleted, next };
       setNotes(r.notes);
       setStep(null);
     } catch (e) {
@@ -155,7 +170,7 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
               </p>
             ))}
             <p className="text-xs" style={{ color: MUTED }}>
-              {others.length
+              {target.current?.next
                 ? 'Next, this account is removed from this phone and bWallet switches to your other account.'
                 : "Next, the wallet is removed from this phone. Funds stay on the blockchain. To get them all back you need your recovery phrase and this wallet's backup. Back up first: Settings › This account › Account › Wallet Backup."}
             </p>
@@ -178,7 +193,7 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
                 ? 'Removing from this phone…'
                 : removeError
                   ? 'Try again'
-                  : others.length
+                  : target.current?.next
                     ? 'Remove it from this phone'
                     : 'Remove the wallet from this phone'}
             </button>
