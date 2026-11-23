@@ -17,8 +17,8 @@ import {
 import { PAUSED_MESSAGE, resetKillSwitchCache, STATUS_URL } from '../../config/killSwitch';
 
 // The operator pause is read from STATUS_URL: stub it, no network in tests.
-// Installed before EACH test, not once at load: another test file restoring its own saved fetch in its afterAll put
-// the real network back under these tests on CI (Linux file order), and the live status said "not paused" (#558).
+// Installed before each test, so no other file's fetch stub can be in place when these run. (The #558 CI failure was
+// a different leak: swapSetAside.test mock.module'd killSwitch with a no-op assertNotPaused for the whole process.)
 const realFetch = globalThis.fetch;
 let pausedNow = false;
 const statusStub = (async (u: string | URL | Request) => {
