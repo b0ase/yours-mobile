@@ -960,7 +960,7 @@ describe("findSealAction: the unsure seal in the wallet's own storage, failed on
   test("the page searches with the toolbox's own failed-actions label, from the record's time", () => {
     const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
     expect(page).toContain('toolboxSdk.specOpFailedActions');
-    expect(page).toMatch(/find: \(script, sinceMs, opts\) =>\s*findSealAction\(/);
+    expect(page).toMatch(/find: \(script, sinceMs\) =>\s*findSealAction\(/);
     expect(page).not.toContain('97d4eb1e49215e3374cc2c1939a7c43a55e95c7427bf2d45ed63e3b4e0c88153');
     expect(page).not.toContain("'unfail'");
   });

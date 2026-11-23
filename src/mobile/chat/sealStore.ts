@@ -29,6 +29,11 @@ export const SEAL_DRAWINGS_KEY = 'bwx.nativeSeal.drawings';
  * extension popup and a tab), so two of them never both pay one kept seal (review of #560 M3).
  */
 export const SEAL_CLAIMS_KEY = 'bwx.nativeSeal.claims';
+/**
+ * Paid records bit-sign refused, archived by "Seal again (you'll pay again)" (review of #560 N2): kept for support and
+ * never deleted by the wallet.
+ */
+export const SEAL_SUPPORT_KEY = 'bwx.nativeSeal.support';
 /** Seals recorded from this device by sealKey (identity · document · blocks; nativeSeal.SealLedger). At most 500. */
 export const SEALED_KEY = 'bwx.nativeSeal.sealed';
 export const DRAWINGS_CAP = 10;
@@ -37,6 +42,8 @@ export const DRAWINGS_CAP = 10;
  * (DocSignButton, PendingDocBanner) don't pull the seal screen's words into a store bundle.
  */
 export const FINISHING_SEAL_LINE = 'Finishing your seal…';
+/** A paid seal bit-sign refused to record (review of #560 N2): the card points to support, never "Review & sign". */
+export const PAID_REFUSED_CARD_LINE = 'Paid · contact support';
 
 const defaultStore = (): Store | null => {
   try {
@@ -130,6 +137,14 @@ export const localStore = (store: Store | null = defaultStore(), now: () => numb
       ),
     drawings: localDrawings(store, now),
     claims: localClaims(store, now),
+    support: {
+      list: () => readList<PendingSeal>(store, SEAL_SUPPORT_KEY),
+      save: (p) =>
+        writeList(store, SEAL_SUPPORT_KEY, [
+          ...readList<PendingSeal>(store, SEAL_SUPPORT_KEY).filter((x) => x.nonce !== p.nonce),
+          p,
+        ]),
+    },
   };
 };
 
@@ -145,11 +160,20 @@ export const localLedger = (store: Store | null = defaultStore()): SealLedger =>
  * Is a seal of this document held on this device (paid or maybe paid, not recorded yet)? The room's card shows
  * "Finishing your seal…" then, never a fresh Sign button. Any signer: the seal page sorts out whose it is.
  */
-export const heldSealFor = (documentId: string, store: PendingSealStore = localStore()): boolean => {
-  if (!documentId) return false;
+export const heldSealFor = (documentId: string, store: PendingSealStore = localStore()): boolean =>
+  heldSealStateFor(documentId, store) !== null;
+
+/** Which held state the room's card shows for this document: being finished, or paid and refused (support). */
+export const heldSealStateFor = (
+  documentId: string,
+  store: PendingSealStore = localStore(),
+): 'finishing' | 'refused' | null => {
+  if (!documentId) return null;
   try {
-    return store.list().some((p) => p.documentId === documentId);
+    const mine = store.list().filter((p) => p.documentId === documentId);
+    if (!mine.length) return null;
+    return mine.some((p) => p.refused) ? 'refused' : 'finishing';
   } catch {
-    return false;
+    return null;
   }
 };

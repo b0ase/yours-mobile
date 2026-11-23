@@ -44,8 +44,13 @@ import {
   RESTORED_DRAWING_MESSAGE,
   abandonSeal,
   drawingUsable,
+  PAY_AGAIN_CONFIRM_MESSAGE,
+  SEAL_AGAIN_PAY_AGAIN_LABEL,
+  archiveRefusedSeal,
   heldSupportMessage,
   heldTooLong,
+  paidRefusedMessage,
+  refusedRecordFor,
   settleUnsureSeal,
   type RecoverResult,
   inertHtml,
@@ -139,6 +144,11 @@ type Phase =
   | { k: 'checking' }
   /** Still unknown after the check: held on this phone, finished on the next open. No Sign button. */
   | { k: 'held'; text: string }
+  /**
+   * Paid, and bit-sign refused to record it (review of #560 N2): support with its reference, and an explicit, confirmed
+   * "Seal again (you'll pay again)" that archives the old record (never deletes it).
+   */
+  | { k: 'paid_refused'; text: string; nonce: string; confirming: boolean }
   | { k: 'done'; out: NativeSealOutcome; roomError: string | null; feeSats: number | null };
 
 export const NativeSealPage = () => {
@@ -209,13 +219,12 @@ export const NativeSealPage = () => {
    * chain services. Any failure → null (held, never dropped).
    */
   const txLookup = (): SealTxLookup => ({
-    find: (script, sinceMs, opts) =>
+    find: (script, sinceMs) =>
       findSealAction(
         (args) => apiContext.wallet.listActions(args) as ReturnType<ListActionsFn>,
         script,
         sinceMs,
         toolboxSdk.specOpFailedActions,
-        opts,
       ),
     beef: async (txid) => {
       try {
@@ -375,7 +384,19 @@ export const NativeSealPage = () => {
     opened.current = key;
     let live = true;
     const show = (recovered: boolean) => {
-      let n = openingNotice(sealStateHere(myKey, doc.documentId, ids, localStore(), localLedger()), recovered);
+      const state = sealStateHere(myKey, doc.documentId, ids, localStore(), localLedger());
+      // Paid and refused for good (N2): its own words and way out, never "Already sealed" or "being recorded".
+      const refusedRec = state === 'refused' ? refusedRecordFor(localStore(), myKey, doc.documentId, ids) : null;
+      if (refusedRec) {
+        setPhase((p) =>
+          p.k !== 'ready' && p.k !== 'notice'
+            ? p
+            : { k: 'paid_refused', text: paidRefusedMessage(refusedRec), nonce: refusedRec.nonce, confirming: false },
+        );
+        // Recovery on open may still record it (inside bit-sign's window): look again once it ends.
+        return recovered ? null : { text: '', busy: true };
+      }
+      let n = openingNotice(state, recovered);
       // Still not recorded a day after it was saved: a reference for support. Never cancelled (review of #560 M2).
       const stuck = recovered && n ? heldTooLong(localStore(), myKey, doc.documentId, ids, Date.now()) : null;
       if (stuck) n = { text: heldSupportMessage(stuck), busy: false };
@@ -384,7 +405,7 @@ export const NativeSealPage = () => {
       const d = n ? null : keptDrawing(key);
       if (d) retryHold.hold(d);
       setPhase((p) =>
-        p.k !== 'ready' && p.k !== 'notice'
+        p.k !== 'ready' && p.k !== 'notice' && p.k !== 'paid_refused'
           ? p
           : n
             ? { k: 'notice', text: n.text, busy: n.busy }
@@ -600,6 +621,11 @@ export const NativeSealPage = () => {
     } catch (e) {
       const text = e instanceof NativeSealError || e instanceof Error ? e.message : 'The seal did not finish.';
       // This version is out of date (another party sealed since it opened): offer the latest, never the same button.
+      // Paid, but bit-sign wouldn't record it: support, and the explicit pay-again way out (N2).
+      if (e instanceof NativeSealError && e.code === 'paid_refused' && e.nonce) {
+        setPhase({ k: 'paid_refused', text, nonce: e.nonce, confirming: false });
+        return;
+      }
       if (e instanceof NativeSealError && e.code === 'newer_version') {
         setPhase({ k: 'stale', text });
         return;
@@ -621,7 +647,19 @@ export const NativeSealPage = () => {
         if (!mounted.current) return;
         if (failure) reportFailure(failure, settled.k);
         if (settled.k === 'recorded') return void (await finishDone(settled.out, fee));
-        if (settled.k === 'failed') return setPhase({ k: 'failed', text: settled.message });
+        if (settled.k === 'failed') {
+          const r = refusedRecordFor(
+            localStore(),
+            myKey,
+            doc.documentId,
+            mine.map((f) => f.id),
+          );
+          return setPhase(
+            r
+              ? { k: 'paid_refused', text: paidRefusedMessage(r), nonce: r.nonce, confirming: false }
+              : { k: 'failed', text: settled.message },
+          );
+        }
         // Still unknown: held. "We'll finish this automatically when you reopen it. Don't sign it again."
         if (settled.k === 'unknown') return setPhase({ k: 'held', text: HELD_FOR_REOPEN_MESSAGE });
         unpaidAfterCheck = settled.drawing ?? {
@@ -650,6 +688,23 @@ export const NativeSealPage = () => {
       }
       setPhase({ k: 'failed', text });
     }
+  };
+
+  /**
+   * "Seal again (you'll pay again)", confirmed (N2): the refused paid record goes to the support list (never deleted),
+   * then the pad, with the same drawing when it was kept.
+   */
+  const payAgain = (nonce: string) => {
+    if (!doc || !mine.length) return;
+    if (!archiveRefusedSeal(localStore(), nonce)) {
+      setPhase({ k: 'failed', text: "Couldn't set the first payment aside for support. Nothing was changed." });
+      return;
+    }
+    const d = keptDrawing(currentKey);
+    if (d) {
+      retryHold.hold(d);
+      setPhase({ k: 'retry', text: PAY_AGAIN_CONFIRM_MESSAGE, drawing: d, label: SEAL_AGAIN_LABEL });
+    } else setPhase({ k: 'ready' });
   };
 
   /** "Draw again" instead of the kept drawing: it is forgotten here, and its kept session (if any) given back. */
@@ -775,6 +830,47 @@ export const NativeSealPage = () => {
               {CHECKING_PAYMENT_NOTE}
             </span>
           </p>
+        )}
+        {phase.k === 'paid_refused' && (
+          <div className="flex flex-col gap-2" data-testid="seal-paid-refused">
+            <p role="alert" className="text-[14px]" style={{ color: '#fca5a5' }}>
+              {phase.text}
+            </p>
+            {phase.confirming ? (
+              <>
+                <p className="text-[13px]" style={{ color: '#e4e4e7' }}>
+                  {PAY_AGAIN_CONFIRM_MESSAGE}
+                </p>
+                <button
+                  type="button"
+                  data-testid="seal-pay-again-confirm"
+                  onClick={() => payAgain(phase.nonce)}
+                  className="min-h-12 w-full rounded-lg text-[15px] font-semibold"
+                  style={{ background: '#F5B800', color: '#0b0b0d' }}
+                >
+                  Yes, seal again and pay again
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhase({ ...phase, confirming: false })}
+                  className="min-h-11 w-full rounded-lg text-[14px]"
+                  style={{ border: '1px solid rgba(245,184,0,0.5)', color: '#F5B800' }}
+                >
+                  Not now
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                data-testid="seal-pay-again"
+                onClick={() => setPhase({ ...phase, confirming: true })}
+                className="min-h-11 w-full rounded-lg text-[14px]"
+                style={{ border: '1px solid rgba(245,184,0,0.5)', color: '#F5B800' }}
+              >
+                {SEAL_AGAIN_PAY_AGAIN_LABEL}
+              </button>
+            )}
+          </div>
         )}
         {phase.k === 'held' && (
           <p role="status" aria-live="polite" className="text-[14px]" data-testid="seal-held">

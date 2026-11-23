@@ -631,7 +631,7 @@ describe('the page wires one signature per document (NativeSealPage.tsx)', () =>
   test('the room card shows "Finishing your seal…" for a held seal, never a fresh Sign button', () => {
     for (const f of ['./DocSignButton.tsx', './PendingDocBanner.tsx']) {
       const src = readFileSync(new URL(f, import.meta.url), 'utf8');
-      expect(src).toContain('heldSealFor(');
+      expect(src).toContain('heldSealStateFor(');
       expect(src).toContain('FINISHING_SEAL_LINE');
     }
   });

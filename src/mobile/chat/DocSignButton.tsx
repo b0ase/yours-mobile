@@ -4,7 +4,7 @@ import { bchatxFrameRoute, docHashFor } from './signLink';
 import { docButtonLabel, type SignableDoc } from './signableDocs';
 import { openDappBrowser } from '../dappBrowser';
 import { nativeSealRoute } from './nativeSeal';
-import { FINISHING_SEAL_LINE, heldSealFor } from './sealStore';
+import { FINISHING_SEAL_LINE, PAID_REFUSED_CARD_LINE, heldSealStateFor } from './sealStore';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -18,8 +18,11 @@ const DocSignButton = ({ ticker, doc }: { ticker: string; doc: SignableDoc }) =>
   const sign = doc.state === 'sign';
   // A seal of it held on this phone (it may have been paid): "Finishing your seal…", never a fresh Sign button. The
   // native page shows what is happening and finishes it (owner, 23 Nov 2026: never sign the same document twice).
-  const finishing = sign && !!nativeSealRoute(ticker, doc.id) && heldSealFor(doc.id);
-  const label = finishing ? FINISHING_SEAL_LINE : docButtonLabel(doc.state);
+  const held = sign && !!nativeSealRoute(ticker, doc.id) ? heldSealStateFor(doc.id) : null;
+  const finishing = held !== null;
+  // Paid but refused by bit-sign (review of #560 N2): the card points to support, never "Finishing" forever.
+  const label =
+    held === 'refused' ? PAID_REFUSED_CARD_LINE : finishing ? FINISHING_SEAL_LINE : docButtonLabel(doc.state);
   return (
     <button
       type="button"

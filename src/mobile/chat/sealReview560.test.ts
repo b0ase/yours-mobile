@@ -2,7 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import * as ns from './nativeSeal';
 import {
+  CLAIM_SKEW_MS,
+  CLAIM_STALE_MS,
   ELSEWHERE_MESSAGE,
+  SEAL_CLAIM_MS,
+  SEAL_RECOVERY_WINDOW_MS,
+  SETTLE_MARK_MS,
+  archiveRefusedSeal,
+  beingSettled,
+  claimAlive,
+  pastRecoverWindow,
   HELD_SUPPORT_AFTER_MS,
   RELEASE_MIN_AGE_MS,
   RELEASE_SPACING_MS,
@@ -29,9 +38,9 @@ import {
   type SealTxLookup,
 } from './nativeSeal';
 import { SEAL_HTML, SEAL_KEY, composedFor, preparedFor } from './nativeSeal.fixtures';
-import { localLedger, localStore } from './sealStore';
+import { heldSealStateFor, localLedger, localStore } from './sealStore';
 import { createRetryHold, RETRY_HOLD_MS } from './sealRetryHold';
-import { retryAllowed, retryDrawingFits } from './sealScreen';
+import { openingNotice, retryAllowed, retryDrawingFits } from './sealScreen';
 import { reportSealFailure, resetSealReports, scrubSealText } from './sealReport';
 import { DEVICE_NOT_ACTIVE_MESSAGE } from '../../utils/sendErrors';
 import { consoleGate } from '../../testing/captureConsole';
@@ -224,9 +233,13 @@ describe('M1 / P2 / P3: ONE release rule, wherever recovery runs', () => {
     expect(p.notFound).toBe(1);
     p = withNotFound(p, old + RELEASE_SPACING_MS);
     expect(unpaidProven(p, old + RELEASE_SPACING_MS)).toBe(true);
+    // N4: answers from before the record is 3 minutes old are not evidence at all.
     const young = withNotFound(withNotFound(unsure({ savedAt: 0 }), 1_000), 7_000);
-    expect(young.notFound).toBe(2);
-    expect(unpaidProven(young, 7_000)).toBe(false); // too young
+    expect(young.notFound).toBeUndefined();
+    expect(unpaidProven(young, old + 1)).toBe(false);
+    const late = withNotFound(withNotFound(young, old - 1), old);
+    expect(late.notFound).toBe(1); // only the answer at 3 minutes counts
+    expect(unpaidProven({ ...p, notFoundFirstAt: old - 1 }, old + RELEASE_SPACING_MS)).toBe(false);
     expect(unpaidProven({ ...p, txid: TX }, old + RELEASE_SPACING_MS)).toBe(false);
   });
 
@@ -336,7 +349,7 @@ describe('M2 / P6: a pay-only retry only after a refusal before anything was bui
     });
     expect(r[0].outcome).toBe('kept');
     expect(store.list()[0].txid).toBe(''); // never pinned to the failed attempt
-    expect(store.list()[0].notFound).toBe(1);
+    expect(store.list()[0].notFound).toBeUndefined(); // a young record: not evidence yet (N4)
   });
 
   test('which refusals keep the session: locked, not delivered, device not active, USB key, not enough funds', async () => {
@@ -363,35 +376,45 @@ describe('M2 / P6: a pay-only retry only after a refusal before anything was bui
     }
   });
 
-  test("a resumed record is searched from its own time exactly, skipping earlier attempts' txids", async () => {
-    const seen: string[][] = [];
-    const listActions = (async (a: { labels: string[] }) => (
-      seen.push(a.labels),
-      { totalActions: 1, actions: [{ txid: 'AA', outputs: [{ lockingScript: '006a' }] }] }
-    )) as unknown as ListActionsFn;
-    expect(await findSealAction(listActions, '006a', 100_000, 'F', { exact: true, exclude: ['aa'] })).toEqual({
-      found: false,
-    });
-    expect(seen[0]).toEqual(['action time from 100000']);
-    seen.length = 0;
-    expect(await findSealAction(listActions, '006a', 100_000, 'F')).toEqual({ found: true, txid: 'AA' });
-    expect(seen[0]).toEqual(['action time from 40000']); // a fresh session keeps the 60 s back-off
-    // nativeSignAndSeal marks the record paid on a kept session; lookUpUnsure passes { exact, exclude }.
+  test("N1 / P9: a resumed record keeps the 60 s back-off: found even when the remote storage's clock is behind", async () => {
     gate.expectLines(`warn [nativeSeal] pay failed ${POOR}`, 'warn [nativeSeal] pay failed Failed to fetch');
     const log: Log = [];
-    const store = localStore(fakeStorage());
-    const api = bitsign(log);
+    let t = 20_000_000;
+    const now = () => t;
+    const store = localStore(fakeStorage(), now);
+    const api = bitsign(log, now);
     const keys = wallet(log, [new Error(POOR), new Error('Failed to fetch')]);
-    const e = (await nativeSignAndSeal(base({ log, store, documentId: 'X1', api, keys })).catch(
+    const e = (await nativeSignAndSeal(base({ log, store, documentId: 'X1', api, keys, now })).catch(
       (x) => x,
     )) as NativeSealError;
-    await nativeSignAndSeal(base({ log, store, documentId: 'X1', api, keys, resume: e.drawing!.resume })).catch(
-      (x) => x,
-    );
-    expect(store.list()[0]).toMatchObject({ resumed: true, excludeTxids: [] });
-    let opts: unknown = null;
-    await recover(api, store, 'X1', { find: async (_s, _t, o) => ((opts = o), null), beef: async () => null });
-    expect(opts).toEqual({ exact: true, exclude: [] });
+    const e2 = (await nativeSignAndSeal(
+      base({ log, store, documentId: 'X1', api, keys, now, resume: e.drawing!.resume }),
+    ).catch((x) => x)) as NativeSealError;
+    expect(e2.code).toBe('pending_recovery');
+    const rec = store.list()[0];
+    expect(Object.keys(rec)).not.toContain('resumed');
+    expect(Object.keys(rec)).not.toContain('excludeTxids');
+    // wallet.1sat.app stamped the action with its own clock, 1.5 s behind the phone.
+    const createdAt = rec.savedAt - 1_500;
+    const listActions = (async (args: { labels: string[] }) => {
+      const from = Number(String(args.labels[0]).replace('action time from ', ''));
+      return createdAt >= from && args.labels.length === 1
+        ? { totalActions: 1, actions: [{ txid: 'cc'.repeat(32), outputs: [{ lockingScript: rec.lockingScriptHex }] }] }
+        : { totalActions: 0, actions: [] };
+    }) as unknown as ListActionsFn;
+    const r = await settleUnsureSeal({
+      api,
+      store,
+      nonce: e2.nonce!,
+      now,
+      lookup: { find: (sc, since) => findSealAction(listActions, sc, since, 'failed'), beef: async () => [7] },
+      sleep: async (ms) => void (t += ms),
+    });
+    expect(r.k).toBe('recorded'); // never missed, released and paid twice
+    expect(count(log, 'cancel')).toBe(0);
+    expect(count(log, 'pay')).toBe(2); // the refused attempt and the one that went out
+    const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
+    expect(page).not.toMatch(/\bexact:|\bexclude:/);
   });
 
   test('a held record with no recorded seal after 24 h: "Contact support" with its reference; never cancelled', () => {
@@ -829,5 +852,170 @@ describe('SealRecorded hook (for #561, the Signed list): every recorded seal, wi
     }
     const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
     expect(page).toMatch(/resume: resume \?\? null,[\s\S]{0,120}ticker,/);
+  });
+});
+
+describe('Round 2 N2 / P10: a paid record bit-sign refused has its own state, words and way out', () => {
+  const refusing = (log: Log, now: () => number = Date.now) =>
+    bitsign(log, now, {
+      commit: () => ({ ok: false, status: 422, body: { error: 'That transaction does not validate.' } }),
+      recover: () => ({ ok: false, status: 422, body: { error: 'That transaction does not validate.' } }),
+    });
+  test('"Paid, but bChatX wouldn\'t record it. Contact support (ref …)"; never "Already sealed"; no second seal', async () => {
+    const log: Log = [];
+    const store = localStore(fakeStorage());
+    const e = (await nativeSignAndSeal(base({ log, store, documentId: 'K1', api: refusing(log) })).catch(
+      (x) => x,
+    )) as NativeSealError;
+    expect(e.code).toBe('paid_refused');
+    expect(e.message).toBe("Paid, but bChatX wouldn't record it. Contact support (ref seal-N1).");
+    expect(e.nonce).toBe('N1');
+    expect(retryAllowed(e, true)).toBe(false);
+    expect(store.list()).toMatchObject([{ nonce: 'N1', refused: { status: 422 }, svg: SVG }]);
+    expect(sealStateHere(SEAL_KEY, 'K1', ['f1'], store)).toBe('refused');
+    expect(openingNotice('refused', true)?.text).not.toMatch(/Already sealed|being recorded/);
+    expect(heldSealStateFor('K1', store)).toBe('refused');
+    const again = (await nativeSignAndSeal(base({ log, store, documentId: 'K1', api: refusing(log) })).catch(
+      (x) => x,
+    )) as NativeSealError;
+    expect(again.code).toBe('paid_refused');
+    expect(again.message).toContain('ref seal-N1');
+    expect(count(log, 'pay')).toBe(1);
+  });
+
+  test("/recover is asked inside bit-sign's window only: never again 24 h after the session ends", async () => {
+    const log: Log = [];
+    let t = 1_000_000;
+    const now = () => t;
+    const store = localStore(fakeStorage(), now);
+    await nativeSignAndSeal(base({ log, store, documentId: 'K2', api: refusing(log, now), now })).catch((x) => x);
+    const p = store.list()[0];
+    expect(p.sessionEndsAt).toBe(1_000_000 + SEAL_NONCE_TTL_MS);
+    const before = count(log, 'recover');
+    t = p.sessionEndsAt! + SEAL_RECOVERY_WINDOW_MS - 1;
+    expect((await recover(refusing(log, now), store, 'K2', NONE, { now }))[0].outcome).toBe('refused');
+    expect(count(log, 'recover')).toBe(before + 1);
+    t = p.sessionEndsAt! + SEAL_RECOVERY_WINDOW_MS + 1;
+    expect((await recover(refusing(log, now), store, 'K2', NONE, { now }))[0].outcome).toBe('refused');
+    expect(count(log, 'recover')).toBe(before + 1); // past the window: not asked
+    expect(pastRecoverWindow({}, t)).toBe(false); // an old record without a known session end keeps being asked
+    expect(store.list()).toHaveLength(1); // never deleted
+  });
+
+  test('"Seal again (you\'ll pay again)", confirmed: archived to the support list (never deleted), same drawing', async () => {
+    const log: Log = [];
+    const storage = fakeStorage();
+    const store = localStore(storage);
+    await nativeSignAndSeal(base({ log, store, documentId: 'K3', api: refusing(log) })).catch((x) => x);
+    expect(archiveRefusedSeal({ ...store, support: undefined }, 'N1')).toBe(false); // nowhere to keep it: unchanged
+    expect(store.list()).toHaveLength(1);
+    expect(archiveRefusedSeal(store, 'N1')).toBe(true);
+    expect(store.list()).toEqual([]);
+    expect(store.support!.list()).toMatchObject([{ nonce: 'N1', refused: { status: 422 }, beefHex: '0909' }]);
+    expect(store.support!.list()[0].archivedAt).toBeGreaterThan(0);
+    expect(localStore(storage).drawings!.get(sealKey(SEAL_KEY, 'K3', ['f1']))?.svg).toBe(SVG);
+    const out = await nativeSignAndSeal(base({ log, store, documentId: 'K3' }));
+    expect(out.txid).toBe(TX);
+    expect(count(log, 'pay')).toBe(2); // the user confirmed paying again
+    expect(store.support!.list()).toHaveLength(1); // still there for support
+    // Only a refused record can be archived.
+    store.save(unsure({ nonce: 'NU' }));
+    expect(archiveRefusedSeal(store, 'NU')).toBe(false);
+    expect(store.list()).toHaveLength(1);
+    const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
+    expect(page).toContain('{SEAL_AGAIN_PAY_AGAIN_LABEL}');
+    expect(page).toMatch(/phase\.confirming \? \([\s\S]{0,400}onClick=\{\(\) => payAgain\(phase\.nonce\)\}/);
+  });
+});
+
+describe('Round 2 N3 / N5 / P11: claims are short, heart-beaten, and dead when stale', () => {
+  test("P11: a crashed context's claim blocks Seal again only until its heartbeat is stale (≤45 s), not 10 min", async () => {
+    gate.expectLines(`warn [nativeSeal] pay failed ${POOR}`);
+    const log: Log = [];
+    let t = 30_000_000;
+    const now = () => t;
+    const storage = fakeStorage();
+    const api = bitsign(log, now);
+    const e = (await nativeSignAndSeal(
+      base({ log, store: localStore(storage, now), documentId: 'L1', api, keys: wallet(log, [new Error(POOR)]), now }),
+    ).catch((x) => x)) as NativeSealError;
+    const key = sealKey(SEAL_KEY, 'L1', ['f1']);
+    localStore(storage, now).claims!.save({ key, by: 'crashedctx', at: t, until: t + SEAL_CLAIM_MS });
+    const blocked = await nativeSignAndSeal(
+      base({ log, store: localStore(storage, now), documentId: 'L1', api, now, resume: e.drawing!.resume }),
+    ).catch((x) => x);
+    expect(blocked.code).toBe('elsewhere');
+    t += CLAIM_STALE_MS + 1; // no heartbeat since the crash
+    const out = await nativeSignAndSeal(
+      base({ log, store: localStore(storage, now), documentId: 'L1', api, now, resume: e.drawing!.resume }),
+    );
+    expect(out.txid).toBe(TX);
+    expect(count(log, 'pay')).toBe(2);
+  });
+
+  test('the claim is refreshed at each step (after a long approval it is fresh when paying)', async () => {
+    gate.expectLines(`warn [nativeSeal] pay failed ${POOR}`);
+    const log: Log = [];
+    let t = 40_000_000;
+    const now = () => t;
+    const storage = fakeStorage();
+    const api = bitsign(log, now);
+    const e = (await nativeSignAndSeal(
+      base({ log, store: localStore(storage, now), documentId: 'L2', api, keys: wallet(log, [new Error(POOR)]), now }),
+    ).catch((x) => x)) as NativeSealError;
+    const key = sealKey(SEAL_KEY, 'L2', ['f1']);
+    let atPay: ns.SealClaim | null = null;
+    const keys: SealKeys = {
+      createSignature: async () => ({ signature: [1] }),
+      createAction: async () => ((atPay = localStore(storage, now).claims!.get(key)), { txid: TX, tx: [9] }),
+    };
+    await nativeSignAndSeal(
+      base({
+        log,
+        store: localStore(storage, now),
+        documentId: 'L2',
+        api,
+        keys,
+        now,
+        resume: e.drawing!.resume,
+        approve: async () => ((t += 40_000), true), // 40 s on the sheet
+      }),
+    );
+    expect(atPay).toMatchObject({ by: ns.CONTEXT_ID, at: t, until: t + SEAL_CLAIM_MS });
+    expect(localStore(storage, now).claims!.get(key)).toBeNull(); // dropped when the seal ends
+  });
+
+  test('N5: a claim or settling mark that claims to last too long (clock moved back, bogus) is stale', () => {
+    const t = 1_000_000;
+    const c = { key: 'k', by: 'x', at: t, until: t + SEAL_CLAIM_MS };
+    expect(claimAlive(c, t)).toBe(true);
+    expect(claimAlive({ ...c, until: t + SEAL_CLAIM_MS + CLAIM_SKEW_MS + 1 }, t)).toBe(false);
+    expect(claimAlive({ ...c, until: t + 10 * 60_000 }, t)).toBe(false); // the old 10-minute claim
+    expect(claimAlive({ ...c, at: t + CLAIM_SKEW_MS + 1, until: t + 60_000 }, t)).toBe(false); // from the future
+    expect(claimAlive({ ...c, at: t - CLAIM_STALE_MS - 1 }, t)).toBe(false); // no heartbeat
+    const p = unsure();
+    expect(beingSettled({ ...p, settling: { by: 'x', until: t + SETTLE_MARK_MS } }, t)).toBe(true);
+    expect(beingSettled({ ...p, settling: { by: 'x', until: t + SETTLE_MARK_MS + CLAIM_SKEW_MS + 1 } }, t)).toBe(false);
+    expect(beingSettled({ ...p, settling: { by: 'x', until: t - 1 } }, t)).toBe(false);
+  });
+});
+
+describe('Round 2 N4: only answers from a record ≥3 minutes old count toward release', () => {
+  test('a reopen loop in the first 3 minutes never builds evidence; two later answers ≥5 s apart release it', async () => {
+    const storage = fakeStorage();
+    localStore(storage).save(unsure({ savedAt: 0, nonce: 'N4' }));
+    const log: Log = [];
+    const api = bitsign(log);
+    for (const at of [1_000, 30_000, 90_000, 170_000, RELEASE_MIN_AGE_MS - 1])
+      expect((await recover(api, localStore(storage), 'D', NONE, { now: () => at }))[0].outcome).toBe('kept');
+    expect(localStore(storage).list()[0].notFound).toBeUndefined();
+    expect((await recover(api, localStore(storage), 'D', NONE, { now: () => RELEASE_MIN_AGE_MS }))[0].outcome).toBe(
+      'kept',
+    );
+    const rs = await recover(api, localStore(storage), 'D', NONE, {
+      now: () => RELEASE_MIN_AGE_MS + RELEASE_SPACING_MS,
+    });
+    expect(rs[0].outcome).toBe('released');
+    expect(log).toEqual(['cancel:N4']);
   });
 });

@@ -60,6 +60,10 @@ export const openingNotice = (state: SealHere, recovered: boolean): { text: stri
     // still unknown after it → held, finished on the next open (owner, 23 Nov 2026: never sign it twice).
     case 'unsure':
       return recovered ? { text: HELD_FOR_REOPEN_MESSAGE, busy: false } : { text: FINISHING_SEAL_LINE, busy: true };
+    // Paid, and bit-sign refused to record it (review of #560 N2): support, never "Already sealed". The page adds the
+    // reference (nativeSeal.paidRefusedMessage) and the explicit "Seal again (you'll pay again)".
+    case 'refused':
+      return { text: "Paid, but bChatX wouldn't record it. Contact support.", busy: false };
     case 'none':
       return null;
   }
@@ -158,6 +162,8 @@ export const retryAllowed = (error: unknown, reachedPay: boolean): boolean => {
   if (error instanceof NativeSealError && error.code === 'newer_version') return false;
   // Being paid in another window (review of #560 M3): never a second payment from here.
   if (error instanceof NativeSealError && error.code === 'elsewhere') return false;
+  // Paid and refused by bit-sign: only the explicit, confirmed "Seal again (you'll pay again)".
+  if (error instanceof NativeSealError && error.code === 'paid_refused') return false;
   if (
     error instanceof NativeSealError &&
     (error.code === 'pending_recovery' || error.code === 'failed' || error.code === 'orphaned')

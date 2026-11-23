@@ -83,24 +83,31 @@ password, every time) → compose → `createSignature` → `createAction` (one 
   - The kept session is given back when the screen unmounts or after 2 minutes on it (`sealRetryHold.ts`); the drawing
     stays. After an account switch the screen goes back to the pad.
   - Two windows sharing one store (an extension popup and a tab) can't both pay one kept seal: a claim
-    (`bwx.nativeSeal.claims`, context id + expiry) is written before the approval and checked again right before
-    paying; the other window says "Already being sealed in another window."
+    (`bwx.nativeSeal.claims`, context id + heartbeat) is written before the approval and checked again right before
+    paying; the other window says "Already being sealed in another window." A claim lasts 2 minutes, is refreshed
+    every 15 s and at each step, and is dead once its heartbeat is 45 s old (a crashed window blocks for at most that)
+    or when it claims to last more than 2 min + 30 s (a clock moved back).
 - **Unknown** (the payment may have gone out): the screen says "Checking whether the payment went out…" and looks for
   the seal's transaction in the wallet's own storage (2, 3, 5, 8, 10 s, then every 20 s, about 4 minutes at most;
   `settleUnsureSeal`), marking the record so recovery elsewhere leaves it alone. Leaving the screen stops it.
   - Found → `/recover` with its BEEF, done, one payment.
   - **One release rule** (`unpaidProven`, the same on screen and on reopen): at least two "no such action" answers at
-    least 5 s apart, stored on the record, and the record at least 3 minutes old. Only then is the nonce cancelled and
+    least 5 s apart, stored on the record, both given once the record is at least 3 minutes old (earlier answers are
+    not evidence). Only then is the nonce cancelled and
     "Nothing was paid" said. Until then the record is kept, so a late find still goes to `/recover`.
   - Still unknown → held: "We'll finish this automatically when you reopen it. Don't sign it again." The room's card
     and banner show "Finishing your seal…" instead of Review & sign. A record still not recorded 24 h after it was
     saved shows "Contact support with reference seal-…"; money is never cancelled automatically.
-  - A paid-on-a-kept-session record is looked up from its own time exactly (no 60 s back-off), skipping earlier
-    attempts' txids.
+  - Every record is looked up from a minute before it was saved: a remote storage stamps actions with its own clock,
+    so an exact window could miss the real payment.
 - **Recovery** (`recoverNativeSeals`) only touches the open account's records (key-less records from before 6 Nov only
   from the seal page, for that one document) and says what it did per record: recorded, released, kept or refused. A
   paid record is removed only when bit-sign says it is recorded (or the session was committed: 409 replayed); 401, 403,
-  404 (not_yours), faults and in-progress keep it, and other refusals keep it as refused for support.
+  404 (not_yours), faults and in-progress keep it. Any other refusal (a 422, say) puts it in its own **refused** state:
+  "Paid, but bChatX wouldn't record it. Contact support (ref seal-…)", never "Already sealed". /recover is asked
+  again on each open only inside bit-sign's window (24 h after the session ends). Under the message, **Seal again
+  (you'll pay again)**, after a confirm, moves the record to the support list (`bwx.nativeSeal.support`, never deleted)
+  and starts a new seal with the same drawing. The room card says "Paid · contact support".
 - **The drawing is kept on the device** (`src/mobile/chat/sealStore.ts`): with the held record
   (`bwx.nativeSeal.pending`, field `svg`), and after a not-paid seal in `bwx.nativeSeal.drawings` (at most 10, 24 h,
   16 KB each). Reopening after a crash or relaunch that recovery proves unpaid offers **Seal again** with that same
