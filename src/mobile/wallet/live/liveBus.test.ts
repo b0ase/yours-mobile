@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, jest, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { __liveState, __resetLive, liveCardSats, noteAccount, noteBalance, reportSpend } from './liveBus';
+import { __liveState, __resetLive, liveCardSats, noteAccount, noteBalance, pageBsvSats, reportSpend } from './liveBus';
 import { publishBalanceRead } from '../../../utils/balanceReads';
 import { displayedSats, PENDING_TTL_MS } from './liveLogic';
 
@@ -264,5 +264,48 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
       __resetLive();
       jest.useRealTimers();
     }
+  });
+
+  test('review of #558 round 4: after a send the page shows the card number, and MAX / send-all wait for a fresh read', () => {
+    __resetLive();
+    noteAccount('addrA');
+    publishBalanceRead({ sats: 10_000, startedAt: Date.now() - 10, account: 'addrA' });
+    // No spend pending: the page's own number.
+    expect(pageBsvSats(__liveState(), 10_000, 'addrA')).toBe(10_000);
+    reportSpend({ sats: 9_000, label: 'Sent', account: 'addrA' });
+    // The page still holds 10,000 until its next read: the asset row, picker and Send card show the card's 1,000.
+    expect(pageBsvSats(__liveState(), 10_000, 'addrA')).toBe(1_000);
+    expect(pageBsvSats(__liveState(), 10_000, 'addrA')).toBe(liveCardSats(__liveState(), 10_000, 'addrA'));
+    const page = readFileSync(resolve(import.meta.dir, '../../../pages/BsvWallet.tsx'), 'utf8');
+    // The send marks the page number stale and reads the balance at once, before the address sync.
+    const sent = page.indexOf('setBalanceFresh(false);\n        void getAndSetBsvBalance();');
+    expect(sent).toBeGreaterThan(0);
+    expect(
+      page.indexOf("refreshUtxos().catch((err) => console.error('[handleSendBsv] reconcile", sent),
+    ).toBeGreaterThan(sent);
+    // MAX and send-all refuse a stale number ("Updating balance…"): no 10,000 fill or confirmation.
+    const max = page.slice(page.indexOf('const fillInputWithAllBsv = () => {'));
+    expect(max.slice(0, 120)).toContain('if (!balanceFresh) {');
+    expect(page).toContain('if (isSendAllBsv && !balanceFresh) {');
+    // Every other BSV figure is the shared one.
+    expect(page).toContain('balance={shownBsv}');
+    expect(page).toContain('balance: shownBsv,');
+    expect(page).toContain('balanceBsv={shownBsv}');
+  });
+
+  test('review of #558 round 4: a read tagged for X before any card mounts never becomes Y card number', () => {
+    __resetLive();
+    publishBalanceRead({ sats: 7_777, startedAt: Date.now(), account: 'X' });
+    expect(__liveState().baseFor).toBe('X');
+    noteAccount('Y');
+    expect(liveCardSats(__liveState(), 5_000, 'Y')).toBe(5_000);
+    // And Y's first read is not a "received" move from X's number.
+    publishBalanceRead({ sats: 5_000, startedAt: Date.now(), account: 'Y' });
+    expect(__liveState().ticks).toHaveLength(0);
+    // An untagged read before the card mounts is still adopted by the first account.
+    __resetLive();
+    noteBalance(4_000);
+    noteAccount('Z');
+    expect(liveCardSats(__liveState(), 1, 'Z')).toBe(4_000);
   });
 });

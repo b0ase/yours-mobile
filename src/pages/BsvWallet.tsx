@@ -59,6 +59,7 @@ import { sendBsv } from '../utils/guardedSendBsv';
 import { getWalletBalance, fetchExchangeRate, cachedExchangeRate } from '../utils/wallet';
 import { cachedDisplayRate, exchangeRateAgeMs, fetchDisplayRate, startAlignedRateRefresh } from '../utils/exchangeRate';
 import { balanceUsd, formatBalanceUsd, rateLine, satsOf } from '../utils/balanceUsd';
+import { pageBsvSats, useLive } from '../mobile/wallet/live/liveBus';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import { YoursEventName } from '../inject';
 import { useSyncTracker } from '../hooks/useSyncTracker';
@@ -266,6 +267,10 @@ export const BsvWallet = () => {
   const [balanceKnown, setBalanceKnown] = useState(() => loadLastBalance(identityAddress) != null);
   // True only once THIS session loaded a fresh balance: MAX / send-all never act on the cached amount.
   const [balanceFresh, setBalanceFresh] = useState(false);
+  // While a spend is pending, every BSV figure on the page is the card's: the last real read minus the spends not yet
+  // in it (mobile/wallet/live/liveBus.ts), never the pre-send number beside a lowered card (review of #558 round 4).
+  const live = useLive();
+  const shownBsv = pageBsvSats(live, satsOf(bsvBalance), identityAddress) / 100_000_000;
   // Switching account without a remount: show that account's cached balance, never the previous one's.
   const balanceAccount = useRef(identityAddress);
   useEffect(() => {
@@ -1360,7 +1365,11 @@ export const BsvWallet = () => {
 
         // No optimistic subtraction here: the wallet announces the spend (bwxLiveSpend) and the card takes it off the
         // last real read until a read includes it. Lowering this number too took it off twice: a send of 9,000 from
-        // 10,000 showed $0 (review of #558 round 3). The refresh below settles the real figure.
+        // 10,000 showed $0 (review of #558 round 3). This number is the pre-send one until the next read, so MAX and
+        // send-all wait for it ("Updating balance…"), and the balance is read at once, before the address sync, so it
+        // settles in about a second (review of #558 round 4).
+        setBalanceFresh(false);
+        void getAndSetBsvBalance();
         rememberSent(identityAddress, addressOrder);
         // Sent: no reminder, except when the payee's host didn't confirm it (the note stays, 17c H2).
         if (!deliveryUnconfirmed) settleNote(null);
@@ -1981,11 +1990,11 @@ export const BsvWallet = () => {
           >
           <AssetRow
             still={!IS_EXTENSION}
-            balance={bsvBalance}
+            balance={shownBsv}
             icon={bsvCoin}
             ticker="BSV"
             decimals={8}
-            usdBalance={balanceUsd(satsOf(bsvBalance), headlineRate)}
+            usdBalance={balanceUsd(satsOf(shownBsv), headlineRate)}
             subline={
               // bWallet: the BSV price, so a moving dollar balance can be read against it (owner, 5 Oct 2026).
               <span className="text-xs mt-0.5" style={{ color: theme.color.global.gray }}>
@@ -2193,8 +2202,8 @@ export const BsvWallet = () => {
       kind: 'bsv',
       ticker: 'BSV',
       icon: bsvCoin,
-      balance: bsvBalance,
-      usdBalance: balanceUsd(satsOf(bsvBalance), headlineRate),
+      balance: shownBsv,
+      usdBalance: balanceUsd(satsOf(shownBsv), headlineRate),
     },
     ...(services.mnee
       ? [
@@ -2519,7 +2528,7 @@ export const BsvWallet = () => {
       <SendCard
         theme={theme}
         rows={recipients}
-        balanceBsv={bsvBalance}
+        balanceBsv={shownBsv}
         rate={exchangeRate}
         sendAll={isSendAllBsv}
         processing={isProcessing}

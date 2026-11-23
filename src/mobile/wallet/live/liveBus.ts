@@ -153,16 +153,28 @@ export const reportSpend = (p: { sats: number; label: string; txid?: string; ori
 /** WalletCard: the account the card shows (identity address). Another account's balance starts afresh. */
 export const noteAccount = (id: string | undefined) => {
   if (!id || id === account) return;
-  if (account !== undefined) {
+  // Another account's numbers (this card's earlier account, or a read tagged for another account that came back before
+  // any card said whose balance it shows: review of #558 round 4) never carry over.
+  if (account !== undefined || (state.baseFor !== undefined && state.baseFor !== id)) {
     lastBase = null;
     unclaimedDrop = null;
     set({ pending: [], ticks: [], base: null, baseFor: undefined });
   } else if (state.base !== null && state.baseFor === undefined) {
-    // Reads that came back before the card said whose they were are this first account's.
+    // Untagged reads that came back before the card said whose they were are this first account's.
     set({ baseFor: id });
   }
   account = id;
 };
+
+/**
+ * Every other BSV figure on the wallet page (asset row, asset picker, Send card): the card's number while a spend is
+ * pending, so two different balances never show at once; otherwise the page's own (review of #558 round 4).
+ */
+export const pageBsvSats = (
+  live: Pick<LiveState, 'base' | 'baseFor' | 'pending'>,
+  propSats: number,
+  forAccount?: string,
+) => (live.pending.length ? liveCardSats(live, propSats, forAccount) : propSats);
 
 /**
  * What the card shows: the last real read for `forAccount` minus the spends announced since that it does not include.
@@ -179,7 +191,7 @@ export const liveCardSats = (
  * `read.startedAt`. Drops pending spends it already includes; announces unexplained moves. `read.account` (tests, or a
  * caller that knows) switches accounts first (noteAccount).
  */
-export const noteBalance = (sats: number, read: { account?: string; startedAt?: number } = {}) => {
+export const noteBalance = (sats: number, read: { account?: string; startedAt?: number; readFor?: string } = {}) => {
   if (!Number.isFinite(sats)) return;
   noteAccount(read.account);
   const now = Date.now();
@@ -187,7 +199,9 @@ export const noteBalance = (sats: number, read: { account?: string; startedAt?: 
   const d = lastBase === sats ? 0 : unexplainedDelta(lastBase, sats, covered);
   const changed = lastBase !== sats;
   lastBase = sats;
-  if (state.base !== sats || state.baseFor !== account) set({ base: sats, baseFor: account });
+  // Whose read it is: the account it was read for when it says so, else the card's.
+  const baseFor = read.readFor ?? account;
+  if (state.base !== sats || state.baseFor !== baseFor) set({ base: sats, baseFor });
   if (!changed) {
     // Same number from a later fetch: spends older than the grace are in it (the wallet's storage took them in before
     // createAction returned), so they go now rather than at the ttl. An incoming payment that landed with a spend inside
@@ -213,7 +227,7 @@ export const noteBalance = (sats: number, read: { account?: string; startedAt?: 
 // A read begun for another account than the card now shows (it answered after a switch) is ignored.
 onBalanceRead((r) => {
   if (r.account && account && r.account !== account) return;
-  noteBalance(r.sats, { startedAt: r.startedAt });
+  noteBalance(r.sats, { startedAt: r.startedAt, readFor: r.account });
 });
 
 const buckets = new Map<string, { sec: number; n: number }>();
