@@ -1,11 +1,16 @@
 import { sendMessageAsync } from './chromeHelpers';
 import { YoursEventName } from '../inject';
 import { publishPendingSats } from './pendingBalance';
-import { publishBalanceRead } from './balanceReads';
+import { publishBalanceRead, type BalanceRead } from './balanceReads';
 
 export { cachedExchangeRate, fetchExchangeRate, isExchangeRateStale, lastKnownExchangeRate } from './exchangeRate';
 
-export async function getWalletBalance(): Promise<number> {
+/**
+ * One balance read: the number, when the read began, whose it is, and whether it came back stale (it began before a
+ * read already published for that account, so a newer number is on screen: utils/balanceReads.ts). A stale read is
+ * published nowhere and must not be shown.
+ */
+export async function readWalletBalance(): Promise<BalanceRead & { stale: boolean }> {
   // When the read began: the live balance only counts spends announced before it as included (utils/balanceReads.ts).
   const startedAt = Date.now();
   const response = await sendMessageAsync<{
@@ -20,12 +25,18 @@ export async function getWalletBalance(): Promise<number> {
   if (!response.success) {
     throw new Error(response.error || 'Failed to get balance');
   }
-  // The part not yet in a block, for the Wallet card's "pending" line (utils/pendingBalance.ts).
-  publishPendingSats(response.pending);
-  publishBalanceRead({
+  const read: BalanceRead = {
     sats: response.data ?? 0,
     startedAt,
     ...(typeof response.account === 'string' ? { account: response.account } : {}),
-  });
-  return response.data ?? 0;
+  };
+  const stale = !publishBalanceRead(read);
+  // The part not yet in a block, for the Wallet card's "pending" line (utils/pendingBalance.ts).
+  if (!stale) publishPendingSats(response.pending);
+  return { ...read, stale };
+}
+
+/** The balance in sats (sites and screens that only need the number). */
+export async function getWalletBalance(): Promise<number> {
+  return (await readWalletBalance()).sats;
 }

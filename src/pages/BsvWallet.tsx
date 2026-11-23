@@ -56,10 +56,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useServiceContext } from '../hooks/useServiceContext';
 import { getLockData, sendAllBsv, syncAddresses, type Bsv21Balance, type LockData } from '@1sat/actions';
 import { sendBsv } from '../utils/guardedSendBsv';
-import { getWalletBalance, fetchExchangeRate, cachedExchangeRate } from '../utils/wallet';
+import { readWalletBalance, fetchExchangeRate, cachedExchangeRate } from '../utils/wallet';
 import { cachedDisplayRate, exchangeRateAgeMs, fetchDisplayRate, startAlignedRateRefresh } from '../utils/exchangeRate';
 import { balanceUsd, formatBalanceUsd, rateLine, satsOf } from '../utils/balanceUsd';
-import { pageBsvSats, useLive } from '../mobile/wallet/live/liveBus';
+import { pageBsvSats, useLiveBalance } from '../mobile/wallet/live/liveBus';
 import { sendMessageAsync } from '../utils/chromeHelpers';
 import { YoursEventName } from '../inject';
 import { useSyncTracker } from '../hooks/useSyncTracker';
@@ -269,7 +269,8 @@ export const BsvWallet = () => {
   const [balanceFresh, setBalanceFresh] = useState(false);
   // While a spend is pending, every BSV figure on the page is the card's: the last real read minus the spends not yet
   // in it (mobile/wallet/live/liveBus.ts), never the pre-send number beside a lowered card (review of #558 round 4).
-  const live = useLive();
+  // Only the base, its account and the pending spends: ticks and session meters (up to 20 a second) never re-render it.
+  const live = useLiveBalance();
   const shownBsv = pageBsvSats(live, satsOf(bsvBalance), identityAddress) / 100_000_000;
   // Switching account without a remount: show that account's cached balance, never the previous one's.
   const balanceAccount = useRef(identityAddress);
@@ -687,10 +688,15 @@ export const BsvWallet = () => {
    * this attempt did not produce a balance.
    */
   const getAndSetBsvBalance = async (): Promise<number | null> => {
-    const pending = getWalletBalance();
-    let satoshis: number;
+    const pending = readWalletBalance();
+    // A read that began before one already shown answered late (utils/balanceReads.ts): never shown, now or later, so
+    // the page never goes back to a number from before a payment (review of #558 round 5).
+    const applyRead = (r: { sats: number; stale: boolean }) => {
+      if (!r.stale) applyBalance(r.sats);
+    };
+    let read: { sats: number; stale: boolean };
     try {
-      satoshis = await withTimeout(pending, BALANCE_TIMEOUT_MS, 'Balance');
+      read = await withTimeout(pending, BALANCE_TIMEOUT_MS, 'Balance');
     } catch (err) {
       console.warn('[BsvWallet] balance not refreshed:', err instanceof Error ? err.message : err);
       const cached = loadLastBalance(identityAddress);
@@ -700,12 +706,13 @@ export const BsvWallet = () => {
       }
       setBalanceFailed(true);
       setBalanceLoading(false);
-      pending.then(applyBalance).catch(() => undefined);
+      pending.then(applyRead).catch(() => undefined);
       return null;
     }
-    applyBalance(satoshis);
+    if (read.stale) return null;
+    applyRead(read);
     await loadRate();
-    return satoshis;
+    return read.sats;
   };
 
   // While the balance is unknown or stale, keep asking every 10 s (owner, 6 Oct 2026: after a restore the

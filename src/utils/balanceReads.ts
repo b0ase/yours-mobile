@@ -13,8 +13,19 @@ export const onBalanceRead = (f: (r: BalanceRead) => void): (() => void) => {
   return () => listeners.delete(f);
 };
 
-export const publishBalanceRead = (r: BalanceRead): void => {
-  if (!Number.isFinite(r.sats) || !Number.isFinite(r.startedAt)) return;
+/** Per account ('' when untagged): when the newest read already published began. */
+const newest = new Map<string, number>();
+
+/**
+ * A read that began before one already published for the same account is stale: it answered late, after a newer read
+ * that may include spends it does not (review of #558 round 5: 10,000 shown after 8,900 had landed, a false
+ * "+1,100 received", and MAX filling the old number). Stale reads reach no listener. Returns whether it was published.
+ */
+export const publishBalanceRead = (r: BalanceRead): boolean => {
+  if (!Number.isFinite(r.sats) || !Number.isFinite(r.startedAt)) return false;
+  const key = r.account ?? '';
+  if ((newest.get(key) ?? -Infinity) > r.startedAt) return false;
+  newest.set(key, r.startedAt);
   listeners.forEach((f) => {
     try {
       f(r);
@@ -22,4 +33,8 @@ export const publishBalanceRead = (r: BalanceRead): void => {
       /* a listener never breaks a balance read */
     }
   });
+  return true;
 };
+
+/** Tests only. */
+export const __resetBalanceReads = () => newest.clear();

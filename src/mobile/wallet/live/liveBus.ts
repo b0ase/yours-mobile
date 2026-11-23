@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { GAMES } from '../../games/gamesCatalog';
 import { loadConnectionLog } from '../connectionLog';
-import { onBalanceRead } from '../../../utils/balanceReads';
+import { __resetBalanceReads, onBalanceRead } from '../../../utils/balanceReads';
 import {
   addPending,
   allowRate,
@@ -93,6 +93,8 @@ let lastBase: number | null = null;
 let unclaimedDrop: { sats: number; at: number; tickId: string; pendingIds: string[] } | null = null;
 /** Whose balance lastBase is (WalletCard's identity address): another account's numbers never reconcile this one's. */
 let account: string | undefined;
+/** When the newest read applied began: one that began earlier answered late and is ignored (review of #558 round 5). */
+let newestReadAt = -Infinity;
 
 /**
  * Pending spends never outlive PENDING_TTL_MS, even when no later read changes the balance. A read with the same number
@@ -158,6 +160,7 @@ export const noteAccount = (id: string | undefined) => {
   if (account !== undefined || (state.baseFor !== undefined && state.baseFor !== id)) {
     lastBase = null;
     unclaimedDrop = null;
+    newestReadAt = -Infinity;
     set({ pending: [], ticks: [], base: null, baseFor: undefined });
   } else if (state.base !== null && state.baseFor === undefined) {
     // Untagged reads that came back before the card said whose they were are this first account's.
@@ -194,6 +197,10 @@ export const liveCardSats = (
 export const noteBalance = (sats: number, read: { account?: string; startedAt?: number; readFor?: string } = {}) => {
   if (!Number.isFinite(sats)) return;
   noteAccount(read.account);
+  if (typeof read.startedAt === 'number') {
+    if (read.startedAt < newestReadAt) return;
+    newestReadAt = read.startedAt;
+  }
   const now = Date.now();
   const covered = state.pending.reduce((s, p) => s + p.sats, 0);
   const d = lastBase === sats ? 0 : unexplainedDelta(lastBase, sats, covered);
@@ -309,6 +316,18 @@ const subscribe = (f: () => void) => {
 };
 const snapshot = () => state;
 
+/** What a balance figure needs: the last real read, its account and the pending spends. */
+export type LiveBalance = Pick<LiveState, 'base' | 'baseFor' | 'pending'>;
+let balanceSel: LiveBalance = { base: state.base, baseFor: state.baseFor, pending: state.pending };
+/** The same object until one of those three changes (ticks and session meters leave it alone). */
+export const liveBalanceSnapshot = (): LiveBalance => {
+  if (balanceSel.base !== state.base || balanceSel.baseFor !== state.baseFor || balanceSel.pending !== state.pending)
+    balanceSel = { base: state.base, baseFor: state.baseFor, pending: state.pending };
+  return balanceSel;
+};
+/** For pages that show a balance figure only (BsvWallet): no re-render for ticks or session meters (review round 5). */
+export const useLiveBalance = (): LiveBalance => useSyncExternalStore(subscribe, liveBalanceSnapshot);
+
 export const useLive = (): LiveState => useSyncExternalStore(subscribe, snapshot);
 
 /** Ticks still showing at `now` (the component re-renders on a timer to fade them). */
@@ -323,6 +342,8 @@ export const __resetLive = () => {
   lastBase = null;
   unclaimedDrop = null;
   account = undefined;
+  newestReadAt = -Infinity;
+  __resetBalanceReads();
   if (expiryTimer !== null) clearTimeout(expiryTimer);
   expiryTimer = null;
   paidHere.clear();

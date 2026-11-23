@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, jest, test } from 'bun:test';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { __liveState, __resetLive, liveCardSats, noteAccount, noteBalance, pageBsvSats, reportSpend } from './liveBus';
+import {
+  __liveState,
+  __resetLive,
+  liveBalanceSnapshot,
+  liveCardSats,
+  noteAccount,
+  noteBalance,
+  pageBsvSats,
+  reportSessionSpend,
+  reportSpend,
+} from './liveBus';
 import { publishBalanceRead } from '../../../utils/balanceReads';
 import { displayedSats, PENDING_TTL_MS } from './liveLogic';
 
@@ -162,7 +172,7 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
     const wallet = readFileSync(resolve(import.meta.dir, '../../../utils/wallet.ts'), 'utf8');
     // Published only after a successful answer, with when the read began.
     expect(wallet).toContain('sats: response.data ?? 0,\n    startedAt,');
-    expect(wallet.indexOf('publishBalanceRead({')).toBeGreaterThan(
+    expect(wallet.indexOf('publishBalanceRead(read)')).toBeGreaterThan(
       wallet.indexOf("throw new Error(response.error || 'Failed to get balance')"),
     );
   });
@@ -307,5 +317,66 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
     noteBalance(4_000);
     noteAccount('Z');
     expect(liveCardSats(__liveState(), 1, 'Z')).toBe(4_000);
+  });
+
+  test('review of #558 round 5: a read that began before a newer one answers late and is ignored everywhere', () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(2_000_000);
+      __resetLive();
+      noteAccount('A');
+      expect(publishBalanceRead({ sats: 10_000, startedAt: Date.now() - 20, account: 'A' })).toBe(true);
+      const r1Start = Date.now() + 10; // R1 begins
+      jest.setSystemTime(2_000_100);
+      reportSpend({ sats: 1_000, label: 'send2', account: 'A' }); // a second send after R1 began
+      jest.setSystemTime(2_003_000);
+      expect(publishBalanceRead({ sats: 8_900, startedAt: Date.now() - 500, account: 'A' })).toBe(true); // R2
+      const ticksBefore = __liveState().ticks.length;
+      // R1 (older, before send2) lands last: not published, so neither the card nor the page takes it.
+      expect(publishBalanceRead({ sats: 10_000, startedAt: r1Start, account: 'A' })).toBe(false);
+      expect(liveCardSats(__liveState(), 10_000, 'A')).toBe(8_900);
+      expect(__liveState().ticks).toHaveLength(ticksBefore); // no false "+1,100 received"
+      // A direct late note is ignored too.
+      noteBalance(10_000, { startedAt: r1Start });
+      expect(__liveState().base).toBe(8_900);
+    } finally {
+      __resetLive();
+      jest.useRealTimers();
+    }
+  });
+
+  test('review of #558 round 5: the page drops a stale read, now and when it answers after the timeout', () => {
+    const page = readFileSync(resolve(import.meta.dir, '../../../pages/BsvWallet.tsx'), 'utf8');
+    const fn = page.slice(page.indexOf('const getAndSetBsvBalance = async'));
+    expect(fn).toContain('const pending = readWalletBalance();');
+    expect(fn).toContain('if (!r.stale) applyBalance(r.sats);');
+    expect(fn).toContain('pending.then(applyRead)');
+    expect(fn).toContain('if (read.stale) return null;');
+    expect(fn).not.toContain('pending.then(applyBalance)');
+  });
+
+  test('review of #558 round 5: the page follows only the balance part of the live state', async () => {
+    __resetLive();
+    noteAccount('A');
+    publishBalanceRead({ sats: 10_000, startedAt: Date.now(), account: 'A' });
+    reportSpend({ sats: 500, label: 'gun pack', origin: 'https://tokenblaster.lol', account: 'A' });
+    const before = liveBalanceSnapshot();
+    expect(liveBalanceSnapshot()).toBe(before);
+    // A session meter report changes ticks and sessions only: the balance snapshot is the same object.
+    const ok = await reportSessionSpend('tokenblaster.lol', {
+      type: 'bwallet:session-spend',
+      v: 1,
+      session: 'gun',
+      sats: 20,
+      left: 400,
+    });
+    expect(ok).toBe(true);
+    expect(liveBalanceSnapshot()).toBe(before);
+    // A new pending spend does change it.
+    reportSpend({ sats: 100, label: 'x', account: 'A' });
+    expect(liveBalanceSnapshot()).not.toBe(before);
+    const page = readFileSync(resolve(import.meta.dir, '../../../pages/BsvWallet.tsx'), 'utf8');
+    expect(page).toContain('const live = useLiveBalance();');
+    expect(page).not.toMatch(/\buseLive\(\)/);
   });
 });
