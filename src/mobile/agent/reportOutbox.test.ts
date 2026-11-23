@@ -7,6 +7,7 @@ import {
   failureReason,
   flushOutbox,
   newReportId,
+  OUTBOX_MAX_AUTO_TRIES,
   outboxText,
   queuedFor,
   readOutbox,
@@ -203,4 +204,62 @@ describe('acknowledged reports leave the outbox; resends carry one message_id (5
     expect(newReportId(0)).toMatch(/^0-[0-9a-f]{16}$/);
     expect(reportMessageId('x')).toBe('bwx-report:x');
   });
+});
+
+describe('automatic sends wait for the backoff and stop after a cap; only Retry forces (review of #557, L6)', () => {
+  test('opening the app again and again sends a failing report only when its backoff is up', async () => {
+    const store = memStore();
+    enqueueReport('A', 'one', 'error', store, 0);
+    let posts = 0;
+    const send = async () => {
+      posts++;
+      throw new Error('500');
+    };
+    // Twenty opens in the first minute: one send (when its 30 s were up).
+    for (let i = 0; i < 20; i++) await flushOutbox('A', call, { store, now: () => 31_000 + i * 1000, send });
+    expect(posts).toBe(1);
+  });
+
+  test(`after ${OUTBOX_MAX_AUTO_TRIES} automatic tries it waits for the person's Retry`, async () => {
+    const store = memStore();
+    enqueueReport('A', 'one', 'error', store, 0);
+    let posts = 0;
+    const send = async () => {
+      posts++;
+      throw new Error('500');
+    };
+    let t = 0;
+    for (let i = 0; i < 40; i++) {
+      t += 2 * 60 * 60_000; // always past the backoff
+      await flushOutbox('A', call, { store, now: () => t, send });
+    }
+    expect(posts).toBe(OUTBOX_MAX_AUTO_TRIES);
+    expect(readOutbox(store, t).length).toBe(1);
+    await flushOutbox('A', call, { store, now: () => t, send, force: true });
+    expect(posts).toBe(OUTBOX_MAX_AUTO_TRIES + 1);
+  });
+
+  test('the background runner never forces; Retry does', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./reportSend.tsx', import.meta.url), 'utf8');
+    const runner = src.slice(src.indexOf('export const ReportOutboxRunner'));
+    expect(runner).toContain('flushOutbox(account, call)');
+    expect(runner).not.toContain('force');
+    expect(src).toMatch(/retryOutbox[\s\S]*?flushOutbox\(account, agentCaller\(apiContext\), \{ force: true \}\)/);
+  });
+
+  test('the same report id is queued once', () => {
+    const store = memStore();
+    enqueueReport('A', 'move failed', 'error', store, 0, 'k-1');
+    enqueueReport('A', 'move failed', 'error', store, 5, 'k-1');
+    expect(readOutbox(store, 10).map((r) => r.id)).toEqual(['k-1']);
+  });
+});
+
+test("Ask b's tellTeam queues a reply that wasn't logged (ok: false), with its id, as reportSend does (L1)", async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('./AgentConversation.tsx', import.meta.url), 'utf8');
+  const tell = src.slice(src.indexOf('const tellTeam'), src.indexOf('const runFree'));
+  expect(tell).toContain('if (r.ok) return r;');
+  expect(tell).toContain("enqueueReport(accountId, text, 'error', undefined, undefined, id);");
 });

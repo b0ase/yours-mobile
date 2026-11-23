@@ -35,6 +35,11 @@ export const DEVICE = '*';
 export const OUTBOX_CAP = 20;
 const MAX_TEXT = 4000;
 export const OUTBOX_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
+/**
+ * Automatic sends of one report, at most (review of #557, L6): after this it waits, listed in "Your reports", for the
+ * person's Retry. With the backoff that is about two hours of tries, never a resend on every open.
+ */
+export const OUTBOX_MAX_AUTO_TRIES = 10;
 
 /** 30 s, 1 min, 2 min … capped at 1 hour. */
 export const backoffMs = (tries: number) => Math.min(30_000 * 2 ** Math.max(0, tries - 1), 60 * 60_000);
@@ -119,6 +124,9 @@ export const enqueueReport = (
   now = Date.now(),
   id = newReportId(now),
 ): QueuedReport => {
+  // The same report again (a wallet report with its own id, taken in twice): kept once.
+  const already = readOutbox(store, now).find((r) => r.id === id);
+  if (already) return already;
   const item: QueuedReport = {
     id,
     account: account || DEVICE,
@@ -178,7 +186,9 @@ export const outboxText = (reason: OutboxReason) =>
 let flushing: Promise<{ sent: number; left: number }> | null = null;
 
 /**
- * Send what's due for this account. `force` ignores the backoff (Retry button, coming back online, sign-in).
+ * Send what's due for this account. `force` is the person's own Retry only: it ignores the backoff and the cap on
+ * automatic tries. Opening the app, coming back online and the minute timer all wait for each report's backoff, and stop
+ * after OUTBOX_MAX_AUTO_TRIES (review of #557, L6: a forced send on every open resent reports all day).
  * A failed send stays queued with a longer wait; nothing is ever removed without a reply from bit-sign saying it has
  * the report (parseReport: ok, with or without an ack). A reply that says it could not log it (ok: false) stays queued
  * too. Every send names the report (message_id) so the server can drop a resend it already has.
@@ -197,7 +207,7 @@ export const flushOutbox = (
   flushing = (async () => {
     let sent = 0;
     for (const item of queuedFor(account, store, now())) {
-      if (!force && item.nextAt > now()) continue;
+      if (!force && (item.nextAt > now() || item.tries > OUTBOX_MAX_AUTO_TRIES)) continue;
       try {
         const r = await send(call, item.text, reportMessageId(item.id));
         // bit-sign answered but could not log it: kept, and tried again after the backoff.
@@ -229,7 +239,8 @@ export const flushOutbox = (
 
 // Wallet-core reports (services/reportSink.ts, e.g. our server's backup failing again and again) join this outbox:
 // sent with its retries and listed in "Your reports"; in the extension, also those its background kept.
-const takeReport = (account: string | null | undefined, text: string) => void enqueueReport(account, text, 'error');
+const takeReport = (account: string | null | undefined, text: string, reportId?: string) =>
+  void enqueueReport(account, text, 'error', undefined, undefined, reportId || undefined);
 /** Join wallet-core reports to this outbox, with those the extension's background kept (run once at load). */
 export const joinWalletReports = () => {
   setReportSink(takeReport);

@@ -70,7 +70,8 @@ export const retryOutbox = (apiContext: ApiContext | null | undefined, account: 
 
 /**
  * Sends queued reports in the background: on mount (app start / unlock / account switch), when the app comes
- * back to the front, when the network returns, and every minute for anything whose backoff is up.
+ * back to the front, when the network returns, and every minute. Each time only what is due: a report waits out its
+ * backoff, and only the person's Retry (retryOutbox) sends one sooner (review of #557, L6).
  */
 export const ReportOutboxRunner = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -78,17 +79,17 @@ export const ReportOutboxRunner = () => {
   useEffect(() => {
     if (!apiContext) return;
     const call = agentCaller(apiContext);
-    const run = (force: boolean) => {
+    const run = () => {
       if (!queuedFor(account).length) return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-      void flushOutbox(account, call, { force }).catch(() => {});
+      void flushOutbox(account, call).catch(() => {});
     };
-    const onVisible = () => document.visibilityState === 'visible' && run(true);
-    const onOnline = () => run(true);
-    run(true);
+    const onVisible = () => document.visibilityState === 'visible' && run();
+    const onOnline = () => run();
+    run();
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onOnline);
-    const timer = setInterval(() => run(false), 60_000);
+    const timer = setInterval(run, 60_000);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onOnline);

@@ -456,7 +456,11 @@ export const AgentConversation = ({
     // One id for the first send and any resend from the outbox (the server's dedupe key).
     const id = newReportId();
     try {
-      return await reportToB((m, p, b) => withClient((c) => c.agentCall(m, p, b)), text, reportMessageId(id));
+      const r = await reportToB((m, p, b) => withClient((c) => c.agentCall(m, p, b)), text, reportMessageId(id));
+      if (r.ok) return r;
+      // bit-sign answered but could not log it: it waits in the outbox (same id), as reportSend does.
+      enqueueReport(accountId, text, 'error', undefined, undefined, id);
+      return { queued: `${outboxText('error')} You'll see it in Your reports as Waiting to send.` };
     } catch (e) {
       const reason = failureReason(e);
       logQueued(reason, e);
