@@ -12,7 +12,9 @@ import { deleteKey } from '../agent/keyStore';
 import { PROVIDER_IDS } from '../agent/providers';
 import { openDappBrowser } from '../dappBrowser';
 import { DELETE_ACCOUNT_URL, SUPPORT_EMAIL } from '../ugc/ugc';
-import { confirmMatches, deleteAccount, type DeleteStep } from './deleteAccount';
+import { confirmMatches, deleteAccount, removeFromDevice, type DeleteStep } from './deleteAccount';
+import { closeAndReload, releaseGraphics } from './accountSwitch';
+import { settleWithin } from '../../utils/settleWithin';
 import { ErrorActions } from '../errors/ErrorActions';
 
 const GOLD = 'var(--bw-accent-hi)';
@@ -40,9 +42,11 @@ const STEP_TEXT: Record<DeleteStep, string> = {
 
 /** Settings › Delete account. */
 export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
-  const { apiContext, chromeStorageService } = useServiceContext() as any;
+  const { apiContext, chromeStorageService, wallet } = useServiceContext() as any;
   const [busy, setBusy] = useState(false);
-  useBackClose(true, () => !busy && onBack());
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState('');
+  useBackClose(true, () => !busy && !removing && onBack());
   const [handle, setHandle] = useState<string | null>(null);
   const [typed, setTyped] = useState('');
   const [step, setStep] = useState<DeleteStep | null>(null);
@@ -67,22 +71,37 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
   const current: string | undefined = chromeStorageService?.getCurrentAccountObject?.()?.selectedAccount;
   const others = accounts.filter((a) => a.addresses.identityAddress !== current);
 
-  /** Last step: take the account off this phone (the whole wallet when it is the only one). */
-  const removeFromDevice = async () => {
-    if (current && others.length) {
-      const next = others[0].addresses.identityAddress;
-      await chromeStorageService.switchAccount(next);
-      try {
-        indexedDB.deleteDatabase(`txos-${current}-${chromeStorageService.getNetwork()}`);
-      } catch {
-        /* best effort */
-      }
-      await chromeStorageService.removeNested('accounts', current);
-    } else {
-      for (const p of PROVIDER_IDS) await deleteKey(p).catch(() => undefined);
-      await wipeLocalWallet({ chrome: (globalThis as any).chrome, native: YoursNative, restore: false });
+  /**
+   * Last step: take the account off this phone (the whole wallet when it is the only one). Capped and checked
+   * (deleteAccount.ts removeFromDevice): it ends in the reload, or in an error with Try again, never in nothing.
+   */
+  const removeFromPhone = async () => {
+    if (removing) return;
+    setRemoving(true);
+    setRemoveError('');
+    try {
+      await removeFromDevice({
+        current,
+        next: others[0]?.addresses.identityAddress,
+        select: (a) => chromeStorageService.switchAccountForReload(a),
+        forget: (a) => chromeStorageService.removeNested('accounts', a),
+        dropCaches: (a) => void indexedDB.deleteDatabase(`txos-${a}-${chromeStorageService.getNetwork()}`),
+        wipeWallet: async () => {
+          for (const p of PROVIDER_IDS) await settleWithin(() => deleteKey(p), 3_000);
+          await wipeLocalWallet({ chrome: (globalThis as any).chrome, native: YoursNative, restore: false });
+        },
+        reload: () => {
+          if (others.length) return closeAndReload(wallet);
+          releaseGraphics();
+          window.location.reload();
+        },
+      });
+    } catch (e) {
+      setRemoving(false);
+      setRemoveError(
+        `${e instanceof Error ? e.message : String(e)} Tap Try again. If it keeps failing, email ${SUPPORT_EMAIL}.`,
+      );
     }
-    window.location.reload();
   };
 
   const run = async () => {
@@ -121,7 +140,7 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
         className="flex items-center gap-2 px-2 pb-2"
         style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)', borderBottom: `1px solid ${LINE}` }}
       >
-        <button onClick={onBack} disabled={busy} aria-label="Back" className="p-2 disabled:opacity-40">
+        <button onClick={onBack} disabled={busy || removing} aria-label="Back" className="p-2 disabled:opacity-40">
           <ArrowLeft size={20} color="white" />
         </button>
         <span className="text-[16px] font-bold text-white">Delete account</span>
@@ -140,12 +159,28 @@ export const DeleteAccountScreen = ({ onBack }: { onBack: () => void }) => {
                 ? 'Next, this account is removed from this phone and bWallet switches to your other account.'
                 : "Next, the wallet is removed from this phone. Funds stay on the blockchain. To get them all back you need your recovery phrase and this wallet's backup. Back up first: Settings › This account › Account › Wallet Backup."}
             </p>
+            {removeError && (
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs" style={{ color: RED }}>
+                  {removeError}
+                </p>
+                <ErrorActions message={String(removeError)} />
+              </div>
+            )}
             <button
-              onClick={() => void removeFromDevice()}
-              className="rounded-full py-3 text-sm font-bold"
+              onClick={() => void removeFromPhone()}
+              disabled={removing}
+              className="rounded-full py-3 text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2"
               style={{ background: GOLD, color: '#1a1300' }}
             >
-              {others.length ? 'Remove it from this phone' : 'Remove the wallet from this phone'}
+              {removing && <Loader2 size={16} className="animate-spin" />}
+              {removing
+                ? 'Removing from this phone…'
+                : removeError
+                  ? 'Try again'
+                  : others.length
+                    ? 'Remove it from this phone'
+                    : 'Remove the wallet from this phone'}
             </button>
           </div>
         ) : (

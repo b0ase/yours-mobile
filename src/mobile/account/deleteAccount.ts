@@ -9,6 +9,7 @@ import { clearConsents } from '../agent/consent';
 import { clearUgcLocal, normHandle } from '../ugc/ugc';
 import { clearHelpDeskUnpin } from '../chat/helpDeskPin';
 import { bsvLockScanKeys } from '../locks/lockFinder';
+import { within } from '../../utils/settleWithin';
 
 /**
  * Settings › Delete account (Apple 5.1.1(v); Google Play account deletion).
@@ -137,4 +138,48 @@ export const deleteAccount = async (
     }
   }
   return { paymail, bchatHandle, notes };
+};
+
+/** Longest each step of "Remove it from this phone" may take before the screen shows an error and Try again. */
+export const REMOVE_STEP_CAP_MS = 15_000;
+/** The whole-wallet wipe: its own steps are capped (forgot/wipe.ts WIPE_CAPS); this is the backstop. */
+export const REMOVE_WIPE_CAP_MS = 45_000;
+
+/**
+ * The last step of Delete account: take this account off the phone, or the whole wallet when it is the only one, then
+ * start again from the reload. Every step is capped and every failure is thrown, so the button always ends in the
+ * reload or an error with Try again (5.2.61 build 155: the button did nothing, a hung or failed step was swallowed).
+ */
+export const removeFromDevice = async (d: {
+  /** This account's identity address. */
+  current?: string;
+  /** Another account on this phone to switch to, if any. */
+  next?: string;
+  /** Select `next` for the reload. */
+  select: (address: string) => Promise<void>;
+  /** Remove the account (its encrypted keys) from storage. */
+  forget: (address: string) => Promise<void>;
+  /** Best effort: the account's local caches. */
+  dropCaches?: (address: string) => void;
+  /** The whole wallet off this device (forgot/wipe.ts); throws if any key may remain. */
+  wipeWallet: () => Promise<void>;
+  /** Close the wallet and reload (the welcome screen, or the other account). */
+  reload: () => unknown;
+  capMs?: number;
+  wipeCapMs?: number;
+}) => {
+  const cap = d.capMs ?? REMOVE_STEP_CAP_MS;
+  if (d.current && d.next) {
+    const { current, next } = d;
+    await within(() => d.select(next), cap, 'Switching to your other account');
+    await within(() => d.forget(current), cap, 'Removing this account');
+    try {
+      d.dropCaches?.(current);
+    } catch {
+      /* best effort */
+    }
+  } else {
+    await within(d.wipeWallet, d.wipeCapMs ?? REMOVE_WIPE_CAP_MS, 'Removing the wallet');
+  }
+  await d.reload();
 };
