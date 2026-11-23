@@ -1,17 +1,18 @@
 import { useSyncExternalStore } from 'react';
 import { GAMES } from '../../games/gamesCatalog';
 import { loadConnectionLog } from '../connectionLog';
+import { onBalanceRead } from '../../../utils/balanceReads';
 import {
   addPending,
   allowRate,
   applySessionSpend,
   expirePending,
+  FALL_MATCH_WINDOW_MS,
   fallExplainedBy,
   fundedWithin,
   liveTicks,
   nextExpiryIn,
   parseSessionSpend,
-  PENDING_TTL_MS,
   pruneSessions,
   pushTick,
   reconcilePending,
@@ -27,7 +28,8 @@ import {
  *  - content.ts (extension): `bwxSessionSpend`, a dApp's `bwallet:session-spend` window message, forwarded with
  *    the page's host; the sender's origin is checked against it here;
  *  - BappFrameHost (mobile): the same message from the framed bApp, origin from the MessageEvent;
- *  - WalletCard: every fetched balance, to reconcile optimistic spends and spot incoming coins.
+ *  - utils/balanceReads.ts: every real balance read (getWalletBalance) with when it began, to reconcile optimistic
+ *    spends and spot incoming coins; WalletCard says which account the card shows (noteAccount).
  */
 
 export const LIVE_SPEND_ACTION = 'bwxLiveSpend';
@@ -84,9 +86,9 @@ let unclaimedDrop: { sats: number; at: number; tickId: string; pendingIds: strin
 let account: string | undefined;
 
 /**
- * Pending spends never outlive PENDING_TTL_MS, even when no later fetch changes the balance. WalletCard reports a
- * balance only when the number changes, so a spend kept by one fetch used to stay on the card until a reload (RB,
- * 23 Nov 2026: $0 shown after paying 1 BSV from ~1.02 BSV).
+ * Pending spends never outlive PENDING_TTL_MS, even when no later read changes the balance. A read with the same number
+ * drops a spend only when it proves the spend is in it (reconcilePending), so without this a spend could stay on the
+ * card until a reload (RB, 23 Nov 2026: $0 shown after paying 1 BSV from ~1.02 BSV).
  */
 let expiryTimer: ReturnType<typeof setTimeout> | null = null;
 const armExpiry = () => {
@@ -103,8 +105,10 @@ const armExpiry = () => {
 };
 
 /** The wallet signed a spend of `sats` (outputs to others). Ticks the card down at once. */
-export const reportSpend = (p: { sats: number; label: string; txid?: string; origin?: string }) => {
+export const reportSpend = (p: { sats: number; label: string; txid?: string; origin?: string; account?: string }) => {
   if (!Number.isSafeInteger(p.sats) || p.sats <= 0) return;
+  // Signed by another account than the card shows (announced just after a switch): not this card's money.
+  if (p.account && account && p.account !== account) return;
   const now = Date.now();
   if (p.origin) {
     const h = hostOf(p.origin);
@@ -126,7 +130,7 @@ export const reportSpend = (p: { sats: number; label: string; txid?: string; ori
   } else {
     pending = addPending(pending, { id, sats: p.sats, at: now, txid: p.txid, base: lastBase });
     // Still smaller than the fall: a later announcement may complete it. Bigger: this fall was something else.
-    if (drop && spent < drop.sats && now - drop.at < PENDING_TTL_MS) drop.pendingIds.push(id);
+    if (drop && spent < drop.sats && now - drop.at < FALL_MATCH_WINDOW_MS) drop.pendingIds.push(id);
     else unclaimedDrop = null;
   }
   set({
@@ -137,21 +141,25 @@ export const reportSpend = (p: { sats: number; label: string; txid?: string; ori
   armExpiry();
 };
 
-/**
- * WalletCard: a balance was fetched (for `forAccount`, its identity address). Drops pending spends it already includes;
- * announces unexplained moves. Called on every finished refresh, not only when the number changes. Another account's
- * balance starts afresh: no pending spend, fall or base carries over (review of #558, M3).
- */
-export const noteBalance = (sats: number, forAccount?: string) => {
-  if (!Number.isFinite(sats)) return;
-  if (forAccount !== undefined && forAccount !== account) {
-    if (account !== undefined) {
-      lastBase = null;
-      unclaimedDrop = null;
-      set({ pending: [], ticks: [] });
-    }
-    account = forAccount;
+/** WalletCard: the account the card shows (identity address). Another account's balance starts afresh. */
+export const noteAccount = (id: string | undefined) => {
+  if (!id || id === account) return;
+  if (account !== undefined) {
+    lastBase = null;
+    unclaimedDrop = null;
+    set({ pending: [], ticks: [] });
   }
+  account = id;
+};
+
+/**
+ * A real balance read came back (utils/balanceReads.ts: getWalletBalance, never a cached or fallback number), begun at
+ * `read.startedAt`. Drops pending spends it already includes; announces unexplained moves. `read.account` (tests, or a
+ * caller that knows) switches accounts first (noteAccount).
+ */
+export const noteBalance = (sats: number, read: { account?: string; startedAt?: number } = {}) => {
+  if (!Number.isFinite(sats)) return;
+  noteAccount(read.account);
   const now = Date.now();
   const covered = state.pending.reduce((s, p) => s + p.sats, 0);
   const d = lastBase === sats ? 0 : unexplainedDelta(lastBase, sats, covered);
@@ -161,7 +169,7 @@ export const noteBalance = (sats: number, forAccount?: string) => {
     // Same number from a later fetch: spends older than the grace are in it (the wallet's storage took them in before
     // createAction returned), so they go now rather than at the ttl. An incoming payment that landed with a spend inside
     // the grace no longer leaves the card low for 30 s (review of #558, L8).
-    const pending = reconcilePending(expirePending(state.pending, now), now);
+    const pending = reconcilePending(expirePending(state.pending, now), now, undefined, sats, read.startedAt, true);
     if (pending.length !== state.pending.length) set({ pending });
     return;
   }
@@ -169,7 +177,7 @@ export const noteBalance = (sats: number, forAccount?: string) => {
   // A fall no announced spend explains: remembered briefly, in case the spend's announcement is still on its way.
   unclaimedDrop = d < 0 ? { sats: -d, at: now, tickId, pendingIds: [] } : null;
   set({
-    pending: reconcilePending(state.pending, now, undefined, sats),
+    pending: reconcilePending(state.pending, now, undefined, sats, read.startedAt),
     ticks: d
       ? pushTick(state.ticks, { id: tickId, sats: d, label: d > 0 ? 'received' : 'sent', at: now })
       : state.ticks,
@@ -177,6 +185,9 @@ export const noteBalance = (sats: number, forAccount?: string) => {
   });
   armExpiry();
 };
+
+// Every real balance read, wherever the page made it (getWalletBalance), with when it began.
+onBalanceRead((r) => noteBalance(r.sats, { startedAt: r.startedAt }));
 
 const buckets = new Map<string, { sec: number; n: number }>();
 
@@ -225,13 +236,14 @@ const install = () => {
       // Only from the wallet itself (background), never from a content script.
       const own = !sender?.origin || sender.origin.startsWith('chrome-extension://') || sender.id === rt.id;
       if (!own || (sender as { tab?: unknown }).tab) return;
-      const d = (msg.data ?? {}) as { sats?: number; label?: string; txid?: string; origin?: string };
+      const d = (msg.data ?? {}) as { sats?: number; label?: string; txid?: string; origin?: string; account?: string };
       if (typeof d.sats === 'number')
         reportSpend({
           sats: d.sats,
           label: typeof d.origin === 'string' && d.origin ? appName(d.origin) : String(d.label ?? '').slice(0, 60),
           txid: typeof d.txid === 'string' ? d.txid : undefined,
           origin: typeof d.origin === 'string' ? d.origin : undefined,
+          account: typeof d.account === 'string' ? d.account : undefined,
         });
       return;
     }

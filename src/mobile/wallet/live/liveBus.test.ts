@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, jest, test } from 'bun:test';
-import { __liveState, __resetLive, noteBalance, reportSpend } from './liveBus';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { __liveState, __resetLive, noteAccount, noteBalance, reportSpend } from './liveBus';
+import { publishBalanceRead } from '../../../utils/balanceReads';
 import { displayedSats, PENDING_TTL_MS } from './liveLogic';
 
 /** What the Wallet card shows for a fetched balance `base` (WalletCard: displayedSats). */
@@ -79,9 +82,9 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
 
   test('review of #558, M3: another account starts afresh (no pending spend, fall or base carries over)', () => {
     __resetLive();
-    noteBalance(10_000, 'addrA');
+    noteBalance(10_000, { account: 'addrA' });
     reportSpend({ sats: 4_000, label: 'a' });
-    noteBalance(2_000, 'addrB'); // the user switched accounts
+    noteBalance(2_000, { account: 'addrB' }); // the user switched accounts
     expect(__liveState().pending).toHaveLength(0);
     expect(shown(2_000)).toBe(2_000);
     expect(__liveState().ticks).toHaveLength(0); // no "sent 8,000" for the switch
@@ -96,11 +99,113 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
       noteBalance(13_900); // +5,000 received, the spend and its fee already in, inside the grace
       expect(shown(13_900)).toBe(12_900);
       jest.advanceTimersByTime(1_600);
-      noteBalance(13_900); // the post-spend refresh ends with the same number
+      noteBalance(13_900, { startedAt: Date.now() - 100 }); // a read begun after the spend: the same number
       expect(shown(13_900)).toBe(13_900);
     } finally {
       __resetLive();
       jest.useRealTimers();
     }
+  });
+
+  test('review of #558 round 2: a same-number read that may predate the payment never drops it (card never reads high)', () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(1_000_000);
+      __resetLive();
+      noteBalance(10_000);
+      const before = Date.now() - 50; // a refresh whose BSV read began before the spend
+      reportSpend({ sats: 1_000, label: 'x' });
+      jest.setSystemTime(1_002_000);
+      noteBalance(10_000, { startedAt: before }); // it ends 2 s later with the old number
+      expect(shown(10_000)).toBe(9_000);
+      // Begun after the spend, but the same number the spend was announced against: still not proof.
+      noteBalance(10_000, { startedAt: Date.now() - 10 });
+      expect(shown(10_000)).toBe(9_000);
+      // No start time (not a real read): nothing is dropped either.
+      noteBalance(10_000);
+      expect(__liveState().pending).toHaveLength(1);
+      // The real post-payment number settles it.
+      noteBalance(8_900, { startedAt: Date.now() });
+      expect(shown(8_900)).toBe(8_900);
+    } finally {
+      __resetLive();
+      jest.useRealTimers();
+    }
+  });
+
+  test('review of #558 round 2: a changed read that began before the spend keeps it until a later read', () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(2_000_000);
+      __resetLive();
+      noteBalance(10_000);
+      const before = Date.now();
+      jest.setSystemTime(2_000_100);
+      reportSpend({ sats: 1_000, label: 'x' });
+      jest.setSystemTime(2_003_000);
+      noteBalance(15_000, { startedAt: before }); // +5,000 received, read begun before the spend
+      expect(shown(15_000)).toBe(14_000);
+    } finally {
+      __resetLive();
+      jest.useRealTimers();
+    }
+  });
+
+  test('review of #558 round 2: only real reads reach the live balance; the card never feeds it its props', () => {
+    __resetLive();
+    publishBalanceRead({ sats: 10_000, startedAt: Date.now() });
+    reportSpend({ sats: 1_000, label: 'x' });
+    expect(__liveState().pending[0].base).toBe(10_000);
+    const card = readFileSync(resolve(import.meta.dir, '..', 'WalletCard.tsx'), 'utf8');
+    expect(card).not.toContain('noteBalance(');
+    expect(card).toContain('useEffect(() => noteAccount(id), [id]);');
+    const wallet = readFileSync(resolve(import.meta.dir, '../../../utils/wallet.ts'), 'utf8');
+    // Published only after a successful answer, with when the read began.
+    expect(wallet.indexOf('publishBalanceRead({ sats: response.data ?? 0, startedAt })')).toBeGreaterThan(
+      wallet.indexOf("throw new Error(response.error || 'Failed to get balance')"),
+    );
+  });
+
+  test('review of #558 round 2: a coincidental unrelated fall never absorbs a payment', () => {
+    __resetLive();
+    noteBalance(10_000);
+    noteBalance(7_000); // 3,000 left elsewhere
+    reportSpend({ sats: 2_000, label: 'a' });
+    expect(shown(7_000)).toBe(5_000);
+    __resetLive();
+    noteBalance(10_000);
+    noteBalance(9_000); // 1,000 left elsewhere
+    reportSpend({ sats: 50, label: 'micro' });
+    expect(shown(9_000)).toBe(8_950);
+  });
+
+  test('review of #558 round 2: a fall is matched only within about one createAction', () => {
+    jest.useFakeTimers();
+    try {
+      jest.setSystemTime(3_000_000);
+      __resetLive();
+      noteBalance(10_000);
+      noteBalance(8_900); // fell by a 1,000 payment + fee
+      jest.setSystemTime(3_015_000); // 15 s later: not this payment's fall
+      reportSpend({ sats: 1_000, label: 'late' });
+      expect(shown(8_900)).toBe(7_900);
+    } finally {
+      __resetLive();
+      jest.useRealTimers();
+    }
+  });
+
+  test('review of #558 round 2: a payment announced for another account never comes off this card', () => {
+    __resetLive();
+    noteAccount('addrA');
+    noteBalance(10_000);
+    reportSpend({ sats: 1_000, label: 'x', account: 'addrA' });
+    noteAccount('addrB');
+    noteBalance(3_000);
+    reportSpend({ sats: 500, label: 'y', account: 'addrA' }); // A's payment announced just after the switch
+    expect(__liveState().pending).toHaveLength(0);
+    expect(shown(3_000)).toBe(3_000);
+    reportSpend({ sats: 500, label: 'z', account: 'addrB' });
+    expect(shown(3_000)).toBe(2_500);
   });
 });

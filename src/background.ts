@@ -7327,6 +7327,8 @@ if (!(
     let releasePayeeMark: (() => void) | undefined;
     let releaseMicropay: (() => void) | undefined;
     let ownMintIntent: MintIntent | undefined;
+    // Whose payment this is, taken before any await: the live balance ignores it on another account's card.
+    const spendAccount = currentAccountId();
     // Own payments only: where the time goes, one warn line (services/payTiming.ts; owner's seal, 7 Nov 2026).
     const timing = message.originator === ADMIN_ORIGINATOR ? payTimer() : null;
     // And they go first: the device sync lets go of the storage queue at its next page (services/ownPayments.ts).
@@ -7607,6 +7609,7 @@ if (!(
                 txid: result.txid,
                 label: message.params.description?.slice(0, 60) ?? '',
                 origin: message.originator && message.originator !== ADMIN_ORIGINATOR ? message.originator : undefined,
+                account: spendAccount,
               },
             })
             ?.catch(() => {

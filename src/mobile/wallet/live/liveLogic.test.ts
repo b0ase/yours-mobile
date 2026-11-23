@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   addPending,
   fallExplainedBy,
+  feeSlack,
   nextExpiryIn,
   allowRate,
   applySessionSpend,
@@ -102,6 +103,14 @@ describe('optimistic spends', () => {
     expect(fallExplainedBy({ sats: 5_000, at: 0 }, 1_000, 4_000)).toBe(false);
     expect(fallExplainedBy({ sats: 100, at: 0 }, 101, 4_000)).toBe(false);
     expect(fallExplainedBy({ sats: 200, at: 0 }, 100, 31_000)).toBe(false);
+    // Round 2: the slack shrinks for small payments, and the match window is about one createAction.
+    expect(fallExplainedBy({ sats: 3_000, at: 0 }, 2_000, 4_000)).toBe(false);
+    expect(fallExplainedBy({ sats: 1_000, at: 0 }, 50, 4_000)).toBe(false);
+    expect(fallExplainedBy({ sats: 190, at: 0 }, 50, 4_000)).toBe(true);
+    expect(fallExplainedBy({ sats: 1_100, at: 0 }, 1_000, 11_000)).toBe(false);
+    expect(feeSlack(100_000_001)).toBe(2_000);
+    expect(feeSlack(3_000)).toBe(300);
+    expect(feeSlack(50)).toBe(200);
     expect(fallExplainedBy(null, 100, 0)).toBe(false);
   });
   test('the next expiry is the oldest spend plus the ttl, never negative', () => {

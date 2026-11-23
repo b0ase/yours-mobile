@@ -13,13 +13,21 @@ Code: `src/mobile/wallet/live/` (pure logic in `liveLogic.ts`, tested), wired in
   received"). Each one fades after 8 s. Tap one to open History.
 - **Optimistic spends.** `background.ts` sends `bwxLiveSpend` to the wallet page as soon as `createAction` returns
   (dApps, internal sends, paid chat turns). The card takes the requested output sats off straight away, then
-  fetches again 1.5 s later and settles on the real figure, fee included. A pending spend is dropped once a fresh
-  balance includes it (older than 1.5 s, or the balance fell by it since it was announced), or after 30 s at the
-  latest, on a timer even when no later fetch changes the number. A refresh that ends with the same number reconciles
-  too. Spends announced after the balance already fell by them (the poll ran while the payment was broadcasting) are
-  not taken off again, matched together (two quick payments, one fetch) and only when the fall equals them within a
-  fee slack of 2,000 sats or 1%; a bigger fall (another device, an account switch) never swallows a spend. Another
-  account's balance starts afresh. Before this (RB, 23 Nov 2026) a 1 BSV payment from ~1.02 BSV showed $0 until a
+  fetches again 1.5 s later and settles on the real figure, fee included.
+- **Reconciling.** Only real balance reads count (`utils/balanceReads.ts`: every successful `getWalletBalance`, with
+  when it began), never the card's props, which can be a cached or fallback number. A read that began after a spend
+  was announced includes it (the wallet's storage takes a spend in before `createAction` returns), so the spend is
+  dropped; a changed number also drops spends the balance has fallen by since they were announced. The same number
+  again proves nothing by itself (the read may predate the payment, or be a slow refresh): it drops a spend only when
+  the read began after it and the number differs from the one the spend was announced against (an incoming payment
+  that landed with the spend). Anything else waits for a changed number or the 30 s timer, so the card never shows the
+  pre-payment balance.
+- **Announced after the fall.** When the poll ran while a payment was broadcasting, the balance already fell before
+  the announcement. Spends announced within 10 s of a fall are matched to it together (two quick payments, one fetch),
+  only when the fall equals them give or take a fee slack: 10% of the spend, at least 200 and at most 2,000 sats. A
+  bigger or older fall (another device, an account switch) never swallows a spend.
+- **Accounts.** Each announcement carries the account that signed it, and the card ignores another account's. Another
+  account's balance starts afresh. Before all this (RB, 23 Nov 2026) a 1 BSV payment from ~1.02 BSV showed $0 until a
   reload.
 - **Incoming.** There is no realtime payment feed today: push (bwalletx-push) only carries chat, and the 1Sat owner
   `/sync` SSE stream ends once it has caught up. So the card polls instead:

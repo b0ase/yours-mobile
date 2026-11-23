@@ -90,7 +90,7 @@ import { BottomMenuContext } from '../../contexts/BottomMenuContext';
 import { asMenuItem } from '../tabs/tabs';
 import { requestIdentityMap } from '../settings/signIns';
 import { LiveTicker } from './live/LiveTicker';
-import { noteBalance, useLive } from './live/liveBus';
+import { noteAccount, useLive } from './live/liveBus';
 import { displayedSats, refreshDelay } from './live/liveLogic';
 import { useCountUp } from './live/useCountUp';
 import { BALANCE_CARDS_ENABLED } from '../storeBuild';
@@ -247,17 +247,9 @@ const WalletCardInner = ({
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses.identityAddress;
-  // Live balance: every fetched balance reconciles the spends shown as pending, for this account only (liveBus.ts).
-  useEffect(() => {
-    if (known) noteBalance(sats, id);
-  }, [sats, known, id]);
-  // A refresh that ends with the same number still counts as a fetch: it reconciles too (review of #558, L8).
-  const wasRefreshing = useRef(refreshing);
-  useEffect(() => {
-    if (wasRefreshing.current && !refreshing && known) noteBalance(sats, id);
-    wasRefreshing.current = refreshing;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshing]);
+  // Live balance: the spends shown as pending are this account's only. Balance reads reach liveBus by themselves
+  // (utils/balanceReads.ts), never this card's props, which may be a cached or fallback number (review of #558).
+  useEffect(() => noteAccount(id), [id]);
   const names = useAccountNames(id, account?.name ?? '', account?.settings?.socialProfile?.displayName ?? '', false);
   const avatar = useAvatar(id);
   // Agent accounts wear a ghost in their colour (agents/PixelGhost); re-read when agent settings change.
