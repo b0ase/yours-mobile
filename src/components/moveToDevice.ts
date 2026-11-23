@@ -39,7 +39,7 @@ export const moveNoticeShows = (status: { onDevice: boolean; snapshotLoading?: b
   !!status && !status.onDevice && !status.snapshotLoading;
 
 export const RETRY_STILL_MOVING =
-  'Still moving in the background. You can leave this screen; this notice goes when it is done.';
+  'Still moving. Keep the wallet open until this finishes; if it stops, it carries on the next time the wallet opens.';
 
 /** The background's answer to Retry (STORAGE_MOVE_TO_DEVICE), as far as the note under the button needs it. */
 type RetryAnswer = { success?: boolean; error?: string; data?: { moving?: boolean } } | undefined;

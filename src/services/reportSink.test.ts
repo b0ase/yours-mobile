@@ -113,6 +113,18 @@ describe('reportSink: the extension background hands reports to the app outbox',
     expect(waitingKeys(sink.WALLET_REPORT_PREFIX)).toEqual([]);
   });
 
+  test("a report's own id reaches the outbox (its message_id), from the background or straight in; once", async () => {
+    const sink = await import('./reportSink');
+    sink.setReportSink(undefined);
+    await sink.reportFromWallet('1Id', 'move failed: timeout', 'lz00000-00112233aabbccdd');
+    const outbox = await import('../mobile/agent/reportOutbox');
+    outbox.joinWalletReports();
+    for (let i = 0; i < 100 && waitingKeys(sink.WALLET_REPORT_PREFIX).length; i++) await tick();
+    expect(outbox.queuedFor('1Id').map((r) => r.id)).toEqual(['lz00000-00112233aabbccdd']);
+    expect(await sink.reportFromWallet('1Id', 'move failed: timeout', 'lz00000-00112233aabbccdd')).toBe(true);
+    expect(outbox.queuedFor('1Id').length).toBe(1);
+  });
+
   test('at most 20 wait (the oldest go): a repeating failure never fills storage', async () => {
     const sink = await import('./reportSink');
     listeners.length = 0; // no page open now: only these drains take reports

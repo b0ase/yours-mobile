@@ -14,7 +14,7 @@ import {
   moveProgressTracker,
   requireLocalStoreForChange,
   RETRY_ANSWER_MS,
-  moveFailureReport,
+  retryMoveAnswer,
   stillMovingText,
   type EnsureLocalDeps,
   type StoreConfigLike,
@@ -556,24 +556,65 @@ describe('review of a95a1ff0, 1: the backup a move to this device reads from is 
 
 describe('Retry moving this account to this device answers in about 2 s (5.2.62)', () => {
   const never = () => new Promise<void>(() => undefined);
+  /** Every timer the code sets is recorded and fires at once: "about 2 s" is the wait asked for, not the clock. */
+  const timed = async <T>(fn: () => Promise<T>): Promise<{ value: T; waits: number[] }> => {
+    const real = globalThis.setTimeout;
+    const waits: number[] = [];
+    globalThis.setTimeout = ((cb: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => {
+      waits.push(ms ?? 0);
+      return real(cb, 0, ...a);
+    }) as typeof setTimeout;
+    try {
+      return { value: await fn(), waits };
+    } finally {
+      globalThis.setTimeout = real;
+    }
+  };
+  type S = {
+    moving: boolean;
+    reason: string | null;
+    progress: { done: number; total: number; startedAt: number } | null;
+  };
 
-  test('the wait is about 2 s, and a move still running carries on (never cancelled, never a second one)', async () => {
-    expect(RETRY_ANSWER_MS).toBeLessThanOrEqual(2500);
+  test('Retry waits RETRY_ANSWER_MS for a move that runs on, answers "Still moving: N of M", never starts a second', async () => {
+    expect(RETRY_ANSWER_MS).toBe(2000);
     let starts = 0;
     let running: Promise<unknown> | null = null;
-    const deps = {
-      isLocal: () => false,
-      running: () => running,
-      start: () => {
-        starts++;
-        running = never();
-        return running;
-      },
-      waitMs: 5,
-    };
-    expect(await joinOrStartMove(deps)).toBe(false);
-    expect(await joinOrStartMove(deps)).toBe(false);
+    const status = (): S => ({
+      moving: running !== null,
+      reason: null,
+      progress: { done: 12, total: 40, startedAt: 0 },
+    });
+    // The background's moveToDeviceNow, as wired: joinOrStartMove with the wait the caller asks for.
+    const moveNow = (waitMs: number) =>
+      joinOrStartMove({
+        isLocal: () => false,
+        running: () => running,
+        start: () => {
+          starts++;
+          running = never();
+          return running;
+        },
+        waitMs,
+      });
+    const first = await timed(() => retryMoveAnswer({ moveNow, status }));
+    expect(first.waits).toEqual([RETRY_ANSWER_MS]);
+    expect(first.value).toEqual({ success: false, data: status(), error: 'Still moving: 12 of 40' });
+    const again = await timed(() => retryMoveAnswer({ moveNow, status }));
+    expect(again.waits).toEqual([RETRY_ANSWER_MS]);
     expect(starts).toBe(1);
+  });
+
+  test('a move that ended: done, or its reason', async () => {
+    const st = (reason: string | null): S => ({ moving: false, reason, progress: null });
+    expect(await retryMoveAnswer({ moveNow: async () => true, status: () => st(null) })).toEqual({
+      success: true,
+      data: st(null),
+    });
+    expect((await retryMoveAnswer({ moveNow: async () => false, status: () => st('backup short') })).error).toBe(
+      'backup short',
+    );
+    expect((await retryMoveAnswer({ moveNow: async () => false, status: () => st(null) })).error).toBe('not moved yet');
   });
 
   test('"Still moving: N of M" once there are counts', () => {
@@ -583,33 +624,15 @@ describe('Retry moving this account to this device answers in about 2 s (5.2.62)
     expect(stillMovingText({ done: 41, total: 40 })).toBe('Still moving: 40 of 40');
   });
 
-  test('a failed move is reported to b with its reason, once per account and reason', () => {
-    const seen = new Set<string>();
-    const failed = { ok: false as const, how: 'failed' as const, reason: 'backup short: 3 outputs missing' };
-    expect(moveFailureReport(failed, 'acct1', 1, seen)).toBe(
-      "Moving this account to this device didn't finish (try 1): backup short: 3 outputs missing",
-    );
-    expect(moveFailureReport(failed, 'acct1', 2, seen)).toBeNull();
-    expect(moveFailureReport(failed, 'acct2', 1, seen)).toContain('backup short');
-    expect(moveFailureReport({ ...failed, reason: 'timeout' }, 'acct1', 3, seen)).toContain('(try 3): timeout');
-    expect(moveFailureReport({ ok: false, how: 'failed' }, 'acct1', 0, seen)).toContain('no reason given');
-    // Not a failure of the move itself: backoff, a backup exporting, no account, or a success.
-    for (const how of ['failed-this-session', 'busy', 'no-account'] as const)
-      expect(moveFailureReport({ ok: false, how, reason: 'x' }, 'acct3', 1, seen)).toBeNull();
-    expect(moveFailureReport({ ok: true, how: 'switched' }, 'acct3', 0, seen)).toBeNull();
-  });
-
-  test('wired: Retry waits RETRY_ANSWER_MS, Recover change keeps its long wait, failures go to reportSink', () => {
+  test('wired: Retry answers through retryMoveAnswer; Recover change keeps its long wait', () => {
     const bg = readFileSync('src/background.ts', 'utf8');
     const start = bg.indexOf("case 'STORAGE_MOVE_TO_DEVICE':");
     const handler = bg.slice(start, bg.indexOf('return true;', start));
-    expect(handler).toContain('await moveToDeviceNow(RETRY_ANSWER_MS)');
-    expect(handler).toContain('stillMovingText(status.progress)');
+    expect(handler).toContain('await retryMoveAnswer({ moveNow: moveToDeviceNow, status: moveStatus })');
+    expect(handler).not.toContain('await moveToDeviceNow()');
     expect(bg).toContain('const moveToDeviceNow = async (waitMs = 90_000): Promise<boolean> =>');
+    expect(bg).toContain('return ensureLocalForPayment(waitMs);');
     expect(bg).toContain('moveNow: () => moveToDeviceNow(),');
     expect(bg).toContain('progress: moveProgress.current(),');
-    const once = bg.slice(bg.indexOf('const preferLocalStorageOnce'), bg.indexOf('const addSnapshotRemote'));
-    expect(once).toContain('moveFailureReport(r, id, entry?.failures ?? 0, moveFailuresReported)');
-    expect(once).toContain('void reportFromWallet(id, report)');
   });
 });

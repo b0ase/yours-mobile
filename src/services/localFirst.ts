@@ -226,23 +226,25 @@ export function stillMovingText(p: Pick<MoveProgress, 'done' | 'total'> | null |
   return p && p.total > 0 ? `Still moving: ${Math.min(p.done, p.total)} of ${p.total}` : 'Still moving';
 }
 
+/** What "Retry moving this account to this device" answers (STORAGE_MOVE_TO_DEVICE). */
+export type RetryMoveAnswer<S> = { success: boolean; data: S; error?: string };
+
 /**
- * The report b gets when a move to this device fails, or null when there is nothing to report: a success, or a move
- * that didn't run (backoff, a master backup exporting, no account open). Once per account and reason per session
- * (`seen`), so the backoff's retries and every open don't send the same failure again. Text only, no keys.
+ * The Retry answer: wait RETRY_ANSWER_MS for the move (`moveNow` joins one running or starts one, never a second),
+ * then answer whatever it says. Still running: "Still moving: N of M" (the move carries on); ended without the
+ * device store: its reason.
  */
-export function moveFailureReport(
-  r: EnsureLocalResult,
-  account: string | null | undefined,
-  failures: number,
-  seen: Set<string>,
-): string | null {
-  if (r.ok || r.how !== 'failed') return null;
-  const reason = (r.reason ?? 'no reason given').slice(0, 300);
-  const key = `${account ?? ''}\n${reason}`;
-  if (seen.has(key)) return null;
-  seen.add(key);
-  return `Moving this account to this device didn't finish (try ${Math.max(1, failures)}): ${reason}`;
+export async function retryMoveAnswer<
+  S extends { moving: boolean; reason: string | null; progress?: MoveProgress | null },
+>(d: { moveNow: (waitMs: number) => Promise<boolean>; status: () => S }): Promise<RetryMoveAnswer<S>> {
+  const ok = await d.moveNow(RETRY_ANSWER_MS);
+  const status = d.status();
+  if (ok) return { success: true, data: status };
+  return {
+    success: false,
+    data: status,
+    error: status.moving ? stillMovingText(status.progress) : (status.reason ?? 'not moved yet'),
+  };
 }
 
 /** What one admission run settled and left (inboundSync.AdmitReport): the restore's own coin-check progress. */

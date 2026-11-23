@@ -30,3 +30,10 @@ describe('Retry answers in about 2 s, then "Still moving: N of M" (5.2.62)', () 
     expect(shownRetryNote('Not moved yet (x).', false)).toBe('Not moved yet (x).');
   });
 });
+
+test('the "still moving" note promises only what is true in the extension too (review of #557, L5)', () => {
+  // The extension's worker can go idle: the move resumes on the next open, it does not run with the wallet closed.
+  expect(RETRY_STILL_MOVING).not.toMatch(/leave this screen/i);
+  expect(RETRY_STILL_MOVING).toMatch(/Keep the wallet open/);
+  expect(RETRY_STILL_MOVING).toMatch(/next time the wallet opens/);
+});

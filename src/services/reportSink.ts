@@ -9,7 +9,8 @@
  * lost), and pages take them in one at a time under a Web Lock shared by every extension page, removing each by its
  * key only after the outbox has it: two open pages never both take the same report.
  */
-type Sink = (account: string | null | undefined, text: string) => void;
+/** `reportId`: the report's own id when the caller has one (the outbox sends it as message_id, so a resend dedupes). */
+type Sink = (account: string | null | undefined, text: string, reportId?: string) => void;
 
 /** One waiting report: chrome.storage.local `${WALLET_REPORT_PREFIX}${id}`. */
 export const WALLET_REPORT_PREFIX = 'bwx.walletReport:';
@@ -18,7 +19,7 @@ const PENDING_CAP = 20;
 const MAX_TEXT = 4000;
 const LOCK_NAME = 'bwx.walletReports';
 
-type Pending = { account: string | null; text: string; at: number };
+type Pending = { account: string | null; text: string; at: number; reportId?: string };
 type Area = {
   get(keys: string | null): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
@@ -62,14 +63,23 @@ const waiting = (all: Record<string, unknown>) =>
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 
 /** Keep a report in chrome.storage.local for the outbox (its own key). True when kept. */
-export async function queueForOutbox(account: string | null | undefined, text: string): Promise<boolean> {
+export async function queueForOutbox(
+  account: string | null | undefined,
+  text: string,
+  reportId?: string,
+): Promise<boolean> {
   const a = area();
   if (!a) return false;
   try {
     const id = `${Date.now().toString(36).padStart(10, '0')}-${(++written).toString(36).padStart(6, '0')}-${Math.random()
       .toString(36)
       .slice(2, 8)}`;
-    const item: Pending = { account: account ?? null, text: text.slice(0, MAX_TEXT), at: Date.now() };
+    const item: Pending = {
+      account: account ?? null,
+      text: text.slice(0, MAX_TEXT),
+      at: Date.now(),
+      ...(reportId ? { reportId } : {}),
+    };
     await a.set({ [`${WALLET_REPORT_PREFIX}${id}`]: item });
     const over = waiting(await a.get(null)).slice(0, -PENDING_CAP);
     if (over.length) await a.remove(over.map(([k]) => k));
@@ -80,13 +90,17 @@ export async function queueForOutbox(account: string | null | undefined, text: s
 }
 
 /** Hand a report to b. Never throws. True when an outbox (or the wait for one) took it. */
-export async function reportFromWallet(account: string | null | undefined, text: string): Promise<boolean> {
+export async function reportFromWallet(
+  account: string | null | undefined,
+  text: string,
+  reportId?: string,
+): Promise<boolean> {
   try {
     if (sink) {
-      sink(account, text);
+      sink(account, text, reportId);
       return true;
     }
-    if (await queueForOutbox(account, text)) return true;
+    if (await queueForOutbox(account, text, reportId)) return true;
     console.warn('[report] no report outbox in this context:', text);
     return false;
   } catch {
@@ -110,7 +124,7 @@ export async function drainPendingWalletReports(
       for (const [key, r] of waiting(await a.get(null))) {
         // Still there (another page may have taken it before this lock): taken, then removed by its key.
         if (!(await a.get(key))?.[key]) continue;
-        take(r.account, r.text);
+        take(r.account, r.text, typeof r.reportId === 'string' ? r.reportId : undefined);
         await a.remove(key);
         n++;
       }
