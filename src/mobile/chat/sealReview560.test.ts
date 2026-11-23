@@ -1139,27 +1139,25 @@ describe('Round 3 M1 / L1: a seal action that could be this one is never "none b
     const rs = await recover(bitsign(log), store, 'D', lookup);
     expect(rs[0].outcome).toBe('recorded');
     expect(count(log, 'recover')).toBe(1);
-    // Only the other seal's transaction: unsure, kept, never released.
+    // Only the other seal's transaction, proven not this one (round 4 L1): it counts as none built, so the ONE rule
+    // releases the record after two spaced answers from a record ≥3 min old.
     store.save(unsure({ nonce: 'NL2', lockingScriptHex: LONG, savedAt: 0 }));
     const onlyOther = page([
       { txid: OTHER_TX, description: SEAL_ACTION_DESCRIPTION, outputs: [{ lockingScript: '' }] },
     ]);
-    for (const at of [RELEASE_MIN_AGE_MS, RELEASE_MIN_AGE_MS + 10_000])
-      expect(
-        (
-          await recover(
-            bitsign(log),
-            store,
-            'D',
-            {
-              find: (s, since) => findSealAction(onlyOther, s, since, 'F'),
-              beef: async () => other.toAtomicBEEF(true),
-            },
-            { now: () => at },
-          )
-        )[0].outcome,
-      ).toBe('kept');
-    expect(count(log, 'cancel')).toBe(0);
+    const outs: string[] = [];
+    for (const at of [RELEASE_MIN_AGE_MS, RELEASE_MIN_AGE_MS + 10_000]) {
+      const rs = await recover(
+        bitsign(log),
+        store,
+        'D',
+        { find: (s, since) => findSealAction(onlyOther, s, since, 'F'), beef: async () => other.toAtomicBEEF(true) },
+        { now: () => at },
+      );
+      outs.push(rs[0].outcome);
+    }
+    expect(outs).toEqual(['kept', 'released']);
+    expect(log.filter((l) => l === 'cancel:NL2')).toHaveLength(1);
   });
   test('the createAction description is the one the lookup matches', () => {
     const src = readFileSync(new URL('./nativeSeal.ts', import.meta.url), 'utf8');
@@ -1310,5 +1308,124 @@ describe('Round 3 L4 / L6: the retry hold and the archived drawing', () => {
     expect(paidAgainDrawingMessage(d.paidRef!)).toContain('seal-N9abcdefghij');
     const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
     expect(page).toContain('text: d.paidRef ? paidAgainDrawingMessage(d.paidRef) : RESTORED_DRAWING_MESSAGE,');
+  });
+});
+
+describe('Round 4: abandoned rows, proven-other seals, and the kept-session cancel', () => {
+  const SCRIPT = '006a' + 'ab'.repeat(40);
+  const FAILED = 'failed-label';
+  type Row = Awaited<ReturnType<ListActionsFn>>['actions'][number];
+  /** The ordinary list is empty; the failed list holds `failed` (as the toolbox's specOpFailedActions does). */
+  const la =
+    (failed: Row[], ordinary: Row[] = []): ListActionsFn =>
+    async ({ labels }) =>
+      labels.includes(FAILED)
+        ? { totalActions: failed.length, actions: failed }
+        : { totalActions: ordinary.length, actions: ordinary };
+  const runRecovery = async (list: ListActionsFn, beef: (t: string) => Promise<number[] | null> = async () => null) => {
+    const store = localStore(fakeStorage());
+    let t = 1_000_000_000_000;
+    const now = () => t;
+    store.save(unsure({ nonce: 'NR4', savedAt: t, lockingScriptHex: SCRIPT }));
+    const log: Log = [];
+    const lookup: SealTxLookup = { find: (s, since) => findSealAction(list, s, since, FAILED), beef };
+    const outs: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      t += RELEASE_MIN_AGE_MS + 10_000 * (i + 1);
+      const r = await recover(bitsign(log), store, 'D', lookup, { now });
+      outs.push(r[0]?.outcome ?? 'none');
+    }
+    return { outs, log };
+  };
+  const txWith = (script: string) => {
+    const k = PrivateKey.fromRandom();
+    const src = new Transaction();
+    src.addInput({
+      sourceTXID: '00'.repeat(32),
+      sourceOutputIndex: 0,
+      unlockingScript: new Script(),
+      sequence: 0xffffffff,
+    });
+    src.addOutput({ satoshis: 1000, lockingScript: new P2PKH().lock(k.toAddress()) });
+    const tx = new Transaction();
+    tx.addInput({ sourceTransaction: src, sourceOutputIndex: 0, unlockingScript: new Script(), sequence: 0xffffffff });
+    tx.addOutput({ satoshis: 0, lockingScript: Script.fromHex(script) });
+    return tx;
+  };
+
+  test('R3-A: an ABANDONED (failed, txid-less) seal row is no candidate: the record is released by the rule', async () => {
+    const r = await runRecovery(
+      la([{ txid: '', status: 'failed', description: SEAL_ACTION_DESCRIPTION, outputs: [{ lockingScript: SCRIPT }] }]),
+    );
+    expect(r.outs.slice(0, 2)).toEqual(['kept', 'released']); // the first answer counts, the second releases
+    expect(r.log).toEqual(['cancel:NR4']);
+  });
+  test("R3-B: another document's abandoned seal row no longer blocks this one", async () => {
+    const r = await runRecovery(
+      la([
+        {
+          txid: '',
+          status: 'failed',
+          description: SEAL_ACTION_DESCRIPTION,
+          outputs: [{ lockingScript: '006a' + 'cd'.repeat(40) }],
+        },
+      ]),
+    );
+    expect(r.outs).toContain('released');
+  });
+  test('a LIVE txid-less row (unsigned, or no status) still makes it unsure: kept forever, never released', async () => {
+    for (const status of ['unsigned', undefined, 'unprocessed']) {
+      const r = await runRecovery(la([], [{ txid: '', status, outputs: [{ lockingScript: SCRIPT }] }]));
+      expect([status, r.outs.every((o) => o === 'kept'), r.log]).toEqual([status, true, []]);
+    }
+  });
+  test('R3-C: a blind long-script seal proven (by its own transaction) not to be this one counts as none built', async () => {
+    const other = txWith('006a' + 'ee'.repeat(40));
+    const r = await runRecovery(
+      la([{ txid: other.id('hex'), description: SEAL_ACTION_DESCRIPTION, outputs: [{ lockingScript: '' }] }]),
+      async () => other.toAtomicBEEF(true),
+    );
+    expect(r.outs).toContain('released');
+    // A BEEF that can't be fetched, or doesn't parse: unknown, kept forever.
+    for (const beef of [async () => null, async () => [1, 2, 3]]) {
+      const k = await runRecovery(
+        la([{ txid: other.id('hex'), description: SEAL_ACTION_DESCRIPTION, outputs: [{ lockingScript: '' }] }]),
+        beef,
+      );
+      expect(k.outs.every((o) => o === 'kept')).toBe(true);
+      expect(k.log).toEqual([]);
+    }
+  });
+  test('R3-D: no candidate at all still releases', async () => {
+    const r = await runRecovery(la([]));
+    expect(r.outs).toContain('released');
+  });
+
+  test("L2: a kept session that can't be reused is NOT cancelled while another window is paying on it", async () => {
+    gate.expectLines(`warn [nativeSeal] pay failed ${POOR}`);
+    const log: Log = [];
+    let t = 50_000_000;
+    const now = () => t;
+    const storage = fakeStorage();
+    const api = bitsign(log, now);
+    const e = (await nativeSignAndSeal(
+      base({ log, store: localStore(storage, now), documentId: 'L4', api, keys: wallet(log, [new Error(POOR)]), now }),
+    ).catch((x) => x)) as NativeSealError;
+    const resume = e.drawing!.resume!;
+    const key = sealKey(SEAL_KEY, 'L4', ['f1']);
+    t = resume.expiresAt; // too late to reuse: it would be given back
+    localStore(storage, now).claims!.save({ key, by: 'otherctx', at: t, until: t + SEAL_CLAIM_MS });
+    const r = await nativeSignAndSeal(
+      base({ log, store: localStore(storage, now), documentId: 'L4', api, now, resume }),
+    ).catch((x) => x);
+    expect(log).not.toContain('cancel:N1'); // the other window's session stays
+    expect(r.code).toBe('elsewhere'); // and this fresh seal stops before paying
+    expect(count(log, 'pay')).toBe(1);
+    // Without the other window, the stale session is given back as before.
+    localStore(storage, now).claims!.remove(key, 'otherctx');
+    const from = log.length;
+    await nativeSignAndSeal(base({ log, store: localStore(storage, now), documentId: 'L4', api, now, resume }));
+    expect(log[from]).toBe('cancel:N1');
+    expect(count(log, 'pay')).toBe(2);
   });
 });

@@ -206,8 +206,15 @@ export async function findSealAction(
           if (!scriptHit && !descHit) continue;
           const txid = typeof a.txid === 'string' && /^[0-9a-f]{64}$/i.test(a.txid) ? a.txid.toLowerCase() : '';
           if (scriptHit && txid) return { found: true, txid };
-          // Built but not yet signed or sent (no txid): it can still go out. Never "none built".
           if (!txid) {
+            // Abandoned before it was ever processed (review of #560 round 4, M1): the toolbox's TaskFailAbandoned
+            // moves a stale 'unsigned' row to 'failed' with no txid. processAction writes the txid and the signed
+            // transaction in one storage write BEFORE any broadcast, and refuses rows that aren't 'unsigned' or
+            // 'unprocessed' (wallet-toolbox 2.14.5 src/storage/methods/processAction.ts: commit :127 before share
+            // :151, validatePlannedTransaction :474-479, txid written :568/:656). So a failed row with no txid can
+            // never go out: no candidate.
+            if (a.status === 'failed') continue;
+            // Built but not yet signed or sent (no txid): it can still go out. Never "none built".
             unsure = true;
             continue;
           }
@@ -1263,7 +1270,9 @@ async function signAndSealOnce(
   const kept = input.resume;
   if (kept) {
     if (resumeUsable(input, kept, now())) reuse = kept;
-    else if (kept.prepared?.nonce) await cancelSeal(input.api, kept.prepared.nonce, input.clock);
+    // Given back, unless another window is paying on it (round 4 L2, as the retry hold does).
+    else if (kept.prepared?.nonce && !sealBusyElsewhere(input.store, key, now()))
+      await cancelSeal(input.api, kept.prepared.nonce, input.clock);
   }
   if (reuse) {
     // ⚠ TWO WINDOWS, ONE KEPT SEAL (review of #560 M3): there is no compose step to hold the session, so a claim in the
@@ -1682,15 +1691,18 @@ async function releaseUnpaid(
   });
 }
 
-/** Pure: does this AtomicBEEF's transaction have an output with exactly this script? False when it doesn't parse. */
-export const txCarriesScript = (tx: number[], lockingScriptHex: string): boolean => {
+/** Pure: does this AtomicBEEF's transaction have an output with exactly this script? Null when it doesn't parse. */
+const scriptInTx = (tx: number[], lockingScriptHex: string): boolean | null => {
   try {
     const want = lockingScriptHex.toLowerCase();
     return Transaction.fromAtomicBEEF(tx).outputs.some((o) => o.lockingScript.toHex().toLowerCase() === want);
   } catch {
-    return false;
+    return null;
   }
 };
+/** Pure: does this AtomicBEEF's transaction have an output with exactly this script? False when it doesn't parse. */
+export const txCarriesScript = (tx: number[], lockingScriptHex: string): boolean =>
+  scriptInTx(tx, lockingScriptHex) === true;
 
 /**
  * An unsure record (no BEEF): look its transaction up in this wallet's own storage. 'found': saved with its BEEF as an
@@ -1718,14 +1730,21 @@ async function lookUpUnsure(
     }
     if (f.found === 'maybe') {
       // Seal actions whose scripts weren't kept (L1): this seal is the one whose own transaction carries its script.
+      let allChecked = true;
       for (const t of f.txids) {
         const tx = await lookup.beef(t).catch(() => null);
-        if (tx?.length && txCarriesScript(tx, p.lockingScriptHex)) {
-          store.save({ ...p, txid: t.toLowerCase(), beefHex: toHex(tx) });
+        const has = tx?.length ? scriptInTx(tx, p.lockingScriptHex) : null;
+        if (has === true) {
+          store.save({ ...p, txid: t.toLowerCase(), beefHex: toHex(tx!) });
           return 'found';
         }
+        if (has === null) allChecked = false;
       }
-      return 'unknown'; // never "not built" while a seal action could be this one
+      // Round 4 L1: every candidate's own transaction was read and none is this seal's: no candidate, the same as
+      // "none built". Any fetch or parse that failed keeps it unknown (never "not built" while one could be it).
+      if (!allChecked) return 'unknown';
+      store.save(withNotFound(p, now()));
+      return 'not_found';
     }
     txid = f.txid.toLowerCase();
   }

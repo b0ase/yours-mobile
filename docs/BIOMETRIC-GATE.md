@@ -103,8 +103,11 @@ password, every time) → compose → `createSignature` → `createAction` (one 
   - A **candidate** is any action with the seal's script or the seal's description ("bit-sign: sign and seal a
     document"). "No such action" means no candidate at all. A candidate with no txid yet (built, not signed) makes the
     answer unsure; one found by description whose script the storage kept truncated ('' for scripts over ~1 KB) is
-    checked against its own transaction, and if none carries this seal's script the answer stays unsure. An unsure
-    answer is never evidence for release.
+    checked against its own transaction: if every one was read and none carries this seal's script, that counts as no
+    candidate; if any couldn't be read, the answer stays unsure. A row the toolbox abandoned (status 'failed', no
+    txid) is no candidate either: processAction writes the txid before any broadcast and never processes a failed row
+    (wallet-toolbox 2.14.5 `src/storage/methods/processAction.ts`, commit at line 127 before the broadcast at 151;
+    `validatePlannedTransaction`, lines 474-479). An unsure answer is never evidence for release.
   - While a window's createAction runs, its record carries a heart-beaten "paying" mark (same timings as the claim);
     recovery and settle in any window leave the record alone while it lives.
 - **Recovery** (`recoverNativeSeals`) only touches the open account's records (key-less records from before 6 Nov only
