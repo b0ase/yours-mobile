@@ -1,10 +1,22 @@
 import { useEffect } from 'react';
 import { useServiceContext } from '../../hooks/useServiceContext';
 import type { ServiceContextProps } from '../../contexts/ServiceContext';
-import { ChatApiError, saveSession } from '../chat/api';
+import { ChatApiError, saveSession, SESSION_EVENT } from '../chat/api';
+import { getChatAccount } from '../chat/chatAccount';
 import { kycClient, signedInClient } from '../kyc/kycWallet';
 import { reportToB, type ReportResult } from './paid';
-import { enqueueReport, failureReason, flushOutbox, logQueued, queuedFor, type QueuedReport } from './reportOutbox';
+import {
+  enqueueReport,
+  failureReason,
+  flushOutbox,
+  logQueued,
+  newReportId,
+  queuedFor,
+  reportMessageId,
+  resetBackoff,
+  runnerMaySend,
+  type QueuedReport,
+} from './reportOutbox';
 
 type ApiContext = NonNullable<ServiceContextProps['apiContext']>;
 
@@ -40,13 +52,17 @@ export const sendOrQueueReport = async (
   account: string | null,
   text: string,
 ): Promise<{ sent: ReportResult } | { queued: QueuedReport }> => {
-  if (!apiContext) return { queued: enqueueReport(account, text, 'signin') };
+  const id = newReportId();
+  if (!apiContext) return { queued: enqueueReport(account, text, 'signin', undefined, undefined, id) };
   try {
-    return { sent: await reportToB(agentCaller(apiContext), text) };
+    const sent = await reportToB(agentCaller(apiContext), text, reportMessageId(id));
+    // bit-sign answered but could not log it: it waits in the outbox (same id), never shown as sent.
+    if (!sent.ok) return { queued: enqueueReport(account, text, 'error', undefined, undefined, id) };
+    return { sent };
   } catch (e) {
     const reason = failureReason(e);
     logQueued(reason, e);
-    return { queued: enqueueReport(account, text, reason) };
+    return { queued: enqueueReport(account, text, reason, undefined, undefined, id) };
   }
 };
 
@@ -57,7 +73,8 @@ export const retryOutbox = (apiContext: ApiContext | null | undefined, account: 
 
 /**
  * Sends queued reports in the background: on mount (app start / unlock / account switch), when the app comes
- * back to the front, when the network returns, and every minute for anything whose backoff is up.
+ * back to the front, when the network returns, and every minute. Each time only what is due: a report waits out its
+ * backoff, and only the person's Retry (retryOutbox) sends one sooner (review of #557, L6).
  */
 export const ReportOutboxRunner = () => {
   const { apiContext, chromeStorageService } = useServiceContext();
@@ -65,20 +82,38 @@ export const ReportOutboxRunner = () => {
   useEffect(() => {
     if (!apiContext) return;
     const call = agentCaller(apiContext);
-    const run = (force: boolean) => {
-      if (!queuedFor(account).length) return;
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-      void flushOutbox(account, call, { force }).catch(() => {});
+    const run = () => {
+      // Never while bChatX's session belongs to another account (mid-switch): A's reports would go under B's handle.
+      if (
+        !runnerMaySend({
+          account,
+          chatAccount: getChatAccount(),
+          queued: queuedFor(account).length,
+          online: typeof navigator === 'undefined' || navigator.onLine !== false,
+        })
+      )
+        return;
+      void flushOutbox(account, call).catch(() => {});
     };
-    const onVisible = () => document.visibilityState === 'visible' && run(true);
-    const onOnline = () => run(true);
-    run(true);
+    const onVisible = () => document.visibilityState === 'visible' && run();
+    // The cause is gone: what waited for it is due now (review of #557, N3).
+    const onOnline = () => {
+      resetBackoff(account, 'offline');
+      run();
+    };
+    const onSession = () => {
+      resetBackoff(account, 'signin');
+      run();
+    };
+    run();
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onOnline);
-    const timer = setInterval(() => run(false), 60_000);
+    window.addEventListener(SESSION_EVENT, onSession);
+    const timer = setInterval(run, 60_000);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener(SESSION_EVENT, onSession);
       clearInterval(timer);
     };
   }, [apiContext, account]);

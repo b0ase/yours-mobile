@@ -13,6 +13,9 @@ import {
   movingMessage,
   moveProgressTracker,
   requireLocalStoreForChange,
+  RETRY_ANSWER_MS,
+  retryMoveAnswer,
+  stillMovingText,
   type EnsureLocalDeps,
   type StoreConfigLike,
 } from './localFirst';
@@ -548,5 +551,88 @@ describe('review of a95a1ff0, 1: the backup a move to this device reads from is 
     );
     await ensureLocalStore(deps);
     expect(asked).toBe(OURS);
+  });
+});
+
+describe('Retry moving this account to this device answers in about 2 s (5.2.62)', () => {
+  const never = () => new Promise<void>(() => undefined);
+  /** Every timer the code sets is recorded and fires at once: "about 2 s" is the wait asked for, not the clock. */
+  const timed = async <T>(fn: () => Promise<T>): Promise<{ value: T; waits: number[] }> => {
+    const real = globalThis.setTimeout;
+    const waits: number[] = [];
+    globalThis.setTimeout = ((cb: (...a: unknown[]) => void, ms?: number, ...a: unknown[]) => {
+      waits.push(ms ?? 0);
+      return real(cb, 0, ...a);
+    }) as typeof setTimeout;
+    try {
+      return { value: await fn(), waits };
+    } finally {
+      globalThis.setTimeout = real;
+    }
+  };
+  type S = {
+    moving: boolean;
+    reason: string | null;
+    progress: { done: number; total: number; startedAt: number } | null;
+  };
+
+  test('Retry waits RETRY_ANSWER_MS for a move that runs on, answers "Still moving: N of M", never starts a second', async () => {
+    expect(RETRY_ANSWER_MS).toBe(2000);
+    let starts = 0;
+    let running: Promise<unknown> | null = null;
+    const status = (): S => ({
+      moving: running !== null,
+      reason: null,
+      progress: { done: 12, total: 40, startedAt: 0 },
+    });
+    // The background's moveToDeviceNow, as wired: joinOrStartMove with the wait the caller asks for.
+    const moveNow = (waitMs: number) =>
+      joinOrStartMove({
+        isLocal: () => false,
+        running: () => running,
+        start: () => {
+          starts++;
+          running = never();
+          return running;
+        },
+        waitMs,
+      });
+    const first = await timed(() => retryMoveAnswer({ moveNow, status }));
+    expect(first.waits).toEqual([RETRY_ANSWER_MS]);
+    expect(first.value).toEqual({ success: false, data: status(), error: 'Still moving: 12 of 40' });
+    const again = await timed(() => retryMoveAnswer({ moveNow, status }));
+    expect(again.waits).toEqual([RETRY_ANSWER_MS]);
+    expect(starts).toBe(1);
+  });
+
+  test('a move that ended: done, or its reason', async () => {
+    const st = (reason: string | null): S => ({ moving: false, reason, progress: null });
+    expect(await retryMoveAnswer({ moveNow: async () => true, status: () => st(null) })).toEqual({
+      success: true,
+      data: st(null),
+    });
+    expect((await retryMoveAnswer({ moveNow: async () => false, status: () => st('backup short') })).error).toBe(
+      'backup short',
+    );
+    expect((await retryMoveAnswer({ moveNow: async () => false, status: () => st(null) })).error).toBe('not moved yet');
+  });
+
+  test('"Still moving: N of M" once there are counts', () => {
+    expect(stillMovingText(null)).toBe('Still moving');
+    expect(stillMovingText({ done: 0, total: 0 })).toBe('Still moving');
+    expect(stillMovingText({ done: 12, total: 40 })).toBe('Still moving: 12 of 40');
+    expect(stillMovingText({ done: 41, total: 40 })).toBe('Still moving: 40 of 40');
+  });
+
+  test('wired: Retry answers through retryMoveAnswer; Recover change keeps its long wait', () => {
+    const bg = readFileSync('src/background.ts', 'utf8');
+    const start = bg.indexOf("case 'STORAGE_MOVE_TO_DEVICE':");
+    const handler = bg.slice(start, bg.indexOf('return true;', start));
+    expect(handler).toContain('await retryMoveAnswer({ moveNow: moveToDeviceNow, status: moveStatus })');
+    expect(handler).not.toContain('await moveToDeviceNow()');
+    expect(bg).toContain('const moveToDeviceNow = async (waitMs = 90_000): Promise<boolean> =>');
+    expect(bg).toContain('return ensureLocalForPayment(waitMs);');
+    expect(bg).toContain('moveNow: () => moveToDeviceNow(),');
+    expect(bg).toContain('progress: moveProgress.current(),');
   });
 });

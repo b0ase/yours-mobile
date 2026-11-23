@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
+import { InMemoryPermissionStore, LocalWalletPermissionsManager } from '@1sat/wallet';
 import { guardLabelsOnSpend } from './labelsOnSpend';
 import { guardReservedBaskets, isReservedBasket } from './reservedBaskets';
 import {
@@ -32,9 +33,11 @@ const PAID = `bmail paid ${TXID}.0 ${'cd'.repeat(20)}`;
 describe('reserved action labels', () => {
   // Changing the list is a security decision: bump RESERVED_LABELS_VERSION and this test together.
   test('the list is pinned', () => {
-    expect(RESERVED_LABELS_VERSION).toBe(3);
+    expect(RESERVED_LABELS_VERSION).toBe(5);
     // v2: special-operation names (any 64-hex label or tag) and names that are not printable ASCII.
     // v3: 'bwx notice', the wallet's own "payment didn't go through" notices (#385 fifth review, M2).
+    // v4: the toolbox's own 'admin…' labels in any case and spacing (5.2.62, admin-name case bypass).
+    // v5: module labels ('p nosend …') in any spelling but the exact one the toolbox checks (review of #557, M3).
     expect(TAG_METHODS).toEqual(['listOutputs', 'createAction', 'internalizeAction']);
     expect(RESERVED_LABEL_PREFIXES).toEqual(['bmail', 'bwx notice']);
     expect(LABEL_METHODS).toEqual(['createAction', 'internalizeAction', 'listActions']);
@@ -51,6 +54,97 @@ describe('reserved action labels', () => {
     for (const l of ['bwx notice payment respent', 'bwx notice payment parent failed', ' BWX Notice x', 'bwx notice'])
       expect(isReservedLabel(l)).toBe(true);
     for (const l of ['bwx', 'bwx noticeboard', 'my bwx notice']) expect(isReservedLabel(l)).toBe(false);
+  });
+
+  test("the toolbox's admin labels can't be named by a site in any case or spacing (5.2.62)", async () => {
+    const ADMIN_LABELS = [
+      'Admin month 2026-11',
+      ' admin originator good.example',
+      'ADMIN BRC177 FUNDING',
+      '\tAdmin month 2026-11 ',
+      'admin month 2026-11',
+      'admin',
+    ];
+    for (const l of ADMIN_LABELS) {
+      expect(isReservedLabel(l)).toBe(true);
+      for (const method of LABEL_METHODS) expect(reservedLabelRefusal(method, { labels: [l] })).toContain('reserved');
+      expect(isReservedLabelProtocol([1, `action label ${l}`])).toBe(true);
+    }
+    for (const l of ['my admin notes', 'ad min', 'tokenblaster']) expect(isReservedLabel(l)).toBe(false);
+    // With the real manager: refused before anything reaches the wallet or a sheet; the wallet still lists by them.
+    const reached: string[] = [];
+    const pm = new WalletPermissionsManager(
+      { listActions: async () => (reached.push('listActions'), { actions: [], totalActions: 0 }) } as never,
+      ADMIN,
+      { encryptWalletMetadata: false },
+    );
+    const asked: unknown[] = [];
+    // A sheet, should one be raised, is denied at once: a regression fails here instead of waiting forever.
+    pm.bindCallback('onProtocolPermissionRequested', async (r: { requestID: string }) => {
+      asked.push(r);
+      await pm.denyPermission(r.requestID);
+    });
+    const w = guardReservedLabels(pm, ADMIN) as unknown as Record<string, (a: unknown, o?: string) => Promise<unknown>>;
+    for (const l of ['Admin month 2026-11', ' admin month 2026-11', 'ADMIN MONTH 2026-11'])
+      await expect(w.listActions({ labels: [l] }, SITE)).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+    expect(reached).toEqual([]);
+    expect(asked).toEqual([]);
+    await w.listActions({ labels: ['admin month 2026-11'] }, ADMIN);
+    expect(reached).toEqual(['listActions']);
+  });
+
+  test("the wallet's module labels ('p nosend …') can't be named in another spelling (review of #557, M3)", async () => {
+    for (const l of [
+      'P nosend expiry seconds 3600',
+      ' p nosend expiry seconds 3600',
+      'P NOSEND x',
+      '\tp 1sat',
+      'P 1sat',
+    ])
+      expect(isReservedLabel(l)).toBe(true);
+    // The exact spelling goes on to the toolbox (it refuses it, or hands it to its module); other words stay open.
+    for (const l of ['p nosend expiry seconds 3600', 'p 1sat', 'pnosend', 'P', 'Pay day', 'pp nosend'])
+      expect(isReservedLabel(l)).toBe(false);
+    expect(reservedLabelRefusal('listActions', { labels: ['P nosend expiry seconds 3600'] })).toContain('reserved');
+    expect(reservedLabelRefusal('listOutputs', { tags: ['P nosend'] })).toContain('reserved');
+    // The request side gets the name lower-cased: the exact 'p …' form there is not a disguised label (N5). A
+    // disguised spelling never gets this far: it is refused on the label methods and in ensureLabelAccess.
+    expect(isReservedLabelProtocol([1, 'action label p nosend mandala'])).toBe(false);
+    expect(isReservedLabelProtocol([1, 'action label  p nosend mandala '])).toBe(false);
+    expect(isReservedLabelProtocol([1, 'action label Admin month 2026-11'])).toBe(true);
+    // The production manager (as initWallet.ts builds it), a sheet that says yes: before, one Allow listed the
+    // wallet's own held sends ("p nosend expiry …", stored lower-cased) for a site.
+    const reached: unknown[] = [];
+    const store = new InMemoryPermissionStore();
+    const pm = new LocalWalletPermissionsManager(
+      {
+        listActions: async (a: unknown) => (reached.push(a), { actions: [], totalActions: 0 }),
+        listOutputs: async () => ({ outputs: [], totalOutputs: 0 }),
+      } as never,
+      ADMIN,
+      {},
+      { store },
+    );
+    const asked: unknown[] = [];
+    pm.bindCallback('onProtocolPermissionRequested', (async (r: { requestID: string }) => {
+      asked.push(r);
+      await pm.grantPermission({ requestID: r.requestID, expiry: 0 });
+    }) as never);
+    const w = guardLabelsOnSpend(guardReservedLabels(pm, ADMIN), { adminOriginator: ADMIN }) as unknown as Record<
+      string,
+      (a: unknown, o?: string) => Promise<unknown>
+    >;
+    for (const l of ['P nosend expiry seconds 3600', ' p nosend expiry seconds 3600', 'P NOSEND EXPIRY SECONDS 3600'])
+      await expect(w.listActions({ labels: [l] }, SITE)).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+    expect(reached).toEqual([]);
+    expect(asked).toEqual([]);
+    // The exact spelling is BRC-177's own door: the toolbox hands it to its nosend module, which asks first.
+    await w.listActions({ labels: ['p nosend expiry seconds 3600'] }, SITE);
+    expect(asked.length).toBe(1);
+    // The wallet itself still lists by them, with no sheet.
+    await w.listActions({ labels: ['p nosend expiry seconds 3600'] }, ADMIN);
+    expect(asked.length).toBe(1);
+    expect(reached.length).toBe(2);
   });
 
   test("bMail's own record labels are reserved, whatever the letter", () => {
@@ -167,7 +261,11 @@ describe('reserved action labels', () => {
       { encryptWalletMetadata: false },
     );
     const asked: unknown[] = [];
-    pm.bindCallback('onProtocolPermissionRequested', async (r: unknown) => void asked.push(r));
+    // A sheet, should one be raised, is denied at once: a regression fails here instead of waiting forever.
+    pm.bindCallback('onProtocolPermissionRequested', async (r: { requestID: string }) => {
+      asked.push(r);
+      await pm.denyPermission(r.requestID);
+    });
     const w = guardReservedLabels(pm, ADMIN) as unknown as Wallet;
     await expect(w.createAction({ description: 'a site call', outputs: [], labels: [PAID] }, SITE)).rejects.toThrow(
       RESERVED_LABEL_REFUSAL,

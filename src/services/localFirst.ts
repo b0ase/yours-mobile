@@ -214,6 +214,39 @@ export function movingMessage(p: MoveProgress | null | undefined, now = Date.now
   return `Moving your wallet to this device: ${p.done} of ${p.total}. You can send in about ${mins} minute${mins === 1 ? '' : 's'}. Nothing was sent.`;
 }
 
+/**
+ * How long "Retry moving this account to this device" waits before it answers (owner's phone, 5.2.61: it waited up to
+ * 90 s showing "Moving…", then fell back to the Retry button with no word of why). The move carries on in the
+ * background either way; the notice polls and shows "Still moving: N of M" until it ends.
+ */
+export const RETRY_ANSWER_MS = 2000;
+
+/** The notice's line while a move runs: "Still moving: N of M" once there are counts, else "Still moving". */
+export function stillMovingText(p: Pick<MoveProgress, 'done' | 'total'> | null | undefined): string {
+  return p && p.total > 0 ? `Still moving: ${Math.min(p.done, p.total)} of ${p.total}` : 'Still moving';
+}
+
+/** What "Retry moving this account to this device" answers (STORAGE_MOVE_TO_DEVICE). */
+export type RetryMoveAnswer<S> = { success: boolean; data: S; error?: string };
+
+/**
+ * The Retry answer: wait RETRY_ANSWER_MS for the move (`moveNow` joins one running or starts one, never a second),
+ * then answer whatever it says. Still running: "Still moving: N of M" (the move carries on); ended without the
+ * device store: its reason.
+ */
+export async function retryMoveAnswer<
+  S extends { moving: boolean; reason: string | null; progress?: MoveProgress | null },
+>(d: { moveNow: (waitMs: number) => Promise<boolean>; status: () => S }): Promise<RetryMoveAnswer<S>> {
+  const ok = await d.moveNow(RETRY_ANSWER_MS);
+  const status = d.status();
+  if (ok) return { success: true, data: status };
+  return {
+    success: false,
+    data: status,
+    error: status.moving ? stillMovingText(status.progress) : (status.reason ?? 'not moved yet'),
+  };
+}
+
 /** What one admission run settled and left (inboundSync.AdmitReport): the restore's own coin-check progress. */
 export type AdmissionCounts = { admitted: number; applied: number; refused: number; retired: number; left: number };
 

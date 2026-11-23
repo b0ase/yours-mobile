@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Smartphone } from 'lucide-react';
-import { moveNoticeShows, moveStatusSend, nextTryText, noticePollMs } from './moveToDevice';
+import {
+  moveNoticeShows,
+  moveStatusSend,
+  nextTryText,
+  noticePollMs,
+  retryButtonText,
+  retryNote,
+  shownRetryNote,
+} from './moveToDevice';
 
 /** What the background says about moving this account's records to this device (STORAGE_MOVE_STATUS). */
 export type MoveStatus = {
@@ -9,6 +17,8 @@ export type MoveStatus = {
   failures: number;
   nextRetryAt: number;
   reason: string | null;
+  /** The move's counts while it runs (background moveStatus), null before any are known. */
+  progress?: { done: number; total: number; startedAt?: number } | null;
   /** An instant restore is loading (services/spendableFirst.ts): the notice stays hidden. */
   snapshotLoading?: boolean;
 };
@@ -55,9 +65,7 @@ export const MoveToDeviceNotice = ({
       (e: unknown): Answer => ({ success: false, error: e instanceof Error ? e.message : String(e) }),
     );
     if (r?.data) setStatus(r.data);
-    setNote(
-      r?.success ? 'Done: this account is on this device now.' : `Not moved yet${r?.error ? ` (${r.error})` : ''}.`,
-    );
+    setNote(retryNote(r));
     setBusy(false);
   };
 
@@ -89,11 +97,11 @@ export const MoveToDeviceNotice = ({
         className="mt-2 w-full min-h-[36px] cursor-pointer rounded-lg border-0 text-xs font-bold disabled:opacity-50"
         style={{ background: 'linear-gradient(180deg,#FFD84D,#E8A100)', color: '#111' }}
       >
-        {busy ? 'Moving…' : 'Retry moving this account to this device'}
+        {retryButtonText(busy, status)}
       </button>
-      {note && (
+      {shownRetryNote(note, status.moving) && (
         <p className="m-0 mt-1" style={{ color: 'var(--bw-muted, #98A2B3)' }}>
-          {note}
+          {shownRetryNote(note, status.moving)}
         </p>
       )}
     </div>

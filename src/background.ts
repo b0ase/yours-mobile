@@ -141,8 +141,16 @@ import {
   ensureLocalStore,
   joinOrStartMove,
   moveProgressTracker,
+  retryMoveAnswer,
   type EnsureLocalResult,
 } from './services/localFirst';
+import {
+  recordMoveOutcome,
+  reportMoveFailure,
+  sameAccountStillOpen,
+  type MoveReportStore,
+} from './services/moveFailureReport';
+import { reportFromWallet } from './services/reportSink';
 import {
   SNAPSHOT_SEND_WAIT,
   addRemoteRefusal,
@@ -1112,19 +1120,53 @@ const settleLocalStore = async (ctx: NonNullable<typeof accountContext>): Promis
   });
 };
 
+/**
+ * Where "already reported to b" is kept for move failures (services/moveFailureReport.ts): chrome.storage.local, so a
+ * service-worker start or app launch doesn't report the same failure again (review of #557, M1); memory only where
+ * there is no storage.
+ */
+const moveReportMemory = new Map<string, unknown>();
+const moveReportStore = (): MoveReportStore => {
+  const local = chrome.storage?.local;
+  if (local)
+    return {
+      get: (key) => local.get(key) as Promise<Record<string, unknown>>,
+      set: (items) => local.set(items),
+    };
+  return {
+    get: async (key) => ({ [key]: moveReportMemory.get(key) }),
+    set: async (items) => void Object.entries(items).forEach(([k, v]) => moveReportMemory.set(k, v)),
+  };
+};
+const currentAccountId = () => chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
 const preferLocalStorage = (ctx: NonNullable<typeof accountContext>) =>
   moveProgress.track(() => preferLocalStorageOnce(ctx));
 const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) => {
+  // The account this move runs under, read BEFORE it starts: a switch, lock or sign-out mid-move must not file this
+  // account's failure (or its backoff reason) under the next one (review of #557, M2). A failed switch reopening the
+  // wallet for the same account (recoverAfterFailedSwitch) is still this account: reported (N1).
+  const id = currentAccountId();
+  const stillCurrent = sameAccountStillOpen(currentAccountId, () => accountContext !== null);
   const r = await settleLocalStore(ctx);
-  const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
-  if (r.ok && id) moveFailures.delete(id);
   // In the background: our server's first fill can take a while, and nothing here waits for it.
   if (r.ok) void addSnapshotRemote(ctx).catch((e) => console.warn('[background] storage: our server not added:', e));
-  if (!r.ok) {
-    console.warn('[background] storage: this device is not the active store yet:', r);
-    const entry = id ? moveFailures.get(id) : undefined;
-    if (entry && r.reason) entry.reason = r.reason;
-  }
+  if (!r.ok) console.warn('[background] storage: this device is not the active store yet:', r);
+  // b hears why a move failed (5.2.62: the owner's Retry ended back on the button with no reason anywhere): once per
+  // account and reason a day, at most 3 a day, kept in storage (services/moveFailureReport.ts).
+  void recordMoveOutcome({
+    r,
+    account: id,
+    stillCurrent,
+    failures: moveFailures,
+    report: (account, failures) =>
+      reportMoveFailure({
+        r,
+        account,
+        failures,
+        store: moveReportStore(),
+        send: (a, text, reportId) => reportFromWallet(a, text, reportId),
+      }),
+  }).catch((e) => console.warn('[background] storage: move outcome not recorded:', e));
 };
 
 /**
@@ -1213,6 +1255,8 @@ const moveStatus = () => {
     failures: f?.failures ?? 0,
     nextRetryAt: f?.nextAt ?? 0,
     reason: f?.reason ?? null,
+    // The move's own counts while it runs ("Still moving: N of M"), null when none are known yet.
+    progress: moveProgress.current(),
     // A move to this device holds the storage too (the seal's coin wait skips itself then, chat/coinWait.ts).
     backup: { ...backup, storageBusy: backup.storageBusy || !!storageSwitch },
   };
@@ -1249,15 +1293,17 @@ const moveProgress = moveProgressTracker();
 
 /**
  * Move this account to this device now, whatever the backoff says: "Retry moving this account to this device" and
- * Recover change from my 12 words (services/recoverOnDevice.ts). True once this device's store is active.
+ * Recover change from my 12 words (services/recoverOnDevice.ts). True once this device's store is active. Waits at
+ * most `waitMs`; the move carries on in the background after that. Retry answers in localFirst RETRY_ANSWER_MS (the notice then
+ * shows "Still moving: N of M"); Recover change keeps the long wait, behind its "Waiting for your backup…".
  */
-const moveToDeviceNow = async (): Promise<boolean> => {
+const moveToDeviceNow = async (waitMs = 90_000): Promise<boolean> => {
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   if (id) {
     const f = moveFailures.get(id);
     if (f) f.nextAt = 0;
   }
-  return ensureLocalForPayment(90_000);
+  return ensureLocalForPayment(waitMs);
 };
 
 /** "Loading your wallet from backup…" on the balance card; undefined = done, null = done without the copy. */
@@ -4021,8 +4067,9 @@ if (!(
           (async () => {
             try {
               await ensureWallet(true);
-              const ok = await moveToDeviceNow();
-              sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: ok, data: moveStatus(), error: ok ? undefined : moveStatus().reason ?? 'not moved yet' });
+              // Answers in about 2 s; a move still running carries on and the notice shows how far it has got.
+              const answer = await retryMoveAnswer({ moveNow: moveToDeviceNow, status: moveStatus });
+              sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', ...answer });
             } catch (error) {
               sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: false, error: error instanceof Error ? error.message : String(error) });
             }
@@ -4678,7 +4725,7 @@ if (!(
       const progress = (step: string) => sendRecoverProgress('seed', step);
       const gate = await recoverOnDevice({
         isLocal: () => !!accountContext?.storage.isActiveStorageProvider(),
-        moveNow: moveToDeviceNow,
+        moveNow: () => moveToDeviceNow(),
         run: () => {
           if (!accountContext) throw new Error('Wallet not initialized');
           return accountContext.recoverSeedChange(progress, { fresh });

@@ -15,7 +15,7 @@
 import { APP_NAME } from '../mobile/storeBuild';
 
 /** Bumped whenever RESERVED_LABEL_PREFIXES changes (reservedLabels.test.ts pins the list against it). */
-export const RESERVED_LABELS_VERSION = 3;
+export const RESERVED_LABELS_VERSION = 5;
 
 /**
  * Label prefixes only the wallet itself may write or list by. A label is compared as the toolbox stores it: trimmed
@@ -39,10 +39,30 @@ const norm = (label: unknown): string => (typeof label === 'string' ? label.trim
  */
 export const isSpecOpName = (name: unknown): boolean => /^[0-9a-f]{64}$/.test(norm(name));
 
+/**
+ * The toolbox's own labels ('admin month …', 'admin originator …'): its isAdminLabel refuses startsWith("admin") as
+ * typed, but storage keeps labels trimmed and lower-cased, so "Admin month 2026-11" listed the wallet's whole history
+ * across sites (5.2.62). Any case and spacing is refused here; like the toolbox, any name starting "admin".
+ */
+const ADMIN_LABEL_PREFIX = 'admin';
+
+/**
+ * A module label ('p nosend …', 'p 1sat …') in another case or spacing (review of #557, M3). The toolbox reserves
+ * labels starting "p " (isAdminLabel) and routes them to a permission module only as typed, but storage keeps labels
+ * trimmed and lower-cased: "P nosend expiry …" passed both checks as an ordinary label and listed the wallet's own
+ * BRC-177 held sends across sites. The exact lower-case form goes on to the toolbox as before (refused there, or
+ * handed to its module); every other spelling of it is refused here, as reservedProtocols.ts does for module keys
+ * (modulesKeys / routesToPModule).
+ */
+export const isDisguisedModuleLabel = (label: unknown): boolean =>
+  typeof label === 'string' && norm(label).startsWith('p ') && !label.startsWith('p ');
+
 export const isReservedLabel = (label: unknown): boolean => {
   const l = norm(label);
   return (
     isSpecOpName(l) ||
+    l.startsWith(ADMIN_LABEL_PREFIX) ||
+    isDisguisedModuleLabel(label) ||
     RESERVED_LABEL_PREFIXES.some((p) => l === p || (l.startsWith(p) && /\s/.test(l.charAt(p.length))))
   );
 };
@@ -57,11 +77,15 @@ export const RESERVED_NAME_REFUSAL = 'Labels, tags and baskets from a site must 
 /** A label or tag no site may send: reserved, a special-operation name, or not plain ASCII. */
 export const isRefusedLabel = (label: unknown): boolean => isReservedLabel(label) || isOddName(label);
 
-/** The manager asks for a label as protocol [1, 'action label <label>']: is this such a request for a refused one? */
+/**
+ * The manager asks for a label as protocol [1, 'action label <label>']: is this such a request for a refused one? The
+ * name arrives lower-cased, so its case can't be judged here (a disguised 'P …' label is refused before any request,
+ * on the label methods and in ensureLabelAccess); the label is trimmed so the exact 'p …' form isn't read as one.
+ */
 export const isReservedLabelProtocol = (protocolID: unknown): boolean => {
   if (!Array.isArray(protocolID) || typeof protocolID[1] !== 'string') return false;
   const name = protocolID[1].trim().toLowerCase();
-  return name.startsWith('action label') && isRefusedLabel(name.slice('action label'.length));
+  return name.startsWith('action label') && isRefusedLabel(name.slice('action label'.length).trim());
 };
 
 /** Wallet methods whose args carry action labels. */
