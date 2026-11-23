@@ -3699,6 +3699,7 @@ if (!(
               trustSite?: boolean;
               block?: boolean;
               seenHash?: string;
+              seenIDs?: string[];
             },
             sendResponse,
           );
@@ -6004,6 +6005,8 @@ if (!(
       block?: boolean;
       /** sheetHash of the lines on screen when the user tapped. A mismatch grants nothing. */
       seenHash?: string;
+      /** The requestIDs on screen when the user tapped: lines that joined after them get their own sheet. */
+      seenIDs?: string[];
     },
     sendResponse: CallbackResponse,
   ) => {
@@ -6039,7 +6042,16 @@ if (!(
       };
     }
     // Bound to exactly what was on screen: a missing or different hash grants nothing (permissionBundle.ts).
-    const resolved = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
+    const seenIDs =
+      Array.isArray(response.seenIDs) && response.seenIDs.every((id) => typeof id === 'string')
+        ? response.seenIDs
+        : undefined;
+    const resolved = permissionBundler.resolve(
+      response.bundleID,
+      response.decisions ?? {},
+      response.seenHash ?? '',
+      seenIDs,
+    );
     // A payment's Allow pays only the outputs its sheet listed: the list must still be its own action's (0xrard,
     // services/spendRecipients.ts). If not, nothing on the sheet is granted and it says the request changed.
     const mismatch = !!resolved?.granted.some((r) => !spendApprovalMatches(r as BundleRequest));

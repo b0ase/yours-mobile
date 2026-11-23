@@ -170,9 +170,6 @@ const WalletCardInner = ({
   const live = useLive();
   const sessionsOpen = Object.keys(live.sessions).length;
   const known = view === 'amount';
-  useEffect(() => {
-    if (known) noteBalance(sats);
-  }, [sats, known]);
   const pendingSats = sats - displayedSats(sats, live.pending);
   // Received and counted, not yet in a block (services/receiveWatch.ts): shown as "pending" under the amount.
   const incoming = useSyncExternalStore(subscribePendingSats, pendingSatsNow, () => 0);
@@ -250,6 +247,17 @@ const WalletCardInner = ({
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const account = chromeStorageService.getCurrentAccountObject().account;
   const id = account?.addresses.identityAddress;
+  // Live balance: every fetched balance reconciles the spends shown as pending, for this account only (liveBus.ts).
+  useEffect(() => {
+    if (known) noteBalance(sats, id);
+  }, [sats, known, id]);
+  // A refresh that ends with the same number still counts as a fetch: it reconciles too (review of #558, L8).
+  const wasRefreshing = useRef(refreshing);
+  useEffect(() => {
+    if (wasRefreshing.current && !refreshing && known) noteBalance(sats, id);
+    wasRefreshing.current = refreshing;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshing]);
   const names = useAccountNames(id, account?.name ?? '', account?.settings?.socialProfile?.displayName ?? '', false);
   const avatar = useAvatar(id);
   // Agent accounts wear a ghost in their colour (agents/PixelGhost); re-read when agent settings change.

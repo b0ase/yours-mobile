@@ -55,4 +55,52 @@ describe('live balance after a payment (RB, scammerscartel.com, 23 Nov 2026: $0 
       jest.useRealTimers();
     }
   });
+
+  test('review of #558, L4: two quick payments that one fetch already shows are not taken off', () => {
+    __resetLive();
+    noteBalance(10_000);
+    noteBalance(10_000 - 1_000 - 2_000 - 200); // both spends and their fees already in
+    reportSpend({ sats: 1_000, label: 'a' });
+    reportSpend({ sats: 2_000, label: 'b' });
+    expect(shown(6_800)).toBe(6_800);
+    expect(__liveState().pending).toHaveLength(0);
+    expect(__liveState().ticks.map((t) => t.sats)).toEqual([-2_000, -1_000]);
+  });
+
+  test('review of #558, M3: an unrelated fall never swallows a later announced spend', () => {
+    __resetLive();
+    noteBalance(10_000);
+    noteBalance(5_000); // spent on another device
+    reportSpend({ sats: 1_000, label: 'a' }); // not yet in the fetched 5,000
+    expect(shown(5_000)).toBe(4_000);
+    noteBalance(3_900); // the next fetch has it
+    expect(shown(3_900)).toBe(3_900);
+  });
+
+  test('review of #558, M3: another account starts afresh (no pending spend, fall or base carries over)', () => {
+    __resetLive();
+    noteBalance(10_000, 'addrA');
+    reportSpend({ sats: 4_000, label: 'a' });
+    noteBalance(2_000, 'addrB'); // the user switched accounts
+    expect(__liveState().pending).toHaveLength(0);
+    expect(shown(2_000)).toBe(2_000);
+    expect(__liveState().ticks).toHaveLength(0); // no "sent 8,000" for the switch
+  });
+
+  test('review of #558, L8: an incoming payment with a spend inside the grace settles on the next same-value fetch', () => {
+    jest.useFakeTimers();
+    try {
+      __resetLive();
+      noteBalance(10_000);
+      reportSpend({ sats: 1_000, label: 'a' });
+      noteBalance(13_900); // +5,000 received, the spend and its fee already in, inside the grace
+      expect(shown(13_900)).toBe(12_900);
+      jest.advanceTimersByTime(1_600);
+      noteBalance(13_900); // the post-spend refresh ends with the same number
+      expect(shown(13_900)).toBe(13_900);
+    } finally {
+      __resetLive();
+      jest.useRealTimers();
+    }
+  });
 });

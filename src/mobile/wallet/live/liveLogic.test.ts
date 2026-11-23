@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   addPending,
-  alreadyInBalance,
+  fallExplainedBy,
   nextExpiryIn,
   allowRate,
   applySessionSpend,
@@ -95,11 +95,14 @@ describe('optimistic spends', () => {
     // 'a' is past the grace (in the balance): a fall of 100 is its own, so 'b' stays.
     expect(reconcilePending(p, 2_550, 1_500, 900).map((x) => x.id)).toEqual(['b']);
   });
-  test('a spend announced after the balance already fell by it is not taken off again', () => {
-    expect(alreadyInBalance({ sats: 100_000_142, at: 0 }, 100_000_001, 4_000)).toBe(true);
-    expect(alreadyInBalance({ sats: 100, at: 0 }, 101, 4_000)).toBe(false);
-    expect(alreadyInBalance({ sats: 200, at: 0 }, 100, 31_000)).toBe(false);
-    expect(alreadyInBalance(null, 100, 0)).toBe(false);
+  test('a fall is matched to announced spends only within a fee slack (review of #558, M3)', () => {
+    expect(fallExplainedBy({ sats: 100_000_142, at: 0 }, 100_000_001, 4_000)).toBe(true);
+    expect(fallExplainedBy({ sats: 3_200, at: 0 }, 3_000, 4_000)).toBe(true);
+    // A much bigger fall (another device, an account switch) never swallows an announced spend.
+    expect(fallExplainedBy({ sats: 5_000, at: 0 }, 1_000, 4_000)).toBe(false);
+    expect(fallExplainedBy({ sats: 100, at: 0 }, 101, 4_000)).toBe(false);
+    expect(fallExplainedBy({ sats: 200, at: 0 }, 100, 31_000)).toBe(false);
+    expect(fallExplainedBy(null, 100, 0)).toBe(false);
   });
   test('the next expiry is the oldest spend plus the ttl, never negative', () => {
     expect(nextExpiryIn([], 0)).toBeNull();

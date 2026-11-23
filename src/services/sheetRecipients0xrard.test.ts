@@ -180,7 +180,8 @@ describe('background.ts binds the list to the request and checks it on Allow', (
     expect(bg).toContain("if (shown && 'refuse' in shown) throw new Error(shown.refuse);");
   });
   test('Allow grants a payment only when its list is still its own action', () => {
-    const fn = bg.slice(bg.indexOf('permissionBundler.resolve(response.bundleID'));
+    const fn = bg.slice(bg.indexOf('permissionBundler.resolve('));
+    expect(fn.slice(0, 200)).toContain('response.bundleID');
     expect(fn.indexOf('spendApprovalMatches')).toBeGreaterThan(0);
     // The grant call (a standing grant, or oneUseGrant for a one-signature request: sharedKeySigning.ts).
     const grant = fn.indexOf('await wallet.grantPermission(');

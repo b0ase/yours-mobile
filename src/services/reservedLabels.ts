@@ -15,15 +15,36 @@
 import { APP_NAME } from '../mobile/storeBuild';
 
 /** Bumped whenever RESERVED_LABEL_PREFIXES changes (reservedLabels.test.ts pins the list against it). */
-export const RESERVED_LABELS_VERSION = 5;
+export const RESERVED_LABELS_VERSION = 6;
 
 /**
  * Label prefixes only the wallet itself may write or list by. A label is compared as the toolbox stores it: trimmed
  * and lower-cased. Each entry is a first word; the label is reserved when it is that word alone or starts with it
  * followed by white space.
  */
-/** 'bwx notice': the wallet's "payment didn't go through" notices (services/failedRowRepair.ts; #385 fifth review, M2). */
-export const RESERVED_LABEL_PREFIXES: readonly string[] = ['bmail', 'bwx notice'];
+/**
+ * 'bwx notice': the wallet's "payment didn't go through" notices (services/failedRowRepair.ts; #385 fifth review, M2).
+ * v6 (review of #558, 23 Nov 2026): every other label only the wallet writes. One grant on [1, 'action label <label>']
+ * lets a site both apply and list X across the whole wallet, so a site that labelled one payment 'paymail' could then
+ * list every paymail payment the user received, with senders and amounts. Left out on purpose: labels sites write
+ * themselves through shared libraries ('metanet payment', 'mandala', 'bsv20 …'/'bsv21 …', 'tokenblaster', 'launch',
+ * 'vesting', 'claim', 'twetch'), which a site's own flow lists. 'p …' token labels are the toolbox's (isAdminLabel).
+ */
+export const RESERVED_LABEL_PREFIXES: readonly string[] = [
+  'bmail',
+  'bwx notice',
+  'paymail', // received paymail payments (mobile/names/paymail.ts, utils/actionNet.ts PAYMAIL_LABEL)
+  'recovered', // coins found again (services/recoverByTxid.ts, services/seedChangeWiring.ts)
+  'bshares', // share placements (mobile/placement/actions.ts)
+  'bwx-partnership', // partnership accounts (mobile/placement/partnership)
+  'btrust', // bTrust funding (mobile/btrust/fund.ts)
+  'bmintx', // private media, archives and batches (mobile/private/privateMint.ts)
+  'bchat reveal', // private reveals (mobile/private/privateMint.ts REVEAL_LABEL)
+  'bsv21-index-fund', // index fund (mobile/tokens/indexFund.ts)
+  'bwalletx-biz-agent', // business agent spends (mobile/agents/business/bizAgent.ts)
+  'memepool', // Memepool trades (mobile/exchange/memepool/wallet.ts)
+  'bmusic-stream', // streaming payments (mobile/media/stream/session.ts)
+];
 
 export const RESERVED_LABEL_REFUSAL = `This label is reserved for ${APP_NAME} itself`;
 

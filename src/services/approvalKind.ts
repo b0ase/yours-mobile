@@ -71,7 +71,7 @@ export const sheetTitleText = (kind: string, site: string, model: Pick<SheetMode
       return `Open your private ${privateTitleLabel(model)} on ${site}`;
     case 'connect':
       if (keys) return `Connect to ${site} and use your "${keys}" keys`;
-      return history ? `Let ${site} see your payments labelled "${history}"` : `Connect to ${site}`;
+      return history ? `Let ${site} see and add to payments labelled "${history}"` : `Connect to ${site}`;
     default:
       return '';
   }

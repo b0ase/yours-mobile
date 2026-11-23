@@ -33,13 +33,28 @@ const PAID = `bmail paid ${TXID}.0 ${'cd'.repeat(20)}`;
 describe('reserved action labels', () => {
   // Changing the list is a security decision: bump RESERVED_LABELS_VERSION and this test together.
   test('the list is pinned', () => {
-    expect(RESERVED_LABELS_VERSION).toBe(5);
+    expect(RESERVED_LABELS_VERSION).toBe(6);
     // v2: special-operation names (any 64-hex label or tag) and names that are not printable ASCII.
     // v3: 'bwx notice', the wallet's own "payment didn't go through" notices (#385 fifth review, M2).
     // v4: the toolbox's own 'admin…' labels in any case and spacing (5.2.62, admin-name case bypass).
     // v5: module labels ('p nosend …') in any spelling but the exact one the toolbox checks (review of #557, M3).
     expect(TAG_METHODS).toEqual(['listOutputs', 'createAction', 'internalizeAction']);
-    expect(RESERVED_LABEL_PREFIXES).toEqual(['bmail', 'bwx notice']);
+    // v6: every label only the wallet writes (review of #558: label 'paymail' once, then list every received payment).
+    expect(RESERVED_LABEL_PREFIXES).toEqual([
+      'bmail',
+      'bwx notice',
+      'paymail',
+      'recovered',
+      'bshares',
+      'bwx-partnership',
+      'btrust',
+      'bmintx',
+      'bchat reveal',
+      'bsv21-index-fund',
+      'bwalletx-biz-agent',
+      'memepool',
+      'bmusic-stream',
+    ]);
     expect(LABEL_METHODS).toEqual(['createAction', 'internalizeAction', 'listActions']);
   });
 
@@ -47,6 +62,38 @@ describe('reserved action labels', () => {
     for (const l of [STAMP, PAID, 'bmail', 'bmail x', '  BMAIL Paid Letter UPPER ', 'BMail\tstamp', 'bmail x'])
       expect(isReservedLabel(l)).toBe(true);
     for (const l of ['bmailer', 'my bmail', 'b mail stamp', 'tokenblaster', '', undefined, 7, ['bmail x']])
+      expect(isReservedLabel(l)).toBe(false);
+  });
+
+  test("the wallet's own labels can't be applied or listed by a site (review of #558, M1)", () => {
+    for (const l of [
+      'paymail',
+      ' PayMail ',
+      'recovered',
+      'bshares',
+      'bwx-partnership',
+      'btrust',
+      'bmintx media',
+      'bmintx batch k1',
+      'bchat reveal',
+      'bsv21-index-fund',
+      'bwalletx-biz-agent',
+      'memepool',
+      'bmusic-stream',
+    ])
+      expect(isReservedLabel(l)).toBe(true);
+    // As the permissions manager asks for them: refused before any sheet.
+    expect(isReservedLabelProtocol([1, 'action label paymail'])).toBe(true);
+    expect(isReservedLabelProtocol([1, 'action label bmintx archive'])).toBe(true);
+    for (const l of [
+      'paymails',
+      'my paymail',
+      'bchat',
+      'bchat room',
+      'scam-order-1',
+      'tokenblaster',
+      'metanet payment',
+    ])
       expect(isReservedLabel(l)).toBe(false);
   });
 

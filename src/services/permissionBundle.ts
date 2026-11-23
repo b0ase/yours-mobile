@@ -24,6 +24,7 @@ import {
   SIGN_IN_NAME,
 } from './sharedKeySigning';
 import { APP_NAME } from '../mobile/storeBuild';
+import { approvalKindForSheet } from './approvalKind';
 
 export { BLOCK_SITE_BASKET };
 
@@ -99,6 +100,27 @@ export const sheetHash = (items: Pick<BundleRequest, 'requestID' | 'recipientsHa
 };
 
 /**
+ * The sheet says which lines it showed (`seenIDs`, review of #558, L5): the tap is bound to exactly those when their hash
+ * is the tap's, it answers only lines among them, and every line it did not show joined live after its view was built.
+ * The lines it did not show are then left to their own sheet. Unlike tapPredatesLiveLines this holds when a live line
+ * the sheet showed (New, unanswered) is followed by another mid-tap.
+ */
+export const tapSawExactly = (
+  items: Pick<BundleRequest, 'requestID' | 'recipientsHash' | 'addedLive'>[],
+  decisions: Record<string, boolean>,
+  seenHash: string,
+  seenIDs: readonly string[] | undefined,
+): boolean => {
+  if (!Array.isArray(seenIDs) || seenIDs.length === 0) return false;
+  const ids = new Set(seenIDs);
+  if (ids.size !== seenIDs.length) return false;
+  const shown = items.filter((i) => ids.has(i.requestID));
+  if (shown.length !== ids.size || sheetHash(shown) !== seenHash) return false;
+  if (Object.keys(decisions).some((id) => !ids.has(id))) return false;
+  return items.every((i) => ids.has(i.requestID) || i.addedLive);
+};
+
+/**
  * The tap's hash is exactly the sheet's lines before some live-joined lines arrived, and the tap answers none of
  * those late lines: the user's view simply predates them. Never true when an answered or original line changed (a
  * payment's recipients are in the hash), or when nothing joined live.
@@ -114,15 +136,18 @@ export const tapPredatesLiveLines = (
 };
 
 /**
- * May this request join the site's sheet while it is on screen? Not a payment, and not a line that would turn the card
- * CAREFUL (RB on scammerscartel.com, 23 Nov 2026). The payment joined a history read's sheet as an unticked red "New:
- * pay" line: the card turned CAREFUL ("Wants more than usual"), its big button became "Not now" under the user's
- * finger, and the payment came back cancelled. Either kind waits and gets its own sheet once this one is answered.
+ * May this request join the site's sheet while it is on screen? Only when the card stays the same kind of card
+ * (RB on scammerscartel.com, 23 Nov 2026; review of #558, M2). The payment joined a history read's sheet as an
+ * unticked red "New: pay" line: the card turned CAREFUL ("Wants more than usual"), its big button became "Not now"
+ * under the user's finger, and the payment came back cancelled. Likewise a plain line joining a SIGN ONCE card turned
+ * it CAREFUL. Never a payment, and never onto the wallet's one Seal sheet (its face is for that seal alone). Anything
+ * else waits and gets its own sheet once this one is answered.
  */
 const joinsLive = (items: BundleRequest[], request: BundleRequest): boolean => {
-  if (request.type === 'spending') return false;
-  if (!isRiskyRequest(request)) return true;
-  return buildSheetModel({ originator: request.originator, items }).lines.some((l) => l.risky);
+  if (request.type === 'spending' || request.seal || items.some((i) => i.seal)) return false;
+  const kindOf = (list: BundleRequest[]) =>
+    approvalKindForSheet(buildSheetModel({ originator: request.originator, items: list }));
+  return kindOf([...items, { ...request, addedLive: true }]) === kindOf(items);
 };
 
 /** Most requests one site may have waiting behind its open sheet. More are refused, so nothing can starve. */
@@ -319,6 +344,8 @@ export class PermissionBundler<R extends BundleRequest = BundleRequest> {
     id: string,
     decisions: Record<string, boolean>,
     seenHash?: string,
+    /** The requestIDs the sheet showed when the user tapped (tapSawExactly). */
+    seenIDs?: readonly string[],
   ): { granted: R[]; denied: R[]; carried?: PermissionBundle<R>; stale?: boolean } | undefined {
     const bundle = this.bundles.get(id);
     if (!bundle) return undefined;
@@ -329,6 +356,7 @@ export class PermissionBundler<R extends BundleRequest = BundleRequest> {
     if (
       seenHash !== undefined &&
       seenHash !== sheetHash(bundle.items) &&
+      !tapSawExactly(bundle.items, decisions, seenHash, seenIDs) &&
       !tapPredatesLiveLines(bundle.items, decisions, seenHash)
     ) {
       this.forget(id);
@@ -607,14 +635,31 @@ export const actionLabelOf = (r: BundleRequest): string | undefined => {
 };
 
 /**
- * An action-label line in plain words. Never "Sign and encrypt anything with your … keys" (RB, scammerscartel.com,
- * 23 Nov 2026: a read of its own order's history read like a key grant). listActions asks to see; createAction and
- * internalizeAction ask to apply it (reason = the action's description).
+ * A site-chosen label as the sheet shows it (review of #558, L6): no quotes or control characters (it sits inside
+ * quotes in the headline), white space collapsed, at most LABEL_SHOWN_MAX characters.
  */
-const labelLineText = (r: BundleRequest, label: string): string =>
-  r.reason === 'listActions' || r.calls?.includes('listActions')
-    ? `See your past payments labelled "${label}"`
-    : `Label your payments "${label}" in your history`;
+export const LABEL_SHOWN_MAX = 40;
+export const shownLabel = (label: string): string => {
+  const clean = [...label]
+    .map((c) => {
+      const code = c.charCodeAt(0);
+      if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return code === 0x09 || code === 0x0a ? ' ' : '';
+      return /["'`\u2018\u2019\u201c\u201d\u00ab\u00bb]/.test(c) ? '' : c;
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean.length > LABEL_SHOWN_MAX ? `${clean.slice(0, LABEL_SHOWN_MAX - 1)}…` : clean;
+};
+
+/**
+ * An action-label line in plain words, never "Sign and encrypt anything with your … keys" (RB, scammerscartel.com,
+ * 23 Nov 2026). Worded by what the grant covers whatever the call was (review of #558, M1): one grant on
+ * [1, 'action label <label>'] lets the site both list X and put X on payments, and labels are wallet-wide, so it also sees
+ * payments other apps labelled X.
+ */
+const labelLineText = (label: string): string =>
+  `See and add to payments labelled "${shownLabel(label)}" (from any app)`;
 
 /** "Use your wallet keys for your …" label for a key used only on your own data, or undefined. */
 export const privateLabelFor = (r: BundleRequest): string | undefined => {
@@ -693,7 +738,7 @@ const lineText = (r: BundleRequest): string => {
     case 'protocol': {
       if (isIdentityKeyRequest(r)) return 'See your public identity (the key that names you)';
       const label = actionLabelOf(r);
-      if (label) return labelLineText(r, label);
+      if (label) return labelLineText(label);
       if (isSharedKeyRequest(r)) return sharedLineText(r);
       const op = keyOperation(r);
       const name = protoName(r);
@@ -842,7 +887,9 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
     // "denied" (RB's seals, 20 Nov 2026: ERR_PERMISSION_DENIED, "You cancelled in your wallet"). Only the wallet-made
     // seal- id counts; a site's request never carries one.
     const sealAlone = !!r.seal && isSealRequestId(r.requestID) && !r.addedLive && bundle.items.length === 1;
-    const checked = once || sealAlone || (!risky && !r.addedLive && !isSharedKeyRequest(r));
+    // An action label is never pre-ticked (review of #558, M1): its grant reads every payment with that label, from
+    // any app; the user ticks it knowingly. A payment beside it still pays (its own labels ride on the payment).
+    const checked = once || sealAlone || (!risky && !r.addedLive && !isSharedKeyRequest(r) && !actionLabelOf(r));
     lines.push({
       requestID: r.requestID,
       ...(once ? { once: true } : {}),
@@ -854,7 +901,7 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
       signIn: isSignInRequest(r),
       privateLabel: privateLabelFor(r),
       ...(isPostSignature(r) || isPostBasket(r) ? { post: true } : {}),
-      ...(actionLabelOf(r) ? { historyLabel: actionLabelOf(r) } : {}),
+      ...(actionLabelOf(r) ? { historyLabel: shownLabel(actionLabelOf(r)!) } : {}),
     });
   }
   const mode: SheetModel['mode'] = payment ? (lines.length ? 'connectAndPay' : 'pay') : 'connect';

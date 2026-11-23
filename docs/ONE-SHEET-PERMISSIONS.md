@@ -41,14 +41,22 @@ Status: PLAN. Nothing has been built yet.
   doesn't change. Only what the user sees changes.
 - Requests that arrive while a sheet is open join it (the sheet shows "+1 more"), rather than
   queueing a new window.
-- Except a payment (RB on scammerscartel.com, 23 Nov 2026): it never joins a sheet already on screen. It waits and
-  gets its own PAY sheet as soon as the open one is answered. Joined as an unticked "New: pay" line it turned a history
-  read into a red "Wants more than usual" card whose Allow did not pay.
-- A tap made before a line joined decides only what it showed; the late line gets its own sheet. A history read that
-  lands mid-tap never cancels the payment.
-- An action-label request (`listActions` / `createAction` labels, protocol `[1, 'action label <label>']`, generic use)
-  uses no key: its line reads "See your past payments labelled …" or "Label your payments … in your history", never
-  "Sign and encrypt anything with your … keys".
+- Except when joining would change the card (RB on scammerscartel.com, 23 Nov 2026; review of #558): a payment never
+  joins a sheet already on screen, nor does any line that would change the card's kind (a plain line onto SIGN ONCE, a
+  risky line onto PAY), nor anything onto the wallet's one Seal sheet. It waits and gets its own sheet as soon as the
+  open one is answered. Joined as an unticked "New: pay" line, a payment turned a history read into a red "Wants more
+  than usual" card whose big button became "Not now".
+- The sheet sends the requestIDs it showed with its hash. A tap is bound to exactly those lines: lines that joined
+  live after them get their own sheet, so a history read landing mid-tap never cancels the payment. A decision for a
+  line outside them, or a changed line, still grants nothing.
+- Pay, careful, post and sign-once cards hold Allow for 700 ms when they appear (a queued PAY sheet promoted right
+  after a Connect included), so a double tap can't land on Pay.
+- An action-label request (protocol `[1, 'action label <label>']`, generic use) uses no key. One grant lets a site both
+  list and apply that label, wallet-wide, so the line reads "See and add to payments labelled "X" (from any app)",
+  whatever the call, and is never pre-ticked. The label is shown without quotes or control characters, at most 40
+  characters. Labels only the wallet writes (`paymail`, `recovered`, `bshares`, `bwx-partnership`, `btrust`, `bmintx …`,
+  `bchat reveal`, `bsv21-index-fund`, `bwalletx-biz-agent`, `memepool`, `bmusic-stream`, plus `bmail …` and
+  `bwx notice …`) are refused to sites before any sheet (services/reservedLabels.ts).
 
 ### 3b. A grouped sheet for every site
 

@@ -4,13 +4,14 @@ import { loadConnectionLog } from '../connectionLog';
 import {
   addPending,
   allowRate,
-  alreadyInBalance,
   applySessionSpend,
   expirePending,
+  fallExplainedBy,
   fundedWithin,
   liveTicks,
   nextExpiryIn,
   parseSessionSpend,
+  PENDING_TTL_MS,
   pruneSessions,
   pushTick,
   reconcilePending,
@@ -74,8 +75,13 @@ export const appName = (origin: string): string => {
 const paidHere = new Map<string, { at: number; sats: number }[]>();
 
 let lastBase: number | null = null;
-/** The last fall of the fetched balance that no announced spend explained (its 'sent' tick's id), if any. */
-let unclaimedDrop: { sats: number; at: number; tickId: string } | null = null;
+/**
+ * The last fall of the fetched balance that no announced spend explained (its 'sent' tick's id), if any, and the
+ * pending spends announced since that it may yet turn out to contain.
+ */
+let unclaimedDrop: { sats: number; at: number; tickId: string; pendingIds: string[] } | null = null;
+/** Whose balance lastBase is (WalletCard's identity address): another account's numbers never reconcile this one's. */
+let account: string | undefined;
 
 /**
  * Pending spends never outlive PENDING_TTL_MS, even when no later fetch changes the balance. WalletCard reports a
@@ -104,44 +110,64 @@ export const reportSpend = (p: { sats: number; label: string; txid?: string; ori
     const h = hostOf(p.origin);
     paidHere.set(h, [...(paidHere.get(h) ?? []), { at: now, sats: p.sats }].slice(-50));
   }
-  // A fetch already showed this spend (the balance fell before createAction returned): not taken off again, and its
-  // unexplained "sent" tick gives way to this named one.
-  const counted = alreadyInBalance(unclaimedDrop, p.sats, now);
-  const ticks = counted && unclaimedDrop ? state.ticks.filter((t) => t.id !== unclaimedDrop!.tickId) : state.ticks;
-  if (counted) unclaimedDrop = null;
+  // A fetch already showed this spend (the balance fell before createAction returned): not taken off again, nor the
+  // spends announced since that fall that it turns out to contain (two quick payments, one fetch: review of #558, L4).
+  // Their unexplained "sent" tick gives way to the named ones.
+  const id = nextId();
+  let pending = expirePending(state.pending, now);
+  let ticks = state.ticks;
+  const drop = unclaimedDrop;
+  const earlier = drop ? pending.filter((x) => drop.pendingIds.includes(x.id)) : [];
+  const spent = earlier.reduce((t, x) => t + x.sats, 0) + p.sats;
+  if (drop && fallExplainedBy(drop, spent, now)) {
+    pending = pending.filter((x) => !drop.pendingIds.includes(x.id));
+    ticks = ticks.filter((t) => t.id !== drop.tickId);
+    unclaimedDrop = null;
+  } else {
+    pending = addPending(pending, { id, sats: p.sats, at: now, txid: p.txid, base: lastBase });
+    // Still smaller than the fall: a later announcement may complete it. Bigger: this fall was something else.
+    if (drop && spent < drop.sats && now - drop.at < PENDING_TTL_MS) drop.pendingIds.push(id);
+    else unclaimedDrop = null;
+  }
   set({
     ticks: pushTick(ticks, { id: nextId(), sats: -p.sats, label: p.label, at: now, txid: p.txid }),
-    pending: counted
-      ? expirePending(state.pending, now)
-      : addPending(expirePending(state.pending, now), {
-          id: nextId(),
-          sats: p.sats,
-          at: now,
-          txid: p.txid,
-          base: lastBase,
-        }),
+    pending,
     lastActivityAt: now,
   });
   armExpiry();
 };
 
-/** WalletCard: a balance was fetched. Drops pending spends it already includes; announces unexplained moves. */
-export const noteBalance = (sats: number) => {
+/**
+ * WalletCard: a balance was fetched (for `forAccount`, its identity address). Drops pending spends it already includes;
+ * announces unexplained moves. Called on every finished refresh, not only when the number changes. Another account's
+ * balance starts afresh: no pending spend, fall or base carries over (review of #558, M3).
+ */
+export const noteBalance = (sats: number, forAccount?: string) => {
   if (!Number.isFinite(sats)) return;
+  if (forAccount !== undefined && forAccount !== account) {
+    if (account !== undefined) {
+      lastBase = null;
+      unclaimedDrop = null;
+      set({ pending: [], ticks: [] });
+    }
+    account = forAccount;
+  }
   const now = Date.now();
   const covered = state.pending.reduce((s, p) => s + p.sats, 0);
   const d = lastBase === sats ? 0 : unexplainedDelta(lastBase, sats, covered);
   const changed = lastBase !== sats;
   lastBase = sats;
   if (!changed) {
-    // Same number: still let old pending spends go, so a spend never hangs off the card.
-    const pending = expirePending(state.pending, now);
+    // Same number from a later fetch: spends older than the grace are in it (the wallet's storage took them in before
+    // createAction returned), so they go now rather than at the ttl. An incoming payment that landed with a spend inside
+    // the grace no longer leaves the card low for 30 s (review of #558, L8).
+    const pending = reconcilePending(expirePending(state.pending, now), now);
     if (pending.length !== state.pending.length) set({ pending });
     return;
   }
   const tickId = nextId();
   // A fall no announced spend explains: remembered briefly, in case the spend's announcement is still on its way.
-  unclaimedDrop = d < 0 ? { sats: -d, at: now, tickId } : null;
+  unclaimedDrop = d < 0 ? { sats: -d, at: now, tickId, pendingIds: [] } : null;
   set({
     pending: reconcilePending(state.pending, now, undefined, sats),
     ticks: d
@@ -243,6 +269,7 @@ export const __resetLive = () => {
   state = { ticks: [], pending: [], sessions: {}, lastActivityAt: Date.now() };
   lastBase = null;
   unclaimedDrop = null;
+  account = undefined;
   if (expiryTimer !== null) clearTimeout(expiryTimer);
   expiryTimer = null;
   paidHere.clear();

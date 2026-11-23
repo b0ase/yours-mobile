@@ -15,9 +15,12 @@ Code: `src/mobile/wallet/live/` (pure logic in `liveLogic.ts`, tested), wired in
   (dApps, internal sends, paid chat turns). The card takes the requested output sats off straight away, then
   fetches again 1.5 s later and settles on the real figure, fee included. A pending spend is dropped once a fresh
   balance includes it (older than 1.5 s, or the balance fell by it since it was announced), or after 30 s at the
-  latest, on a timer even when no later fetch changes the number. A spend announced after the balance already fell by
-  it (the poll ran while the payment was broadcasting) is not taken off again. Before this (RB, 23 Nov 2026) a 1 BSV
-  payment from ~1.02 BSV showed $0 until a reload.
+  latest, on a timer even when no later fetch changes the number. A refresh that ends with the same number reconciles
+  too. Spends announced after the balance already fell by them (the poll ran while the payment was broadcasting) are
+  not taken off again, matched together (two quick payments, one fetch) and only when the fall equals them within a
+  fee slack of 2,000 sats or 1%; a bigger fall (another device, an account switch) never swallows a spend. Another
+  account's balance starts afresh. Before this (RB, 23 Nov 2026) a 1 BSV payment from ~1.02 BSV showed $0 until a
+  reload.
 - **Incoming.** There is no realtime payment feed today: push (bwalletx-push) only carries chat, and the 1Sat owner
   `/sync` SSE stream ends once it has caught up. So the card polls instead:
   - every **5 s** while visible, for 2 minutes after any activity, or while a session meter is live;

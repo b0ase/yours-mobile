@@ -83,18 +83,24 @@ export const reconcilePending = (list: Pending[], now: number, graceMs = 1_500, 
   });
 };
 
+/** Fees and the odd marker output a fall may carry on top of the spends it is matched to: 2,000 sats or 1%. */
+export const FEE_SLACK_SATS = 2_000;
+export const feeSlack = (spent: number): number => Math.max(FEE_SLACK_SATS, Math.ceil(spent * 0.01));
+
 /**
- * A spend is announced (createAction returned) after the balance already fell by at least its sats with no spend to
- * explain the fall (`drop`, within `windowMs`): that fetch ran after the wallet's own storage took the spend in, so
- * the balance includes it and the card must not take it off again (RB, 23 Nov 2026: a 1 BSV payment whose broadcast
- * outlasted the 5 s poll showed $0 until reload).
+ * Spends announced (createAction returned) after the balance already fell, together `spent` sats: does the fall
+ * (`drop`, within `windowMs`) cover exactly them, give or take the fees (feeSlack)? Then that fetch ran after the
+ * wallet's own storage took them in, so the balance includes them and the card must not take them off again (RB,
+ * 23 Nov 2026: a 1 BSV payment whose broadcast outlasted the 5 s poll showed $0 until reload). A bigger fall (another
+ * device, an account switch, a spend nobody announced) never swallows them (review of #558, M3): they stay pending.
  */
-export const alreadyInBalance = (
+export const fallExplainedBy = (
   drop: { sats: number; at: number } | null | undefined,
-  sats: number,
+  spent: number,
   now: number,
   windowMs = PENDING_TTL_MS,
-): boolean => !!drop && now - drop.at < windowMs && drop.sats >= sats && sats > 0;
+): boolean =>
+  !!drop && now - drop.at < windowMs && spent > 0 && drop.sats >= spent && drop.sats - spent <= feeSlack(spent);
 
 /** When the oldest pending spend expires (ms from `now`), or null with none. Never negative. */
 export const nextExpiryIn = (list: Pending[], now: number, ttl = PENDING_TTL_MS): number | null =>

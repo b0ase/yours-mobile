@@ -32,7 +32,7 @@ import { useSheetPrice } from '../../components/DollarAmount';
 import { EnvelopePresets } from '../../components/approval/EnvelopePresets';
 import { envelopePerSpendLimit, envelopeUsdText } from '../../services/envelopes';
 import { usdToSats } from '../../services/streamGrants';
-import { escapeDenies, sheetControls } from './sheetControls';
+import { APPEAR_HOLD_MS, escapeDenies, holdsOnAppear, sheetControls } from './sheetControls';
 import { SEAL_BUTTON, SEAL_SITE_SUB, SealHero, SealSheetBody, SealTitle } from './SealSheetBody';
 import { PaymentRecipients } from './PaymentRecipients';
 import { ENVELOPES_ENABLED } from '../../mobile/storeBuild';
@@ -177,6 +177,7 @@ export const BundleSheet = (props: {
       const res = await sendMessageAsync<{ success?: boolean; error?: string }>({
         action: 'BUNDLE_PERMISSION_RESPONSE',
         seenHash: seenHash(choice),
+        seenIDs: seenItems(choice).map((r) => r.requestID),
         bundleID: request.bundleID,
         decisions: answer.decisions,
         allowanceUsd: answer.mayStore && showAllowance && allowanceOn ? allowanceUsd : 0,
@@ -198,6 +199,14 @@ export const BundleSheet = (props: {
   };
 
   const kind = approvalKindForSheet(model);
+  // Each new sheet (a queued one promoted into this window included) holds Allow briefly on pay and red cards.
+  const [appearing, setAppearing] = useState(true);
+  useEffect(() => {
+    setAppearing(true);
+    const t = setTimeout(() => setAppearing(false), APPEAR_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [request.bundleID]);
+  const held = hold || (appearing && holdsOnAppear(kind));
   const name = siteName(request.originator);
   const many = model.lines.length + (model.payment ? 1 : 0) > 1;
   const payLabel = model.payment ? dollarsInline(model.payment.satoshis, price) : '';
@@ -241,7 +250,7 @@ export const BundleSheet = (props: {
     setAllowanceUsd(next);
     setAllowanceOn(next > 0);
   };
-  const disabled = busy || !armed || hold;
+  const disabled = busy || !armed || held;
   const careful = kind === 'careful';
   const riskyLines = model.lines.filter((l) => l.risky);
   // Lines that joined while the sheet was open: shown up front with their own tick ("New: …").
@@ -294,8 +303,8 @@ export const BundleSheet = (props: {
   const ordinaryLines = careful ? model.lines.filter((l) => !l.risky && !l.isNew) : [];
   // Live sheet: an Allow is bound to exactly the lines on screen (background checks the hash). A line not on
   // screen is never in it, so it can never be granted. Not now and Block decline everything, so they cover all.
-  const seenHash = (choice: SheetChoice) =>
-    sheetHash(choice === 'allow' ? shownItems(request.items, view) : request.items);
+  const seenItems = (choice: SheetChoice) => (choice === 'allow' ? shownItems(request.items, view) : request.items);
+  const seenHash = (choice: SheetChoice) => sheetHash(seenItems(choice));
 
   const toggle = (id: string, dflt: boolean) => setChecked((c) => ({ ...c, [id]: !isChecked(id, dflt) }));
   const lineRow = (l: (typeof model.lines)[number], big = false) => (
@@ -432,7 +441,7 @@ export const BundleSheet = (props: {
   // Careful card: three choices (owner, 24 Oct 2026). The large, safe default is Not now (this request only);
   // Block this site really blocks (background stores a block record and revokes its grants).
   // Refusing never waits for the arm delay or a hold, only for an answer already being sent (N3-4).
-  const { allowDisabled, denyDisabled } = sheetControls({ busy, armed, hold, mustRead });
+  const { allowDisabled, denyDisabled } = sheetControls({ busy, armed, hold: held, mustRead });
   const deny = { label: 'Not now', onClick: () => void send('notNow'), disabled: denyDisabled };
   const block = { label: 'Block this site', onClick: () => void send('block'), disabled: denyDisabled };
   const allow = {
