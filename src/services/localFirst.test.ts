@@ -336,7 +336,9 @@ describe('a send during the copy (never a second copy, refuse within 2 s with pr
       isLocal: () => local,
       ensureLocal: () =>
         joinOrStartMove({ isLocal: () => local, running: () => never(), start: never, waitMs: SEND_WAIT_MS }),
-      refusal: () => movingMessage({ done: 250, total: 1000, startedAt: Date.now() - 5 * 60_000 }),
+      // 4.5 min for 250 → 13.5 min for the other 750 → "about 14". Not on a whole minute: movingMessage reads the clock
+      // again, and 5 min here landed exactly on 15.0, so any delay made it "16" on a slow CI runner.
+      refusal: () => movingMessage({ done: 250, total: 1000, startedAt: Date.now() - 4.5 * 60_000 }),
       log: () => undefined,
     });
     const { value: err, waits } = await timed(() => wallet.createAction({ outputs: [{}] } as never).catch((e) => e));
@@ -345,7 +347,7 @@ describe('a send during the copy (never a second copy, refuse within 2 s with pr
     expect(waits).toEqual([SEND_WAIT_MS]);
     expect(err).toBeInstanceOf(LocalStoreNeededError);
     expect(err.message).toBe(
-      'Moving your wallet to this device: 250 of 1000. You can send in about 15 minutes. Nothing was sent.',
+      'Moving your wallet to this device: 250 of 1000. You can send in about 14 minutes. Nothing was sent.',
     );
     expect(built).toBe(0);
     // Coins admitted: the same wrapped send now goes through.

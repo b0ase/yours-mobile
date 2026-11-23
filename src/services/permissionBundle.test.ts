@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { approvalKindForSheet } from './approvalKind';
+import { approvalKindForSheet, sheetTitleText } from './approvalKind';
 import {
+  actionLabelOf,
+  LABEL_SHOWN_MAX,
+  shownLabel,
+  privateLabelFor,
   postPackCompanions,
   allowanceGranted,
   allowanceSats,
@@ -598,9 +602,7 @@ describe('the three answers of a careful sheet (owner, 24 Oct 2026)', () => {
 describe('the live sheet (owner, 24 Oct 2026)', () => {
   test('an untouched open sheet takes a new line live, marked New and unticked', () => {
     const { clock, updated, bundler } = setup();
-    const b = bundler.add(
-      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
-    )!;
+    const b = bundler.add(proto('sign'))!;
     clock.tick(400);
     expect(bundler.add(basket('late'))).toBe(b);
     expect(updated).toHaveLength(1);
@@ -612,9 +614,7 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('Allow alone never grants a New line; ticking it does', () => {
     const { clock, bundler } = setup();
-    const b = bundler.add(
-      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
-    )!;
+    const b = bundler.add(proto('sign'))!;
     clock.tick(400);
     bundler.add(basket('late'));
     const model = buildSheetModel(b);
@@ -625,9 +625,7 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('regression (paid playtest, 25 Oct 2026): Allow never denies a joined line; it gets its own sheet', () => {
     const { clock, ready, bundler } = setup();
-    const b = bundler.add(
-      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
-    )!;
+    const b = bundler.add(proto('sign'))!;
     clock.tick(400);
     bundler.add(basket('late'));
     const model = buildSheetModel(b);
@@ -645,9 +643,7 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
 
   test('Not now still declines a joined line; an explicit untick on Allow declines it', () => {
     const { clock, bundler } = setup();
-    const b = bundler.add(
-      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
-    )!;
+    const b = bundler.add(proto('sign'))!;
     clock.tick(400);
     bundler.add(basket('late'));
     const model = buildSheetModel(b);
@@ -655,32 +651,51 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
     expect(sheetDecisions(model, true, { late: false }, false, cardView(model))).toEqual({ sign: true, late: false });
   });
 
-  test('an approve bound to an older set of lines (hash mismatch) grants nothing', () => {
-    const { clock, bundler } = setup();
-    const b = bundler.add(
-      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
-    )!;
+  test('a tap made before a line joined decides what it saw; the late line gets its own sheet (RB, 23 Nov 2026)', () => {
+    const { clock, ready, bundler } = setup();
+    const b = bundler.add(proto('sign'))!;
     clock.tick(400);
     const before = buildSheetModel(b);
     const seen = sheetHash(b.items); // what was on screen when the user tapped
     bundler.add(basket('late')); // arrives before the tap reaches the background
     const res = bundler.resolve(b.id, sheetDecisions(before, true, {}, false, cardView(before)), seen)!;
+    expect(res.stale).toBeUndefined();
+    expect(res.granted.map((r) => r.requestID)).toEqual(['sign']);
+    expect(res.denied).toHaveLength(0);
+    // Never granted by a tap that could not have seen it: it is carried to a sheet of its own.
+    expect(res.carried?.items.map((r) => r.requestID)).toEqual(['late']);
+    expect(ready.at(-1)?.id).toBe(res.carried!.id);
+  });
+
+  test('an approve bound to a different set of lines (not just late joiners) still grants nothing', () => {
+    const { clock, bundler } = setup();
+    const b = bundler.add(proto('sign'))!;
+    bundler.add(basket('bk'));
+    clock.tick(400);
+    const seen = sheetHash(b.items);
+    bundler.removeRequest('bk'); // an original line went away: the tap's view no longer matches
+    bundler.add(basket('late'));
+    const res = bundler.resolve(b.id, { sign: true, bk: true }, seen)!;
     expect(res.stale).toBe(true);
     expect(res.granted).toHaveLength(0);
-    expect(res.denied.map((r) => r.requestID).sort()).toEqual(['late', 'sign']);
+    // A tap that answers the late line was built after it joined: its hash must include it.
+    const two = setup();
+    const b2 = two.bundler.add(proto('sign'))!;
+    two.clock.tick(400);
+    const seen2 = sheetHash(b2.items);
+    two.bundler.add(basket('late'));
+    const res2 = two.bundler.resolve(b2.id, { sign: true, late: true }, seen2)!;
+    expect(res2.stale).toBe(true);
+    expect(res2.granted).toHaveLength(0);
   });
 
   test('a missing hash grants nothing; a matching hash grants the ticked lines', () => {
     const one = setup();
-    const b1 = one.bundler.add(
-      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
-    )!;
+    const b1 = one.bundler.add(proto('sign'))!;
     one.clock.tick(400);
     expect(one.bundler.resolve(b1.id, { sign: true }, '')!.granted).toHaveLength(0);
     const two = setup();
-    const b2 = two.bundler.add(
-      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
-    )!;
+    const b2 = two.bundler.add(proto('sign'))!;
     two.clock.tick(400);
     two.bundler.add(basket('late'));
     const res = two.bundler.resolve(b2.id, { sign: true, late: false }, sheetHash(b2.items))!;
@@ -716,17 +731,21 @@ describe('the live sheet (owner, 24 Oct 2026)', () => {
     expect(bundler.queued('bmovies.app').map((i) => i.requestID)).toEqual(['over']);
   });
 
-  test('a live spend is a New line, never the main payment', () => {
-    const { clock, bundler } = setup();
-    const b = bundler.add(
-      proto('sign', 'bmovies.app', { protocolID: [2, 'bwallet sign in'], counterparty: 'anyone' }),
-    )!;
+  test('a payment never joins a sheet on screen: it waits for its own PAY sheet (RB, 23 Nov 2026)', () => {
+    const { clock, ready, updated, bundler } = setup();
+    const b = bundler.add(proto('sign'))!;
     clock.tick(400);
-    bundler.add(spend('pay', 5000));
+    expect(bundler.add(spend('pay', 5000))).toBeUndefined();
+    expect(updated).toHaveLength(0);
+    expect(b.items.map((i) => i.requestID)).toEqual(['sign']);
     const model = buildSheetModel(b);
     expect(model.payment).toBeUndefined();
-    // Not granted by Allow alone, and not denied: it is carried to a sheet of its own.
-    expect(sheetDecisions(model, true, {}, false, cardView(model)).pay).toBeUndefined();
+    expect(approvalKindForSheet(model)).not.toBe('careful');
+    bundler.resolve(b.id, sheetDecisions(model, true, {}, false, cardView(model)), sheetHash(b.items));
+    clock.tick(400);
+    const next = buildSheetModel(ready.at(-1)!);
+    expect(next.payment?.requestID).toBe('pay');
+    expect(approvalKindForSheet(next)).toBe('pay');
   });
 });
 
@@ -863,5 +882,223 @@ describe('merge window default', () => {
   test('stays short: it is waited before every Connect prompt', async () => {
     const { DEFAULT_MERGE_WINDOW_MS } = await import('./permissionBundle');
     expect(DEFAULT_MERGE_WINDOW_MS).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('history reads by action label (RB on scammerscartel.com, 23 Nov 2026)', () => {
+  const site = 'scammerscartel.com';
+  /** What the toolbox asks for listActions({ labels: [label] }) (ensureLabelAccess). */
+  const labelRead = (
+    id: string,
+    label = 'scam-order-239af5c079e4',
+    extra: Partial<BundleRequest> = {},
+  ): BundleRequest =>
+    proto(id, site, {
+      protocolID: [1, `action label ${label}`],
+      counterparty: 'self',
+      usageType: 'generic',
+      reason: 'listActions',
+      ...extra,
+    });
+  const LINE = 'See and add to payments labelled "scam-order-239af5c079e4" (from any app)';
+
+  test('a label line says what its one grant covers (see and add, any app), never keys; it is never pre-ticked', () => {
+    const m = buildSheetModel({ originator: site, items: [labelRead('read')] });
+    const line = m.lines[0];
+    expect(line.text).toBe(LINE);
+    expect(line.text).not.toMatch(/key|sign|encrypt/i);
+    expect(line.historyLabel).toBe('scam-order-239af5c079e4');
+    expect(line.risky).toBe(false);
+    expect(line.checked).toBe(false);
+    expect(approvalKindForSheet(m)).toBe('connect');
+    expect(sheetTitleText('connect', 'scammerscartel', m)).toBe(
+      'Let scammerscartel see and add to payments labelled "scam-order-239af5c079e4"',
+    );
+    // Allow alone grants nothing the user did not tick.
+    expect(sheetDecisions(m, true, {}, true, cardView(m))).toEqual({ read: false });
+    expect(sheetDecisions(m, true, { read: true }, true, cardView(m))).toEqual({ read: true });
+  });
+
+  test('the same words whatever the call (review of #558, M1: an "apply" grant also lists)', () => {
+    const apply = buildSheetModel({
+      originator: site,
+      items: [labelRead('apply', 'scammerscartel', { reason: 'Scammers Cartel: unlock SMILAZ' })],
+    });
+    expect(apply.lines[0].text).toBe('See and add to payments labelled "scammerscartel" (from any app)');
+    expect(apply.lines[0].checked).toBe(false);
+    // Not a label request: signing with a protocol that happens to be named like one.
+    const signing = labelRead('sig', 'x', { usageType: 'signing' });
+    expect(actionLabelOf(signing)).toBeUndefined();
+    expect(buildSheetModel({ originator: site, items: [signing] }).lines[0].text).toMatch(/keys/);
+    // Nor at level 2, nor for another counterparty.
+    expect(actionLabelOf(labelRead('l2', 'x', { protocolID: [2, 'action label x'] }))).toBeUndefined();
+    expect(actionLabelOf(labelRead('cp', 'x', { counterparty: '02' + 'ab'.repeat(32) }))).toBeUndefined();
+  });
+
+  test('review of #558, L6: the site-chosen label is shown without quotes or control characters, capped', () => {
+    const m = buildSheetModel({ originator: site, items: [labelRead('q', 'x" and nothing else. "\u0007')] });
+    expect(m.lines[0].text).toBe('See and add to payments labelled "x and nothing else." (from any app)');
+    expect(sheetTitleText('connect', 's', m)).toBe('Let s see and add to payments labelled "x and nothing else."');
+    expect(shownLabel('a'.repeat(60))).toBe(`${'a'.repeat(LABEL_SHOWN_MAX - 1)}…`);
+    expect(shownLabel('  a \t b  ')).toBe('a b');
+  });
+
+  test('a label with "history" or "chat" in it is not "your private data"', () => {
+    const r = labelRead('h', 'chat history');
+    expect(privateLabelFor(r)).toBeUndefined();
+    const m = buildSheetModel({ originator: site, items: [r] });
+    expect(approvalKindForSheet(m)).toBe('connect');
+    expect(m.lines[0].text).toBe('See and add to payments labelled "chat history" (from any app)');
+  });
+
+  test('beside a key line, the connect title names the keys, never the label', () => {
+    const m = buildSheetModel({
+      originator: site,
+      items: [labelRead('read'), proto('k', site, { counterparty: 'self', protocolID: [2, 'cartel docs'] })],
+    });
+    expect(sheetTitleText('connect', 'scammerscartel', m)).toBe(
+      'Connect to scammerscartel and use your "cartel docs" keys',
+    );
+  });
+
+  test('regression: the payment arrives while the history read is on screen; it is never cancelled by Allow', () => {
+    const { clock, ready, bundler } = setup();
+    const b = bundler.add(labelRead('read'))!;
+    clock.tick(400);
+    // Was: joined as an unticked red "New: pay 100,000,142 sats" line, card CAREFUL ("Wants more than usual").
+    expect(bundler.add(spend('pay', 100_000_142, site))).toBeUndefined();
+    const first = buildSheetModel(b);
+    expect(approvalKindForSheet(first)).toBe('connect');
+    expect(first.lines.map((l) => l.text)).toEqual([LINE]);
+    const res = bundler.resolve(
+      b.id,
+      sheetDecisions(first, true, { read: true }, true, cardView(first)),
+      sheetHash(b.items),
+    )!;
+    expect(res.granted.map((r) => r.requestID)).toEqual(['read']);
+    expect(res.denied).toHaveLength(0);
+    // The payment's own PAY sheet comes next: Pay grants it.
+    clock.tick(400);
+    const payBundle = ready.at(-1)!;
+    const pay = buildSheetModel(payBundle);
+    expect(approvalKindForSheet(pay)).toBe('pay');
+    expect(pay.payment?.satoshis).toBe(100_000_142);
+    const paid = bundler.resolve(
+      payBundle.id,
+      sheetDecisions(pay, true, {}, true, cardView(pay)),
+      sheetHash(payBundle.items),
+    )!;
+    expect(paid.granted.map((r) => r.requestID)).toEqual(['pay']);
+  });
+
+  test('a line that would change the card never joins it live (its big button would change meaning)', () => {
+    const { clock, ready, updated, bundler } = setup();
+    const b = bundler.add(spend('pay', 100_000_142, site))!;
+    clock.tick(400);
+    expect(bundler.add(proto('priv', site, { privileged: true }))).toBeUndefined();
+    expect(updated).toHaveLength(0);
+    expect(approvalKindForSheet(buildSheetModel(b))).toBe('pay');
+    const m = buildSheetModel(b);
+    expect(
+      bundler.resolve(b.id, sheetDecisions(m, true, {}, true, cardView(m)), sheetHash(b.items))!.granted,
+    ).toHaveLength(1);
+    clock.tick(400);
+    expect(ready.at(-1)!.items.map((i) => i.requestID)).toEqual(['priv']);
+    // A sheet that is already CAREFUL may take another risky line live: nothing flips.
+    const two = setup();
+    const c = two.bundler.add(proto('p1', site, { privileged: true }))!;
+    two.clock.tick(400);
+    expect(two.bundler.add(proto('p2', site, { privileged: true }))).toBe(c);
+  });
+
+  test('review of #558, M2: a plain line never turns a SIGN ONCE card CAREFUL; nothing joins a Seal sheet', () => {
+    const { clock, updated, bundler } = setup();
+    const once = bundler.add(
+      proto('once:abc', site, {
+        protocolID: [1, 'bitcoin auth'],
+        counterparty: 'anyone',
+        usageType: 'signing',
+      }),
+    )!;
+    clock.tick(400);
+    expect(approvalKindForSheet(buildSheetModel(once))).toBe('signonce');
+    expect(bundler.add(basket('bk', site))).toBeUndefined();
+    expect(updated).toHaveLength(0);
+    expect(approvalKindForSheet(buildSheetModel(once))).toBe('signonce');
+    const two = setup();
+    const seal = two.bundler.add(
+      proto('seal-1', site, {
+        protocolID: [2, 'bitsign seal'],
+        counterparty: 'anyone',
+        seal: { title: 'Seal', lines: [] } as never,
+      }),
+    )!;
+    two.clock.tick(400);
+    expect(two.bundler.add(basket('bk2', site))).toBeUndefined();
+    expect(seal.items).toHaveLength(1);
+  });
+
+  test('regression: a history read joining an open PAY sheet mid-tap never cancels the payment', () => {
+    const { clock, ready, bundler } = setup();
+    const b = bundler.add(spend('pay', 100_000_142, site))!;
+    clock.tick(400);
+    const seen = buildSheetModel(b);
+    const seenHash = sheetHash(b.items); // the user taps Pay on this
+    bundler.add(labelRead('read')); // the site's background check lands first
+    const res = bundler.resolve(b.id, sheetDecisions(seen, true, {}, true, cardView(seen)), seenHash)!;
+    expect(res.stale).toBeUndefined();
+    expect(res.granted.map((r) => r.requestID)).toEqual(['pay']);
+    expect(res.denied).toHaveLength(0);
+    expect(res.carried?.items.map((r) => r.requestID)).toEqual(['read']);
+    expect(ready.at(-1)?.id).toBe(res.carried!.id);
+    // And when the sheet already showed it (New, unticked), Pay pays and the read gets its own sheet.
+    const two = setup();
+    const b2 = two.bundler.add(spend('pay', 100_000_142, site))!;
+    two.clock.tick(400);
+    two.bundler.add(labelRead('read'));
+    const shown = buildSheetModel(b2);
+    expect(approvalKindForSheet(shown)).toBe('pay');
+    expect(shown.lines[0].text).toBe(`New: ${LINE}`);
+    const r2 = two.bundler.resolve(b2.id, sheetDecisions(shown, true, {}, true, cardView(shown)), sheetHash(b2.items))!;
+    expect(r2.granted.map((r) => r.requestID)).toEqual(['pay']);
+    expect(r2.carried?.items.map((r) => r.requestID)).toEqual(['read']);
+  });
+
+  test('review of #558, L5: a second line joining mid-tap after one the sheet showed never cancels the payment', () => {
+    const { clock, bundler } = setup();
+    const b = bundler.add({ ...spend('pay', 1_000, site), recipientsHash: 'h' })!;
+    clock.tick(400);
+    bundler.add(labelRead('l1'));
+    const seenIDs = b.items.map((i) => i.requestID); // the sheet showed pay + l1 (New, left unticked)
+    const seen = sheetHash(b.items);
+    bundler.add(labelRead('l2', 'other-order'));
+    const res = bundler.resolve(b.id, { pay: true }, seen, seenIDs)!;
+    expect(res.stale).toBeUndefined();
+    expect(res.granted.map((r) => r.requestID)).toEqual(['pay']);
+    expect(res.carried?.items.map((r) => r.requestID).sort()).toEqual(['l1', 'l2']);
+  });
+
+  test('review of #558, L5: the shown IDs bind the tap; a decision outside them, or a changed line, is stale', () => {
+    const one = setup();
+    const b = one.bundler.add({ ...spend('pay', 1_000, site), recipientsHash: 'h' })!;
+    one.clock.tick(400);
+    one.bundler.add(labelRead('l1'));
+    const seen = sheetHash(b.items);
+    one.bundler.add(labelRead('l2', 'other-order'));
+    // Answers l2, which it never showed.
+    expect(one.bundler.resolve(b.id, { pay: true, l2: true }, seen, ['pay', 'l1'])!.stale).toBe(true);
+    const two = setup();
+    const b2 = two.bundler.add({ ...spend('pay', 1_000, site), recipientsHash: 'h' })!;
+    two.clock.tick(400);
+    const seen2 = sheetHash([{ requestID: 'pay', recipientsHash: 'other' }]); // the recipients it showed differ
+    two.bundler.add(labelRead('l1'));
+    expect(two.bundler.resolve(b2.id, { pay: true }, seen2, ['pay'])!.stale).toBe(true);
+    // An original (not live) line the sheet did not show is never "late".
+    const three = setup();
+    const b3 = three.bundler.add({ ...spend('pay', 1_000, site), recipientsHash: 'h' })!;
+    three.bundler.add(basket('orig', site));
+    three.clock.tick(400);
+    const only = b3.items.filter((i) => i.requestID === 'pay');
+    expect(three.bundler.resolve(b3.id, { pay: true }, sheetHash(only), ['pay'])!.stale).toBe(true);
   });
 });

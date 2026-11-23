@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { Beef, PrivateKey, Transaction, Utils } from '@bsv/sdk';
 import type { OneSatContext } from '@1sat/actions';
 import { tokenReceiveScript, type SwapTerms } from './swap';
@@ -10,10 +10,19 @@ let sendTx: (input: SendInput) => { txid: string; tx: number[] };
 mock.module('../../../services/tokenSpendGuard', () => ({
   guardedSendBsv21: { execute: async (_ctx: unknown, input: SendInput) => (sends.push(input), sendTx(input)) },
 }));
-// Keep the module's other exports (FeaturePausedError): this mock outlives the file, and the next swap test file
-// imports swapActions, which needs them.
-const realKillSwitch = { ...(await import('../../config/killSwitch')) };
-mock.module('../../config/killSwitch', () => ({ ...realKillSwitch, assertNotPaused: async () => undefined }));
+// The operator pause reads STATUS_URL: answer "nothing paused" here instead of mocking the killSwitch module.
+// mock.module lasts for the whole bun process, so a no-op assertNotPaused leaked into later files and let the agent
+// account pay while paused (bizAgent.test on CI's Linux file order, #558).
+const { STATUS_URL, resetKillSwitchCache } = await import('../../config/killSwitch');
+const realFetch = globalThis.fetch;
+const statusStub = (async (u: string | URL | Request) => {
+  if (String(u instanceof Request ? u.url : u) === STATUS_URL) return new Response(JSON.stringify({ paused: [] }));
+  throw new Error('no network in tests');
+}) as typeof fetch;
+afterAll(() => {
+  globalThis.fetch = realFetch;
+  resetKillSwitchCache();
+});
 
 const { offerSwap, setAsideDestination, setAsideTiming, _resetSetAsides, SWAP_TIMED_OUT } =
   await import('./swapActions');
@@ -49,6 +58,8 @@ const ctxFor = () =>
   }) as unknown as OneSatContext;
 
 beforeEach(() => {
+  globalThis.fetch = statusStub;
+  resetKillSwitchCache();
   sends.length = 0;
   _resetSetAsides();
   setAsideTiming.pollMs = 1;

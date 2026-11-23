@@ -38,7 +38,14 @@ export const tickText = (t: Pick<Tick, 'sats' | 'label'>): string =>
 
 // ─── Optimistic spends ──────────────────────────────────────────────────────
 
-export type Pending = { id: string; sats: number; at: number; txid?: string };
+export type Pending = {
+  id: string;
+  sats: number;
+  at: number;
+  txid?: string;
+  /** The fetched balance when the spend was announced (null/undefined: none yet). */
+  base?: number | null;
+};
 
 export const PENDING_TTL_MS = 30_000;
 
@@ -50,12 +57,84 @@ export const addPending = (list: Pending[], p: Pending): Pending[] =>
   p.sats > 0 && !(p.txid && list.some((x) => x.txid === p.txid)) ? [...list, p] : list;
 
 /**
- * A fresh balance arrived at `now`: spends signed more than `graceMs` before it are in that balance (the wallet
- * updates its own storage before createAction returns), so they are dropped. Very recent ones stay until the next
- * fetch or `PENDING_TTL_MS`, in case that fetch started before the spend.
+ * A balance read `next` came back at `now`. Which pending spends does it already include?
+ *
+ * `readStartedAt` (when the read began, review of #558 round 2): a spend announced before then is in it, because the
+ * wallet's own storage takes a spend in before createAction returns. Without it, the old rule: older than `graceMs`.
+ *
+ * A changed number (`sameValue` false) may also include spends announced after the read began (storage took them in
+ * before the read, the announcement came later), but only when the balance fell by exactly them since they were
+ * announced (`base`), give or take their fees: more than the spends, by at most feeSlack (cumulative, oldest first).
+ * A fall that merely covers them (an unrelated fall in the same read) never drops them (review of #558 round 3).
+ * Without the match, a fetch landing inside the grace kept a spend the balance already showed, the card took it off
+ * twice and read $0 (RB, 23 Nov 2026: 1 BSV paid from ~1.02 BSV).
+ *
+ * The same number again proves nothing by itself: the read may predate the payment, or be a slow refresh. Only a read
+ * that began after the spend, of a balance other than the one the spend was announced against (`base`), drops it (an
+ * incoming payment that landed with the spend inside the grace). Otherwise the spend waits for a changed number or the
+ * ttl, so the card never shows the pre-payment balance.
  */
-export const reconcilePending = (list: Pending[], now: number, graceMs = 1_500): Pending[] =>
-  list.filter((p) => now - p.at < graceMs);
+export const reconcilePending = (
+  list: Pending[],
+  now: number,
+  graceMs = 1_500,
+  next?: number,
+  readStartedAt?: number,
+  sameValue = false,
+): Pending[] => {
+  const oldestFirst = [...list].sort((a, b) => a.at - b.at);
+  const known = typeof readStartedAt === 'number' && Number.isFinite(readStartedAt);
+  const inRead = (p: Pending) => (known ? p.at < readStartedAt : now - p.at >= graceMs);
+  if (sameValue)
+    return oldestFirst.filter(
+      (p) => !(known && inRead(p) && typeof p.base === 'number' && typeof next === 'number' && p.base !== next),
+    );
+  const included = oldestFirst.filter(inRead);
+  const rest = oldestFirst.filter((p) => !inRead(p));
+  // The rest: dropped only as a run (oldest first) the fall since their base matches, fees included.
+  const base = rest[0]?.base;
+  if (typeof base !== 'number' || typeof next !== 'number' || !Number.isFinite(next)) return rest;
+  // Spends in the read that were announced against the same base are part of that fall too.
+  const fell = base - next - included.filter((p) => p.base === base).reduce((t, p) => t + p.sats, 0);
+  let matched = 0;
+  let spent = 0;
+  for (let i = 0; i < rest.length && typeof rest[i].base === 'number'; i++) {
+    spent += rest[i].sats;
+    if (fell > spent && fell - spent <= feeSlack(spent)) matched = i + 1;
+  }
+  return rest.slice(matched);
+};
+
+/**
+ * Fees and the odd marker output a fall may carry on top of the spends it is matched to: at most 2,000 sats, and for
+ * a small payment 10% of it, never under 200 (review of #558 round 2: a 50 sat payment was absorbed by any fall up to
+ * ~2,050 sats).
+ */
+export const FEE_SLACK_SATS = 2_000;
+export const FEE_SLACK_FLOOR_SATS = 200;
+export const feeSlack = (spent: number): number =>
+  Math.min(FEE_SLACK_SATS, Math.max(FEE_SLACK_FLOOR_SATS, Math.ceil(spent * 0.1)));
+/** How long after a fall an announcement may still be matched to it: about one createAction (sign + broadcast). */
+export const FALL_MATCH_WINDOW_MS = 10_000;
+
+/**
+ * Spends announced (createAction returned) after the balance already fell, together `spent` sats: does the fall
+ * (`drop`, within `windowMs`) cover exactly them, give or take the fees (feeSlack)? Then that fetch ran after the
+ * wallet's own storage took them in, so the balance includes them and the card must not take them off again (RB,
+ * 23 Nov 2026: a 1 BSV payment whose broadcast outlasted the 5 s poll showed $0 until reload). A bigger fall (another
+ * device, an account switch, a spend nobody announced) never swallows them (review of #558, M3): they stay pending.
+ */
+export const fallExplainedBy = (
+  drop: { sats: number; at: number } | null | undefined,
+  spent: number,
+  now: number,
+  windowMs = FALL_MATCH_WINDOW_MS,
+): boolean =>
+  !!drop && now - drop.at < windowMs && spent > 0 && drop.sats > spent && drop.sats - spent <= feeSlack(spent);
+
+/** When the oldest pending spend expires (ms from `now`), or null with none. Never negative. */
+export const nextExpiryIn = (list: Pending[], now: number, ttl = PENDING_TTL_MS): number | null =>
+  list.length ? Math.max(0, Math.min(...list.map((p) => p.at + ttl)) - now) : null;
 
 export const expirePending = (list: Pending[], now: number, ttl = PENDING_TTL_MS): Pending[] =>
   list.filter((p) => now - p.at < ttl);

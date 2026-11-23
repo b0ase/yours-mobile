@@ -12,3 +12,11 @@ export function sheetControls(s: { busy: boolean; armed: boolean; hold: boolean;
 /** Escape on the sheet means "Not now", unless an answer is already on its way. */
 export const escapeDenies = (e: { key: string; defaultPrevented?: boolean }, busy: boolean) =>
   e.key === 'Escape' && !e.defaultPrevented && !busy;
+
+/**
+ * A sheet that can pay or is red holds Allow for a moment when it appears (review of #558, L7): a payment queued behind
+ * a Connect sheet now opens as its own PAY sheet right after it, so a double tap on Connect could land on Pay.
+ */
+export const APPEAR_HOLD_MS = 700;
+export const holdsOnAppear = (kind: string): boolean =>
+  kind === 'pay' || kind === 'careful' || kind === 'post' || kind === 'signonce';

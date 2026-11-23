@@ -58,14 +58,20 @@ export const siteName = (originator: string): string => {
  */
 export const keysName = (text: string): string => /"([^"]+)"/.exec(text)?.[1] ?? '';
 export const sheetTitleText = (kind: string, site: string, model: Pick<SheetModel, 'lines'>): string => {
-  const keys = model.lines.map((l) => keysName(l.text)).find(Boolean);
+  // An action label is no key (permissionBundle.ts actionLabelOf): its quoted name is never called "keys".
+  const keys = model.lines
+    .filter((l) => !l.historyLabel)
+    .map((l) => keysName(l.text))
+    .find(Boolean);
+  const history = model.lines.find((l) => l.historyLabel)?.historyLabel;
   switch (kind) {
     case 'signin':
       return `Connect and sign in to ${site}`;
     case 'private':
       return `Open your private ${privateTitleLabel(model)} on ${site}`;
     case 'connect':
-      return keys ? `Connect to ${site} and use your "${keys}" keys` : `Connect to ${site}`;
+      if (keys) return `Connect to ${site} and use your "${keys}" keys`;
+      return history ? `Let ${site} see and add to payments labelled "${history}"` : `Connect to ${site}`;
     default:
       return '';
   }

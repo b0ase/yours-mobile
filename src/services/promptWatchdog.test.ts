@@ -125,7 +125,7 @@ describe('PromptWatchdog', () => {
 });
 
 describe('the hang it fixes: a payment queued behind a dead sheet', () => {
-  test('a spend joining a shown (dead) sheet only gets onUpdate: nothing new is shown', () => {
+  test('a spend arriving while a (dead) sheet is shown waits behind it: nothing new is shown until it goes', () => {
     const c = clock();
     const ready: string[] = [];
     const updated: string[] = [];
@@ -139,11 +139,15 @@ describe('the hang it fixes: a payment queued behind a dead sheet', () => {
     const first = b.add({ requestID: 'r1', originator: 'tokenblaster.lol', type: 'protocol' } as never)!;
     c.advance(1000);
     expect(ready).toEqual([first.id]);
-    // START: the $0.10 spend joins that sheet live. Only a reload message goes out, to a UI that is gone.
-    b.add({ requestID: 'r2', originator: 'tokenblaster.lol', type: 'spending' } as never);
+    // START: the $0.10 spend. A payment never joins a sheet on screen (permissionBundle.ts joinsLive, 23 Nov 2026):
+    // it queues behind it, so only the watchdog (watching the blocking sheet) can move it on.
+    expect(b.add({ requestID: 'r2', originator: 'tokenblaster.lol', type: 'spending' } as never)).toBeUndefined();
     c.advance(180_000);
     expect(ready).toEqual([first.id]);
-    expect(updated).toEqual([first.id]);
+    expect(updated).toEqual([]);
+    b.drop(first.id);
+    c.advance(1000);
+    expect(ready.length).toBe(2);
   });
 
   test('a spend queued behind a frozen sheet waits until that sheet goes; dropping it shows the spend', () => {

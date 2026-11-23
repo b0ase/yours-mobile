@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   addPending,
+  fallExplainedBy,
+  feeSlack,
+  nextExpiryIn,
   allowRate,
   applySessionSpend,
   displayedSats,
@@ -70,6 +73,69 @@ describe('optimistic spends', () => {
     ];
     expect(reconcilePending(p, 10_000).map((x) => x.id)).toEqual(['new']);
     expect(expirePending(p, 30_500).map((x) => x.id)).toEqual(['new']);
+  });
+  test('regression (RB, 23 Nov 2026): a fetch inside the grace that already shows the spend drops it', () => {
+    // 1 BSV + 1 sat paid from ~1.0237 BSV; the post-spend balance (0.0237 BSV) lands 400 ms after the announcement.
+    const p = addPending([], { id: 'pay', sats: 100_000_001, at: 10_000, base: 102_370_000 });
+    const next = 102_370_000 - 100_000_142; // fee and the 1 sat marker included
+    const kept = reconcilePending(p, 10_400, 1_500, next);
+    expect(kept).toHaveLength(0);
+    expect(displayedSats(next, kept)).toBe(next); // was 0 (taken off twice, clamped)
+    // A fetch that started before the spend (balance not fallen yet) still keeps it.
+    expect(reconcilePending(p, 10_400, 1_500, 102_370_000)).toHaveLength(1);
+    // No base known: the grace rule alone, as before.
+    expect(reconcilePending([{ id: 'x', sats: 5, at: 10_000 }], 10_400, 1_500, 0)).toHaveLength(1);
+  });
+  test('several pending spends: only a run the fall matches (fees included), oldest first', () => {
+    const p = [
+      { id: 'a', sats: 100, at: 1_000, base: 1_000 },
+      { id: 'b', sats: 50, at: 1_100, base: 1_000 },
+    ];
+    // Fell by a + its fee: a goes, b stays.
+    expect(reconcilePending(p, 1_200, 1_500, 880).map((x) => x.id)).toEqual(['b']);
+    // Fell by a + b + fees: both go.
+    expect(reconcilePending(p, 1_200, 1_500, 800).map((x) => x.id)).toEqual([]);
+    // 'a' is past the grace (in the read): a fall of a + fee is its own, so 'b' stays.
+    expect(reconcilePending(p, 2_550, 1_500, 880).map((x) => x.id)).toEqual(['b']);
+  });
+  test('review of #558 round 3: a fall that only covers a spend (an unrelated fall in the same read) never drops it', () => {
+    // Read began before a 1,000 payment and includes an unrelated 1,000 fall: the payment is not in it.
+    const p = [{ id: 'pay', sats: 1_000, at: 2_000_100, base: 10_000 }];
+    expect(reconcilePending(p, 2_000_500, 1_500, 9_000, 2_000_000)).toHaveLength(1);
+    // Nor a much bigger fall.
+    expect(reconcilePending(p, 2_000_500, 1_500, 5_000, 2_000_000)).toHaveLength(1);
+    // The payment and its fee: dropped.
+    expect(reconcilePending(p, 2_000_500, 1_500, 8_900, 2_000_000)).toHaveLength(0);
+  });
+  test('a fall is matched to announced spends only within a fee slack (review of #558, M3)', () => {
+    expect(fallExplainedBy({ sats: 100_000_142, at: 0 }, 100_000_001, 4_000)).toBe(true);
+    expect(fallExplainedBy({ sats: 3_200, at: 0 }, 3_000, 4_000)).toBe(true);
+    // A much bigger fall (another device, an account switch) never swallows an announced spend.
+    expect(fallExplainedBy({ sats: 5_000, at: 0 }, 1_000, 4_000)).toBe(false);
+    expect(fallExplainedBy({ sats: 100, at: 0 }, 101, 4_000)).toBe(false);
+    expect(fallExplainedBy({ sats: 200, at: 0 }, 100, 31_000)).toBe(false);
+    // Round 2: the slack shrinks for small payments, and the match window is about one createAction.
+    expect(fallExplainedBy({ sats: 3_000, at: 0 }, 2_000, 4_000)).toBe(false);
+    expect(fallExplainedBy({ sats: 1_000, at: 0 }, 50, 4_000)).toBe(false);
+    expect(fallExplainedBy({ sats: 190, at: 0 }, 50, 4_000)).toBe(true);
+    expect(fallExplainedBy({ sats: 1_100, at: 0 }, 1_000, 11_000)).toBe(false);
+    expect(feeSlack(100_000_001)).toBe(2_000);
+    expect(feeSlack(3_000)).toBe(300);
+    expect(feeSlack(50)).toBe(200);
+    expect(fallExplainedBy(null, 100, 0)).toBe(false);
+  });
+  test('the next expiry is the oldest spend plus the ttl, never negative', () => {
+    expect(nextExpiryIn([], 0)).toBeNull();
+    expect(
+      nextExpiryIn(
+        [
+          { id: 'a', sats: 1, at: 1_000 },
+          { id: 'b', sats: 1, at: 500 },
+        ],
+        1_000,
+      ),
+    ).toBe(29_500);
+    expect(nextExpiryIn([{ id: 'a', sats: 1, at: 0 }], 99_000)).toBe(0);
   });
   test('unexplained delta: incoming, covered spend, unknown spend', () => {
     expect(unexplainedDelta(null, 5, 0)).toBe(0);

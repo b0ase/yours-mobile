@@ -57,6 +57,8 @@ export const parseStatus = (raw: unknown, version: string | null): Set<KillFeatu
 
 let cache: { at: number; paused: Set<KillFeature>; read: boolean } | null = null;
 let inflight: Promise<Set<KillFeature>> | null = null;
+/** Bumped by resetKillSwitchCache, so a status read begun before a reset never writes its answer after it. */
+let generation = 0;
 
 /** Paused features, from a fresh (<10 min) in-memory copy or the network. Never throws. */
 export const getPaused = async (
@@ -65,6 +67,7 @@ export const getPaused = async (
 ): Promise<Set<KillFeature>> => {
   if (cache && now - cache.at < STATUS_TTL) return cache.paused;
   if (inflight) return inflight;
+  const gen = generation;
   inflight = (async () => {
     let paused = new Set<KillFeature>();
     let read = false;
@@ -79,8 +82,11 @@ export const getPaused = async (
     } catch {
       /* fail open */
     }
-    cache = { at: now, paused, read };
-    inflight = null;
+    // A read begun before resetKillSwitchCache never writes its answer afterwards (see `generation`).
+    if (gen === generation) {
+      cache = { at: now, paused, read };
+      inflight = null;
+    }
     return paused;
   })();
   return inflight;
@@ -135,6 +141,7 @@ export function guardSpending<T extends object>(
 
 /** Test hook. */
 export const resetKillSwitchCache = () => {
+  generation++;
   cache = null;
   inflight = null;
 };

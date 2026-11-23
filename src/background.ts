@@ -2587,7 +2587,8 @@ const showPermissionPrompt = (request: PermissionRequest & { requestID: string }
               Number(request.protocolID[0]),
               String(request.protocolID[1]),
             ]);
-          // A request arriving while this site's sheet is open waits for its own sheet (never joins that one).
+          // A request arriving while this site's sheet is open joins it live as a "New" line, unticked (a payment never
+          // does: it waits for its own PAY sheet), or after the user touched it waits for its own sheet (permissionBundle.ts).
           bundle = permissionBundler.add(request as BundledRequest & BundleRequest);
         } catch (error) {
           // The wallet could not put this sheet together (payees unreadable, queue full…): its own code, never "denied".
@@ -3698,6 +3699,7 @@ if (!(
               trustSite?: boolean;
               block?: boolean;
               seenHash?: string;
+              seenIDs?: string[];
             },
             sendResponse,
           );
@@ -6003,6 +6005,8 @@ if (!(
       block?: boolean;
       /** sheetHash of the lines on screen when the user tapped. A mismatch grants nothing. */
       seenHash?: string;
+      /** The requestIDs on screen when the user tapped: lines that joined after them get their own sheet. */
+      seenIDs?: string[];
     },
     sendResponse: CallbackResponse,
   ) => {
@@ -6038,7 +6042,16 @@ if (!(
       };
     }
     // Bound to exactly what was on screen: a missing or different hash grants nothing (permissionBundle.ts).
-    const resolved = permissionBundler.resolve(response.bundleID, response.decisions ?? {}, response.seenHash ?? '');
+    const seenIDs =
+      Array.isArray(response.seenIDs) && response.seenIDs.every((id) => typeof id === 'string')
+        ? response.seenIDs
+        : undefined;
+    const resolved = permissionBundler.resolve(
+      response.bundleID,
+      response.decisions ?? {},
+      response.seenHash ?? '',
+      seenIDs,
+    );
     // A payment's Allow pays only the outputs its sheet listed: the list must still be its own action's (0xrard,
     // services/spendRecipients.ts). If not, nothing on the sheet is granted and it says the request changed.
     const mismatch = !!resolved?.granted.some((r) => !spendApprovalMatches(r as BundleRequest));
@@ -6398,7 +6411,9 @@ if (!(
       return;
     }
     // Received-but-not-yet-swept deposits count too, and money still arriving, each once (services/depositBalance.ts).
-    // `data` stays the total (sites read it); `pending` is the part not yet in a block, for the card.
+    // `data` stays the total (sites read it); `pending` is the part not yet in a block, for the card; `account` is whose
+    // balance it is, so a read that answers after an account switch never lands on the other card (liveBus.ts).
+    const forAccount = currentAccountId();
     accountContext
       .balanceSplit()
       .then(({ total, pending }) => {
@@ -6407,6 +6422,7 @@ if (!(
           success: true,
           data: total,
           pending,
+          ...(forAccount ? { account: forAccount } : {}),
         });
       })
       .catch((error) => {
@@ -7314,6 +7330,8 @@ if (!(
     let releasePayeeMark: (() => void) | undefined;
     let releaseMicropay: (() => void) | undefined;
     let ownMintIntent: MintIntent | undefined;
+    // Whose payment this is, taken before any await: the live balance ignores it on another account's card.
+    const spendAccount = currentAccountId();
     // Own payments only: where the time goes, one warn line (services/payTiming.ts; owner's seal, 7 Nov 2026).
     const timing = message.originator === ADMIN_ORIGINATOR ? payTimer() : null;
     // And they go first: the device sync lets go of the storage queue at its next page (services/ownPayments.ts).
@@ -7594,6 +7612,7 @@ if (!(
                 txid: result.txid,
                 label: message.params.description?.slice(0, 60) ?? '',
                 origin: message.originator && message.originator !== ADMIN_ORIGINATOR ? message.originator : undefined,
+                account: spendAccount,
               },
             })
             ?.catch(() => {

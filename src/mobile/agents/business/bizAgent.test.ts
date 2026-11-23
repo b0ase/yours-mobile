@@ -17,13 +17,16 @@ import {
 import { PAUSED_MESSAGE, resetKillSwitchCache, STATUS_URL } from '../../config/killSwitch';
 
 // The operator pause is read from STATUS_URL: stub it, no network in tests.
+// Installed before each test, so no other file's fetch stub can be in place when these run. (The #558 CI failure was
+// a different leak: swapSetAside.test mock.module'd killSwitch with a no-op assertNotPaused for the whole process.)
 const realFetch = globalThis.fetch;
 let pausedNow = false;
-globalThis.fetch = (async (u: string | URL | Request) => {
+const statusStub = (async (u: string | URL | Request) => {
   if (String(u instanceof Request ? u.url : u) === STATUS_URL)
     return new Response(JSON.stringify({ paused: pausedNow ? ['spending'] : [] }));
   throw new Error('no network in tests');
 }) as typeof fetch;
+globalThis.fetch = statusStub;
 afterAll(() => {
   globalThis.fetch = realFetch;
   resetKillSwitchCache();
@@ -103,6 +106,7 @@ describe('agent account', () => {
   });
 
   beforeEach(() => {
+    globalThis.fetch = statusStub;
     pausedNow = false;
     resetKillSwitchCache();
     store = memStore();
