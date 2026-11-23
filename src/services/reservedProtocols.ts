@@ -47,9 +47,17 @@ const RAW_HASH_REFUSED = new Set(NO_RAW_HASH.map(key));
 const asProtocol = (p: unknown): Protocol | null =>
   Array.isArray(p) && p.length === 2 && typeof p[0] === 'number' && typeof p[1] === 'string' ? [p[0], p[1]] : null;
 
+/**
+ * Names the toolbox keeps for the wallet itself (WalletPermissionsManager isAdminProtocol: startsWith("admin")). The
+ * toolbox compares the name as typed, but KeyDeriver derives from it trimmed and lower-cased, so "Admin metadata
+ * encryption", " admin …" or "ADMIN …" passed its check and, after one sheet, gave a site the wallet's own admin keys
+ * (5.2.62). Refused here in every case and spacing, at every level.
+ */
+export const isAdminProtocolName = (name: string): boolean => name.trim().toLowerCase().startsWith('admin');
+
 export const isReservedProtocol = (protocolID: unknown): boolean => {
   const p = asProtocol(protocolID);
-  return !!p && RESERVED_HASHES.has(protocolHash(p));
+  return !!p && (isAdminProtocolName(p[1]) || RESERVED_HASHES.has(protocolHash(p)));
 };
 
 export const RESERVED_REFUSAL = `This protocol is reserved for ${APP_NAME} itself`;
@@ -126,7 +134,7 @@ export const reservedProtocolRefusal = (method: string, args: unknown): string |
   if (a.protocolID === undefined || a.protocolID === null) return null;
   const p = asProtocol(a.protocolID);
   if (!p) return 'Invalid protocolID';
-  if (RESERVED_HASHES.has(protocolHash(p))) return `${RESERVED_REFUSAL}: "${p[1]}"`;
+  if (isAdminProtocolName(p[1]) || RESERVED_HASHES.has(protocolHash(p))) return `${RESERVED_REFUSAL}: "${p[1]}"`;
   // A module's keys: only createSignature under the exact name the toolbox hands to the module (which checks it), and
   // the module probe (answered without a key). Every other way in, any case or spacing, is refused (G2, review 16 F3).
   if (modulesKeys(p[1]) && !isModuleProbe(method, args)) {

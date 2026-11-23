@@ -32,9 +32,10 @@ const PAID = `bmail paid ${TXID}.0 ${'cd'.repeat(20)}`;
 describe('reserved action labels', () => {
   // Changing the list is a security decision: bump RESERVED_LABELS_VERSION and this test together.
   test('the list is pinned', () => {
-    expect(RESERVED_LABELS_VERSION).toBe(3);
+    expect(RESERVED_LABELS_VERSION).toBe(4);
     // v2: special-operation names (any 64-hex label or tag) and names that are not printable ASCII.
     // v3: 'bwx notice', the wallet's own "payment didn't go through" notices (#385 fifth review, M2).
+    // v4: the toolbox's own 'admin…' labels in any case and spacing (5.2.62, admin-name case bypass).
     expect(TAG_METHODS).toEqual(['listOutputs', 'createAction', 'internalizeAction']);
     expect(RESERVED_LABEL_PREFIXES).toEqual(['bmail', 'bwx notice']);
     expect(LABEL_METHODS).toEqual(['createAction', 'internalizeAction', 'listActions']);
@@ -51,6 +52,39 @@ describe('reserved action labels', () => {
     for (const l of ['bwx notice payment respent', 'bwx notice payment parent failed', ' BWX Notice x', 'bwx notice'])
       expect(isReservedLabel(l)).toBe(true);
     for (const l of ['bwx', 'bwx noticeboard', 'my bwx notice']) expect(isReservedLabel(l)).toBe(false);
+  });
+
+  test("the toolbox's admin labels can't be named by a site in any case or spacing (5.2.62)", async () => {
+    const ADMIN_LABELS = [
+      'Admin month 2026-11',
+      ' admin originator good.example',
+      'ADMIN BRC177 FUNDING',
+      '\tAdmin month 2026-11 ',
+      'admin month 2026-11',
+      'admin',
+    ];
+    for (const l of ADMIN_LABELS) {
+      expect(isReservedLabel(l)).toBe(true);
+      for (const method of LABEL_METHODS) expect(reservedLabelRefusal(method, { labels: [l] })).toContain('reserved');
+      expect(isReservedLabelProtocol([1, `action label ${l}`])).toBe(true);
+    }
+    for (const l of ['my admin notes', 'ad min', 'tokenblaster']) expect(isReservedLabel(l)).toBe(false);
+    // With the real manager: refused before anything reaches the wallet or a sheet; the wallet still lists by them.
+    const reached: string[] = [];
+    const pm = new WalletPermissionsManager(
+      { listActions: async () => (reached.push('listActions'), { actions: [], totalActions: 0 }) } as never,
+      ADMIN,
+      { encryptWalletMetadata: false },
+    );
+    const asked: unknown[] = [];
+    pm.bindCallback('onProtocolPermissionRequested', async (r: unknown) => void asked.push(r));
+    const w = guardReservedLabels(pm, ADMIN) as unknown as Record<string, (a: unknown, o?: string) => Promise<unknown>>;
+    for (const l of ['Admin month 2026-11', ' admin month 2026-11', 'ADMIN MONTH 2026-11'])
+      await expect(w.listActions({ labels: [l] }, SITE)).rejects.toThrow(RESERVED_LABEL_REFUSAL);
+    expect(reached).toEqual([]);
+    expect(asked).toEqual([]);
+    await w.listActions({ labels: ['admin month 2026-11'] }, ADMIN);
+    expect(reached).toEqual(['listActions']);
   });
 
   test("bMail's own record labels are reserved, whatever the letter", () => {
@@ -167,7 +201,11 @@ describe('reserved action labels', () => {
       { encryptWalletMetadata: false },
     );
     const asked: unknown[] = [];
-    pm.bindCallback('onProtocolPermissionRequested', async (r: unknown) => void asked.push(r));
+    // A sheet, should one be raised, is denied at once: a regression fails here instead of waiting forever.
+    pm.bindCallback('onProtocolPermissionRequested', async (r: { requestID: string }) => {
+      asked.push(r);
+      await pm.denyPermission(r.requestID);
+    });
     const w = guardReservedLabels(pm, ADMIN) as unknown as Wallet;
     await expect(w.createAction({ description: 'a site call', outputs: [], labels: [PAID] }, SITE)).rejects.toThrow(
       RESERVED_LABEL_REFUSAL,

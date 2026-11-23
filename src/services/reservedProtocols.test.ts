@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { PrivateKey, ProtoWallet } from '@bsv/sdk';
+import { WalletPermissionsManager } from '@bsv/wallet-toolbox-client';
 import { EXTERNAL_OK, RESERVED_PROTOCOLS } from './reservedProtocolList';
 import {
   guardReservedProtocols,
@@ -10,6 +12,8 @@ import {
   LEVEL0_SIGN_REFUSAL,
   listActionsNamesNoLabel,
   RAW_HASH_REFUSAL,
+  refusalCode,
+  RESERVED_PROTOCOL_CODE,
   reservedProtocolRefusal,
   revokeReservedProtocolGrants,
   withoutReservedProtocols,
@@ -221,6 +225,109 @@ describe('reserved protocols (audit C1)', () => {
 });
 
 // Every protocol the wallet's own code uses must be listed as reserved or as deliberately shared.
+/**
+ * The toolbox keeps protocol names starting "admin" for the wallet, but its isAdminProtocol compares them as typed while
+ * KeyDeriver derives from the name trimmed and lower-cased: "Admin …", " admin …" and "ADMIN …" are the wallet's own
+ * admin keys (5.2.62, admin-name case bypass).
+ */
+describe('admin protocol names, any case or spacing (5.2.62)', () => {
+  const ADMIN_NAMES = [
+    'Admin metadata encryption',
+    ' admin metadata encryption',
+    'ADMIN PERMISSION TOKEN ENCRYPTION',
+    '\tAdmin protocol-permission ',
+    'admin metadata encryption',
+    'admin',
+  ];
+
+  test('refused on every protocol method, at every level, with the reserved code', () => {
+    for (const name of ADMIN_NAMES)
+      for (const level of [0, 1, 2]) {
+        expect(isReservedProtocol([level, name])).toBe(true);
+        for (const method of METHODS) {
+          const r = reservedProtocolRefusal(method, { protocolID: [level, name], keyID: '1', counterparty: 'self' });
+          expect(r).toMatch(/reserved/);
+          expect(refusalCode(r ?? '')).toBe(RESERVED_PROTOCOL_CODE);
+        }
+      }
+  });
+
+  test('names that only contain the word are not caught', () => {
+    for (const name of ['my admin notes', 'bwallet sign in', 'app posts', 'ad min'])
+      expect(isReservedProtocol([2, name])).toBe(false);
+  });
+
+  test('grants: grouped and counterparty requests drop them; a stored one is revoked', async () => {
+    expect(
+      withoutReservedProtocols([{ protocolID: [2, 'Admin metadata encryption'] }, { protocolID: [2, 'app posts'] }]),
+    ).toEqual([{ protocolID: [2, 'app posts'] }]);
+    const m = guardReservedProtocols(fakeManager(), ADMIN) as Record<string, (...a: unknown[]) => Promise<unknown>> & {
+      calls: string[];
+    };
+    await m.grantCounterpartyPermission({
+      requestID: 'p',
+      granted: { protocols: [{ protocolName: ' ADMIN permission token encryption' }, { protocolName: 'chat' }] },
+    });
+    expect(m.calls[0]).not.toContain('ADMIN');
+    let grants = [
+      {
+        key: {
+          type: 'protocol',
+          originator: 'evil.example',
+          protocolLevel: 2,
+          protocolName: 'Admin metadata encryption',
+        },
+      },
+      { key: { type: 'protocol', originator: 'evil.example', protocolLevel: 2, protocolName: 'app posts' } },
+      { key: { type: 'protocol', originator: ADMIN, protocolLevel: 2, protocolName: 'admin metadata encryption' } },
+    ];
+    const removed = await revokeReservedProtocolGrants(
+      {
+        listGrants: async () => grants,
+        deleteGrant: async (k: never) => void (grants = grants.filter((g) => g.key !== k)),
+      },
+      ADMIN,
+    );
+    expect(removed).toBe(1);
+    expect(grants.map((g) => g.key.protocolName)).toEqual(['app posts', 'admin metadata encryption']);
+  });
+
+  test('with the real permissions manager: a site gets no admin key and no sheet; the wallet keeps its own', async () => {
+    const proto = new ProtoWallet(PrivateKey.fromRandom());
+    const underlying = new Proxy(proto, {
+      get(t, p) {
+        if (p === 'listOutputs') return async () => ({ totalOutputs: 0, outputs: [] });
+        if (p === 'listActions') return async () => ({ totalActions: 0, actions: [] });
+        if (p === 'getNetwork') return async () => ({ network: 'mainnet' });
+        const v = (t as unknown as Record<string | symbol, unknown>)[p];
+        return typeof v === 'function' ? v.bind(t) : v;
+      },
+    });
+    const pm = new WalletPermissionsManager(underlying as never, ADMIN, {});
+    const asked: unknown[] = [];
+    // A sheet, should one be raised, is denied at once: a regression fails here instead of waiting forever.
+    pm.bindCallback('onProtocolPermissionRequested', async (r: { requestID: string }) => {
+      asked.push(r);
+      await pm.denyPermission(r.requestID);
+    });
+    const w = guardReservedProtocols(pm, ADMIN) as unknown as Record<
+      string,
+      (a: unknown, o?: string) => Promise<{ publicKey?: string; ciphertext?: number[] }>
+    >;
+    const name = 'admin metadata encryption';
+    const own = await w.getPublicKey({ protocolID: [2, name], keyID: '1' }, ADMIN);
+    expect(own.publicKey).toMatch(/^0[23]/);
+    const { ciphertext } = await w.encrypt({ protocolID: [2, name], keyID: '1', plaintext: [1, 2, 3] }, ADMIN);
+    for (const v of ['Admin metadata encryption', ' admin metadata encryption', 'ADMIN METADATA ENCRYPTION']) {
+      await expect(w.getPublicKey({ protocolID: [2, v], keyID: '1' }, 'evil.example')).rejects.toThrow(/reserved/);
+      await expect(w.decrypt({ protocolID: [2, v], keyID: '1', ciphertext }, 'evil.example')).rejects.toThrow(
+        /reserved/,
+      );
+    }
+    expect(asked).toEqual([]);
+  });
+});
+
 const walk = (dir: string): string[] =>
   readdirSync(dir).flatMap((f) => {
     const p = join(dir, f);

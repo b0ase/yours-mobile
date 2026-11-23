@@ -15,7 +15,7 @@
 import { APP_NAME } from '../mobile/storeBuild';
 
 /** Bumped whenever RESERVED_LABEL_PREFIXES changes (reservedLabels.test.ts pins the list against it). */
-export const RESERVED_LABELS_VERSION = 3;
+export const RESERVED_LABELS_VERSION = 4;
 
 /**
  * Label prefixes only the wallet itself may write or list by. A label is compared as the toolbox stores it: trimmed
@@ -39,10 +39,18 @@ const norm = (label: unknown): string => (typeof label === 'string' ? label.trim
  */
 export const isSpecOpName = (name: unknown): boolean => /^[0-9a-f]{64}$/.test(norm(name));
 
+/**
+ * The toolbox's own labels ('admin month …', 'admin originator …'): its isAdminLabel refuses startsWith("admin") as
+ * typed, but storage keeps labels trimmed and lower-cased, so "Admin month 2026-11" listed the wallet's whole history
+ * across sites (5.2.62). Any case and spacing is refused here; like the toolbox, any name starting "admin".
+ */
+const ADMIN_LABEL_PREFIX = 'admin';
+
 export const isReservedLabel = (label: unknown): boolean => {
   const l = norm(label);
   return (
     isSpecOpName(l) ||
+    l.startsWith(ADMIN_LABEL_PREFIX) ||
     RESERVED_LABEL_PREFIXES.some((p) => l === p || (l.startsWith(p) && /\s/.test(l.charAt(p.length))))
   );
 };
