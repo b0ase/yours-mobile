@@ -17,13 +17,16 @@ import {
 import { PAUSED_MESSAGE, resetKillSwitchCache, STATUS_URL } from '../../config/killSwitch';
 
 // The operator pause is read from STATUS_URL: stub it, no network in tests.
+// Installed before EACH test, not once at load: another test file restoring its own saved fetch in its afterAll put
+// the real network back under these tests on CI (Linux file order), and the live status said "not paused" (#558).
 const realFetch = globalThis.fetch;
 let pausedNow = false;
-globalThis.fetch = (async (u: string | URL | Request) => {
+const statusStub = (async (u: string | URL | Request) => {
   if (String(u instanceof Request ? u.url : u) === STATUS_URL)
     return new Response(JSON.stringify({ paused: pausedNow ? ['spending'] : [] }));
   throw new Error('no network in tests');
 }) as typeof fetch;
+globalThis.fetch = statusStub;
 afterAll(() => {
   globalThis.fetch = realFetch;
   resetKillSwitchCache();
@@ -103,6 +106,7 @@ describe('agent account', () => {
   });
 
   beforeEach(() => {
+    globalThis.fetch = statusStub;
     pausedNow = false;
     resetKillSwitchCache();
     store = memStore();
