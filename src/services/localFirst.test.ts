@@ -13,6 +13,9 @@ import {
   movingMessage,
   moveProgressTracker,
   requireLocalStoreForChange,
+  RETRY_ANSWER_MS,
+  moveFailureReport,
+  stillMovingText,
   type EnsureLocalDeps,
   type StoreConfigLike,
 } from './localFirst';
@@ -548,5 +551,65 @@ describe('review of a95a1ff0, 1: the backup a move to this device reads from is 
     );
     await ensureLocalStore(deps);
     expect(asked).toBe(OURS);
+  });
+});
+
+describe('Retry moving this account to this device answers in about 2 s (5.2.62)', () => {
+  const never = () => new Promise<void>(() => undefined);
+
+  test('the wait is about 2 s, and a move still running carries on (never cancelled, never a second one)', async () => {
+    expect(RETRY_ANSWER_MS).toBeLessThanOrEqual(2500);
+    let starts = 0;
+    let running: Promise<unknown> | null = null;
+    const deps = {
+      isLocal: () => false,
+      running: () => running,
+      start: () => {
+        starts++;
+        running = never();
+        return running;
+      },
+      waitMs: 5,
+    };
+    expect(await joinOrStartMove(deps)).toBe(false);
+    expect(await joinOrStartMove(deps)).toBe(false);
+    expect(starts).toBe(1);
+  });
+
+  test('"Still moving: N of M" once there are counts', () => {
+    expect(stillMovingText(null)).toBe('Still moving');
+    expect(stillMovingText({ done: 0, total: 0 })).toBe('Still moving');
+    expect(stillMovingText({ done: 12, total: 40 })).toBe('Still moving: 12 of 40');
+    expect(stillMovingText({ done: 41, total: 40 })).toBe('Still moving: 40 of 40');
+  });
+
+  test('a failed move is reported to b with its reason, once per account and reason', () => {
+    const seen = new Set<string>();
+    const failed = { ok: false as const, how: 'failed' as const, reason: 'backup short: 3 outputs missing' };
+    expect(moveFailureReport(failed, 'acct1', 1, seen)).toBe(
+      "Moving this account to this device didn't finish (try 1): backup short: 3 outputs missing",
+    );
+    expect(moveFailureReport(failed, 'acct1', 2, seen)).toBeNull();
+    expect(moveFailureReport(failed, 'acct2', 1, seen)).toContain('backup short');
+    expect(moveFailureReport({ ...failed, reason: 'timeout' }, 'acct1', 3, seen)).toContain('(try 3): timeout');
+    expect(moveFailureReport({ ok: false, how: 'failed' }, 'acct1', 0, seen)).toContain('no reason given');
+    // Not a failure of the move itself: backoff, a backup exporting, no account, or a success.
+    for (const how of ['failed-this-session', 'busy', 'no-account'] as const)
+      expect(moveFailureReport({ ok: false, how, reason: 'x' }, 'acct3', 1, seen)).toBeNull();
+    expect(moveFailureReport({ ok: true, how: 'switched' }, 'acct3', 0, seen)).toBeNull();
+  });
+
+  test('wired: Retry waits RETRY_ANSWER_MS, Recover change keeps its long wait, failures go to reportSink', () => {
+    const bg = readFileSync('src/background.ts', 'utf8');
+    const start = bg.indexOf("case 'STORAGE_MOVE_TO_DEVICE':");
+    const handler = bg.slice(start, bg.indexOf('return true;', start));
+    expect(handler).toContain('await moveToDeviceNow(RETRY_ANSWER_MS)');
+    expect(handler).toContain('stillMovingText(status.progress)');
+    expect(bg).toContain('const moveToDeviceNow = async (waitMs = 90_000): Promise<boolean> =>');
+    expect(bg).toContain('moveNow: () => moveToDeviceNow(),');
+    expect(bg).toContain('progress: moveProgress.current(),');
+    const once = bg.slice(bg.indexOf('const preferLocalStorageOnce'), bg.indexOf('const addSnapshotRemote'));
+    expect(once).toContain('moveFailureReport(r, id, entry?.failures ?? 0, moveFailuresReported)');
+    expect(once).toContain('void reportFromWallet(id, report)');
   });
 });

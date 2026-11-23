@@ -137,12 +137,16 @@ import {
 } from './services/restoreProgress';
 import { isUncheckedPage } from './services/inboundSync';
 import {
+  RETRY_ANSWER_MS,
   SEND_WAIT_MS,
   ensureLocalStore,
   joinOrStartMove,
+  moveFailureReport,
   moveProgressTracker,
+  stillMovingText,
   type EnsureLocalResult,
 } from './services/localFirst';
+import { reportFromWallet } from './services/reportSink';
 import {
   SNAPSHOT_SEND_WAIT,
   addRemoteRefusal,
@@ -1112,6 +1116,8 @@ const settleLocalStore = async (ctx: NonNullable<typeof accountContext>): Promis
   });
 };
 
+/** Move failures already reported to b this session (account + reason). */
+const moveFailuresReported = new Set<string>();
 const preferLocalStorage = (ctx: NonNullable<typeof accountContext>) =>
   moveProgress.track(() => preferLocalStorageOnce(ctx));
 const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) => {
@@ -1124,6 +1130,9 @@ const preferLocalStorageOnce = async (ctx: NonNullable<typeof accountContext>) =
     console.warn('[background] storage: this device is not the active store yet:', r);
     const entry = id ? moveFailures.get(id) : undefined;
     if (entry && r.reason) entry.reason = r.reason;
+    // b hears why (5.2.62: the owner's Retry ended back on the button with no reason anywhere): once per reason.
+    const report = moveFailureReport(r, id, entry?.failures ?? 0, moveFailuresReported);
+    if (report) void reportFromWallet(id, report);
   }
 };
 
@@ -1213,6 +1222,8 @@ const moveStatus = () => {
     failures: f?.failures ?? 0,
     nextRetryAt: f?.nextAt ?? 0,
     reason: f?.reason ?? null,
+    // The move's own counts while it runs ("Still moving: N of M"), null when none are known yet.
+    progress: moveProgress.current(),
     // A move to this device holds the storage too (the seal's coin wait skips itself then, chat/coinWait.ts).
     backup: { ...backup, storageBusy: backup.storageBusy || !!storageSwitch },
   };
@@ -1249,15 +1260,17 @@ const moveProgress = moveProgressTracker();
 
 /**
  * Move this account to this device now, whatever the backoff says: "Retry moving this account to this device" and
- * Recover change from my 12 words (services/recoverOnDevice.ts). True once this device's store is active.
+ * Recover change from my 12 words (services/recoverOnDevice.ts). True once this device's store is active. Waits at
+ * most `waitMs`; the move carries on in the background after that. Retry answers in RETRY_ANSWER_MS (the notice then
+ * shows "Still moving: N of M"); Recover change keeps the long wait, behind its "Waiting for your backup…".
  */
-const moveToDeviceNow = async (): Promise<boolean> => {
+const moveToDeviceNow = async (waitMs = 90_000): Promise<boolean> => {
   const id = chromeStorageService.getCurrentAccountObject().account?.addresses.identityAddress;
   if (id) {
     const f = moveFailures.get(id);
     if (f) f.nextAt = 0;
   }
-  return ensureLocalForPayment(90_000);
+  return ensureLocalForPayment(waitMs);
 };
 
 /** "Loading your wallet from backup…" on the balance card; undefined = done, null = done without the copy. */
@@ -4021,8 +4034,11 @@ if (!(
           (async () => {
             try {
               await ensureWallet(true);
-              const ok = await moveToDeviceNow();
-              sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: ok, data: moveStatus(), error: ok ? undefined : moveStatus().reason ?? 'not moved yet' });
+              // Answers in about 2 s; a move still running carries on and the notice shows how far it has got.
+              const ok = await moveToDeviceNow(RETRY_ANSWER_MS);
+              const status = moveStatus();
+              const error = ok ? undefined : status.moving ? stillMovingText(status.progress) : (status.reason ?? 'not moved yet');
+              sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: ok, data: status, error });
             } catch (error) {
               sendResponse({ type: 'STORAGE_MOVE_TO_DEVICE', success: false, error: error instanceof Error ? error.message : String(error) });
             }
@@ -4678,7 +4694,7 @@ if (!(
       const progress = (step: string) => sendRecoverProgress('seed', step);
       const gate = await recoverOnDevice({
         isLocal: () => !!accountContext?.storage.isActiveStorageProvider(),
-        moveNow: moveToDeviceNow,
+        moveNow: () => moveToDeviceNow(),
         run: () => {
           if (!accountContext) throw new Error('Wallet not initialized');
           return accountContext.recoverSeedChange(progress, { fresh });

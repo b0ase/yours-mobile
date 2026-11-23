@@ -214,6 +214,37 @@ export function movingMessage(p: MoveProgress | null | undefined, now = Date.now
   return `Moving your wallet to this device: ${p.done} of ${p.total}. You can send in about ${mins} minute${mins === 1 ? '' : 's'}. Nothing was sent.`;
 }
 
+/**
+ * How long "Retry moving this account to this device" waits before it answers (owner's phone, 5.2.61: it waited up to
+ * 90 s showing "Moving…", then fell back to the Retry button with no word of why). The move carries on in the
+ * background either way; the notice polls and shows "Still moving: N of M" until it ends.
+ */
+export const RETRY_ANSWER_MS = 2000;
+
+/** The notice's line while a move runs: "Still moving: N of M" once there are counts, else "Still moving". */
+export function stillMovingText(p: Pick<MoveProgress, 'done' | 'total'> | null | undefined): string {
+  return p && p.total > 0 ? `Still moving: ${Math.min(p.done, p.total)} of ${p.total}` : 'Still moving';
+}
+
+/**
+ * The report b gets when a move to this device fails, or null when there is nothing to report: a success, or a move
+ * that didn't run (backoff, a master backup exporting, no account open). Once per account and reason per session
+ * (`seen`), so the backoff's retries and every open don't send the same failure again. Text only, no keys.
+ */
+export function moveFailureReport(
+  r: EnsureLocalResult,
+  account: string | null | undefined,
+  failures: number,
+  seen: Set<string>,
+): string | null {
+  if (r.ok || r.how !== 'failed') return null;
+  const reason = (r.reason ?? 'no reason given').slice(0, 300);
+  const key = `${account ?? ''}\n${reason}`;
+  if (seen.has(key)) return null;
+  seen.add(key);
+  return `Moving this account to this device didn't finish (try ${Math.max(1, failures)}): ${reason}`;
+}
+
 /** What one admission run settled and left (inboundSync.AdmitReport): the restore's own coin-check progress. */
 export type AdmissionCounts = { admitted: number; applied: number; refused: number; retired: number; left: number };
 

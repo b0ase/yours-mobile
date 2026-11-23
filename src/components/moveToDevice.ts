@@ -1,4 +1,5 @@
 import { sendMessageAsync } from '../utils/chromeHelpers';
+import { stillMovingText } from '../services/localFirst';
 
 /** Plain words for when the next automatic move to this device is due (MoveToDeviceNotice, review 4 Nov 2026 F4). */
 export const nextTryText = (nextRetryAt: number, now = Date.now()): string => {
@@ -36,3 +37,34 @@ export const noticePollMs = (status: { onDevice: boolean } | null, steadyMs: num
  */
 export const moveNoticeShows = (status: { onDevice: boolean; snapshotLoading?: boolean } | null): boolean =>
   !!status && !status.onDevice && !status.snapshotLoading;
+
+export const RETRY_STILL_MOVING =
+  'Still moving in the background. You can leave this screen; this notice goes when it is done.';
+
+/** The background's answer to Retry (STORAGE_MOVE_TO_DEVICE), as far as the note under the button needs it. */
+type RetryAnswer = { success?: boolean; error?: string; data?: { moving?: boolean } } | undefined;
+
+/**
+ * The note under the button after Retry (5.2.62). The background answers in about 2 s: done, still moving (it carries on
+ * in the background and the button shows "Still moving: N of M" until it ends), or not moved, with the reason.
+ */
+export const retryNote = (r: RetryAnswer): string => {
+  if (r?.success) return 'Done: this account is on this device now.';
+  if (r?.data?.moving) return RETRY_STILL_MOVING;
+  return `Not moved yet${r?.error ? ` (${r.error})` : ''}.`;
+};
+
+/** The Retry button's words: "Still moving: N of M…" while a move runs (the button is disabled then). */
+export const retryButtonText = (
+  busy: boolean,
+  status: { moving: boolean; progress?: { done: number; total: number } | null },
+): string =>
+  busy
+    ? 'Moving…'
+    : status.moving
+      ? `${stillMovingText(status.progress)}…`
+      : 'Retry moving this account to this device';
+
+/** The note as shown: the "still moving" note goes once the move has ended (the status line then says how it ended). */
+export const shownRetryNote = (note: string, moving: boolean): string =>
+  note === RETRY_STILL_MOVING && !moving ? '' : note;
