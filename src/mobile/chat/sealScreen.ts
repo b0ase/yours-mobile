@@ -10,9 +10,10 @@
  * Pure (no React, no wallet) so sealScreen.test.ts can pin every label and rule.
  */
 import { fmtDollars, satsToUsd } from '../../utils/dollarsFirst';
+import { FINISHING_SEAL_LINE } from './sealStore';
 import {
   ALREADY_SEALED_MESSAGE,
-  MAY_HAVE_PAID_MESSAGE,
+  HELD_FOR_REOPEN_MESSAGE,
   NativeSealError,
   type PadPoint,
   type SealHere,
@@ -31,6 +32,12 @@ export const COIN_SLOW_LINE = 'Checking your coins — this can take a few secon
 export const WAITING_NETWORK_LINE = 'Waiting for the network…';
 /** A payment from this phone for this seal is saved and being recorded (recovery runs on open). */
 export const RECORDING_LINE = 'Paid, being recorded…';
+/** A held seal (it may have been paid) is being finished: shown on the page and on the document's card in the room. */
+export { FINISHING_SEAL_LINE } from './sealStore';
+/** The one-tap retry after a seal that paid nothing: the same drawing, no redraw. */
+export const TRY_AGAIN_LABEL = 'Try again';
+/** The same, on reopen with a kept drawing. */
+export const SEAL_AGAIN_LABEL = 'Seal again';
 /** A seal of this document by this account is running in this app right now (a page left while it paid). */
 export const IN_FLIGHT_LINE = 'Sealing now… it finishes on its own.';
 /** Recovery ended and the payment is still not recorded: kept on the phone for the next open. */
@@ -49,8 +56,10 @@ export const openingNotice = (state: SealHere, recovered: boolean): { text: stri
       return recovered ? { text: STILL_RECORDING_LINE, busy: false } : { text: RECORDING_LINE, busy: true };
     case 'in_flight':
       return { text: IN_FLIGHT_LINE, busy: true };
+    // A payment that may have gone out: "Finishing your seal…" while recovery looks for it, never a fresh Sign button;
+    // still unknown after it → held, finished on the next open (owner, 23 Nov 2026: never sign it twice).
     case 'unsure':
-      return { text: MAY_HAVE_PAID_MESSAGE, busy: false };
+      return recovered ? { text: HELD_FOR_REOPEN_MESSAGE, busy: false } : { text: FINISHING_SEAL_LINE, busy: true };
     case 'none':
       return null;
   }
@@ -60,6 +69,10 @@ export const openingNotice = (state: SealHere, recovered: boolean): { text: stri
 export const SLOW_COMMIT_MS = 10_000;
 
 const satsWord = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'sat' : 'sats'}`;
+
+/** The retry button: "Try again · ~72 sats" / "Seal again · ~72 sats" (the same drawing; the sheet still asks). */
+export const retryLabel = (label: string, feeSats: number | null): string =>
+  feeSats ? `${label} · ~${satsWord(feeSats)}` : label;
 
 /** The one button: "Sign & seal · ~72 sats" ("Sign & seal" while the cost is unknown). */
 export const sealButtonLabel = (feeSats: number | null): string =>

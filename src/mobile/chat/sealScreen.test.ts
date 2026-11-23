@@ -171,7 +171,10 @@ describe('double press, double pay', () => {
     expect(body.indexOf('press.take()')).toBeGreaterThan(-1);
     expect(body.indexOf('press.take()')).toBeLessThan(body.indexOf('await'));
     expect(body.match(/press\.release\(\)/g)?.length).toBe(1);
-    expect(body.indexOf('press.release()')).toBeGreaterThan(body.indexOf('if (retryAllowed(e, reachedPay.current))'));
+    // Released only when nothing was paid: retryAllowed, or the on-screen check proved the payment never went out.
+    const decision = body.indexOf('if (unpaidAfterCheck || retryAllowed(e, reachedPay.current))');
+    expect(decision).toBeGreaterThan(-1);
+    expect(body.indexOf('press.release()')).toBeGreaterThan(decision);
     expect(body).toContain("if (s === 'paying') reachedPay.current = true;");
   });
 });

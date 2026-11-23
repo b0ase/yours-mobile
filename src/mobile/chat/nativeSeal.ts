@@ -1,4 +1,4 @@
-import { Transaction } from '@bsv/sdk';
+import { Transaction, Utils } from '@bsv/sdk';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
 import {
   SPENT_ELSEWHERE_SHORT_MESSAGE,
@@ -85,6 +85,12 @@ export interface PendingSeal {
    * Recovery looks the transaction up in this wallet's own storage by it (SealTxLookup).
    */
   lockingScriptHex?: string;
+  /**
+   * The drawn signature (the strict SVG the seal sent), kept with an UNSURE record only (owner, 23 Nov 2026: "having to
+   * do it twice is not good"): if recovery proves nothing was paid, the page offers "Seal again" with this same drawing
+   * instead of a redraw. On this device only; gone with the record (success or cancel).
+   */
+  svg?: string;
 }
 
 /**
@@ -154,7 +160,88 @@ export interface PendingSealStore {
   list(): PendingSeal[];
   save(p: PendingSeal): void;
   remove(nonce: string): void;
+  /** Drawings kept for one-tap "Seal again" after a seal that proved unpaid (same device store; optional). */
+  drawings?: SealDrawingStore;
 }
+
+/**
+ * ONE SIGNATURE PER DOCUMENT (owner, 23 Nov 2026: "having to do it twice is not good"). What a seal that proved unpaid
+ * keeps so "Try again" / "Seal again" never asks for a second drawing: the drawing itself, and (while bit-sign's signing
+ * session lasts) the prepared + composed seal and its attestation, so a retry only approves and pays.
+ */
+export interface SealResume {
+  /** sealKey of the seal it belongs to: used only for that signer, document and blocks. */
+  key: string;
+  /** The strict SVG the record was composed with. */
+  svg: string;
+  prepared: PreparedSeal;
+  /** compose's answer, checked AGAIN against the document on screen (checkComposed) before it is reused. */
+  composed: Record<string, unknown>;
+  /** createSignature over the composed record (hex). Never reported or logged. */
+  attestation: string;
+  /** When bit-sign's signing session for the nonce ends (ms since epoch). */
+  expiresAt: number;
+}
+
+export interface SealDrawing {
+  key: string;
+  documentId: string;
+  identityKey: string;
+  fieldIds: string[];
+  /** The strict SVG (pair/bitsign.signatureSvg). The page checks it again (checkStrictSvg) before using it. */
+  svg: string;
+  savedAt: number;
+  /** Present while the nonce is kept for a pay-only retry; dropped once that session is cancelled or expires. */
+  resume?: SealResume;
+}
+
+export interface SealDrawingStore {
+  get(key: string): SealDrawing | null;
+  save(d: SealDrawing): void;
+  remove(key: string): void;
+}
+
+/** bit-sign SEAL_NONCE_TTL_MS: a prepared seal can be composed and committed for this long. */
+export const SEAL_NONCE_TTL_MS = 10 * 60_000;
+/** A kept nonce is reused only with at least this long left (approval + payment + commit). */
+export const RESUME_MARGIN_MS = 90_000;
+/** A kept drawing is offered for this long at most; then the pad starts empty. */
+export const DRAWING_MAX_AGE_MS = 24 * 60 * 60_000;
+/** A drawing bigger than this is not kept on the device (the pad's own cap is 8 KB of path). */
+export const DRAWING_MAX_CHARS = 16 * 1024;
+
+/** Pure: is this stored drawing still usable for this seal? */
+export const drawingUsable = (d: SealDrawing | null | undefined, key: string, now: number): d is SealDrawing =>
+  !!d &&
+  d.key === key &&
+  typeof d.svg === 'string' &&
+  d.svg.length > 0 &&
+  d.svg.length <= DRAWING_MAX_CHARS &&
+  typeof d.savedAt === 'number' &&
+  now - d.savedAt < DRAWING_MAX_AGE_MS;
+
+const drawingsOf = (store: PendingSealStore): SealDrawingStore | undefined => {
+  try {
+    return store.drawings;
+  } catch {
+    return undefined;
+  }
+};
+const forgetDrawing = (store: PendingSealStore, key: string) => {
+  try {
+    drawingsOf(store)?.remove(key);
+  } catch {
+    /* storage blocked */
+  }
+};
+const keepDrawing = (store: PendingSealStore, d: SealDrawing): SealDrawing => {
+  try {
+    if (d.svg.length <= DRAWING_MAX_CHARS) drawingsOf(store)?.save(d);
+  } catch {
+    /* storage blocked: the page still has it in memory */
+  }
+  return d;
+};
 
 /**
  * What this device has sealed (or seen sealed by another party at commit). The double-pay guard (owner's iPhone, 6 Nov
@@ -264,6 +351,52 @@ const markSealed = (ledger: SealLedger | null | undefined, key: string) => {
  * during it, a txid in the answer). The nonce is never cancelled then, and no retry is offered.
  */
 export const MAY_HAVE_PAID_MESSAGE = 'This seal may have been paid — it will be checked and recorded.';
+
+// ── Not paid: plain words, and the drawing is kept (owner, 23 Nov 2026) ─────────────────────────────────────────────
+/** The sheet was approved but Face ID / Touch ID / the passcode did not complete. */
+export const FACE_ID_NOT_PAID_MESSAGE = "Face ID didn't complete. Nothing was paid.";
+/** No phone prompt here, and the wallet password sheet was cancelled or wrong. */
+export const PASSWORD_NOT_PAID_MESSAGE = "The wallet password wasn't confirmed. Nothing was paid.";
+/** Cancel on the sheet of a retry (the signature was already made; nothing more is). */
+export const DECLINED_NOT_PAID_MESSAGE = 'Not sealed: you cancelled. Nothing was paid.';
+/** createAction refused before anything was built or sent, with no plainer words of its own. */
+export const REFUSED_NOT_PAID_MESSAGE = 'The payment was refused before anything was sent. Nothing was paid.';
+/** The wallet's own storage has no seal transaction after an unclear failure: nothing went out. */
+export const NOT_SENT_AFTER_CHECK_MESSAGE = "The payment didn't go out. Nothing was paid.";
+/** On reopen, a seal that proved unpaid: the drawing is offered again. */
+export const RESTORED_DRAWING_MESSAGE = "Your last seal didn't go through. Nothing was paid. Your signature is kept.";
+/** Still unknown after the on-screen check: held, and finished by recovery on the next open. */
+export const HELD_FOR_REOPEN_MESSAGE = "We'll finish this automatically when you reopen it. Don't sign it again.";
+
+/**
+ * What approve() answered. true / 'approved' → pay; false / 'declined' → Cancel on the sheet; the rest → the sheet was
+ * approved but the phone's prompt (or the wallet password) did not complete. None of them pays.
+ */
+export type SealApproval = boolean | 'approved' | 'declined' | 'device_auth_failed' | 'password_failed';
+
+/** What a failed seal reports (chat/sealReport.ts): where it stopped and the raw error, never shown as is. */
+export interface SealFailure {
+  outcome: 'pending_recovery' | 'not_paid';
+  step: SealStep;
+  error: unknown;
+}
+
+const tellFailure = (input: { onFailure?: (f: SealFailure) => void }, f: SealFailure) => {
+  try {
+    input.onFailure?.(f);
+  } catch {
+    /* a report never changes the seal */
+  }
+};
+
+/** The words for a createAction that proved nothing went out: the wallet's own, always saying nothing was paid. */
+const notPaidText = (e: unknown): string => {
+  const info = classifySendError(e, 'send');
+  if (info.kind === 'cancelled') return 'You cancelled the payment. Nothing was paid.';
+  const raw = (e instanceof Error ? e.message : typeof e === 'string' ? e : '').trim();
+  if (!raw) return REFUSED_NOT_PAID_MESSAGE;
+  return /nothing (was|has been) (sent|paid)/i.test(raw) ? raw : `${raw.replace(/\s*$/, '')} Nothing was paid.`;
+};
 /** How long a cancel may take at most before the seal goes on without it (it is best effort). */
 export const CANCEL_TIMEOUT_MS = 3_000;
 
@@ -291,6 +424,10 @@ const NOTHING_SENT_KINDS = new Set<SendErrorKind>([
  */
 export const provablyNotPaid = (e: unknown): boolean => {
   if (e && typeof e === 'object' && typeof (e as { txid?: unknown }).txid === 'string') return false;
+  // The extension's USB-key gate (services/usbPresence.ts gateWalletOnUsb) refuses on the PAGE, before the call is even
+  // sent to the background: nothing can have been built (23 Nov 2026 audit of what createAction throws).
+  if (e instanceof Error && (e.name === 'UsbKeyAbsentError' || /^Insert your USB key to continue$/.test(e.message)))
+    return true;
   const info = classifySendError(e, 'send');
   return info.moneyMoved === 'no' && !info.txid && NOTHING_SENT_KINDS.has(info.kind);
 };
@@ -333,6 +470,10 @@ export type SealStep =
   | 'recovering';
 
 export class NativeSealError extends Error {
+  /** A seal that paid nothing: the drawing (and, while its session lasts, the seal itself) for Try again. */
+  readonly drawing?: SealDrawing;
+  /** pending_recovery from an unclear payment: the held record's nonce, for the on-screen check (settleUnsureSeal). */
+  readonly nonce?: string;
   constructor(
     message: string,
     readonly code:
@@ -346,9 +487,12 @@ export class NativeSealError extends Error {
       | 'not_paid'
       | 'orphaned',
     readonly status = 0,
+    extra: { drawing?: SealDrawing; nonce?: string } = {},
   ) {
     super(message);
     this.name = 'NativeSealError';
+    if (extra.drawing) this.drawing = extra.drawing;
+    if (extra.nonce) this.nonce = extra.nonce;
   }
 }
 
@@ -520,7 +664,16 @@ export async function nativeSignAndSeal(input: {
   /** The wallet's identity key: part of the seal's key (another account on this phone signs on its own). */
   identityKey?: string;
   /** `feeSats`: the fee to show, from the document on screen (never prepare's `ref`); the seal never pays for more. */
-  approve: (prepared: PreparedSeal, feeSats: number) => Promise<boolean>;
+  approve: (prepared: PreparedSeal, feeSats: number) => Promise<SealApproval>;
+  /**
+   * The seal kept by a failure that paid nothing (NativeSealError.drawing.resume): while bit-sign's session for its nonce
+   * lasts, and when it is still for this signer, document, blocks, drawing and document text, the retry skips prepare,
+   * compose and the signature, and only approves and pays. Otherwise its nonce is cancelled and the seal is prepared
+   * again from the SAME drawing (no redraw).
+   */
+  resume?: SealResume | null;
+  /** Told whenever a seal ends in pending_recovery or not_paid (chat/sealReport.ts reports it to b). */
+  onFailure?: (f: SealFailure) => void;
   /** The wallet's own fee rate (sat/kB), the one its createAction pays (default 100). */
   satsPerKb?: number;
   /**
@@ -561,12 +714,16 @@ export async function nativeSignAndSeal(input: {
     release();
   });
   try {
-    const out = await signAndSealOnce(input, hold);
+    const out = await signAndSealOnce(input, hold, key);
     markSealed(input.ledger, key);
+    forgetDrawing(input.store, key);
     return out;
   } catch (e) {
     // Another party sealed first: the document is sealed, so it is never offered again from here either.
     if (e instanceof NativeSealError && e.code === 'orphaned') markSealed(input.ledger, key);
+    // Sealed, or the person cancelled on the sheet: no drawing is kept for later.
+    if (e instanceof NativeSealError && ['orphaned', 'already_sealed', 'failed'].includes(e.code))
+      forgetDrawing(input.store, key);
     throw e;
   } finally {
     release();
@@ -603,27 +760,88 @@ function saveUnsure(
       identityKey: input.identityKey ?? '',
       fieldIds: [...input.fieldIds],
       lockingScriptHex,
+      // The drawing goes with the held record: if recovery proves nothing was paid, "Seal again" reuses it.
+      ...(input.svg.trim().length <= DRAWING_MAX_CHARS ? { svg: input.svg.trim() } : {}),
     });
   } catch {
     /* storage blocked: the in-flight hold and the server's checks remain */
   }
 }
 
-async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0], hold: Hold): Promise<NativeSealOutcome> {
-  const step = (s: SealStep) => input.onStep?.(s);
-  step('preparing');
-  const prepared = (await call(input.api, 'prepare', {
+/** When the prepared seal's session ends: prepare's expiresAt, else SEAL_NONCE_TTL_MS from when it was prepared. */
+const sessionEnd = (prepared: PreparedSeal, preparedAt: number): number => {
+  const t = Date.parse(String((prepared as { expiresAt?: unknown }).expiresAt ?? ''));
+  return Number.isFinite(t) ? Math.min(t, preparedAt + SEAL_NONCE_TTL_MS) : preparedAt + SEAL_NONCE_TTL_MS;
+};
+
+/**
+ * Pure: may this kept seal be paid as it is? Only for the same signer, document, blocks and drawing, with time left on
+ * its session, and when prepare and compose still check out against the document on screen NOW (sealCheck.ts).
+ */
+export const resumeUsable = (
+  input: Pick<
+    Parameters<typeof nativeSignAndSeal>[0],
+    'documentId' | 'documentHtml' | 'fieldIds' | 'svg' | 'identityKey'
+  >,
+  r: SealResume | null | undefined,
+  now: number,
+): boolean => {
+  if (!r || typeof r !== 'object' || !r.prepared || !r.composed || typeof r.attestation !== 'string') return false;
+  if (r.key !== sealKey(input.identityKey ?? '', input.documentId, input.fieldIds)) return false;
+  if (r.svg !== input.svg.trim() || !r.attestation) return false;
+  if (!(now < r.expiresAt - RESUME_MARGIN_MS)) return false;
+  if (checkPrepared(r.prepared, { documentHtml: input.documentHtml, identityKey: input.identityKey ?? '' }))
+    return false;
+  return checkComposed(r.composed, {
     documentId: input.documentId,
+    documentHtml: input.documentHtml,
+    svg: r.svg,
     fieldIds: input.fieldIds,
-  })) as unknown as PreparedSeal;
+    identityKey: input.identityKey ?? '',
+    nonce: r.prepared.nonce,
+    ...(typeof (r.prepared as { ts?: unknown }).ts === 'string' ? { ts: (r.prepared as { ts?: string }).ts } : {}),
+  }).ok;
+};
+
+async function signAndSealOnce(
+  input: Parameters<typeof nativeSignAndSeal>[0],
+  hold: Hold,
+  key: string,
+): Promise<NativeSealOutcome> {
+  const step = (s: SealStep) => input.onStep?.(s);
+  const now = input.now ?? Date.now;
+  // ⚠ ONE SIGNATURE PER DOCUMENT: a seal kept by a failure that paid nothing is paid as it is while it can be; any
+  // other kept seal (expired, another drawing or document) gives its session back and this one is prepared afresh.
+  let reuse: SealResume | null = null;
+  const kept = input.resume;
+  if (kept) {
+    if (resumeUsable(input, kept, now())) reuse = kept;
+    else if (kept.prepared?.nonce) await cancelSeal(input.api, kept.prepared.nonce, input.clock);
+  }
+  let prepared: PreparedSeal;
+  let expiresAt: number;
+  if (reuse) {
+    prepared = reuse.prepared;
+    expiresAt = reuse.expiresAt;
+  } else {
+    step('preparing');
+    const preparedAt = now();
+    prepared = (await call(input.api, 'prepare', {
+      documentId: input.documentId,
+      fieldIds: input.fieldIds,
+    })) as unknown as PreparedSeal;
+    expiresAt = sessionEnd(prepared, preparedAt);
+  }
 
   /** Set once createAction may have built or broadcast something: from then on the nonce is only cancelled on proof. */
   let mayHavePaid = false;
   try {
-    return await afterPrepare(input, hold, prepared, () => (mayHavePaid = true));
+    return await afterPrepare(input, hold, key, prepared, expiresAt, reuse, () => (mayHavePaid = true));
   } catch (e) {
-    // Nothing can have been paid (before the payment, or a refusal that proves it): free the nonce for a clean retry.
-    if (!mayHavePaid) await cancelSeal(input.api, prepared.nonce, input.clock);
+    // Nothing can have been paid (before the payment, or a refusal that proves it): free the nonce, unless the failure
+    // kept this seal for a pay-only retry (its drawing carries the resume).
+    const keptForRetry = e instanceof NativeSealError && !!e.drawing?.resume;
+    if (!mayHavePaid && !keptForRetry) await cancelSeal(input.api, prepared.nonce, input.clock);
     throw e;
   }
 }
@@ -631,10 +849,25 @@ async function signAndSealOnce(input: Parameters<typeof nativeSignAndSeal>[0], h
 async function afterPrepare(
   input: Parameters<typeof nativeSignAndSeal>[0],
   hold: Hold,
+  key: string,
   prepared: PreparedSeal,
+  expiresAt: number,
+  reuse: SealResume | null,
   paymentMayHaveGoneOut: () => void,
 ): Promise<NativeSealOutcome> {
   const step = (s: SealStep) => input.onStep?.(s);
+  const now = input.now ?? Date.now;
+  const svg = input.svg.trim();
+  /** The drawing a not-paid failure hands back (with the seal itself when it is kept for a pay-only retry). */
+  const drawing = (resume?: SealResume): SealDrawing => ({
+    key,
+    documentId: input.documentId,
+    identityKey: input.identityKey ?? '',
+    fieldIds: [...input.fieldIds],
+    svg,
+    savedAt: now(),
+    ...(resume ? { resume } : {}),
+  });
   // ⚠ THE WALLET DECIDES WHAT IT SIGNS (sealCheck.ts): prepare must be for this document and this wallet.
   const preparedWrong = checkPrepared(prepared, {
     documentHtml: input.documentHtml,
@@ -654,8 +887,21 @@ async function afterPrepare(
     throw new NativeSealError(SEAL_TOO_BIG_MESSAGE, 'refused');
   }
   step('approving');
-  if (!(await input.approve(prepared, shownFee)))
-    throw new NativeSealError('Not sealed: you cancelled. Nothing was signed or paid.', 'cancelled');
+  // EVERY payment, a retry too: the sheet, then Face ID / passcode or the wallet password (sealApproval.ts).
+  const answer = await input.approve(prepared, shownFee);
+  if (answer !== true && answer !== 'approved') {
+    // Nothing was paid. A kept seal stays kept (its nonce is not cancelled) unless the person said no on the sheet.
+    const declined = answer === false || answer === 'declined';
+    if (declined) forgetDrawing(input.store, key);
+    const text = declined
+      ? reuse
+        ? DECLINED_NOT_PAID_MESSAGE
+        : 'Not sealed: you cancelled. Nothing was signed or paid.'
+      : answer === 'password_failed'
+        ? PASSWORD_NOT_PAID_MESSAGE
+        : FACE_ID_NOT_PAID_MESSAGE;
+    throw new NativeSealError(text, 'cancelled', 0, { drawing: drawing(declined ? undefined : (reuse ?? undefined)) });
+  }
 
   if (input.coins?.pending()) {
     step('healing');
@@ -668,11 +914,15 @@ async function afterPrepare(
     if (why !== 'done') console.info('[nativeSeal] paying without waiting for the coin check:', why);
   }
 
-  step('composing');
-  const svg = input.svg.trim();
-  const composed = await call(input.api, 'compose', { nonce: prepared.nonce, svg });
+  let composed: Record<string, unknown>;
+  if (reuse) composed = reuse.composed;
+  else {
+    step('composing');
+    composed = await call(input.api, 'compose', { nonce: prepared.nonce, svg });
+  }
   // ⚠ NOTHING FROM COMPOSE IS SIGNED OR PAID FOR AS SENT: the protocol, key id and counterparty are fixed, the record is
   // rebuilt from this document and must match byte for byte, and the output is the wallet's own copy (sealCheck.ts).
+  // A kept seal is checked again here, against the document on screen now.
   const checked = checkComposed(composed, {
     documentId: input.documentId,
     documentHtml: input.documentHtml,
@@ -694,14 +944,20 @@ async function afterPrepare(
     throw new NativeSealError(SEAL_TOO_BIG_MESSAGE, 'refused');
   }
 
-  step('signing');
-  const { signature } = await input.keys.createSignature({
-    protocolID: signing.protocolID,
-    keyID: signing.keyID,
-    counterparty: signing.counterparty,
-    data: Array.from(new TextEncoder().encode(recordCanonical)),
-  });
-  const attestation = toHex(signature);
+  let attestation: string;
+  if (reuse) attestation = reuse.attestation;
+  else {
+    step('signing');
+    const { signature } = await input.keys.createSignature({
+      protocolID: signing.protocolID,
+      keyID: signing.keyID,
+      counterparty: signing.counterparty,
+      data: Array.from(new TextEncoder().encode(recordCanonical)),
+    });
+    attestation = toHex(signature);
+  }
+  /** This seal, kept for a pay-only retry when the payment proves it went nowhere. */
+  const resume: SealResume = { key, svg, prepared, composed, attestation, expiresAt };
 
   // Left (abandonSeal) or held too long: stop here, before any money moves. From here the hold stays until settled.
   if (hold.abandoned)
@@ -722,22 +978,32 @@ async function afterPrepare(
   } catch (e) {
     console.warn('[nativeSeal] pay failed', e instanceof Error ? e.message : e);
     if (provablyNotPaid(e)) {
-      // Refused before anything went out: nothing paid, the unsure record goes, the nonce is cancelled, button back.
+      // Refused before anything went out: nothing paid, the unsure record goes. The nonce, the composed record and the
+      // attestation are KEPT (not cancelled) so Try again only approves and pays: one signature per document.
       input.store.remove(prepared.nonce);
-      if (isSpentCoinError(e)) throw new NativeSealError(SEAL_SPENT_MESSAGE, 'spent_elsewhere');
-      throw new NativeSealError(e instanceof Error && e.message ? e.message : 'The payment was refused.', 'not_paid');
+      const kept = keepDrawing(input.store, drawing(resume));
+      tellFailure(input, { outcome: 'not_paid', step: 'paying', error: e });
+      if (isSpentCoinError(e)) throw new NativeSealError(SEAL_SPENT_MESSAGE, 'spent_elsewhere', 0, { drawing: kept });
+      throw new NativeSealError(notPaidText(e), 'not_paid', 0, { drawing: kept });
     }
-    // ⚠ ANY DOUBT: it may have gone out. Never cancel the nonce, never offer a retry; this seal is held on this phone.
+    // ⚠ ANY DOUBT: it may have gone out. Never cancel the nonce, never offer a retry; this seal is held on this phone
+    // (with the drawing) until its transaction is found in the wallet's own storage, or proved never built.
     paymentMayHaveGoneOut();
     if (txidIn(e)) saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, txidIn(e));
-    throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery');
+    tellFailure(input, { outcome: 'pending_recovery', step: 'paying', error: e });
+    throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery', 0, { nonce: prepared.nonce });
   }
   if (!paid?.txid || !paid.tx) {
     // A txid with no transaction (or neither): it may well have gone out. The unsure record stays (with the txid).
     paymentMayHaveGoneOut();
     const t = typeof paid?.txid === 'string' && /^[0-9a-f]{64}$/i.test(paid.txid) ? paid.txid.toLowerCase() : '';
     if (t) saveUnsure(input, prepared.nonce, attestation, lockingScriptHex, t);
-    throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery');
+    tellFailure(input, {
+      outcome: 'pending_recovery',
+      step: 'paying',
+      error: new Error(t ? 'createAction answered a txid without its transaction' : 'createAction answered no txid'),
+    });
+    throw new NativeSealError(MAY_HAVE_PAID_MESSAGE, 'pending_recovery', 0, { nonce: prepared.nonce });
   }
   paymentMayHaveGoneOut();
   const txid = paid.txid.toLowerCase();
@@ -823,6 +1089,11 @@ async function afterPrepare(
     );
   }
   if (!out) {
+    tellFailure(input, {
+      outcome: 'pending_recovery',
+      step: 'committing',
+      error: new Error(lastErr || 'not recorded'),
+    });
     throw new NativeSealError(
       `Paid (${txid.slice(0, 12)}…) but not recorded yet${lastErr ? ` (${lastErr})` : ''}. It is saved on this phone and will be finished the next time you open this document.`,
       'pending_recovery',
@@ -841,43 +1112,62 @@ async function afterPrepare(
 }
 
 /**
- * An unsure record (no BEEF): look its transaction up in this wallet's own storage. Found with its BEEF → saved as an
- * ordinary paid record, which /recover then records (bit-sign records a paid seal even on a cancelled session). The
- * wallet says none was ever built → nothing was paid: released, and the nonce cancelled. Anything unknown (no lookup,
- * no script, the lookup failed, the BEEF not to be had yet) → held, never dropped while a transaction might exist.
- * True when the record now carries its BEEF.
+ * An unsure record proved unpaid (the wallet never built its transaction): the record goes, the nonce is cancelled
+ * (bit-sign never recovers a cancelled nonce) and the drawing is kept for "Seal again". Returns that drawing, if any.
  */
-async function resolveUnsure(
+async function releaseUnpaid(
   api: SealApi,
   store: PendingSealStore,
   p: PendingSeal,
+  now: () => number = Date.now,
+): Promise<SealDrawing | null> {
+  store.remove(p.nonce);
+  await cancelSeal(api, p.nonce);
+  if (!p.svg || !p.fieldIds || p.identityKey === undefined) return null;
+  return keepDrawing(store, {
+    key: sealKey(p.identityKey, p.documentId, p.fieldIds),
+    documentId: p.documentId,
+    identityKey: p.identityKey,
+    fieldIds: [...p.fieldIds],
+    svg: p.svg,
+    savedAt: now(),
+  });
+}
+
+/**
+ * An unsure record (no BEEF): look its transaction up in this wallet's own storage. 'found': saved with its BEEF as an
+ * ordinary paid record, which /recover then records (bit-sign records a paid seal even on a cancelled session).
+ * 'not_found': the wallet answered and none was ever built (the record is left for the caller to release). 'unknown':
+ * no lookup, no script, the lookup failed, or the BEEF is not to be had yet; held, never dropped while a transaction
+ * might exist (a txid learnt is kept).
+ */
+async function lookUpUnsure(
+  store: PendingSealStore,
+  p: PendingSeal,
   lookup: SealTxLookup | undefined,
-): Promise<boolean> {
-  if (!lookup) return false;
+): Promise<'found' | 'not_found' | 'unknown'> {
+  if (!lookup) return 'unknown';
   let txid = p.txid;
   if (!txid) {
-    if (!p.lockingScriptHex) return false;
+    if (!p.lockingScriptHex) return 'unknown';
     const f = await lookup.find(p.lockingScriptHex, p.savedAt).catch(() => null);
-    if (!f) return false;
-    if (!f.found) {
-      store.remove(p.nonce);
-      await cancelSeal(api, p.nonce);
-      return false;
-    }
+    if (!f) return 'unknown';
+    if (!f.found) return 'not_found';
     txid = f.txid.toLowerCase();
   }
   const tx = await lookup.beef(txid).catch(() => null);
   if (!tx?.length) {
     if (txid !== p.txid) store.save({ ...p, txid }); // keep what was learnt
-    return false;
+    return 'unknown';
   }
   store.save({ ...p, txid, beefHex: toHex(tx) });
-  return true;
+  return 'found';
 }
 
 /**
  * Finish seals saved on this phone (for this document, or all): paid-but-unrecorded ones through /recover, unsure ones
- * through the wallet's own storage first (resolveUnsure). A seal running right now is left alone. Never throws.
+ * through the wallet's own storage first (lookUpUnsure). One the wallet never built is released as unpaid (its drawing
+ * kept for "Seal again"). A seal running right now is left alone. Never throws.
  */
 export async function recoverNativeSeals(
   api: SealApi,
@@ -894,7 +1184,9 @@ export async function recoverNativeSeals(
     if (p.fieldIds && inFlight.has(sealKey(p.identityKey ?? '', p.documentId, p.fieldIds))) continue;
     try {
       if (!p.beefHex) {
-        if (!(await resolveUnsure(api, store, p, lookup))) continue;
+        const r = await lookUpUnsure(store, p, lookup);
+        if (r === 'not_found') await releaseUnpaid(api, store, p);
+        if (r !== 'found') continue;
         p = store.list().find((x) => x.nonce === saved.nonce) ?? p;
         if (!p.beefHex) continue;
       }
@@ -903,14 +1195,114 @@ export async function recoverNativeSeals(
       if (keepsPayment(r)) continue;
       // Success (idempotent too), an orphaned result, or a definitive refusal: done with it.
       store.remove(p.nonce);
+      const key = sealKey(p.identityKey ?? '', p.documentId, p.fieldIds ?? []);
       // Recorded (or sealed first by another party): sealed either way, never offered again from here.
-      if (r.ok) markSealed(ledger, sealKey(p.identityKey ?? '', p.documentId, p.fieldIds ?? []));
+      if (r.ok) {
+        markSealed(ledger, key);
+        forgetDrawing(store, key);
+      }
       if (r.ok && !isOrphaned(r.body)) done++;
     } catch {
       /* next time */
     }
   }
   return done;
+}
+
+/** The on-screen check after an unclear payment: waits before each look (≈28 s in all, growing). */
+export const SETTLE_DELAYS_MS = [2_000, 3_000, 5_000, 8_000, 10_000] as const;
+/** "Not built" counts only when the wallet says so this many times in a row, seconds apart. */
+export const SETTLE_NOT_FOUND_TIMES = 2;
+export const CHECKING_PAYMENT_LINE = 'Checking whether the payment went out…';
+
+export type SettleResult =
+  /** Found in the wallet and recorded by /recover: one payment, signature recorded. */
+  | { k: 'recorded'; out: NativeSealOutcome }
+  /** The wallet never built it: the nonce is cancelled and the drawing kept (Try again, no redraw). */
+  | { k: 'not_paid'; drawing: SealDrawing | null }
+  /** Still unknown: held on this phone, finished by recovery on the next open. Never sign again. */
+  | { k: 'unknown' }
+  /** Found and paid, but bit-sign refused it for good, or another party sealed first. Nothing to retry. */
+  | { k: 'failed'; code: 'failed' | 'orphaned'; message: string };
+
+/**
+ * Resolve an unclear seal payment ON THE SAME SCREEN instead of leaving the person at "failed" (owner, 23 Nov 2026):
+ * looks for its transaction in this wallet's own storage a few times over about half a minute (bounded, with backoff).
+ * Found → /recover with its BEEF (no second payment). Proved never built (SETTLE_NOT_FOUND_TIMES answers in a row, not
+ * merely a failed lookup) → released as unpaid, drawing kept. Otherwise it stays held. Never pays, never throws.
+ */
+export async function settleUnsureSeal(o: {
+  api: SealApi;
+  store: PendingSealStore;
+  nonce: string;
+  lookup?: SealTxLookup;
+  ledger?: SealLedger | null;
+  sleep?: (ms: number) => Promise<void>;
+  delaysMs?: readonly number[];
+  now?: () => number;
+}): Promise<SettleResult> {
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let notFound = 0;
+  for (const wait of o.delaysMs ?? SETTLE_DELAYS_MS) {
+    await sleep(wait);
+    try {
+      let p = o.store.list().find((x) => x.nonce === o.nonce);
+      // Gone: another page's recovery took it. What it did is not known here; the card shows the real state on open.
+      if (!p) return { k: 'unknown' };
+      const key = sealKey(p.identityKey ?? '', p.documentId, p.fieldIds ?? []);
+      // Never while this seal is paying again in this app.
+      if (p.fieldIds && inFlight.has(key)) return { k: 'unknown' };
+      if (!p.beefHex) {
+        const r = await lookUpUnsure(o.store, p, o.lookup);
+        if (r === 'not_found') {
+          if (++notFound < SETTLE_NOT_FOUND_TIMES) continue;
+          return { k: 'not_paid', drawing: await releaseUnpaid(o.api, o.store, p, o.now) };
+        }
+        notFound = 0;
+        if (r !== 'found') continue;
+        p = o.store.list().find((x) => x.nonce === o.nonce);
+        if (!p?.beefHex) continue;
+      }
+      const body = { nonce: p.nonce, attestation: p.attestation, txid: p.txid, beefHex: p.beefHex };
+      const r = await o.api('recover', body).catch(() => null);
+      if (!r || keepsPayment(r)) continue; // in progress, network or server fault: look again
+      o.store.remove(p.nonce);
+      if (r.ok) {
+        markSealed(o.ledger, key);
+        forgetDrawing(o.store, key);
+        if (isOrphaned(r.body))
+          return {
+            k: 'failed',
+            code: 'orphaned',
+            message:
+              typeof r.body.message === 'string' && r.body.message
+                ? r.body.message
+                : 'Another party sealed this document first. Your payment is recorded; nothing more to do.',
+          };
+        const feeSats = feeFromAtomicBeef(Utils.toArray(p.beefHex, 'hex'));
+        return {
+          k: 'recorded',
+          out: {
+            signatureId: String(r.body.signatureId ?? ''),
+            txid: String(r.body.txid || p.txid),
+            docHash: String(r.body.docHash ?? ''),
+            complete: !!r.body.complete,
+            sealed: !!r.body.sealed,
+            recovered: true,
+            ...(feeSats != null ? { feeSats } : {}),
+          },
+        };
+      }
+      return {
+        k: 'failed',
+        code: 'failed',
+        message: typeof r.body.error === 'string' && r.body.error ? r.body.error : 'The seal could not be recorded.',
+      };
+    } catch {
+      /* look again */
+    }
+  }
+  return { k: 'unknown' };
 }
 
 // ── The drawn signature, in exactly the web pad's format (bit-sign InPlaceSignaturePad / SovereignSignature) ──────────

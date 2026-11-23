@@ -265,7 +265,7 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
     expect(err.message).toBe(SEAL_SPENT_MESSAGE);
   });
 
-  test("other refusals that prove nothing went out: the wallet's words, the nonce cancelled, a clean retry", async () => {
+  test("other refusals that prove nothing went out: the wallet's words, the seal kept for a pay-only retry", async () => {
     gate.expectLines('warn [nativeSeal] pay failed Not enough spendable BSV for this payment.');
     const log: string[] = [];
     const boom = new Error('Not enough spendable BSV for this payment.');
@@ -282,8 +282,10 @@ describe('pay refused: a coin already spent on another device (owner iPhone, 3 N
     }).catch((e) => e);
     expect(err).toBeInstanceOf(NativeSealError);
     expect(err.code).toBe('not_paid');
-    expect(err.message).toBe(boom.message);
-    expect(log.filter((l) => l.startsWith('cancel'))).toEqual(['cancel:{"nonce":"N1"}']);
+    expect(err.message).toBe(`${boom.message} Nothing was paid.`);
+    // The nonce is kept (not cancelled) with the composed record and attestation: Try again only approves and pays.
+    expect(log.filter((l) => l.startsWith('cancel'))).toEqual([]);
+    expect(err.drawing.resume).toMatchObject({ attestation: '0102ff', prepared: { nonce: 'N1' } });
   });
 });
 

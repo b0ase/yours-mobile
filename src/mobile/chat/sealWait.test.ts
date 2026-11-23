@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   ALREADY_SEALED_MESSAGE,
   BUSY_ELSEWHERE_MESSAGE,
+  HELD_FOR_REOPEN_MESSAGE,
   LEFT_PAGE_MESSAGE,
   MAY_HAVE_PAID_MESSAGE,
   NEWER_VERSION_MESSAGE,
@@ -24,6 +25,7 @@ import { COIN_WAIT_CAP_MS, COIN_WAIT_SLOW_MS, type WakeClock } from './coinWait'
 import { SEAL_HTML, SEAL_KEY, composedFor, preparedFor } from './nativeSeal.fixtures';
 import {
   COIN_SLOW_LINE,
+  FINISHING_SEAL_LINE,
   FRESH_COIN_LINE,
   RECORDING_LINE,
   STILL_RECORDING_LINE,
@@ -602,7 +604,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     },
   });
 
-  test('a definite refusal cancels the nonce, then a clean retry seals once', async () => {
+  test('a definite refusal keeps the seal (no cancel); Try again pays once on the SAME nonce, nothing redrawn', async () => {
     gate.expectLines('warn [nativeSeal] pay failed Not enough spendable BSV for this payment.');
     const log: string[] = [];
     const store = memStore();
@@ -611,14 +613,17 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     const e = await seal({ log, documentId: 'C1', store, ledger, keys }).catch((x) => x);
     expect(e.code).toBe('not_paid');
     expect(retryAllowed(e, true)).toBe(true); // the button comes back
-    expect(log.filter((l) => l === 'cancel')).toHaveLength(1);
-    expect(log.indexOf('cancel')).toBeGreaterThan(log.indexOf('pay'));
+    expect(log).not.toContain('cancel'); // the session is kept for a pay-only retry
+    expect(e.drawing).toMatchObject({ svg: '<svg/>', fieldIds: ['f1'], resume: { attestation: '010203' } });
     expect(store.m.size).toBe(0);
     expect(sealStateHere(SEAL_KEY, 'C1', ['f1'], store, ledger)).toBe('none');
-    const out = await seal({ log, documentId: 'C1', store, ledger, keys }); // the retry
+    const before = log.length;
+    const out = await seal({ log, documentId: 'C1', store, ledger, keys, resume: e.drawing.resume }); // Try again
     expect(out.txid).toBe(TX);
+    // Only the payment and its recording: no prepare, compose or signature again, and one payment.
+    expect(log.slice(before)).toEqual(['pay', 'receipt', 'commit']);
     expect(log.filter((l) => l === 'pay')).toHaveLength(2);
-    expect(log.filter((l) => l === 'cancel')).toHaveLength(1);
+    expect(log.filter((l) => l === 'cancel')).toHaveLength(0);
   });
 
   test('a user decline and a pre-payment failure cancel too (nothing was ever paid)', async () => {
@@ -723,7 +728,12 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     });
     expect(store.list()).toMatchObject([{ nonce: 'N9', beefHex: '', txid: T2 }]);
     expect(log).toEqual([]); // never /recover without the BEEF, never a cancel
-    expect(openingNotice(sealStateHere(SEAL_KEY, 'U9', ['f1'], store), true)?.text).toBe(MAY_HAVE_PAID_MESSAGE);
+    // Never a fresh Sign button: "Finishing your seal…" while recovery looks, then held for the next open.
+    expect(openingNotice(sealStateHere(SEAL_KEY, 'U9', ['f1'], store), false)).toEqual({
+      text: FINISHING_SEAL_LINE,
+      busy: true,
+    });
+    expect(openingNotice(sealStateHere(SEAL_KEY, 'U9', ['f1'], store), true)?.text).toBe(HELD_FOR_REOPEN_MESSAGE);
   });
 
   test('a storage error (QuotaExceeded) during createAction may come after the broadcast: no cancel, held', async () => {
@@ -772,17 +782,9 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
   });
 
   test('a cancel that fails (404, 409, 503, a network error, or never answers) is ignored', async () => {
-    // Five refused payments; of the five failed cancels only the 409 is worth a line (404/503/network/timeout are
+    // Five declined seals; of the five failed cancels only the 409 is worth a line (404/503/network/timeout are
     // silent by design: an older server, or nothing to say).
-    const NOT_PAID = 'warn [nativeSeal] pay failed Not enough spendable BSV for this payment.';
-    gate.expectLines(
-      NOT_PAID,
-      NOT_PAID,
-      'info [nativeSeal] cancel not taken (harmless): 409 commit_in_progress',
-      NOT_PAID,
-      NOT_PAID,
-      NOT_PAID,
-    );
+    gate.expectLines('info [nativeSeal] cancel not taken (harmless): 409 commit_in_progress');
     const answers: (() => Promise<{ ok: boolean; status: number; body: Record<string, unknown> }>)[] = [
       async () => ({ ok: false, status: 404, body: { code: 'not_yours' } }),
       async () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
@@ -796,9 +798,9 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
         log,
         documentId: `X${i}`,
         api: (path, body) => (path === 'cancel' ? (log.push('cancel'), answer()) : base(path, body)),
-        keys: failingPay(log, [new Error('Not enough spendable BSV for this payment.')]),
+        approve: async () => false,
       }).catch((x) => x);
-      expect(e.code).toBe('not_paid');
+      expect(e.code).toBe('cancelled');
       expect(log.filter((l) => l === 'cancel')).toHaveLength(1); // once: no retry loop
     }
     // Never answers: the seal goes on after CANCEL_TIMEOUT_MS on the wall clock.
@@ -811,7 +813,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
       documentId: 'X-hang',
       clock: f.clock,
       api: (path, body) => (path === 'cancel' ? (log.push('cancel'), new Promise(() => undefined)) : base(path, body)),
-      keys: failingPay(log, [new Error('Not enough spendable BSV for this payment.')]),
+      approve: async () => false,
     }).catch((x) => (out = x));
     await until(() => log.includes('cancel'));
     await flush();
@@ -819,7 +821,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     f.advance(3_000);
     f.wake();
     await until(() => out !== null);
-    expect((out as NativeSealError).code).toBe('not_paid');
+    expect((out as NativeSealError).code).toBe('cancelled');
   });
 });
 

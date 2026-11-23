@@ -63,6 +63,38 @@ status line.
 **Settings › "Face ID / fingerprint for signing and payments"** (the Security section, with Change password). On by default. Turning it
 off needs Face ID, fingerprint or the passcode too.
 
+## Native seal: one signature per document (5.2.63, owner 23 Nov 2026)
+
+"Having to do it twice is not good." The wallet's own Review & sign screen (`src/mobile/chat/NativeSealPage.tsx`,
+`/m/seal/:ticker/:doc`, bWalletX only) runs prepare → approve (the payment sheet, then Face ID / passcode or the wallet
+password, every time) → compose → `createSignature` → `createAction` (one 0-sat OP_RETURN) → commit
+(`src/mobile/chat/nativeSeal.ts`). A failure must never make the person draw and sign again:
+
+- **Definitely not paid** (Cancel on the sheet, Face ID / passcode or the password not completed, or `createAction`
+  refused with proof nothing was built: `provablyNotPaid`): plain words ("Face ID didn't complete. Nothing was paid.",
+  "… Nothing was paid."), the drawing shown, and **Try again**. After a refused payment the nonce, the composed record
+  and the attestation are kept (`SealResume`, not cancelled), so Try again only approves and pays. A kept session with
+  less than 90 s left, or one that no longer checks out against the document on screen, is cancelled and the seal is
+  prepared again from the same drawing, silently. Leaving the screen gives the kept session back.
+- **Unknown** (the payment may have gone out): the screen says "Checking whether the payment went out…" and looks for
+  the seal's transaction in the wallet's own storage five times over about 28 s (`settleUnsureSeal`). Found → `/recover`
+  with its BEEF, done, one payment. "Not built" twice in a row → the nonce is cancelled and it is the not-paid case
+  above. Still unknown → held: "We'll finish this automatically when you reopen it. Don't sign it again." The room's
+  card and banner show "Finishing your seal…" instead of Review & sign while it is held.
+- **The drawing is kept on the device** (`src/mobile/chat/sealStore.ts`): with the held record
+  (`bwx.nativeSeal.pending`, field `svg`), and after a not-paid seal in `bwx.nativeSeal.drawings` (at most 10, 24 h,
+  16 KB each). Reopening after a crash or relaunch that recovery proves unpaid offers **Seal again** with that same
+  drawing. Cleared on success, on Cancel at the sheet and on Draw again. A restored drawing is checked
+  (`checkStrictSvg`) before it is used.
+- **Never double-pay:** no Try again while the money may have moved; the in-flight hold and one live seal per signer,
+  document and blocks (`sealStateHere`) apply to every retry; the on-screen check never pays and leaves a seal that is
+  paying again alone.
+- **Reported to b:** every pending_recovery / not_paid seal sends one report through "Report to b"
+  (`sendOrQueueReport`: b_feedback, or the outbox) with the `createAction` error's kind and moneyMoved
+  (`classifySendError`), its name and message (hex, base64-like runs and secrets removed, 300 characters), the step,
+  the app version and platform; a second one names what the on-screen check found. Logged as `[seal-failure]`
+  (`src/mobile/chat/sealReport.ts`).
+
 ## What the site gets
 
 The BRC-100 results don't change.
