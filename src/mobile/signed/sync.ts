@@ -54,10 +54,26 @@ export const resetSyncThrottle = () => {
   inFlight.clear();
 };
 
-async function runSync(identityKey: string, get: Get, sessionHandle: string, now: () => number): Promise<Result> {
+/** The bChatX session's account (chat/chatAccount getChatAccount) against the page's own account. */
+export interface SyncAccount {
+  account: string;
+  chatAccount: () => string | null;
+}
+
+async function runSync(
+  identityKey: string,
+  get: Get,
+  sessionHandle: string,
+  now: () => number,
+  acct?: SyncAccount,
+): Promise<Result> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return { state: { k: 'offline' }, rows: null };
+  // The session belongs to whichever account is current: a list fetched for another account is never this one's.
+  const same = () => !acct || (!!acct.account && acct.chatAccount() === acct.account);
+  if (!same()) return { state: { k: 'idle' }, rows: null };
   try {
     const rows = await fetchServerRows(get, sessionHandle);
+    if (!same()) return { state: { k: 'idle' }, rows: null };
     const at = now();
     saveCachedSync(identityKey, rows, at);
     return { state: { k: 'ok', at }, rows };
@@ -76,7 +92,7 @@ export function syncSigned(
   identityKey: string,
   get: Get | null,
   sessionHandle: string,
-  opts: { force?: boolean; now?: () => number } = {},
+  opts: { force?: boolean; now?: () => number; account?: SyncAccount } = {},
 ): Promise<Result> {
   const now = opts.now ?? Date.now;
   if (!get) return Promise.resolve({ state: { k: 'signed_out' }, rows: null });
@@ -87,7 +103,7 @@ export function syncSigned(
   if (!opts.force && last !== undefined && now() - last < SYNC_EVERY_MS)
     return Promise.resolve({ state: lastState.get(key) ?? { k: 'idle' }, rows: null });
   lastAttempt.set(key, now());
-  const p = runSync(identityKey, get, sessionHandle, now).then((r) => {
+  const p = runSync(identityKey, get, sessionHandle, now, opts.account).then((r) => {
     lastState.set(key, r.state);
     inFlight.delete(key);
     return r;

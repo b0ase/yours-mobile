@@ -10,7 +10,6 @@ import {
   type ListActionsFn,
   type PendingSealStore,
   type SealApi,
-  type SealApiReply,
   type SealLedger,
   type SealTxLookup,
 } from '../chat/nativeSeal';
@@ -50,13 +49,20 @@ export type FinishOutcome =
   | { k: 'recorded' }
   /** Another party sealed the document first; this payment is recorded against the session. */
   | { k: 'orphaned' }
+  /** bit-sign had already recorded this seal with an earlier payment (409 replayed): this one wasn't needed. */
+  | { k: 'replayed' }
   /** The wallet proved no payment was ever built: released, nothing was paid. */
   | { k: 'released' }
   /** Not settled yet (in progress, a fault, not proven unpaid yet, or handled elsewhere): it stays held. */
-  | { k: 'kept' }
-  /** bit-sign refused it for good, with its reason. */
-  | { k: 'refused'; reason: string }
-  /** No session, or bit-sign refused the session: the user taps Sign in, then Finish runs again. */
+  | { k: 'kept'; alsoRecorded?: number }
+  /**
+   * bit-sign doesn't know this seal for the handle the session is signed in as (403 / 404 not_yours: the seal was made
+   * as $boase, the session is $b0asex). The session is fine and stays; the record stays held.
+   */
+  | { k: 'wrong_handle'; handle: string; alsoRecorded?: number }
+  /** bit-sign refused it with an answer that won't change on its own, with its reason. It stays held (support). */
+  | { k: 'refused'; reason: string; alsoRecorded?: number }
+  /** No session, or bit-sign refused it (401): the user taps Sign in, then Finish runs again. */
   | { k: 'sign_in' }
   /** The wallet switched accounts: nothing more is done for this one. */
   | { k: 'account_changed' }
@@ -81,17 +87,29 @@ export interface FinishDeps {
   now?: () => number;
 }
 
-/** An answer that means "this session isn't the right one" (#560 keeps the record on these; Finish asks to sign in). */
-const authRefusal = (r: SealApiReply) =>
-  r.status === 401 || r.status === 403 || (r.status === 404 && r.body?.code === 'not_yours');
-
 /**
  * Finish ONE held document for THIS account: the seal flow's own recoverNativeSeals (#560) with this identity key (never
  * `keyless`), over a store view that lists only this identity's records for that document that no other page or
- * window is handling (held.finishStoreFor). Never signs in, never runs for another account, never counts an auth
- * refusal as done, and reports what recovery says it did (its RecoverResult per record). Never throws.
+ * window is handling (held.finishStoreFor). Never signs in, never starts for another account, and reports what
+ * recovery says it did (its RecoverResult per record).
+ *   - Only a 401 means the session is bad: it is cleared and the user taps Sign in. A 403 or 404 not_yours means the
+ *     session is fine but signed in as another handle than the one that sealed: the session stays, the record stays.
+ *   - Several records for one document: the worst one still held is reported (never "Recorded" while one is refused),
+ *     with how many others were recorded.
+ *   - Something recorded is reported even if the account changed meanwhile; otherwise a switch says so.
+ * One Finish per document at a time (a second tap waits for the first and gets its answer). Never throws.
  */
-export async function finishHeldWith(documentId: string, d: FinishDeps): Promise<FinishOutcome> {
+const running = new Map<string, Promise<FinishOutcome>>();
+export function finishHeldWith(documentId: string, d: FinishDeps): Promise<FinishOutcome> {
+  const key = `${(d.identityKey || '').toLowerCase()}|${documentId}`;
+  const r = running.get(key);
+  if (r) return r;
+  const p = finishOnce(documentId, d).finally(() => running.delete(key));
+  running.set(key, p);
+  return p;
+}
+
+async function finishOnce(documentId: string, d: FinishDeps): Promise<FinishOutcome> {
   const now = d.now ?? Date.now;
   const sameAccount = () => !!d.account && d.chatAccount() === d.account;
   if (!d.identityKey || !sameAccount()) return { k: 'account_changed' };
@@ -105,20 +123,27 @@ export async function finishHeldWith(documentId: string, d: FinishDeps): Promise
   } catch {
     status = 0;
   }
-  if (status === 401 || status === 403) {
+  // A switch while checking: never clear (or act with) the session of the account that is current now.
+  if (!sameAccount()) return { k: 'account_changed' };
+  if (status === 401) {
     d.clearSession();
     return { k: 'sign_in' };
   }
   if (status === 0) return { k: 'offline' };
-  if (!sameAccount()) return { k: 'account_changed' };
 
   const reasons = new Map<string, string>();
-  let authFailed = false;
+  const replayed = new Set<string>();
+  const wrongHandle = new Set<string>();
+  let unauthorised = false;
   const api: SealApi = async (path, body) => {
     const r = await d.post(path, body);
-    if (authRefusal(r)) authFailed = true;
+    if (path !== 'recover') return r;
+    const nonce = String(body.nonce ?? '');
+    if (r.status === 401) unauthorised = true;
+    else if (r.status === 403 || (r.status === 404 && r.body?.code === 'not_yours')) wrongHandle.add(nonce);
+    else if (r.status === 409 && r.body?.code === 'replayed') replayed.add(nonce);
     const why = r.body?.error ?? r.body?.message;
-    if (path === 'recover' && !r.ok && typeof why === 'string' && why) reasons.set(String(body.nonce ?? ''), why);
+    if (!r.ok && typeof why === 'string' && why) reasons.set(nonce, why);
     return r;
   };
   let results: Awaited<ReturnType<typeof recoverNativeSeals>>;
@@ -130,16 +155,28 @@ export async function finishHeldWith(documentId: string, d: FinishDeps): Promise
   } catch {
     return { k: 'failed' };
   }
-  if (!sameAccount()) return { k: 'account_changed' };
-  if (authFailed) {
+  const mine = results.filter((r) => r.documentId === documentId);
+  const recorded = mine.filter((r) => r.outcome === 'recorded' && !r.orphaned && !replayed.has(r.nonce)).length;
+  const also = recorded ? { alsoRecorded: recorded } : {};
+  // The worst record still held first: refused, then a seal for another handle, then one still being checked.
+  const refused = mine.find((r) => r.outcome === 'refused');
+  if (refused)
+    return {
+      k: 'refused',
+      reason: (reasons.get(refused.nonce) ?? 'bChatX could not record it.').slice(0, 200),
+      ...also,
+    };
+  const kept = mine.filter((r) => r.outcome === 'kept');
+  if (kept.some((r) => wrongHandle.has(r.nonce))) return { k: 'wrong_handle', handle: s.handle, ...also };
+  if (unauthorised && kept.length) {
+    if (!sameAccount()) return { k: 'account_changed' };
     d.clearSession();
     return { k: 'sign_in' };
   }
-  const mine = results.filter((r) => r.documentId === documentId);
-  if (mine.some((r) => r.outcome === 'recorded' && !r.orphaned)) return { k: 'recorded' };
-  const refused = mine.find((r) => r.outcome === 'refused');
-  if (refused)
-    return { k: 'refused', reason: (reasons.get(refused.nonce) ?? 'bChatX could not record it.').slice(0, 200) };
+  if (!recorded && !sameAccount()) return { k: 'account_changed' };
+  if (kept.length) return { k: 'kept', ...also };
+  if (recorded) return { k: 'recorded' };
+  if (mine.some((r) => r.outcome === 'recorded' && replayed.has(r.nonce))) return { k: 'replayed' };
   if (mine.some((r) => r.outcome === 'recorded' && r.orphaned)) return { k: 'orphaned' };
   if (mine.some((r) => r.outcome === 'released')) return { k: 'released' };
   return { k: 'kept' };

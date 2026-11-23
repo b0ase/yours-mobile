@@ -808,24 +808,18 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     expect(r5.calls).toEqual([]);
   });
 
-  test('H2 (probe 561): an expired session is cleared and asks for Sign in; the held seal is never erased', async () => {
+  test('H2 / N1: only a 401 means the session is bad (cleared, Sign in); the held seal is never erased', async () => {
     setHeld([held()]);
     const a = deps({ check: async () => 401 });
     expect(await finish(a.d)).toEqual({ k: 'sign_in' });
     expect(a.calls).toEqual([]);
     expect(a.cleared()).toBe(1);
-    // A 401 / 403 / 404 not_yours on the seal route itself: kept, session cleared, Sign in asked.
-    for (const reply of [
-      { ok: false, status: 401, body: { error: 'Unauthorized' } },
-      { ok: false, status: 403, body: { error: 'Forbidden' } },
-      { ok: false, status: 404, body: { code: 'not_yours' } },
-    ]) {
-      setHeld([held()]);
-      const b = deps({ replies: () => reply });
-      expect(await finish(b.d)).toEqual({ k: 'sign_in' });
-      expect(readHeldSeals(kv).map((p) => p.nonce)).toEqual(['N1']);
-      expect(b.cleared()).toBe(1);
-    }
+    // A 401 on the seal route itself: kept, session cleared, Sign in asked.
+    setHeld([held()]);
+    const b = deps({ replies: () => ({ ok: false, status: 401, body: { error: 'Unauthorized' } }) });
+    expect(await finish(b.d)).toEqual({ k: 'sign_in' });
+    expect(readHeldSeals(kv).map((p) => p.nonce)).toEqual(['N1']);
+    expect(b.cleared()).toBe(1);
     // No session at all: Sign in, nothing sent.
     setHeld([held()]);
     const c = deps({ session: () => null });
@@ -834,18 +828,122 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     expect(finishText({ k: 'sign_in' })).toBe('Sign in to bChatX to finish this.');
   });
 
-  test('L2: another account active before or after: nothing (more) is done', async () => {
+  test('N1 (probe 561b): 403 or 404 not_yours: a seal for another handle; the proven session stays, the seal stays', async () => {
+    for (const reply of [
+      { ok: false, status: 403, body: { error: 'Key not linked' } },
+      { ok: false, status: 404, body: { code: 'not_yours' } },
+    ]) {
+      setHeld([held()]);
+      const b = deps({ replies: () => reply });
+      expect(await finish(b.d)).toEqual({ k: 'wrong_handle', handle: 'b0asex' });
+      expect(readHeldSeals(kv).map((p) => p.nonce)).toEqual(['N1']);
+      expect(b.cleared()).toBe(0);
+    }
+    expect(finishText({ k: 'wrong_handle', handle: 'b0asex' })).toBe(
+      "bChatX doesn't know this seal for the handle you're signed in as ($b0asex). It stays held. Sign in as the handle that sealed it.",
+    );
+    // A 403 on the session check is not "signed out" either: Finish goes on.
+    setHeld([held()]);
+    const c = deps({ check: async () => 403 });
+    expect(await finish(c.d)).toEqual({ k: 'recorded' });
+    expect(c.cleared()).toBe(0);
+    // Every record of another account or with no key is untouched, even when every answer is 404.
+    setHeld([
+      held({ nonce: 'nA' }),
+      held({ nonce: 'nB', identityKey: OTHER }),
+      held({ nonce: 'nK', identityKey: undefined }),
+      held({ nonce: 'nK2', identityKey: '' }),
+    ]);
+    const all404 = deps({ replies: () => ({ ok: false, status: 404, body: { code: 'not_yours' } }) });
+    await finish(all404.d);
+    expect(all404.calls).toEqual(['recover:nA']);
+    expect(
+      readHeldSeals(kv)
+        .map((p) => p.nonce)
+        .sort(),
+    ).toEqual(['nA', 'nB', 'nK', 'nK2']);
+  });
+
+  test('N2: 409 replayed says it was already recorded with an earlier payment', async () => {
+    setHeld([held()]);
+    const r = deps({ replies: () => ({ ok: false, status: 409, body: { code: 'replayed', error: 'replayed' } }) });
+    expect(await finish(r.d)).toEqual({ k: 'replayed' });
+    expect(readHeldSeals(kv)).toEqual([]);
+    expect(finishText({ k: 'replayed' })).toBe("Already recorded with an earlier payment; this one wasn't needed.");
+    // Any other 409 is a refusal with its reason, and the payment stays held.
+    setHeld([held()]);
+    const o = deps({ replies: () => ({ ok: false, status: 409, body: { code: 'not_composed', error: 'nc' } }) });
+    expect(await finish(o.d)).toEqual({ k: 'refused', reason: 'nc' });
+    expect(readHeldSeals(kv)).toHaveLength(1);
+  });
+
+  test('N4: one document, one recorded and one refused: the refused one is reported, with the other counted', async () => {
+    setHeld([held({ nonce: 'nA', fieldIds: ['a'] }), held({ nonce: 'nB', fieldIds: ['b'] })]);
+    const m = deps({
+      replies: (_p, body) =>
+        body.nonce === 'nA'
+          ? { ok: true, status: 200, body: { signatureId: 'S', txid: TX1, docHash: H1 } }
+          : { ok: false, status: 410, body: { error: 'Too late' } },
+    });
+    expect(await finish(m.d)).toEqual({ k: 'refused', reason: 'Too late', alsoRecorded: 1 });
+    expect(readHeldSeals(kv).map((p) => p.nonce)).toEqual(['nB']);
+    expect(finishText({ k: 'refused', reason: 'Too late', alsoRecorded: 1 })).toBe(
+      'Too late One other seal for it was recorded.',
+    );
+  });
+
+  test('L2 / N3: another account before: nothing done; a switch while it ran: say what was recorded, else that it switched', async () => {
     setHeld([held()]);
     const before = deps({ chatAccount: () => 'someone-else' });
     expect(await finish(before.d)).toEqual({ k: 'account_changed' });
     expect(before.calls).toEqual([]);
-    // A session made for another account is not this account's.
     const wrongSession = deps({ session: () => ({ token: 't', handle: 'x', address: 'a', account: 'someone-else' }) });
     expect(await finish(wrongSession.d)).toEqual({ k: 'sign_in' });
-    // Switched while it ran.
+    // Switched during recovery after bit-sign recorded it: the truth is "recorded".
+    let acct = ADDR;
+    const during = deps({
+      chatAccount: () => acct,
+      replies: (_p, body) => (
+        (acct = 'someone-else'),
+        { ok: true, status: 200, body: { signatureId: 'S', txid: body.txid } }
+      ),
+    });
+    expect(await finish(during.d)).toEqual({ k: 'recorded' });
+    // Switched during recovery and nothing recorded: it says so, and a 401 then never clears the new account's session.
+    setHeld([held()]);
+    acct = ADDR;
+    const lost = deps({
+      chatAccount: () => acct,
+      replies: () => ((acct = 'someone-else'), { ok: false, status: 401, body: {} }),
+    });
+    expect(await finish(lost.d)).toEqual({ k: 'account_changed' });
+    expect(lost.cleared()).toBe(0);
+    // Switched while the session was being checked: nothing more, nothing cleared.
+    acct = ADDR;
+    const checking = deps({ chatAccount: () => acct, check: async () => ((acct = 'someone-else'), 401) });
+    expect(await finish(checking.d)).toEqual({ k: 'account_changed' });
+    expect(checking.cleared()).toBe(0);
+  });
+
+  test('two taps at once share one Finish', async () => {
+    setHeld([held()]);
     let n = 0;
-    const during = deps({ chatAccount: () => (n++ < 2 ? ADDR : 'someone-else') });
-    expect(await finish(during.d)).toEqual({ k: 'account_changed' });
+    const r = deps({
+      replies: () => (n++, { ok: true, status: 200, body: { signatureId: 'S', txid: TX1 } }),
+    });
+    const [a, b] = await Promise.all([finish(r.d), finish(r.d)]);
+    expect([a, b, n]).toEqual([{ k: 'recorded' }, { k: 'recorded' }, 1]);
+  });
+
+  test('N5: a settling mark or claim further ahead than its lifetime + 30 s is stale (clock moved back, bad data)', async () => {
+    const { busyElsewhere } = await import('./held');
+    const st = localStore(kv);
+    expect(busyElsewhere(held({ settling: { by: 'x', until: NOW + 80_000 } }), st, NOW)).toBe(true);
+    expect(busyElsewhere(held({ settling: { by: 'x', until: NOW + 365 * 864e5 } }), st, NOW)).toBe(false);
+    st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW, until: NOW + 365 * 864e5 });
+    expect(busyElsewhere(held(), st, NOW)).toBe(false);
+    st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW, until: NOW + 10 * 60_000 });
+    expect(busyElsewhere(held(), st, NOW)).toBe(true);
   });
 
   test('M2: a seal another page is settling, or another window is paying, is left alone; offline says so', async () => {
@@ -975,6 +1073,23 @@ describe('sync with bit-sign: throttled, shared, and plain about failures', () =
     await a;
     expect(n).toBe(2); // the failure, then one shared list request
     expect((await syncSigned(ME, okGet(), 'b', { now: () => t, force: true })).state.k).toBe('ok');
+  });
+  test('L2: a list fetched while the account switched is thrown away, never cached as this account’s', async () => {
+    let acct = '1Me';
+    const get = async (p: string) => {
+      if (p.endsWith('/signatures')) acct = '1Other';
+      return p.endsWith('/signatures') ? { signatures: list } : { handles: [] };
+    };
+    const r = await syncSigned(ME, get, 'boase', { force: true, account: { account: '1Me', chatAccount: () => acct } });
+    expect(r).toEqual({ state: { k: 'idle' }, rows: null });
+    expect(loadCachedSync(ME)).toBeNull();
+    // Another account current from the start: no request at all.
+    let asked = 0;
+    const r2 = await syncSigned(ME, async () => (asked++, {}), 'boase', {
+      force: true,
+      account: { account: '1Me', chatAccount: () => '1Other' },
+    });
+    expect([r2.rows, asked]).toEqual([null, 0]);
   });
   test('a failed handles list still lists, with the session handle alone', async () => {
     const get = async (p: string) => {

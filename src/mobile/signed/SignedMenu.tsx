@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { FileSignature } from 'lucide-react';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { getChatAccount } from '../chat/chatAccount';
 import { badgeLabel, badgeText } from '../tabs/tabBadges';
 import { setSignedBadge, useSignedBadge } from './badge';
 import { heldFor, readHeldSeals } from './held';
@@ -24,6 +25,10 @@ const useIdentityKey = (): string => {
   const { chromeStorageService } = useServiceContext();
   return chromeStorageService.getCurrentAccountObject().account?.pubKeys?.identityPubKey ?? '';
 };
+const useIdentityAddress = (): string => {
+  const { chromeStorageService } = useServiceContext();
+  return chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+};
 
 export const refreshSignedBadge = (identityKey: string): void => {
   if (!identityKey) return setSignedBadge(0);
@@ -39,6 +44,7 @@ export const SignedRecorder = () => {
 export const SignedBadgeKeeper = () => {
   const { pathname } = useLocation();
   const identityKey = useIdentityKey();
+  const identityAddress = useIdentityAddress();
   useEffect(() => {
     refreshSignedBadge(identityKey);
     const off = onSignedChange(() => refreshSignedBadge(identityKey));
@@ -53,8 +59,11 @@ export const SignedBadgeKeeper = () => {
   useEffect(() => {
     refreshSignedBadge(identityKey);
     const get = sessionGet();
-    if (identityKey && get) void syncSigned(identityKey, get, sessionHandle());
-  }, [identityKey, pathname]);
+    if (identityKey && get)
+      void syncSigned(identityKey, get, sessionHandle(), {
+        account: { account: identityAddress, chatAccount: getChatAccount },
+      });
+  }, [identityKey, identityAddress, pathname]);
   return null;
 };
 

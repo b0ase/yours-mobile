@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import { TopNav } from '../../components/TopNav';
 import { useServiceContext } from '../../hooks/useServiceContext';
+import { getChatAccount } from '../chat/chatAccount';
 import { useBackClose } from '../backStack';
 import { nativeSealRoute } from '../chat/nativeSeal';
 import { signDocUrl } from '../chat/pendingDoc';
@@ -63,12 +64,15 @@ const SignedPage = () => {
   const runSync = useCallback(
     async (force = false) => {
       setSync({ k: 'loading' });
-      const r = await syncSigned(identityKey, sessionGet(), sessionHandle(), { force });
+      const r = await syncSigned(identityKey, sessionGet(), sessionHandle(), {
+        force,
+        account: { account: identityAddress, chatAccount: getChatAccount },
+      });
       setSync(r.state);
       if (r.rows) setServerRows(r.rows);
       refreshSignedBadge(identityKey);
     },
-    [identityKey],
+    [identityKey, identityAddress],
   );
   useEffect(() => {
     void runSync();

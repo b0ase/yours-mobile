@@ -33,6 +33,8 @@ export const fmtTime = (ms: number) =>
 
 export type FinishState = { k: 'idle' } | { k: 'working' } | FinishOutcome;
 /** What the banner says after a Finish: the TRUE outcome, never "Recorded" unless bit-sign recorded it. */
+const alsoText = (n?: number) =>
+  n ? ` ${n === 1 ? 'One other seal for it was' : `${n} other seals for it were`} recorded.` : '';
 export const finishText = (st: FinishState): string => {
   switch (st.k) {
     case 'working':
@@ -41,12 +43,20 @@ export const finishText = (st: FinishState): string => {
       return 'Recorded. It is in Sealed now.';
     case 'orphaned':
       return 'Another party sealed this document first. Your payment is recorded; nothing more to do.';
+    case 'replayed':
+      return "Already recorded with an earlier payment; this one wasn't needed.";
     case 'released':
       return 'Nothing was paid; you can seal again.';
     case 'kept':
-      return 'Still checking. It stays here and is tried again; nothing is paid twice.';
+      return 'Still checking. It stays here and is tried again; nothing is paid twice.' + alsoText(st.alsoRecorded);
+    case 'wrong_handle':
+      return (
+        `bChatX doesn't know this seal for the handle you're signed in as (${st.handle ? `$${st.handle.replace(/^[$@]/, '')}` : 'this one'}). ` +
+        'It stays held. Sign in as the handle that sealed it.' +
+        alsoText(st.alsoRecorded)
+      );
     case 'refused':
-      return st.reason;
+      return st.reason + alsoText(st.alsoRecorded);
     case 'sign_in':
       return 'Sign in to bChatX to finish this.';
     case 'account_changed':
