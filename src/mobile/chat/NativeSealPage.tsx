@@ -544,6 +544,8 @@ export const NativeSealPage = () => {
         fieldIds: mine.map((f) => f.id),
         svg,
         resume: resume ?? null,
+        // The room's $TICKER: on held records and in the Signed list's SealRecorded hook.
+        ticker,
         api,
         keys,
         store: localStore(),

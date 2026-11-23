@@ -106,6 +106,8 @@ export interface PendingSeal {
   excludeTxids?: string[];
   /** A context is settling this record on screen right now (settleUnsureSeal): recovery elsewhere leaves it alone. */
   settling?: { by: string; until: number };
+  /** The room's ticker, when the seal flow knew it: a recovered seal tells the Signed list (SealRecorded) with it. */
+  ticker?: string;
 }
 
 /**
@@ -510,6 +512,51 @@ const markSealed = (ledger: SealLedger | null | undefined, key: string) => {
   }
 };
 
+/** One seal this device has recorded on bit-sign (a fresh seal or a recovered one). */
+export interface SealRecorded {
+  documentId: string;
+  identityKey: string;
+  /** prepare's title; '' for a recovered seal. */
+  title: string;
+  signatureId: string;
+  txid: string;
+  docHash: string;
+  complete: boolean;
+  /** The room's ticker, when the seal flow knows it (the Signed list otherwise takes it from bit-sign's rows). */
+  ticker?: string;
+}
+let sealRecorded: ((s: SealRecorded) => void) | null = null;
+/**
+ * The wallet's own Signed list (signed/recorder.ts) listens here, so it keeps its record without our server. Additive:
+ * a listener that throws never touches the seal.
+ */
+export const setSealRecordedHook = (fn: ((s: SealRecorded) => void) | null): void => {
+  sealRecorded = fn;
+};
+const tellRecorded = (s: SealRecorded) => {
+  try {
+    sealRecorded?.(s);
+  } catch {
+    /* the Signed list only */
+  }
+};
+/** The room ticker as the Signed list keys it ("BCORP"), or nothing when it isn't a plausible ticker. */
+const tickerOf = (t: unknown): { ticker?: string } => {
+  const v = typeof t === 'string' ? t.trim().replace(/^\$/, '').toUpperCase() : '';
+  return /^[A-Z0-9_.-]{1,64}$/.test(v) ? { ticker: v } : {};
+};
+/** A recovered seal's hook payload (title unknown: ''). */
+const recordedFrom = (p: PendingSeal, body: Record<string, unknown>): SealRecorded => ({
+  documentId: p.documentId,
+  identityKey: p.identityKey ?? '',
+  title: '',
+  signatureId: String(body.signatureId ?? ''),
+  txid: String(body.txid || p.txid),
+  docHash: String(body.docHash ?? ''),
+  complete: !!body.complete,
+  ...tickerOf(p.ticker),
+});
+
 /**
  * createAction failed and it is NOT certain that nothing went out (a broadcast was tried, a network error or timeout
  * during it, a txid in the answer). The nonce is never cancelled then, and no retry is offered.
@@ -867,6 +914,8 @@ export async function nativeSignAndSeal(input: {
   resume?: SealResume | null;
   /** Told whenever a seal ends in pending_recovery or not_paid (chat/sealReport.ts reports it to b). */
   onFailure?: (f: SealFailure) => void;
+  /** The room's $TICKER, when known: carried on held records and in the SealRecorded hook (the Signed list). */
+  ticker?: string;
   /** The wallet's own fee rate (sat/kB), the one its createAction pays (default 100). */
   satsPerKb?: number;
   /**
@@ -957,6 +1006,7 @@ function saveUnsure(
       attestation,
       savedAt: before?.savedAt ?? (input.now ?? Date.now)(),
       ...(resumed ? { resumed: true, excludeTxids: [...(resumed.failedTxids ?? [])] } : {}),
+      ...tickerOf(input.ticker),
       identityKey: input.identityKey ?? '',
       fieldIds: [...input.fieldIds],
       lockingScriptHex,
@@ -1265,6 +1315,7 @@ async function afterPrepare(
     savedAt: (input.now ?? Date.now)(),
     identityKey: input.identityKey ?? '',
     fieldIds: [...input.fieldIds],
+    ...tickerOf(input.ticker),
   });
 
   step('committing');
@@ -1346,7 +1397,7 @@ async function afterPrepare(
     );
   }
   input.store.remove(prepared.nonce);
-  return {
+  const outcome: NativeSealOutcome = {
     signatureId: String(out.signatureId ?? ''),
     txid: String(out.txid || txid),
     docHash: String(out.docHash ?? ''),
@@ -1355,6 +1406,17 @@ async function afterPrepare(
     ...(recovered ? { recovered: true } : {}),
     ...(feeSats != null ? { feeSats } : {}),
   };
+  tellRecorded({
+    documentId: input.documentId,
+    identityKey: input.identityKey ?? '',
+    title: prepared.title,
+    signatureId: outcome.signatureId,
+    txid: outcome.txid,
+    docHash: outcome.docHash,
+    complete: outcome.complete,
+    ...tickerOf(input.ticker),
+  });
+  return outcome;
 }
 
 /**
@@ -1508,7 +1570,9 @@ export async function recoverNativeSeals(
       // Recorded (or sealed first by another party, or committed already): never offered again from here.
       markSealed(ledger, key);
       forgetDrawing(store, key);
-      result('recorded', r.ok ? isOrphaned(r.body) : true);
+      const orphaned = r.ok ? isOrphaned(r.body) : true;
+      if (!orphaned) tellRecorded(recordedFrom(p, r.body));
+      result('recorded', orphaned);
     } catch {
       result('kept');
     }
@@ -1640,6 +1704,7 @@ export async function settleUnsureSeal(o: {
                 : 'Another party sealed this document first. Your payment is recorded; nothing more to do.',
           };
         const feeSats = feeFromAtomicBeef(Utils.toArray(p.beefHex, 'hex'));
+        tellRecorded(recordedFrom(p, r.body));
         return {
           k: 'recorded',
           out: {

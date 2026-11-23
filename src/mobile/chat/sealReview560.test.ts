@@ -759,3 +759,75 @@ describe('L5: "Nothing was paid" said once, and only when proven', () => {
     expect(r.k).toBe('unknown'); // young record: never "not paid"
   });
 });
+
+describe('SealRecorded hook (for #561, the Signed list): every recorded seal, with the room ticker when known', () => {
+  test('a fresh seal, a recovered one and one settled on screen all tell it, with the ticker; orphaned does not', async () => {
+    const got: ns.SealRecorded[] = [];
+    ns.setSealRecordedHook((s) => void got.push(s));
+    try {
+      const store = localStore(fakeStorage());
+      await nativeSignAndSeal(base({ log: [], store, documentId: 'SR1', ticker: '$bcorp' }));
+      expect(got).toEqual([
+        {
+          documentId: 'SR1',
+          identityKey: SEAL_KEY,
+          title: 'T',
+          signatureId: 'S',
+          txid: TX,
+          docHash: 'H',
+          complete: true,
+          ticker: 'BCORP',
+        },
+      ]);
+      // A paid record saved with its ticker, recovered on reopen.
+      store.save({ ...unsure({ documentId: 'SR2', nonce: 'NSR2', ticker: 'BCORP' }), txid: TX, beefHex: '00' });
+      await recover(bitsign([]), store, 'SR2', NONE);
+      expect(got[1]).toMatchObject({ documentId: 'SR2', title: '', ticker: 'BCORP', signatureId: 'S' });
+      // Settled on screen.
+      store.save(unsure({ documentId: 'SR3', nonce: 'NSR3', ticker: 'BCORP' }));
+      const r = await settleUnsureSeal({
+        api: bitsign([]),
+        store,
+        nonce: 'NSR3',
+        lookup: { find: async () => ({ found: true, txid: TX }), beef: async () => [7] },
+        sleep: async () => undefined,
+      });
+      expect(r.k).toBe('recorded');
+      expect(got[2]).toMatchObject({ documentId: 'SR3', ticker: 'BCORP' });
+      // Orphaned (another party sealed first) and a seal with no ticker known.
+      store.save({ ...unsure({ documentId: 'SR4', nonce: 'NSR4' }), txid: TX, beefHex: '00' });
+      await recover(
+        async () => ({ ok: true, status: 200, body: { success: false, orphaned: true } }),
+        store,
+        'SR4',
+        NONE,
+      );
+      expect(got).toHaveLength(3);
+      await nativeSignAndSeal(base({ log: [], store, documentId: 'SR5' }));
+      expect(got[3].ticker).toBeUndefined();
+      expect('ticker' in got[3]).toBe(false);
+    } finally {
+      ns.setSealRecordedHook(null);
+    }
+  });
+
+  test('a listener that throws never touches the seal; the held record carries the ticker', async () => {
+    gate.expectLines('warn [nativeSeal] pay failed Failed to fetch');
+    ns.setSealRecordedHook(() => {
+      throw new Error('Signed list broke');
+    });
+    try {
+      const store = localStore(fakeStorage());
+      const out = await nativeSignAndSeal(base({ log: [], store, documentId: 'SR6', ticker: 'BCORP' }));
+      expect(out.txid).toBe(TX);
+      await nativeSignAndSeal(
+        base({ log: [], store, documentId: 'SR7', ticker: 'BCORP', keys: wallet([], [new Error('Failed to fetch')]) }),
+      ).catch((x) => x);
+      expect(store.list()).toMatchObject([{ documentId: 'SR7', ticker: 'BCORP' }]);
+    } finally {
+      ns.setSealRecordedHook(null);
+    }
+    const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
+    expect(page).toMatch(/resume: resume \?\? null,[\s\S]{0,120}ticker,/);
+  });
+});
