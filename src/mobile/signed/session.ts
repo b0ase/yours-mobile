@@ -213,12 +213,15 @@ const sessionCheck = async (): Promise<number> => {
 
 /** An unsure seal's transaction in this wallet's own storage (as NativeSealPage `txLookup`). */
 const txLookup = (ctx: OneSatContext): SealTxLookup => ({
-  find: (script, sinceMs) =>
+  // Exactly as the seal page's (NativeSealPage txLookup), including when a failed, txid-less row was first seen.
+  find: (script, sinceMs, opts) =>
     findSealAction(
       (args) => ctx.wallet.listActions(args) as ReturnType<ListActionsFn>,
       script,
       sinceMs,
       toolboxSdk.specOpFailedActions,
+      Date.now(),
+      opts?.failedSeenAt,
     ),
   beef: async (txid) => {
     try {
