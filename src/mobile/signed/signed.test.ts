@@ -792,7 +792,10 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
 
     setHeld([held()]);
     const r3 = deps({ replies: () => ({ ok: false, status: 409, body: { error: 'The session was cancelled.' } }) });
-    expect(await finish(r3.d)).toEqual({ k: 'refused', reason: 'The session was cancelled.' });
+    expect(await finish(r3.d)).toEqual({
+      k: 'refused',
+      reason: `Paid, but bChatX wouldn't record it. Contact support (ref seal-N1). bChatX said: The session was cancelled.`,
+    });
 
     setHeld([held()]);
     const r4 = deps({
@@ -873,7 +876,10 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     // Any other 409 is a refusal with its reason, and the payment stays held.
     setHeld([held()]);
     const o = deps({ replies: () => ({ ok: false, status: 409, body: { code: 'not_composed', error: 'nc' } }) });
-    expect(await finish(o.d)).toEqual({ k: 'refused', reason: 'nc' });
+    expect(await finish(o.d)).toEqual({
+      k: 'refused',
+      reason: `Paid, but bChatX wouldn't record it. Contact support (ref seal-N1). bChatX said: nc`,
+    });
     expect(readHeldSeals(kv)).toHaveLength(1);
   });
 
@@ -885,7 +891,11 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
           ? { ok: true, status: 200, body: { signatureId: 'S', txid: TX1, docHash: H1 } }
           : { ok: false, status: 410, body: { error: 'Too late' } },
     });
-    expect(await finish(m.d)).toEqual({ k: 'refused', reason: 'Too late', alsoRecorded: 1 });
+    expect(await finish(m.d)).toEqual({
+      k: 'refused',
+      reason: `Paid, but bChatX wouldn't record it. Contact support (ref seal-nB). bChatX said: Too late`,
+      alsoRecorded: 1,
+    });
     expect(readHeldSeals(kv).map((p) => p.nonce)).toEqual(['nB']);
     expect(finishText({ k: 'refused', reason: 'Too late', alsoRecorded: 1 })).toBe(
       'Too late One other seal for it was recorded.',
@@ -925,6 +935,42 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     expect(checking.cleared()).toBe(0);
   });
 
+  test('#560 refused state: the banner says Paid · contact support with the reference, and it ranks first', async () => {
+    const { paidRefusedFor } = await import('./held');
+    const refusedRec = held({ nonce: 'abcdef1234567890', refused: { at: NOW, status: 410, error: 'Too late' } });
+    expect(paidRefusedFor('1c377264-aaaa', [held({ nonce: 'x' }), refusedRec])).toBe(
+      "Paid, but bChatX wouldn't record it. Contact support (ref seal-abcdef123456).",
+    );
+    expect(paidRefusedFor('other', [refusedRec])).toBeNull();
+    // The support list (archived refused payments) is never read as held or as signed.
+    mem.set('bwx.nativeSeal.support', JSON.stringify([{ ...refusedRec, archivedAt: NOW }]));
+    expect(readHeldSeals(kv)).toEqual([]);
+    expect(loadLocal(ME)).toEqual([]);
+    refreshSignedBadge(ME);
+    expect(getSignedBadge()).toBe(0);
+    mem.delete('bwx.nativeSeal.support');
+    const html = renderToStaticMarkup(
+      createElement(HeldBanner, {
+        held: [refusedRec],
+        titleOf: () => 'Doc',
+        onFinish: () => undefined,
+        states: {},
+        refusedText: (id: string) => paidRefusedFor(id, [refusedRec]),
+      }),
+    );
+    expect(html).toContain('Contact support (ref seal-abcdef123456)');
+    expect(html).not.toContain('Still checking');
+    // Mixed answers: a refused record outranks one still being checked (kept) and one never built.
+    setHeld([held({ nonce: 'nA', fieldIds: ['a'] }), held({ nonce: 'nB', fieldIds: ['b'] })]);
+    const m = deps({
+      replies: (_p, body) =>
+        body.nonce === 'nA'
+          ? { ok: false, status: 503, body: { error: 'busy' } }
+          : { ok: false, status: 410, body: { error: 'Too late' } },
+    });
+    expect((await finish(m.d)).k).toBe('refused');
+  });
+
   test('two taps at once share one Finish', async () => {
     setHeld([held()]);
     let n = 0;
@@ -942,7 +988,12 @@ describe('Finish: true outcomes, never an auth failure as done, never across acc
     expect(busyElsewhere(held({ settling: { by: 'x', until: NOW + 365 * 864e5 } }), st, NOW)).toBe(false);
     st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW, until: NOW + 365 * 864e5 });
     expect(busyElsewhere(held(), st, NOW)).toBe(false);
-    st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW, until: NOW + 10 * 60_000 });
+    st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW, until: NOW + 60_000 });
+    expect(busyElsewhere(held(), st, NOW)).toBe(true);
+    // A claim whose heartbeat stopped (#560: CLAIM_STALE_MS) belongs to a context that crashed or slept: not busy.
+    st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW - 60_000, until: NOW + 60_000 });
+    expect(busyElsewhere(held(), st, NOW)).toBe(false);
+    st.claims!.save({ key: sealKey(ME, '1c377264-aaaa', ['f1']), by: 'other', at: NOW, until: NOW + 60_000 });
     expect(busyElsewhere(held(), st, NOW)).toBe(true);
   });
 

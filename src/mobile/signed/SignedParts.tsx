@@ -79,6 +79,7 @@ export const HeldBanner = ({
   onSignIn,
   states,
   busy = new Set<string>(),
+  refusedText = () => null,
 }: {
   held: PendingSeal[];
   titleOf: (documentId: string) => string;
@@ -88,6 +89,8 @@ export const HeldBanner = ({
   states: Record<string, FinishState>;
   /** Documents another page or window is handling now. */
   busy?: ReadonlySet<string>;
+  /** "Paid, but bChatX wouldn't record it. Contact support (ref …)" for a document whose held seal bit-sign refused. */
+  refusedText?: (documentId: string) => string | null;
 }) => {
   if (!held.length) return null;
   const docs = [...new Map(held.map((p) => [p.documentId, p])).values()];
@@ -101,7 +104,8 @@ export const HeldBanner = ({
         {docs.map((p) => {
           const st: FinishState = states[p.documentId] ?? { k: 'idle' };
           const isBusy = busy.has(p.documentId) && st.k === 'idle';
-          const text = isBusy ? BUSY_TEXT : finishText(st);
+          const paidRefused = st.k === 'idle' ? refusedText(p.documentId) : null;
+          const text = isBusy ? BUSY_TEXT : (paidRefused ?? finishText(st));
           const signIn = st.k === 'sign_in' && !!onSignIn;
           return (
             <li key={p.documentId} className="sg-held-item">

@@ -12,7 +12,7 @@ import { openDappBrowser } from '../dappBrowser';
 import { DocView } from '../bureau/DocView';
 import type { DocContent } from '../bureau/api';
 import { bureauClient } from '../bureau/session';
-import { heldFor, readHeldSeals } from './held';
+import { heldFor, paidRefusedFor, readHeldSeals } from './held';
 import { loadCachedSync, loadLocal, onSignedChange } from './localStore';
 import { busyHeld, finishHeld, sessionGet, sessionHandle, signInToBchat } from './session';
 import { refreshSignedBadge } from './SignedMenu';
@@ -177,6 +177,7 @@ const SignedPage = () => {
           onSignIn={(id) => void onFinishSignIn(id)}
           states={finish}
           busy={busy}
+          refusedText={(id) => paidRefusedFor(id, held)}
         />
         <SyncNote
           state={sync}

@@ -1,7 +1,8 @@
 import {
   CONTEXT_ID,
-  SEAL_CLAIM_MS,
-  SETTLE_MARK_MS,
+  beingSettled,
+  claimAlive,
+  paidRefusedMessage,
   sealKey,
   type PendingSeal,
   type PendingSealStore,
@@ -57,20 +58,26 @@ export const heldFor = (identityKey: string, list: PendingSeal[]): PendingSeal[]
  * record being settled. (#560's release rule covers the rest: an unsure record is released only when the wallet
  * answered "no such action" twice, seconds apart, and the record is at least 3 minutes old.)
  */
-/** A mark or claim further ahead than its own lifetime plus this is bogus (a clock moved back, bad data): stale. */
-export const MARK_SLACK_MS = 30_000;
-const live = (until: unknown, now: number, max: number): boolean =>
-  typeof until === 'number' && until > now && until - now <= max + MARK_SLACK_MS;
-
 export const busyElsewhere = (p: PendingSeal, store: PendingSealStore, now: number): boolean => {
-  // Any live settling mark, this context's too (a Sign page settling it in the background).
-  if (p.settling && live(p.settling.until, now, SETTLE_MARK_MS)) return true;
+  // Any live settling mark, this context's too (a Sign page settling it in the background). #560's beingSettled treats
+  // a mark further ahead than its own span + skew as stale (a clock moved back, bad data).
+  if (beingSettled(p, now)) return true;
   try {
     const c = p.fieldIds ? store.claims?.get(sealKey(p.identityKey ?? '', p.documentId, p.fieldIds)) : null;
-    return !!c && c.by !== CONTEXT_ID && live(c.until, now, SEAL_CLAIM_MS);
+    // A live claim (fresh heartbeat, not from the future) by another context: that window is paying it.
+    return claimAlive(c, now) && c.by !== CONTEXT_ID;
   } catch {
     return false;
   }
+};
+
+/**
+ * Paid, but bit-sign refused to record it (#560: the record carries `refused`): "Paid, but bChatX wouldn't record it.
+ * Contact support (ref seal-…)" for this document's first such record of this account, else null.
+ */
+export const paidRefusedFor = (documentId: string, held: readonly PendingSeal[]): string | null => {
+  const p = held.find((x) => x.documentId === documentId && !!x.refused);
+  return p ? paidRefusedMessage(p) : null;
 };
 
 /**

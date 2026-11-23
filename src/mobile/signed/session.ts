@@ -6,6 +6,7 @@ import { getChatAccount } from '../chat/chatAccount';
 import { walletSigner } from '../chat/signer';
 import {
   findSealAction,
+  paidRefusedMessage,
   recoverNativeSeals,
   type ListActionsFn,
   type PendingSealStore,
@@ -60,7 +61,7 @@ export type FinishOutcome =
    * as $boase, the session is $b0asex). The session is fine and stays; the record stays held.
    */
   | { k: 'wrong_handle'; handle: string; alsoRecorded?: number }
-  /** bit-sign refused it with an answer that won't change on its own, with its reason. It stays held (support). */
+  /** Paid, and bit-sign refused to record it (#560 'refused'): "Contact support (ref seal-…)" and bit-sign's reason. */
   | { k: 'refused'; reason: string; alsoRecorded?: number }
   /** No session, or bit-sign refused it (401): the user taps Sign in, then Finish runs again. */
   | { k: 'sign_in' }
@@ -116,7 +117,8 @@ async function finishOnce(documentId: string, d: FinishDeps): Promise<FinishOutc
   const s = d.session();
   if (!s || (s.account && s.account !== d.account)) return { k: 'sign_in' };
   const view = finishStoreFor(d.identityKey, documentId, now(), d.store);
-  if (!view.list().length) return { k: 'kept' };
+  const before = new Map(view.list().map((p) => [p.nonce, p]));
+  if (!before.size) return { k: 'kept' };
   let status: number;
   try {
     status = await d.check();
@@ -160,12 +162,13 @@ async function finishOnce(documentId: string, d: FinishDeps): Promise<FinishOutc
   const also = recorded ? { alsoRecorded: recorded } : {};
   // The worst record still held first: refused, then a seal for another handle, then one still being checked.
   const refused = mine.find((r) => r.outcome === 'refused');
-  if (refused)
-    return {
-      k: 'refused',
-      reason: (reasons.get(refused.nonce) ?? 'bChatX could not record it.').slice(0, 200),
-      ...also,
-    };
+  if (refused) {
+    // Paid, and bit-sign won't record it (#560 marks it refused, keeps it for support): its reference, and why.
+    const rec = before.get(refused.nonce);
+    const why = reasons.get(refused.nonce);
+    const reason = rec ? paidRefusedMessage(rec) : 'bChatX could not record it.';
+    return { k: 'refused', reason: (why ? `${reason} bChatX said: ${why}` : reason).slice(0, 300), ...also };
+  }
   const kept = mine.filter((r) => r.outcome === 'kept');
   if (kept.some((r) => wrongHandle.has(r.nonce))) return { k: 'wrong_handle', handle: s.handle, ...also };
   if (unauthorised && kept.length) {
