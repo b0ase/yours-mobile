@@ -15,7 +15,7 @@
 import { APP_NAME } from '../mobile/storeBuild';
 
 /** Bumped whenever RESERVED_LABEL_PREFIXES changes (reservedLabels.test.ts pins the list against it). */
-export const RESERVED_LABELS_VERSION = 4;
+export const RESERVED_LABELS_VERSION = 5;
 
 /**
  * Label prefixes only the wallet itself may write or list by. A label is compared as the toolbox stores it: trimmed
@@ -46,11 +46,23 @@ export const isSpecOpName = (name: unknown): boolean => /^[0-9a-f]{64}$/.test(no
  */
 const ADMIN_LABEL_PREFIX = 'admin';
 
+/**
+ * A module label ('p nosend …', 'p 1sat …') in another case or spacing (review of #557, M3). The toolbox reserves
+ * labels starting "p " (isAdminLabel) and routes them to a permission module only as typed, but storage keeps labels
+ * trimmed and lower-cased: "P nosend expiry …" passed both checks as an ordinary label and listed the wallet's own
+ * BRC-177 held sends across sites. The exact lower-case form goes on to the toolbox as before (refused there, or
+ * handed to its module); every other spelling of it is refused here, as reservedProtocols.ts does for module keys
+ * (modulesKeys / routesToPModule).
+ */
+export const isDisguisedModuleLabel = (label: unknown): boolean =>
+  typeof label === 'string' && norm(label).startsWith('p ') && !label.startsWith('p ');
+
 export const isReservedLabel = (label: unknown): boolean => {
   const l = norm(label);
   return (
     isSpecOpName(l) ||
     l.startsWith(ADMIN_LABEL_PREFIX) ||
+    isDisguisedModuleLabel(label) ||
     RESERVED_LABEL_PREFIXES.some((p) => l === p || (l.startsWith(p) && /\s/.test(l.charAt(p.length))))
   );
 };

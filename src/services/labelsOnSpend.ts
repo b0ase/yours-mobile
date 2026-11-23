@@ -133,7 +133,8 @@ export function guardLabelsOnSpend<T extends object>(manager: T, deps: LabelGuar
       // Admin-only labels are refused by the manager itself: never deferred past that check.
       args.label.startsWith('admin') ||
       args.label.startsWith('p ') ||
-      // The wallet's own labels are refused by reservedLabels.ts: never deferred onto a sheet.
+      // The wallet's own labels, and 'admin…' / 'p …' in any other case or spacing, are refused by reservedLabels.ts:
+      // never deferred onto a sheet.
       isRefusedLabel(args.label)
     )
       return label.call(manager, args);
