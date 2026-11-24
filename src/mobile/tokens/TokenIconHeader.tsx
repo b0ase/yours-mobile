@@ -152,8 +152,11 @@ const IssuerIconSheet = ({ tokenId, onClose }: { tokenId: string; onClose: () =>
       const icon = `${ins.url.slice('1sat://'.length).replace('.', '_')}`;
       const res = await publishIconOverride(apiContext, tokenId, icon);
       if (!res.txid) throw new Error(res.error || 'Publish failed');
-      const key = (await apiContext.wallet.getPublicKey({ identityKey: true })).publicKey;
-      await resolveIconOverride(tokenId, key, fetch, Date.now(), [res.txid]);
+      // Normally already in the cache (publishIconOverride checked the returned tx); else look it up by txid.
+      if (!res.override) {
+        const key = (await apiContext.wallet.getPublicKey({ identityKey: true })).publicKey;
+        await resolveIconOverride(tokenId, key, fetch, Date.now(), [res.txid]);
+      }
       setMsg('Published. Wallets that read icon updates will show it.');
       setImg(null);
     } catch (e) {

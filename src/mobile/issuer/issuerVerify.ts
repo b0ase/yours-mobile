@@ -38,7 +38,7 @@ const mem = new Map<string, IssuerInfo>();
 // WhatsOnChain rate-limits; a wallet list can ask for dozens of tokens at once.
 let active = 0;
 const waiting: (() => void)[] = [];
-async function limited<T>(fn: () => Promise<T>, max = 2): Promise<T> {
+export async function limited<T>(fn: () => Promise<T>, max = 2): Promise<T> {
   if (active >= max) await new Promise<void>((r) => waiting.push(r));
   active++;
   try {

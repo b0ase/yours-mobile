@@ -51,6 +51,7 @@ import { P2PKH } from '@bsv/sdk';
 import { maxOverlayFee, withTokenSendGuard, type OverlayFee } from '../mobile/wallet/send/tokenFee';
 import { HOLDER_DROP_ENABLED, MARKET_ENABLED } from '../mobile/storeBuild';
 import { tokenIconUrl } from '../mobile/tokens/officialTokens';
+import { useTokenIcon } from '../mobile/tokens/tokenIcon';
 
 // Issuer tools › Airdrop to holders: bWalletX only, a lazy chunk the store build drops (storeBuild.ts).
 const HolderDropSheet = HOLDER_DROP_ENABLED ? lazy(() => import('../mobile/holderDrop/HolderDropSheet')) : null;
@@ -138,6 +139,10 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
   const [composing, setComposing] = useState(!!prefill);
   // Airdrop note (src/mobile/airdrops/note.ts): optional, written on chain in the same tx.
   const [note, setNote] = useState('');
+
+  // The on-chain icon, then what this wallet shows (issuer-signed update, profile picture) instead.
+  const onchainIcon = tokenIconUrl(token.info.id, getTokenName(token.info), token.info.icon);
+  const shownIcon = useTokenIcon(token.info.id, getTokenName(token.info), onchainIcon).url;
 
   const maxAmount = token.isConfirmed ? token.info.all.confirmed : token.info.all.pending;
   const maxDisplay = showAmount(maxAmount, token.info.dec);
@@ -256,7 +261,6 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
 
     const tokenName = getTokenName(token.info);
 
-    const shownIcon = tokenIconUrl(token.info.id, tokenName, token.info.icon);
     // Consolidate duplicate addresses by summing amounts
     const tokenConsolidated = new Map<string, bigint>();
     const tokenOrder: string[] = [];
@@ -600,7 +604,6 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
   const row = theme.color.global.row;
   const accent = theme.color.component.primaryButtonLeftGradient;
   const tokenName = getTokenName(token.info);
-  const shownIcon = tokenIconUrl(token.info.id, tokenName, token.info.icon);
 
   const anyRecipientEmpty = recipients.some((r) => !r.address || !r.amountInput);
   // Group send: the running total across every recipient; Send stays off while it exceeds the balance.
@@ -679,7 +682,7 @@ export const SendBsv21View = ({ token, onBack, prefill }: SendBsv21ViewProps) =>
           <TokenIconHeader
             tokenId={token.info.id}
             ticker={tokenName}
-            onchain={shownIcon}
+            onchain={onchainIcon}
           />
           {/* Balance chip — matches the BSV / MNEE send views */}
           <div className="flex flex-col items-center w-full mb-5 gap-1.5">

@@ -192,8 +192,8 @@ export function expandChunks(script: Script): Script['chunks'] {
   return out;
 }
 
-/** Parse one OP_RETURN as a MAP SET + AIP (BITCOIN_ECDSA) statement of any kind, else null. The signature is NOT checked. */
-export function parseSignedMap(script: Script): ParsedIssue | null {
+/** Parse one OP_RETURN as an issuer statement (MAP app=bWallet type=issue + AIP), else null. */
+export function parseIssueScript(script: Script): ParsedIssue | null {
   const ch = expandChunks(script);
   const ret = ch.findIndex((c) => c.op === OP.OP_RETURN);
   if (ret < 0) return null;
@@ -204,30 +204,77 @@ export function parseSignedMap(script: Script): ParsedIssue | null {
     else parts[parts.length - 1].push(d);
   }
   const str = (b: number[]) => toUTF8(b);
-  const map = parts.find((p) => p.length && str(p[0]) === MAP_PREFIX && str(p[1] ?? []) === 'SET');
-  const aipIdx = parts.findIndex((p) => p.length >= 4 && str(p[0]) === AIP_PREFIX);
-  if (!map || aipIdx < 0) return null;
+  // Canonical layout only: the MAP is the FIRST part (the whole signed region) and the AIP is the second. AIP signs
+  // the concatenated pushes with no boundaries, so a looser parser let anyone replay a real statement's signature
+  // with an unsigned MAP after it (an OP_0 or a re-split prefix push hides the signed MAP): a forged "Issued by".
+  const map = parts[0];
+  const aip = parts[1];
+  if (!map || !aip || map.length < 2 || map.length % 2) return null;
+  if (str(map[0]) !== MAP_PREFIX || str(map[1]) !== 'SET') return null;
+  if (aip.length < 4 || str(aip[0]) !== AIP_PREFIX || str(aip[1]) !== AIP_ALGORITHM) return null;
   const fields: Record<string, string> = {};
-  for (let i = 2; i + 1 < map.length; i += 2) fields[str(map[i])] = str(map[i + 1]);
-  const aip = parts[aipIdx];
-  if (str(aip[1]) !== AIP_ALGORITHM) return null;
-  // Signed bytes: everything before the AIP separator.
-  let pipes = 0;
-  let cut = ch.length;
-  for (let i = ret + 1; i < ch.length; i++) {
-    const d = ch[i].data;
-    if (d && d.length === 1 && d[0] === PIPE && ++pipes === aipIdx) {
-      cut = i;
-      break;
-    }
+  for (let i = 2; i + 1 < map.length; i += 2) {
+    const k = str(map[i]);
+    if (k in fields) return null;
+    fields[k] = str(map[i + 1]);
   }
+  if (fields.app !== ISSUER_APP || fields.type !== 'issue') return null;
+  if (fields.kind !== 'bsv21' && fields.kind !== 'ordinal') return null;
+  if (!/^[0-9a-f]{64}$/.test(fields.script_sha256 ?? '') || !/^0[23][0-9a-f]{64}$/.test(fields.identity_key ?? ''))
+    return null;
+  if ('ticker' in fields && !fields.ticker) return null;
+  // Byte for byte what issueMapScript writes for these fields: same keys, same order, same pushes, nothing extra.
+  const canon = issueMapScript({
+    kind: fields.kind,
+    ticker: fields.ticker ?? null,
+    scriptSha256: fields.script_sha256,
+    identityKey: fields.identity_key,
+  }).chunks.slice(2);
+  if (canon.length !== map.length || canon.some((c, i) => !same(c.data ?? [], map[i]))) return null;
+  // Signed bytes: everything before the first separator (the one between the MAP and the AIP).
+  const cut = ch.findIndex((c, i) => i > ret && c.data?.length === 1 && c.data[0] === PIPE);
+  if (cut < 0) return null;
   return { fields, address: str(aip[2]), signature: aip[3], message: aipMessage(ch.slice(0, cut)) };
 }
 
-/** Parse one OP_RETURN as an issuer statement (MAP app=bWallet type=issue + AIP), else null. */
-export function parseIssueScript(script: Script): ParsedIssue | null {
-  const p = parseSignedMap(script);
-  return p && p.fields.app === ISSUER_APP && p.fields.type === 'issue' ? p : null;
+const same = (a: number[], b: number[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * Parse an OP_RETURN as a MAP SET + AIP statement of ANY kind, in the same canonical layout as parseIssueScript:
+ * MAP is part 0 (the whole signed region), AIP is part 1, and the MAP must be byte for byte what `rebuild(fields)`
+ * writes (exact keys, order and strict values, no empty or extra pushes). `rebuild` returns the unsigned script
+ * for the fields, or null to reject them. The signature is NOT checked.
+ */
+export function parseCanonicalSigned(
+  script: Script,
+  rebuild: (fields: Record<string, string>) => Script | null,
+): ParsedIssue | null {
+  const ch = expandChunks(script);
+  const ret = ch.findIndex((c) => c.op === OP.OP_RETURN);
+  if (ret < 0) return null;
+  const parts: number[][][] = [[]];
+  for (const c of ch.slice(ret + 1)) {
+    const d = c.data ?? [];
+    if (d.length === 1 && d[0] === PIPE) parts.push([]);
+    else parts[parts.length - 1].push(d);
+  }
+  const str = (b: number[]) => toUTF8(b);
+  const map = parts[0];
+  const aip = parts[1];
+  if (parts.length !== 2 || !map || !aip || map.length < 2 || map.length % 2) return null;
+  if (str(map[0]) !== MAP_PREFIX || str(map[1]) !== 'SET') return null;
+  if (aip.length !== 4 || str(aip[0]) !== AIP_PREFIX || str(aip[1]) !== AIP_ALGORITHM) return null;
+  const fields: Record<string, string> = {};
+  for (let i = 2; i + 1 < map.length; i += 2) {
+    const k = str(map[i]);
+    if (k in fields) return null;
+    fields[k] = str(map[i + 1]);
+  }
+  const canon = rebuild(fields)?.chunks.slice(2);
+  if (!canon || canon.length !== map.length || canon.some((c, i) => !same(c.data ?? [], map[i]))) return null;
+  const cut = ch.findIndex((c, i) => i > ret && c.data?.length === 1 && c.data[0] === PIPE);
+  if (cut < 0) return null;
+  return { fields, address: str(aip[2]), signature: aip[3], message: aipMessage(ch.slice(0, cut)) };
 }
 
 /** Does `signature` (compact, BSM) over `message` recover to `address`? */
