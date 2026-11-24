@@ -1,65 +1,45 @@
 import type { OneSatContext } from '@1sat/actions';
 import { inscribeIcon } from '../tickets/mintTicket';
-import { BWALLET_MARK_ICON } from '../names/personalToken';
+import { STORE_BUILD, STORE_NAME_NOTE } from '../storeBuild';
 import { deployToken, type MintedToken } from './mintToken';
-import type { TokenForm } from './token';
+import { cleanToken, type TokenForm } from './token';
 
 /**
  * The icon of a token made with Mint a token. The person's own image is inscribed as its own 1Sat ordinal, and the
- * token's `icon` is that inscription's outpoint (`<txid>_<vout>`, the BSV-21 convention). The default gold coin is
- * used only when the person skips, and the sheet says so before they confirm.
+ * token's `icon` is that inscription's outpoint (`<txid>_<vout>`, the BSV-21 convention). When the person skips there
+ * is no icon field at all on chain; the default gold coin is shown at display time, and the sheet says so.
  *
- * Accepted: PNG and WebP (re-encoded to at most 512 × 512 and 100 KB by the wallet) and SVG after it passes
- * `checkSvg`. Anything else is refused with a plain message.
+ * Every picked image (PNG, JPEG, WebP, HEIC if the browser can decode it, SVG) is drawn onto a canvas and re-encoded
+ * as PNG or WebP of at most 512 × 512 and 100 KB. Only that raster is ever inscribed: an SVG is never inscribed or
+ * parsed by us, it is only drawn by the browser's image decoder (which runs no script and loads nothing outside it).
  */
 
 export const ICON_MAX_BYTES = 100 * 1024;
 export const ICON_MAX_EDGE = 512;
-export const ICON_TYPE_MESSAGE = 'Pick a PNG, WebP or SVG image for the icon.';
+/** Input caps, checked before the image is decoded (file size) and before it is drawn (width × height). */
+export const ICON_INPUT_MAX_BYTES = 12 * 1024 * 1024;
+export const ICON_INPUT_MAX_PIXELS = 40_000_000;
+export const ICON_TYPE_MESSAGE = 'Pick a PNG, JPEG, WebP or SVG image for the icon.';
 export const ICON_TOO_BIG_MESSAGE =
   'That image is still over 100 KB after shrinking it. Pick a simpler or smaller one.';
+export const ICON_INPUT_TOO_BIG_MESSAGE = 'That image is too big to open. Pick one under 12 MB.';
+export const ICON_UNREADABLE_MESSAGE = 'Could not read this image';
+export const ICON_SAVED_MESSAGE = 'Your icon is saved; try the token again';
 export const DEFAULT_ICON_NOTE = 'No image: uses the default coin';
 
-export type IconKind = 'png' | 'webp' | 'svg';
+export type IconKind = 'png' | 'webp' | 'jpeg' | 'heic' | 'svg';
+export type OutputKind = 'png' | 'webp';
+const OUT_TYPE: Record<OutputKind, 'image/png' | 'image/webp'> = { png: 'image/png', webp: 'image/webp' };
 
+/** What the picked file's type says it is (input only). Output is only ever PNG or WebP. */
 export const iconKind = (type: string): IconKind | null => {
   const t = type.toLowerCase().split(';')[0].trim();
   if (t === 'image/png') return 'png';
   if (t === 'image/webp') return 'webp';
+  if (t === 'image/jpeg' || t === 'image/jpg') return 'jpeg';
+  if (t === 'image/heic' || t === 'image/heif') return 'heic';
   if (t === 'image/svg+xml') return 'svg';
   return null;
-};
-
-export type SvgCheck = { ok: true; svg: string } | { ok: false; message: string };
-
-const SVG_BAD = (why: string): SvgCheck => ({ ok: false, message: `That SVG can't be used: it ${why}.` });
-
-/**
- * Checks an SVG for the things that must never be inscribed as an icon. It refuses rather than rewrites, so what is
- * inscribed is exactly what was checked: scripts, event handlers (onload=…), foreignObject, embedded pages
- * (iframe, object, embed), DOCTYPE/ENTITY, `javascript:` and any link or `url()` that isn't a `#fragment` inside the file.
- */
-export const checkSvg = (text: string): SvgCheck => {
-  const svg = text.replace(/^\uFEFF/, '').trim();
-  if (!/<svg[\s>]/i.test(svg)) return SVG_BAD('is not an SVG image');
-  if (/<script/i.test(svg)) return SVG_BAD('contains a script');
-  if (/<foreignObject/i.test(svg)) return SVG_BAD('contains a foreignObject');
-  if (/<(iframe|object|embed|audio|video|link|meta|base)[\s>/]/i.test(svg)) return SVG_BAD('embeds other content');
-  if (/<!DOCTYPE|<!ENTITY|<\?xml-stylesheet/i.test(svg)) return SVG_BAD('declares entities or stylesheets');
-  if (/[\s"'/]on[a-z]+\s*=/i.test(svg)) return SVG_BAD('has an event handler');
-  if (/javascript:|vbscript:/i.test(svg)) return SVG_BAD('has a script link');
-  // Every link must point inside the file ("#id"). http(s):, data:, // and relative paths are all external.
-  for (const m of svg.matchAll(/(?:^|[\s"'/])(?:xlink:)?href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
-    const v = (m[1] ?? m[2] ?? m[3] ?? '').trim();
-    if (!v.startsWith('#')) return SVG_BAD('links to something outside the image');
-  }
-  if (/attributeName\s*=\s*["']?(?:xlink:)?href/i.test(svg)) return SVG_BAD('animates a link');
-  if (/\bsrc\s*=/i.test(svg)) return SVG_BAD('links to something outside the image');
-  for (const m of svg.matchAll(/url\(\s*(["']?)([^)]*)\1\s*\)/gi))
-    if (!m[2].trim().startsWith('#')) return SVG_BAD('links to something outside the image');
-  if (/@import/i.test(svg)) return SVG_BAD('imports a stylesheet');
-  if (/expression\s*\(/i.test(svg)) return SVG_BAD('has a style expression');
-  return { ok: true, svg };
 };
 
 export type RasterEncoder = (
@@ -69,50 +49,119 @@ export type RasterEncoder = (
   quality?: number,
 ) => Promise<File>;
 
-/** The browser encoder: centre-crop to a square, scale to `edge` (never up) and encode. */
-export const canvasEncoder: RasterEncoder = async (file, edge, type, quality) => {
-  const bmp = await createImageBitmap(file);
-  const side = Math.min(bmp.width, bmp.height);
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = Math.min(edge, side);
-  canvas
-    .getContext('2d')!
-    .drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, type, quality));
-  if (!blob || blob.type !== type) throw new Error('Could not read this image');
-  return new File([blob], type === 'image/png' ? 'icon.png' : 'icon.webp', { type });
+type Source = { source: CanvasImageSource; width: number; height: number; close: () => void };
+
+/** Decode with the browser's own decoder. SVG goes through an <img>, which runs no script and fetches nothing. */
+const decode = async (file: File): Promise<Source> => {
+  if (iconKind(file.type) !== 'svg') {
+    try {
+      const bmp = await createImageBitmap(file);
+      return { source: bmp, width: bmp.width, height: bmp.height, close: () => bmp.close?.() };
+    } catch {
+      // fall through to the <img> decoder (some browsers decode HEIC or odd JPEGs only there)
+    }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    // An SVG with no size of its own reports 0: draw it at the full edge.
+    const w = img.naturalWidth || ICON_MAX_EDGE;
+    const h = img.naturalHeight || ICON_MAX_EDGE;
+    return { source: img, width: w, height: h, close: () => URL.revokeObjectURL(url) };
+  } catch (e) {
+    URL.revokeObjectURL(url);
+    throw e;
+  }
 };
 
-/** Re-encode steps, tried in order until one is within the limit. */
+/**
+ * The browser encoder: centre-crop to a square, scale to `edge` (never up) and encode. WebKit's canvas can't make
+ * WebP and hands back a PNG instead; that is fine, the type of what came out is what is returned.
+ */
+export const canvasEncoder: RasterEncoder = async (file, edge, type, quality) => {
+  const src = await decode(file);
+  try {
+    if (!(src.width > 0 && src.height > 0) || src.width * src.height > ICON_INPUT_MAX_PIXELS)
+      throw new Error(ICON_INPUT_TOO_BIG_MESSAGE);
+    const side = Math.min(src.width, src.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = Math.min(edge, side);
+    canvas
+      .getContext('2d')!
+      .drawImage(
+        src.source,
+        (src.width - side) / 2,
+        (src.height - side) / 2,
+        side,
+        side,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, type, quality));
+    const got = blob && (blob.type === 'image/png' || blob.type === 'image/webp') ? blob.type : null;
+    if (!blob || !got) throw new Error(ICON_UNREADABLE_MESSAGE);
+    return new File([blob], got === 'image/png' ? 'icon.png' : 'icon.webp', { type: got });
+  } finally {
+    src.close();
+  }
+};
+
+/** Re-encode steps, tried in order until one is within the limit. A step that fails is skipped. */
 const STEPS: { edge: number; type: 'image/png' | 'image/webp'; quality?: number }[] = [
   { edge: ICON_MAX_EDGE, type: 'image/png' },
   { edge: ICON_MAX_EDGE, type: 'image/webp', quality: 0.9 },
   { edge: 384, type: 'image/webp', quality: 0.8 },
   { edge: 256, type: 'image/webp', quality: 0.8 },
   { edge: 128, type: 'image/webp', quality: 0.8 },
+  { edge: 384, type: 'image/png' },
+  { edge: 256, type: 'image/png' },
+  { edge: 128, type: 'image/png' },
 ];
 
-export type PreparedIcon = { file: File; kind: IconKind };
+export type PreparedIcon = { file: File; kind: OutputKind };
+
+/** True only when the bytes really are a PNG or a WebP, whatever the file claims to be. */
+const rasterKind = async (f: File): Promise<OutputKind | null> => {
+  const b = new Uint8Array(await f.slice(0, 12).arrayBuffer());
+  const at = (i: number, s: string) => [...s].every((c, k) => b[i + k] === c.charCodeAt(0));
+  if (b[0] === 0x89 && at(1, 'PNG') && b[4] === 0x0d) return 'png';
+  if (at(0, 'RIFF') && at(8, 'WEBP')) return 'webp';
+  return null;
+};
 
 /**
  * Validate and prepare a picked image. Throws an Error whose message is shown to the person as it stands.
- * SVG is checked and kept as is; PNG/WebP are squared and re-encoded to fit 512 × 512 and 100 KB.
+ * Every image, SVG included, is re-encoded to a PNG or WebP of at most 512 × 512 and 100 KB, and only that raster is
+ * returned. The output's own bytes are checked to be a raster before it is accepted.
  */
 export const prepareIcon = async (file: File, encode: RasterEncoder = canvasEncoder): Promise<PreparedIcon> => {
-  const kind = iconKind(file.type);
-  if (!kind) throw new Error(ICON_TYPE_MESSAGE);
+  if (!iconKind(file.type)) throw new Error(ICON_TYPE_MESSAGE);
   if (file.size <= 0) throw new Error('That file is empty.');
-  if (kind === 'svg') {
-    if (file.size > ICON_MAX_BYTES) throw new Error(ICON_TOO_BIG_MESSAGE);
-    const res = checkSvg(await file.text());
-    if (!res.ok) throw new Error(res.message);
-    return { file: new File([res.svg], 'icon.svg', { type: 'image/svg+xml' }), kind };
-  }
+  if (file.size > ICON_INPUT_MAX_BYTES) throw new Error(ICON_INPUT_TOO_BIG_MESSAGE);
+  let tooBig = false;
+  let lastError: unknown = null;
   for (const s of STEPS) {
-    const out = await encode(file, s.edge, s.type, s.quality);
-    if (out.size > 0 && out.size <= ICON_MAX_BYTES) return { file: out, kind: iconKind(out.type) ?? kind };
+    let out: File;
+    try {
+      out = await encode(file, s.edge, s.type, s.quality);
+    } catch (e) {
+      lastError = e;
+      continue;
+    }
+    const kind = await rasterKind(out);
+    if (!kind || out.type !== OUT_TYPE[kind]) {
+      lastError = new Error(ICON_UNREADABLE_MESSAGE);
+      continue;
+    }
+    if (out.size > 0 && out.size <= ICON_MAX_BYTES) return { file: out, kind };
+    tooBig = true;
   }
-  throw new Error(ICON_TOO_BIG_MESSAGE);
+  if (tooBig) throw new Error(ICON_TOO_BIG_MESSAGE);
+  throw new Error(lastError instanceof Error ? lastError.message : ICON_UNREADABLE_MESSAGE);
 };
 
 /** What the confirm sheet shows for the icon row, and the line under the picker. */
@@ -126,10 +175,27 @@ export interface MintSteps {
   deploy: typeof deployToken;
 }
 
+/** An icon that is already on chain for the picked file, kept by the caller so a retry never inscribes it twice. */
+export interface SavedIcon {
+  file: File;
+  outpoint: string;
+}
+
+export interface MintExtras {
+  /** The icon already inscribed for this very file (compared by identity). */
+  saved?: SavedIcon | null;
+  /** Called the moment the inscription is confirmed on chain, before the deploy. */
+  onInscribed?: (saved: SavedIcon) => void;
+  /** A store build never mints a token (storeBuild.ts); checked before anything is inscribed. */
+  store?: boolean;
+}
+
 /**
  * The mint, in order: inscribe the picked image (to the person's own key), then deploy with `icon` = the
- * inscription's outpoint. If the inscription fails the error is thrown before the deploy is called, so nothing is
- * minted. Skipping the image deploys with the default coin.
+ * inscription's outpoint. A store build is refused before anything is inscribed. If the inscription fails the error
+ * is thrown before the deploy is called, so nothing is minted. If the inscription is on chain and the deploy then
+ * fails, the caller already holds the outpoint (`onInscribed`) and passes it back as `saved` on retry, so the image
+ * is not inscribed twice; the error says the icon is saved. Skipping the image deploys with no icon field.
  */
 export async function mintWithIcon(
   ctx: OneSatContext,
@@ -137,7 +203,19 @@ export async function mintWithIcon(
   icon: File | null,
   opts: Omit<Parameters<typeof deployToken>[2], 'icon'>,
   steps: MintSteps = { inscribe: inscribeIcon, deploy: deployToken },
+  extras: MintExtras = {},
 ): Promise<MintedToken> {
-  const outpoint = icon ? await steps.inscribe(ctx, icon, form.ticker.trim(), 'token') : null;
-  return steps.deploy(ctx, form, { ...opts, icon: outpoint ?? BWALLET_MARK_ICON });
+  if (extras.store ?? STORE_BUILD) throw new Error(STORE_NAME_NOTE);
+  if (!icon) return steps.deploy(ctx, form, { ...opts, icon: null });
+  let outpoint: string;
+  if (extras.saved && extras.saved.file === icon) outpoint = extras.saved.outpoint;
+  else {
+    outpoint = await steps.inscribe(ctx, icon, cleanToken(form).ticker, 'token', 'token-icon');
+    extras.onInscribed?.({ file: icon, outpoint });
+  }
+  try {
+    return await steps.deploy(ctx, form, { ...opts, icon: outpoint });
+  } catch (e) {
+    throw new Error(ICON_SAVED_MESSAGE, { cause: e });
+  }
 }
