@@ -4,6 +4,7 @@ import {
   inscriptionTicker,
   isInscriptionScript,
   issueMapScript,
+  signableTicker,
   ISSUER_KEY_ID,
   ISSUER_PROTOCOL,
   scriptSha256,
@@ -49,7 +50,7 @@ export function withIssuerSignature(
             const rec: IssueRecord = {
               index,
               scriptSha256: scriptSha256(tokenHex),
-              ticker: kind === 'bsv21' ? inscriptionTicker(tokenHex) : null,
+              ticker: kind === 'bsv21' ? signableTicker(inscriptionTicker(tokenHex)) : null,
               identityKey,
             };
             const unsigned = issueMapScript({ kind, ticker: rec.ticker, scriptSha256: rec.scriptSha256, identityKey });

@@ -105,6 +105,14 @@ const mapPairs = (f: IssueFields): [string, string][] => [
   ['identity_key', f.identityKey.toLowerCase()],
 ];
 
+/**
+ * The ticker to put in a statement, or null. A ticker that is a bare '|' (read as the AIP separator) or that does not
+ * survive a UTF-8 round trip (a leading BOM is stripped on decode) would make the issuer's own statement fail the
+ * canonical check, so it is left out; verifiers read the ticker from the inscription anyway.
+ */
+export const signableTicker = (t: string | null | undefined): string | null =>
+  t && t !== '|' && toUTF8(toArray(t, 'utf8')) === t ? t : null;
+
 /** Unsigned issuer MAP script (sign with AIP before adding to the tx). */
 export function issueMapScript(f: IssueFields): Script {
   const s = new Script().writeOpCode(OP.OP_FALSE).writeOpCode(OP.OP_RETURN);
@@ -215,7 +223,7 @@ export function parseIssueScript(script: Script): ParsedIssue | null {
   const fields: Record<string, string> = {};
   for (let i = 2; i + 1 < map.length; i += 2) {
     const k = str(map[i]);
-    if (k in fields) return null;
+    if (Object.hasOwn(fields, k)) return null;
     fields[k] = str(map[i + 1]);
   }
   if (fields.app !== ISSUER_APP || fields.type !== 'issue') return null;
@@ -267,7 +275,7 @@ export function parseCanonicalSigned(
   const fields: Record<string, string> = {};
   for (let i = 2; i + 1 < map.length; i += 2) {
     const k = str(map[i]);
-    if (k in fields) return null;
+    if (Object.hasOwn(fields, k)) return null;
     fields[k] = str(map[i + 1]);
   }
   const canon = rebuild(fields)?.chunks.slice(2);
