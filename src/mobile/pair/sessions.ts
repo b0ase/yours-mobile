@@ -167,9 +167,9 @@ export const setPairRevoker = (fn: Revoke) => {
   revoke = fn;
 };
 // The call into the approval path. Tests swap it per sessions copy; null puts the real handleSiteCall back.
-let callSite: typeof handleSiteCall = handleSiteCall;
+let siteCallOverride: typeof handleSiteCall | null = null;
 export const setSiteCaller = (fn: typeof handleSiteCall | null) => {
-  callSite = fn ?? handleSiteCall;
+  siteCallOverride = fn;
 };
 const readQueue = (): string[] => {
   try {
@@ -652,7 +652,8 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
     if (login) return reply(l, { t: 'res', id, ...login });
     // The relay's origin is a claim, not proof (audit H1): run under the paired key, never the site's own grants.
     const as = keyOf(l.stored); // this pairing's own key: never shared with another channel claiming the host
-    const r = (await callSite(as, as + '/', action, params, true)) as {
+    const callArgs = [as, as + '/', action, params, true] as const;
+    const r = (await (siteCallOverride ? siteCallOverride(...callArgs) : handleSiteCall(...callArgs))) as {
       success?: boolean;
       data?: unknown;
       error?: string;
