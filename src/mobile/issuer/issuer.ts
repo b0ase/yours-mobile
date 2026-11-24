@@ -192,8 +192,8 @@ export function expandChunks(script: Script): Script['chunks'] {
   return out;
 }
 
-/** Parse one OP_RETURN as an issuer statement (MAP app=bWallet type=issue + AIP), else null. */
-export function parseIssueScript(script: Script): ParsedIssue | null {
+/** Parse one OP_RETURN as a MAP SET + AIP (BITCOIN_ECDSA) statement of any kind, else null. The signature is NOT checked. */
+export function parseSignedMap(script: Script): ParsedIssue | null {
   const ch = expandChunks(script);
   const ret = ch.findIndex((c) => c.op === OP.OP_RETURN);
   if (ret < 0) return null;
@@ -209,7 +209,6 @@ export function parseIssueScript(script: Script): ParsedIssue | null {
   if (!map || aipIdx < 0) return null;
   const fields: Record<string, string> = {};
   for (let i = 2; i + 1 < map.length; i += 2) fields[str(map[i])] = str(map[i + 1]);
-  if (fields.app !== ISSUER_APP || fields.type !== 'issue') return null;
   const aip = parts[aipIdx];
   if (str(aip[1]) !== AIP_ALGORITHM) return null;
   // Signed bytes: everything before the AIP separator.
@@ -223,6 +222,12 @@ export function parseIssueScript(script: Script): ParsedIssue | null {
     }
   }
   return { fields, address: str(aip[2]), signature: aip[3], message: aipMessage(ch.slice(0, cut)) };
+}
+
+/** Parse one OP_RETURN as an issuer statement (MAP app=bWallet type=issue + AIP), else null. */
+export function parseIssueScript(script: Script): ParsedIssue | null {
+  const p = parseSignedMap(script);
+  return p && p.fields.app === ISSUER_APP && p.fields.type === 'issue' ? p : null;
 }
 
 /** Does `signature` (compact, BSM) over `message` recover to `address`? */
