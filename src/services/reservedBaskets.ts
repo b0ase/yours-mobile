@@ -16,6 +16,8 @@ import { APP_NAME } from '../mobile/storeBuild';
 const TRUST_SITE_BASKET = 'bwalletx.trust-site';
 /** The "Block this site" record: kept in the same store so "Forget site" in Settings removes it (unblocks). */
 export const BLOCK_SITE_BASKET = 'bwalletx.block-site';
+/** One site's "See your balance (read-only)" grant (services/balanceSummary.ts): a record, never a basket a site can read. */
+export const BALANCE_READ_BASKET = 'bwalletx.balance-read';
 
 const RESERVED = new Set([
   'default',
@@ -130,7 +132,13 @@ export const revokeReservedBasketGrants = async (store: BasketGrantStore, adminO
   for (const g of grants) {
     const k = g.key;
     if (k.type !== 'basket' || k.originator === adminOriginator) continue;
-    if (k.basket === TRUST_SITE_BASKET || k.basket === BLOCK_SITE_BASKET || !isReservedBasket(k.basket)) continue;
+    if (
+      k.basket === TRUST_SITE_BASKET ||
+      k.basket === BLOCK_SITE_BASKET ||
+      k.basket === BALANCE_READ_BASKET ||
+      !isReservedBasket(k.basket)
+    )
+      continue;
     await store.deleteGrant(k as never);
     removed++;
   }

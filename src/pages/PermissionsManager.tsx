@@ -10,6 +10,7 @@ import { ALLOWANCES_ENABLED } from '../services/allowanceFlag';
 import type { Envelope } from '../services/envelopes';
 import { ENVELOPES_ENABLED } from '../mobile/storeBuild';
 import { BLOCK_SITE_BASKET } from '../services/reservedBaskets';
+import { BALANCE_READ_BASKET } from '../services/balanceSummary';
 
 /** Permission token as returned by WPM — passed through as-is from background */
 interface PermissionToken {
@@ -120,6 +121,7 @@ const friendlyBasketName = (name?: string): string => {
     'admin spending-authorization': 'Spending authorizations (admin)',
     'admin certificate-access': 'Certificate access (admin)',
     'bwalletx.trust-site': 'Sign-in and signing without asking',
+    [BALANCE_READ_BASKET]: 'Your balance (read-only)',
     [BLOCK_SITE_BASKET]: 'Every request from this site is refused. Revoke All Access to unblock it.',
   };
   return map[name] ?? name;
@@ -139,7 +141,11 @@ export const formatPermissionDetail = (perm: PermissionToken, spent?: number): s
       return `${name}${level}`;
     }
     case 'basket':
-      if (perm.basketName === 'bwalletx.trust-site' || perm.basketName === BLOCK_SITE_BASKET)
+      if (
+        perm.basketName === 'bwalletx.trust-site' ||
+        perm.basketName === BLOCK_SITE_BASKET ||
+        perm.basketName === BALANCE_READ_BASKET
+      )
         return friendlyBasketName(perm.basketName);
       return `Can access: ${friendlyBasketName(perm.basketName)}`;
     case 'spending': {

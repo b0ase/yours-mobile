@@ -11,6 +11,7 @@
  */
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { isMintPrivateAction, isMintPrivateCode } from '../../services/mintPrivateAction';
+import { isBalanceSummaryAction } from '../../services/balanceSummary';
 import { USER_DENIED_CODE, USER_DENIED_MESSAGE, isUserDenied } from '../../services/userDenied';
 import { ONE_APPROVAL_SEAL } from '../../services/sealPass';
 import { NATIVE_SEAL_ENABLED } from '../storeBuild';
@@ -94,6 +95,7 @@ export const parseXdmRequest = (data: unknown): XdmRequest | null => {
     !(
       isCWIEventName(d.call) ||
       isMintPrivateAction(d.call) ||
+      isBalanceSummaryAction(d.call) ||
       d.call === LAST_VERIFICATION_CALL ||
       d.call === CONFIRM_USER_CALL ||
       d.call === FRAME_BITSIGN_CAPABILITIES_CALL ||

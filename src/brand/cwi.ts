@@ -21,6 +21,7 @@ import { attachMintPrivate } from '../mintPrivatePage';
 import { attachTwetch } from '../twetchPage';
 import { attachSwap } from '../swapPage';
 import { attachProveHoldings } from '../proveHoldingsPage';
+import { attachBalanceSummary } from '../balanceSummaryPage';
 
 export { CWIEventName };
 
@@ -54,6 +55,8 @@ attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 attachSwap(CWI as unknown as Record<string, unknown>, transport);
 // window.CWI.proveHoldings() (services/proveHoldingsSite.ts): bChatX / bit-sign link token addresses, origin from Chrome.
 attachProveHoldings(CWI as unknown as Record<string, unknown>, transport);
+// window.CWI.getBalanceSummary() (services/balanceSummary.ts): totals only, behind a read-only grant per site.
+attachBalanceSummary(CWI as unknown as Record<string, unknown>, transport);
 
 // In a sub-frame, nothing is exposed until the content script says the background allowed this frame (an https
 // frame inside an https top-level page; services/frameAccess.ts). Every call is re-checked there anyway.

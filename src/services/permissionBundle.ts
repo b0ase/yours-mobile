@@ -24,6 +24,7 @@ import {
   SIGN_IN_NAME,
 } from './sharedKeySigning';
 import { APP_NAME } from '../mobile/storeBuild';
+import { BALANCE_READ_DETAIL, BALANCE_READ_LINE } from './balanceSummary';
 import { approvalKindForSheet } from './approvalKind';
 
 export { BLOCK_SITE_BASKET };
@@ -66,6 +67,11 @@ export interface BundleRequest {
   addedLive?: boolean;
   /** The wallet's own "Reconnect to <site>?" line after a disconnect (services/reconnectGate.ts). */
   reconnect?: boolean;
+  /**
+   * The wallet's own "See your balance (read-only)" line (services/balanceSummary.ts). Answered by the wallet, never
+   * sent to the permissions manager; Allow stores that site's balance grant.
+   */
+  balanceRead?: boolean;
   /**
    * The wallet's own "use your wallet inside <top>?" line for a site framed by another (services/frameAccess.ts):
    * the top-level host. Never a grant, never "Don't ask again".
@@ -736,6 +742,7 @@ const sharedLineText = (r: BundleRequest): string => {
 const lineText = (r: BundleRequest): string => {
   switch (r.type) {
     case 'protocol': {
+      if (r.balanceRead) return BALANCE_READ_LINE;
       if (isIdentityKeyRequest(r)) return 'See your public identity (the key that names you)';
       const label = actionLabelOf(r);
       if (label) return labelLineText(label);
@@ -789,6 +796,7 @@ const lineDetail = (r: BundleRequest): string => {
   const parts: string[] = [];
   switch (r.type) {
     case 'protocol':
+      if (r.balanceRead) return BALANCE_READ_DETAIL;
       parts.push(`protocol "${protoName(r)}" level ${protoLevel(r)}`);
       if (r.counterparty) parts.push(`counterparty ${r.counterparty}`);
       break;
@@ -889,7 +897,12 @@ export const buildSheetModel = (bundle: Pick<PermissionBundle, 'originator' | 'i
     const sealAlone = !!r.seal && isSealRequestId(r.requestID) && !r.addedLive && bundle.items.length === 1;
     // An action label is never pre-ticked (review of #558, M1): its grant reads every payment with that label, from
     // any app; the user ticks it knowingly. A payment beside it still pays (its own labels ride on the payment).
-    const checked = once || sealAlone || (!risky && !r.addedLive && !isSharedKeyRequest(r) && !actionLabelOf(r));
+    // A read-only balance line is routine and ticked like the identity line: totals only, nothing moves.
+    const checked =
+      once ||
+      sealAlone ||
+      (!!r.balanceRead && !r.addedLive) ||
+      (!risky && !r.addedLive && !isSharedKeyRequest(r) && !actionLabelOf(r));
     lines.push({
       requestID: r.requestID,
       ...(once ? { once: true } : {}),

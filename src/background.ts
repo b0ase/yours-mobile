@@ -85,6 +85,19 @@ import type {
   TwetchPrompt,
 } from './promptProtocol';
 import { isProveHoldingsAction, runSiteProveHoldings } from './services/proveHoldingsSite';
+import {
+  BALANCE_READ_BASKET,
+  BALANCE_READ_PROTOCOL_NAME,
+  BALANCE_REQUEST_PREFIX,
+  BALANCE_SUMMARY_ACTION,
+  BalanceSummaryMemory,
+  isBalanceReadRequestId,
+  readBalanceSummary,
+  runBalanceSummary,
+  type BalanceAnswer,
+} from './services/balanceSummary';
+import { heldBsv21BalancesWithout } from './mobile/airdrops/heldBalances';
+import { readQuarantineMirror } from './mobile/airdrops/inbox';
 import { proveHoldings } from './mobile/chat/holdings';
 import { BchatClient, defaultHttp } from './mobile/chat/api';
 import { walletSigner } from './mobile/chat/signer';
@@ -1712,6 +1725,45 @@ const askReconnect = (originator: string): Promise<void> =>
     permissionBundler.add(request);
   });
 
+let balanceReadCounter = 0;
+/**
+ * "See your balance (read-only)" (services/balanceSummary.ts): one line on the site's connect sheet. Rides the reconnect
+ * request plumbing (RECONNECT_ID_PREFIX: answered here, never sent to the permission manager). Resolves with the
+ * expiry the sheet's Remember choice gives the grant on Allow, false on Not now, close or timeout. A blocked site is
+ * refused before any sheet, like every other sheet path.
+ */
+const askBalanceRead = async (originator: string): Promise<BalanceAnswer> => {
+  if (await siteBlocked(originator)) return false;
+  return new Promise<BalanceAnswer>((resolve) => {
+    const requestID = `${BALANCE_REQUEST_PREFIX}${Date.now().toString(36)}-${(balanceReadCounter++).toString(36)}`;
+    const request = {
+      requestID,
+      type: 'protocol',
+      originator,
+      // Display only: the sheet reads balanceRead. No key is derived from it.
+      protocolID: [1, BALANCE_READ_PROTOCOL_NAME],
+      counterparty: 'self',
+      balanceRead: true,
+      reason: 'Read your balance',
+    } as unknown as BundledRequest & BundleRequest;
+    pendingPermissionRequests.set(requestID, {
+      request,
+      resolve: ((expiry?: number) => resolve({ expiry })) as () => void,
+      reject: () => resolve(false),
+    });
+    // Unanswered, it expires like every other sheet (nothing was read).
+    setTimeout(() => {
+      if (pendingPermissionRequests.has(requestID)) expireSpendRequest(requestID);
+    }, PROMPT_EXPIRY_MS);
+    try {
+      permissionBundler.add(request);
+    } catch {
+      pendingPermissionRequests.delete(requestID);
+      resolve(false);
+    }
+  });
+};
+
 /**
  * One Seal sheet for bit-sign's sign-and-seal (services/sealPass.ts, owner 2 Nov 2026). sealPasses: per site, the
  * approval that lets exactly that seal's sign and its very next matching payment through. The sheet is a synthetic
@@ -3237,7 +3289,12 @@ if (isInServiceWorker) {
     if (message?.action === 'bwxSiteDisconnect') {
       if (sender.id === chrome.runtime.id && sender.frameId === 0 && sender.origin) {
         const { originator } = originatorForOrigin(sender.origin);
-        if (originator) void updateReconnectState((s) => ({ state: noteDisconnect(s, originator, Date.now()), result: null }));
+        if (originator) {
+          void updateReconnectState((s) => ({ state: noteDisconnect(s, originator, Date.now()), result: null }));
+          // Disconnect revokes the site's balance read too: its grant is deleted, and until it reconnects the grant
+          // reads as absent (needsReconnect) even where the store was not open to delete it.
+          void revokeBalanceGrant(originator);
+        }
         // Disconnected: the panel drops the site's look.
         if (sender.tab?.id !== undefined && siteOriginTabs.delete(sender.tab.id)) void pushSiteTheme();
       }
@@ -4365,6 +4422,17 @@ if (!(
         });
     };
 
+    // The balance read has its own path (services/balanceSummary.ts), ahead of the wallet-open below: a locked wallet
+    // answers LOCKED at once, so this call never opens the unlock window or waits the pre-approval 60 s.
+    if (!isFromExtension && message?.action === BALANCE_SUMMARY_ACTION) {
+      if (typeof message.originator === 'string' && message.originator !== ADMIN_ORIGINATOR) {
+        const origin = message.originator;
+        void updateConnectionLog((l) => recordCall(l, origin, String(message.action)));
+      }
+      runDappRequest(processCWIBalanceSummary(message, sendResponse));
+      return true;
+    }
+
     let gateAsk: Promise<boolean> | undefined;
     // A site's call never waits silently on the wallet: settling is capped at 5 s, a locked wallet shows its unlock
     // UI at once and the person has 60 s to unlock (services/preApprovalTimeout.ts). Our own pages wait as before.
@@ -4388,6 +4456,14 @@ if (!(
             return true;
           case CWIEventName.GET_NETWORK:
             runDappRequest(processCWIGetNetwork(message, sendResponse));
+            return true;
+          case BALANCE_SUMMARY_ACTION:
+            // A site only; our own pages have their own balance code.
+            if (isFromExtension) {
+              sendResponse({ type: BALANCE_SUMMARY_ACTION, success: false, error: 'Unauthorized', code: 'ORIGIN' });
+              return true;
+            }
+            runDappRequest(processCWIBalanceSummary(message, sendResponse));
             return true;
           case CWIEventName.GET_HEIGHT:
             runDappRequest(processCWIGetHeight(message, sendResponse));
@@ -5548,6 +5624,86 @@ if (!(
     const list = (v as Record<string, unknown>)[k];
     return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
   };
+  /**
+   * What window.CWI.getBalanceSummary needs (services/balanceSummary.ts). The grant is a record under the site's own
+   * originator in the account's permission store, so it is per site and per account. Disconnect and Forget site remove
+   * it (revokeBalanceGrant, revokeBasketGrantsFor), and a site that has disconnected reads as ungranted until the
+   * connect sheet is answered again (needsReconnect).
+   */
+  const balanceMemory = new BalanceSummaryMemory();
+  const balanceAccountId = () =>
+    chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
+  const balanceSummaryDeps = () => ({
+    locked: async () => !(await checkIsAuthenticated()),
+    account: balanceAccountId,
+    blocked: (o: string) => siteBlocked(o),
+    granted: async (o: string) => {
+      const store = accountContext?.permissionStore;
+      if (!store) return false;
+      const now = Date.now();
+      if (await updateReconnectState((s) => ({ result: needsReconnect(s, o, now) })).catch(() => true)) return false;
+      const grant = await store.findGrant({
+        type: 'basket',
+        originator: normalizeOriginator(o),
+        basket: BALANCE_READ_BASKET,
+      });
+      return blockActive(grant as { expiry: number } | null);
+    },
+    grant: async (o: string, expiry?: number) => {
+      const store = accountContext?.permissionStore;
+      if (!store) throw new Error('Wallet is locked');
+      await store.putGrant({
+        key: { type: 'basket', originator: normalizeOriginator(o), basket: BALANCE_READ_BASKET },
+        // The sheet's Remember choice: an hour when off, the usual grant length when on.
+        expiry: withDefaultExpiry(expiry ?? 0),
+        grantedAt: Date.now(),
+        reason: 'See your balance (read-only)',
+      } as Parameters<typeof store.putGrant>[0]);
+      // The person just answered this site's connect sheet: it is connected again.
+      await updateReconnectState((s) => ({ state: noteReconnected(s, o, Date.now()), result: null })).catch(
+        () => undefined,
+      );
+    },
+    denied: (o: string) => basketDenials.has(normalizeOriginator(o), BALANCE_READ_BASKET),
+    noteDenied: (o: string) => basketDenials.add(normalizeOriginator(o), BALANCE_READ_BASKET),
+    ask: (o: string) => askBalanceRead(o),
+    read: () => {
+      const ctx = accountContext;
+      if (!ctx) throw new Error('The wallet is still starting up. Try again in a moment.');
+      return readBalanceSummary({
+        // The number the wallet card shows (funding basket, deposits waiting, change on its way), not the basket alone.
+        total: async () => (await ctx.balanceSplit()).total,
+        // The phone background has no localStorage: the UI mirrors the quarantined ids into storage.
+        quarantined: () => readQuarantineMirror(balanceAccountId()),
+        // The held amounts as the wallet's own token list shows them (getBsv21Balances, quarantine removed).
+        held: async (quarantined) => {
+          const wpm = (await ensureWallet()) as unknown as Record<string, unknown>;
+          const admin = new Proxy(
+            {},
+            {
+              get: (_t, m: string) =>
+                typeof wpm[m] === 'function'
+                  ? (args: unknown) => (wpm[m] as (a: unknown, o?: string) => unknown)(args, ADMIN_ORIGINATOR)
+                  : wpm[m],
+            },
+          ) as unknown as Parameters<typeof createContext>[0];
+          const services = ctx.syncContext.services;
+          if (!services) throw new Error('The wallet is still starting up. Try again in a moment.');
+          return heldBsv21BalancesWithout(createContext(admin, { chain: 'main', services }), quarantined);
+        },
+      });
+    },
+  });
+  /** Disconnect: the site's balance grant is deleted (when the account is open) and its cached answer dropped. */
+  const revokeBalanceGrant = async (originator: string): Promise<void> => {
+    balanceMemory.forget(normalizeOriginator(originator));
+    const store = accountContext?.permissionStore;
+    if (!store) return;
+    await store
+      .deleteGrant({ type: 'basket', originator: normalizeOriginator(originator), basket: BALANCE_READ_BASKET } as never)
+      .catch(() => undefined);
+  };
+
   const proveHoldingsDeps = {
     locked: async () => !(await checkIsAuthenticated()),
     granted: async (origin: string) => (await proveGrants()).includes(origin),
@@ -6185,6 +6341,9 @@ if (!(
           const pending = pendingPermissionRequests.get(r.requestID);
           pendingPermissionRequests.delete(r.requestID);
           if (!pending) return;
+          // A balance line carries the sheet's Remember choice: its grant expires as the other lines' grants do.
+          // (askBalanceRead's resolve takes that expiry; every other line's resolve ignores arguments.)
+          if (isBalanceReadRequestId(r.requestID)) return (pending.resolve as (e?: number) => void)(expiry);
           if (isReconnectRequestId(r.requestID) || isSealRequestId(r.requestID)) return pending.resolve();
           try {
             if (!wallet) throw new Error('Wallet is locked');
@@ -6925,6 +7084,16 @@ if (!(
         error: error instanceof Error ? error.message : JSON.stringify(error),
       });
     }
+    return true;
+  };
+
+  /** window.CWI.getBalanceSummary(): totals only, behind the site's own read-only grant (services/balanceSummary.ts). */
+  const processCWIBalanceSummary = async (message: { originator?: string }, sendResponse: CallbackResponse) => {
+    const origin = message.originator && message.originator !== ADMIN_ORIGINATOR ? message.originator : undefined;
+    const r = await runBalanceSummary(origin, balanceSummaryDeps(), APP_NAME, balanceMemory);
+    sendResponse({ type: BALANCE_SUMMARY_ACTION, ...r });
+    // A call from the site keeps it connected, after the gap above was measured to its previous call.
+    if (origin) reconnectSeen(origin);
     return true;
   };
 

@@ -1,4 +1,8 @@
 import type { HistoryRow } from './txHistory';
+import { BALANCE_READ_BASKET } from '../../services/balanceSummary';
+
+/** The key a balance-read grant counts under in ConnectionRow.grants (named for people in ConnectionsView). */
+export const BALANCE_GRANT_KEY = 'balance-read';
 
 /**
  * Connections log (docs/HISTORY-V2-PLAN.md §3): which sites and apps used this wallet over BRC-100 / CWI (the
@@ -149,7 +153,8 @@ export const mergeConnections = (
     const r = get(hostOf(g.originator));
     r.originator = g.originator;
     for (const p of g.permissions) {
-      const t = p.type ?? 'other';
+      // The balance read is stored as a basket grant under a private name; Connections shows it as what it is.
+      const t = p.type === 'basket' && p.basketName === BALANCE_READ_BASKET ? BALANCE_GRANT_KEY : (p.type ?? 'other');
       r.grants[t] = (r.grants[t] ?? 0) + 1;
       if (t === 'spending' && typeof p.authorizedAmount === 'number')
         r.spendLimitSats = (r.spendLimitSats ?? 0) + p.authorizedAmount;

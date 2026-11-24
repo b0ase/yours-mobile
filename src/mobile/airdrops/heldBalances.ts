@@ -10,3 +10,7 @@ type Ctx = Parameters<typeof getBsv21Balances.execute>[0];
 
 export const heldBsv21Balances = async (ctx: Ctx): Promise<Bsv21Balance[]> =>
   withoutQuarantined(await getBsv21Balances.execute(ctx, {}), activeQuarantine());
+
+/** The same list with a quarantine set the caller already has (the background reads it from the UI's mirror). */
+export const heldBsv21BalancesWithout = async (ctx: Ctx, quarantined: Set<string>): Promise<Bsv21Balance[]> =>
+  withoutQuarantined(await getBsv21Balances.execute(ctx, {}), quarantined);

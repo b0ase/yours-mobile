@@ -11,6 +11,7 @@ import { attachMintPrivate } from './mintPrivatePage';
 import { attachTwetch } from './twetchPage';
 import { attachSwap } from './swapPage';
 import { attachThemeOffer } from './themeOfferPage';
+import { attachBalanceSummary } from './balanceSummaryPage';
 
 // Re-export for backwards compatibility
 export { CWIEventName };
@@ -46,6 +47,8 @@ attachTwetch(CWI as unknown as Record<string, unknown>, transport);
 attachSwap(CWI as unknown as Record<string, unknown>, transport);
 // window.CWI.theme.offer (services/themeOfferSite.ts): a family site offers its look, one sheet, origin from Chrome.
 attachThemeOffer(CWI as unknown as Record<string, unknown>, transport);
+// window.CWI.getBalanceSummary() (services/balanceSummary.ts): totals only, behind a read-only grant per site.
+attachBalanceSummary(CWI as unknown as Record<string, unknown>, transport);
 
 // Inject CWI on window. In a sub-frame only once the content script says the background allowed this frame
 // (https frame inside an https top; services/frameAccess.ts).
