@@ -40,7 +40,7 @@ const SVG_BAD = (why: string): SvgCheck => ({ ok: false, message: `That SVG can'
  * (iframe, object, embed), DOCTYPE/ENTITY, `javascript:` and any link or `url()` that isn't a `#fragment` inside the file.
  */
 export const checkSvg = (text: string): SvgCheck => {
-  const svg = text.replace(/^﻿/, '').trim();
+  const svg = text.replace(/^\uFEFF/, '').trim();
   if (!/<svg[\s>]/i.test(svg)) return SVG_BAD('is not an SVG image');
   if (/<script/i.test(svg)) return SVG_BAD('contains a script');
   if (/<foreignObject/i.test(svg)) return SVG_BAD('contains a foreignObject');
