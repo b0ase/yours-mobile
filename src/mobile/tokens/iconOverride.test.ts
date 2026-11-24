@@ -55,7 +55,16 @@ function fakeFetch(txs: Transaction[], listed = txs.map((t) => t.id('hex'))) {
   }) as unknown as typeof fetch;
 }
 
-beforeEach(() => clearOverrideCache());
+// Other test files leave their own localStorage shims on globalThis; start each test from a clean one.
+beforeEach(() => {
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
+  clearOverrideCache();
+});
 
 describe('icon override: reading a tx', () => {
   test('a valid override by the recorded issuer is accepted', () => {

@@ -112,6 +112,7 @@ export const pickIcon = (deployIcon: string, override: IconOverride | null): str
 const LS = 'bwallet.iconoverride.v1.';
 const TTL = 3600_000;
 const mem = new Map<string, { at: number; value: IconOverride | null }>();
+const stored = new Set<string>();
 const inflight = new Map<string, Promise<IconOverride | null>>();
 
 export const cachedOverride = (tokenId: string, now = Date.now()): IconOverride | null | undefined => {
@@ -135,12 +136,21 @@ const remember = (tokenId: string, value: IconOverride | null, now: number) => {
   mem.set(id, { at: now, value });
   try {
     globalThis.localStorage?.setItem(LS + id, JSON.stringify({ at: now, value }));
+    stored.add(id);
   } catch {
     /* storage blocked */
   }
 };
 
-export const clearOverrideCache = () => mem.clear();
+export const clearOverrideCache = () => {
+  mem.clear();
+  try {
+    for (const id of stored) globalThis.localStorage?.removeItem(LS + id);
+    stored.clear();
+  } catch {
+    /* storage blocked */
+  }
+};
 
 /** Candidate txids that mention the token, from bit-sign's index. Only a pointer: validity is checked locally. */
 export async function listOverrideTxids(f: Fetch, tokenId: string): Promise<string[] | null> {
