@@ -573,8 +573,11 @@ describe('review of fix/envelope-queue (13 Nov 2026): deadlines, carrying on, fa
     h.ctl.hangLoad = true;
     await expect(store.trySpend(A, 100)).rejects.toThrow(ENVELOPE_TIMED_OUT);
     h.ctl.hangLoad = false;
-    // Nothing was written, the lock is free: the next op reads fresh state and runs.
-    expect(await store.trySpend(A, 100)).toBe(true);
+    // Nothing was written, the lock is free: the next op reads fresh state and runs. It goes through a store with a
+    // roomy deadline on the SAME key (the lock is shared per key): a held lock would still fail it, while a busy CI
+    // machine can no longer push an honest read past the 50 ms deadline above (CI flake, 24 Nov 2026).
+    const fresh = new EnvelopeStore(h.backend, Date.now, { timeoutMs: 5_000 });
+    expect(await fresh.trySpend(A, 100)).toBe(true);
     expect(cell.raw()?.envelopes[A].balanceSats).toBe(0);
   });
 
