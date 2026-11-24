@@ -3,18 +3,10 @@
  * bphone-put with other terms (token B at 999/min) would otherwise make the next settings open re-sign those terms
  * quietly. The owner card is what the owner submitted, so the served card differs and the wallet asks.
  */
-import { afterAll, expect, mock, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
 
-const realConfig = { ...(await import('../names/config')) };
-mock.module('../names/config', () => ({
-  ...realConfig,
-  BWALLET_PAYMAIL_DOMAIN: 'bwalletx.com',
-  BWALLET_PAYMAIL_API: 'https://pay.test',
-}));
-afterAll(() => {
-  mock.module('../names/config', () => realConfig);
-});
+// Paymail domain and API (https://pay.test) come from src/testing/preload.ts.
 
 const { loadMyProfile, readOwnerCard, saveMyProfile } = await import('./bphone');
 const { planPayoutResign, signPayee } = await import('./payee');

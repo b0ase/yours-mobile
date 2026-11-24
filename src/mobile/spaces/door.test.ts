@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { P2PKH, PrivateKey, Transaction, Utils, type WalletInterface } from '@bsv/sdk';
 import * as bmailClient from '../bmail/client';
 import type { StampNet } from '../bmail/client';
@@ -20,44 +20,34 @@ let internalized = 0;
 let listed: { messageBox?: string; acceptPayments?: boolean }[] = [];
 /** The door's own rules are tested with the BEEF check mocked; the money tests below run the real verifyPostage. */
 let realCheck = false;
-// Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
-// import other names from it.
-const realMessageBox = { ...(await import('@bsv/message-box-client')) };
-mock.module('@bsv/message-box-client', () => ({
-  ...realMessageBox,
-  MessageBoxClient: class {
-    async listMessages(a: { messageBox?: string; acceptPayments?: boolean }) {
-      listed.push(a);
-      return inbox.filter((m) => !acked.includes(m.messageId));
-    }
-    async acknowledgeMessage({ messageIds }: { messageIds: string[] }) {
-      acked.push(...messageIds);
-    }
-    async sendMessage(m: { recipient: string; messageBox: string; body: string }) {
-      sent.push(m);
-    }
-  },
-}));
-// A copy taken before mocking (the mock patches the module namespace in place).
-const realClient = { ...bmailClient };
-mock.module('../bmail/client', () => ({
-  // Keep the real exports (bun module mocks leak across test files; bMail's own tests need sendMail).
-  ...realClient,
-  bmailHost: () => 'https://box.test',
+// The message box client and the BEEF check go in through door.ts's seam (setDoorSeam): no module mock, and the
+// real seam comes back when this file is done.
+class FakeMessageBoxClient {
+  async listMessages(a: { messageBox?: string; acceptPayments?: boolean }) {
+    listed.push(a);
+    return inbox.filter((m) => !acked.includes(m.messageId));
+  }
+  async acknowledgeMessage({ messageIds }: { messageIds: string[] }) {
+    acked.push(...messageIds);
+  }
+  async sendMessage(m: { recipient: string; messageBox: string; body: string }) {
+    sent.push(m);
+  }
+}
+const realClient = bmailClient;
+
+const door = await import('./door');
+door.setDoorSeam({
+  host: () => 'https://box.test',
+  newClient: () => new FakeMessageBoxClient() as never,
   verifyPostage: async (...a: Parameters<typeof bmailClient.verifyPostage>) => {
     if (realCheck) return realClient.verifyPostage(...a);
     if (!(a[2] ?? true)) return { sats: paidSats };
     internalized++;
     return { sats: paidSats, fresh: true };
   },
-}));
-// Put both modules back when this file is done: bMail's own tests fetch through the real verifyPostage.
-afterAll(() => {
-  mock.module('@bsv/message-box-client', () => realMessageBox);
-  mock.module('../bmail/client', () => realClient);
 });
-
-const door = await import('./door');
+afterAll(() => door.setDoorSeam(null));
 const { checkDoorRequest, parseDoorRequest, runDoor, doorPriceUsd, minAcceptSats, needsHandCheck, loadLedger } = door;
 
 const store = new Map<string, string>();

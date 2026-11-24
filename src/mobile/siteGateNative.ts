@@ -12,12 +12,14 @@ export const nativeAuth = async (
   reason: string,
   host: string,
   isNative: () => boolean = canDeviceOwnerAuth,
+  // Tests hand in the prompt; production loads the real plugin below.
+  plugin?: Pick<typeof import('./native').YoursNative, 'deviceOwnerAuth'>,
 ): Promise<AuthResult> => {
   // The web wallet and Desktop have no OS prompt: 'unavailable', so the caller asks for the wallet password. On the
   // web the plugin proxy still HAS the method and throws "not implemented on web", which stopped every seal on
   // web.bwalletx.com (found 16 Nov 2026 signing a room document as a test account).
   if (!isNative()) return { status: 'unavailable' };
-  const { YoursNative } = await import('./native');
+  const YoursNative = plugin ?? (await import('./native')).YoursNative;
   if (!YoursNative.deviceOwnerAuth) return { status: 'unavailable' };
   let r: Awaited<ReturnType<NonNullable<typeof YoursNative.deviceOwnerAuth>>>;
   try {

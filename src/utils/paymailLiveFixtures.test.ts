@@ -1,17 +1,11 @@
-import { afterEach, expect, mock, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
 // Live answers from pay.bwallet.space, 25 Oct 2026 (owner's iPhone send to bwalletX@ / bwalletX.X@bwalletX.com).
 import pki from '../mobile/names/testdata/paymail-bwalletx-x/pki.json';
 import p2p from '../mobile/names/testdata/paymail-bwalletx-x/p2p.json';
 import caps from '../mobile/names/testdata/paymail-bwalletx-x/bsvalias.json';
 import { captureConsole, msgOf } from '../testing/captureConsole';
 
-// As the mobile build defines it (vite.config.mobile.ts), so bwalletx.com counts as our domain.
-const realConfig = await import('../mobile/names/config');
-mock.module('../mobile/names/config', () => ({
-  ...realConfig,
-  BWALLET_PAYMAIL_DOMAIN: 'bwalletx.com',
-  BWALLET_PAYMAIL_API: 'https://pay.bwallet.space',
-}));
+// bwalletx.com counts as our domain: src/testing/preload.ts defines it as the mobile build does (vite.config.mobile.ts).
 const { resolvePaymail, destinationFor, parseRecipient } = await import('../mobile/names/names');
 const { sendBsv } = await import('./guardedSendBsv');
 

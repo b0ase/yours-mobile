@@ -216,9 +216,21 @@ export const checkDoorRequest = (
 
 // ── wallet + message box ──
 
+/** What the door takes from bMail and the message box. Tests swap it with setDoorSeam; production uses the real ones. */
+type DoorSeam = {
+  host: typeof bmailHost;
+  newClient: (a: { walletClient: WalletInterface; host: string }) => MessageBoxClient;
+  verifyPostage: typeof verifyPostage;
+};
+const realSeam: DoorSeam = { host: bmailHost, newClient: (a) => new MessageBoxClient(a), verifyPostage };
+let seam: DoorSeam = realSeam;
+export const setDoorSeam = (s: Partial<DoorSeam> | null) => {
+  seam = s ? { ...realSeam, ...s } : realSeam;
+};
+
 const mbox = (wallet: WalletInterface) => {
-  const host = bmailHost();
-  const client = new MessageBoxClient({ walletClient: wallet, host });
+  const host = seam.host();
+  const client = seam.newClient({ walletClient: wallet, host });
   // Its server is the wallet's own: no site may sign in to it as the user (services/ownBackendKeys.ts). The default
   // host's key is seeded; an override host's counts once this client has connected.
   trackOwnAuthFetch('door', (client as unknown as { authFetch?: unknown }).authFetch, host);
@@ -260,7 +272,7 @@ export const payAtDoor = async (
 const deliver = (wallet: WalletInterface, req: DoorRequest) =>
   mbox(wallet).sendMessage(
     { recipient: req.to, messageBox: DOOR_BOX, body: JSON.stringify(req), skipEncryption: true },
-    bmailHost(),
+    seam.host(),
   );
 
 const pendingKey = (me: string) => `bwx.spacedoor.pending.${me}`;
@@ -294,7 +306,7 @@ export const resendDoorRequest = (wallet: WalletInterface, req: DoorRequest) => 
 export const readDoorReply = async (wallet: WalletInterface, id: string): Promise<DoorReply | null> => {
   const client = mbox(wallet);
   // acceptPayments off: the client would otherwise take in any payment a message carries, unchecked.
-  const msgs = await client.listMessages({ messageBox: DOOR_REPLY_BOX, host: bmailHost(), acceptPayments: false });
+  const msgs = await client.listMessages({ messageBox: DOOR_REPLY_BOX, host: seam.host(), acceptPayments: false });
   let found: DoorReply | null = null;
   const ack: string[] = [];
   for (const m of msgs) {
@@ -304,7 +316,7 @@ export const readDoorReply = async (wallet: WalletInterface, id: string): Promis
       ack.push(m.messageId);
     }
   }
-  if (ack.length) await client.acknowledgeMessage({ messageIds: ack, host: bmailHost() }).catch(() => undefined);
+  if (ack.length) await client.acknowledgeMessage({ messageIds: ack, host: seam.host() }).catch(() => undefined);
   return found;
 };
 
@@ -336,7 +348,7 @@ export const runDoor = async (
   const hostKey = a.hostKey.toLowerCase();
   const client = mbox(wallet);
   // acceptPayments off: the only money taken in here is the door payment, after verifyPostage's network check.
-  const msgs = await client.listMessages({ messageBox: DOOR_BOX, host: bmailHost(), acceptPayments: false });
+  const msgs = await client.listMessages({ messageBox: DOOR_BOX, host: seam.host(), acceptPayments: false });
   const ledger = loadLedger(hostKey);
   const round: DoorRound = { admitted: 0, refused: 0, check: 0 };
   const now = a.now ?? Date.now;
@@ -345,7 +357,7 @@ export const runDoor = async (
   for (const m of msgs) {
     const req = parseDoorRequest(m.body);
     const done = () =>
-      client.acknowledgeMessage({ messageIds: [m.messageId], host: bmailHost() }).catch(() => undefined);
+      client.acknowledgeMessage({ messageIds: [m.messageId], host: seam.host() }).catch(() => undefined);
     if (!req) {
       await done();
       continue;
@@ -396,7 +408,7 @@ export const runDoor = async (
     if (since !== undefined && now() >= since && now() - since < DOOR_CONFIRM_MS) continue;
     // The wallet checks the BEEF: txid, output amount, and that it pays a key only I can derive. Read-only first.
     const env = { from: req.from, postage: req.payment } as Envelope;
-    const look = await verifyPostage(wallet, env, false);
+    const look = await seam.verifyPostage(wallet, env, false);
     if (look.sats < minAcceptSats(a.priceSats ?? 0)) {
       round.lastNote = look.note ?? 'Payment not valid';
       // e.g. wallet locked: nothing was learnt about the payment, so nothing is refused or recorded.
@@ -409,7 +421,7 @@ export const runDoor = async (
     // What the payment is for: this request, by id and by what it asks (a later request with the same id and
     // another ticket address is another use).
     const use = `door ${req.id} ${req.ticker} ${req.ordAddress}`;
-    const took = await verifyPostage(wallet, env, true, a.net, use);
+    const took = await seam.verifyPostage(wallet, env, true, a.net, use);
     if (took.sats <= 0) {
       round.lastNote = took.note ?? 'Payment not accepted';
       if (!wait(took)) await refuse(round.lastNote);
@@ -472,7 +484,7 @@ const reply = (client: MessageBoxClient, req: DoorRequest, r: { ok: boolean; tic
   return client
     .sendMessage(
       { recipient: req.from, messageBox: DOOR_REPLY_BOX, body: JSON.stringify(body), skipEncryption: true },
-      bmailHost(),
+      seam.host(),
     )
     .catch(() => undefined);
 };

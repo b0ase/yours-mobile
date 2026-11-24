@@ -6,7 +6,7 @@
  * plus paymail history restore (mobile/names/paymail.ts) against a mocked endpoint. No network, random keys.
  */
 import 'fake-indexeddb/auto';
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { Beef, KeyDeriver, MerklePath, P2PKH, PrivateKey, Random, Transaction, Utils } from '@bsv/sdk';
 import { Services, StorageIdb, StorageProvider, Wallet, WalletStorageManager } from '@bsv/wallet-toolbox-client';
 import { createWalletCore } from '@1sat/wallet';
@@ -18,19 +18,7 @@ import {
   type SwitchDeps,
 } from '../services/restoreFromRemote';
 
-// Paymail on, pointed at the mocked endpoint (outside a build the constants are empty and paymail is off).
-// Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
-// import other names from it.
-const realNamesConfig = { ...(await import('../mobile/names/config')) };
-mock.module('../mobile/names/config', () => ({
-  ...realNamesConfig,
-  BWALLET_PAYMAIL_DOMAIN: 'bwalletx.com',
-  BWALLET_PAYMAIL_API: 'https://pay.test',
-  LEGACY_PAYMAIL_DOMAINS: ['bwallet.space'],
-  SIBLING_PAYMAIL_DOMAINS: ['bmailx.com'],
-  BWALLET_PAYMAIL_DOMAINS: ['bwalletx.com', 'bmailx.com'],
-  OPNS_PROFILE_DOMAIN: 'bwalletx.com',
-}));
+// Paymail is on and pointed at https://pay.test by src/testing/preload.ts.
 
 const HEIGHT = 971004;
 const REMOTE = 'https://wallet.1sat.test';

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { Beef, PrivateKey, Transaction, Utils } from '@bsv/sdk';
 import type { OneSatContext } from '@1sat/actions';
 import { tokenReceiveScript, type SwapTerms } from './swap';
@@ -7,12 +7,13 @@ import { tokenReceiveScript, type SwapTerms } from './swap';
 type SendInput = { tokenId: string; recipients: { amount: string; destination: Record<string, unknown> }[] };
 const sends: SendInput[] = [];
 let sendTx: (input: SendInput) => { txid: string; tx: number[] };
-mock.module('../../../services/tokenSpendGuard', () => ({
-  guardedSendBsv21: { execute: async (_ctx: unknown, input: SendInput) => (sends.push(input), sendTx(input)) },
-}));
-// The operator pause reads STATUS_URL: answer "nothing paused" here instead of mocking the killSwitch module.
-// mock.module lasts for the whole bun process, so a no-op assertNotPaused leaked into later files and let the agent
-// account pay while paused (bizAgent.test on CI's Linux file order, #558).
+// Handed to offerSwap through its `send` option: no module mock of the token spend guard.
+const send = {
+  execute: async (_ctx: unknown, input: SendInput) => (sends.push(input), sendTx(input)),
+} as never;
+// The operator pause reads STATUS_URL: answer "nothing paused" here instead of mocking the killSwitch module
+// (a module mock lasts for the whole bun process: a no-op assertNotPaused leaked into later files and let the agent
+// account pay while paused, bizAgent.test on CI's Linux file order, #558).
 const { STATUS_URL, resetKillSwitchCache } = await import('../../config/killSwitch');
 const realFetch = globalThis.fetch;
 const statusStub = (async (u: string | URL | Request) => {
@@ -77,7 +78,7 @@ beforeEach(() => {
 });
 
 const run = (ref = 'c1', ask: () => Promise<boolean | 'expired'> = async () => true) =>
-  offerSwap(ctxFor(), { terms: terms(ref), quote: { rate: 50, source: 'test' }, ask });
+  offerSwap(ctxFor(), { terms: terms(ref), quote: { rate: 50, source: 'test' }, ask, send });
 
 describe('swap offer set-aside (owner 30 Oct 2026: "set-aside tokens are not in the wallet yet", every retry)', () => {
   test('the self-send names counterparty self, so sendBsv21 files it in the token basket with its key', async () => {

@@ -1,22 +1,10 @@
-import { afterAll, describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
+import { P1SAT_PROTOCOL } from '@1sat/actions';
 import { Utils } from '@bsv/sdk';
 
 const outputs: { outpoint: string; tags?: string[]; customInstructions?: string }[] = [];
-// Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
-// import other names from it.
-const realActions = { ...(await import('@1sat/actions')) };
-// ...and hand listOrdinals back to the real one once this file is done.
-let active = true;
-afterAll(() => {
-  active = false;
-});
-mock.module('@1sat/actions', () => ({
-  ...realActions,
-  listOrdinals: {
-    execute: (...a: Parameters<typeof realActions.listOrdinals.execute>) =>
-      active ? Promise.resolve({ outputs }) : realActions.listOrdinals.execute(...a),
-  },
-}));
+// The wallet's ordinals come in through ownerSigner's `list` parameter: no module mock.
+const list = async () => outputs;
 const { isListed, keyOf, ownerSigner } = await import('./ownership');
 const { PodcastListedError } = await import('./podcasts');
 
@@ -39,7 +27,7 @@ describe('podcast ownership signer', () => {
       customInstructions: JSON.stringify({ protocolID: [1, 'P1SAT'], keyID: `${TX}.2` }),
     });
     const { ctx, calls } = fakeCtx();
-    const r = await ownerSigner(ctx, `${TX}_0`)('bwx-podcast:p:n');
+    const r = await ownerSigner(ctx, `${TX}_0`, list)('bwx-podcast:p:n');
     expect(calls.sig!.data).toEqual(Utils.toArray('bwx-podcast:p:n', 'utf8'));
     expect(calls.sig!.hashToDirectlySign).toBeUndefined();
     expect(calls.sig!.keyID).toBe(`${TX}.2`);
@@ -49,7 +37,7 @@ describe('podcast ownership signer', () => {
   });
   test('default key is P1SAT with keyID = current outpoint', () => {
     expect(keyOf({ outpoint: `${TX}_5` })).toEqual({
-      protocolID: realActions.P1SAT_PROTOCOL as never,
+      protocolID: P1SAT_PROTOCOL as never,
       keyID: `${TX}.5`,
     });
   });
@@ -58,7 +46,7 @@ describe('podcast ownership signer', () => {
     outputs.push({ outpoint: `${TX}_1`, tags: [`origin:${TX}_0`, 'ordlock'] });
     expect(isListed(outputs[0])).toBe(true);
     const { ctx, calls } = fakeCtx();
-    await expect(ownerSigner(ctx, `${TX}_0`)('m')).rejects.toBeInstanceOf(PodcastListedError);
+    await expect(ownerSigner(ctx, `${TX}_0`, list)('m')).rejects.toBeInstanceOf(PodcastListedError);
     expect(calls.sig).toBeUndefined();
   });
 });

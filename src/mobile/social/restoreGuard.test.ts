@@ -1,12 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { getKeys } from '../../utils/keys';
 import { keepGlobals } from '../../testing/stubGlobals';
 
 // bun runs every test file in one process: put back the globals this file swaps so they can't leak into the next.
 keepGlobals('localStorage');
 
-const realConfig = { ...(await import('../names/config')) };
-mock.module('../names/config', () => ({ ...realConfig, BWALLET_PAYMAIL_DOMAIN: 'bwalletx.com' }));
+// Paymail domain bwalletx.com comes from src/testing/preload.ts.
 // A pending Continue with X sign-in for the account being restored (real socialLogin, no module mock, so
 // the other social tests in this process see the real module).
 const ls = new Map<string, string>();

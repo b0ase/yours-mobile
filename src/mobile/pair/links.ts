@@ -70,10 +70,12 @@ export const takePairLink = () => {
 };
 export const onPairLink = (l: () => void) => (listeners.add(l), () => void listeners.delete(l));
 
-if (Capacitor.isNativePlatform()) {
-  void CapApp.addListener('appUrlOpen', ({ url }) => offerPairLink(url));
-  void CapApp.getLaunchUrl().then((r) => offerPairLink(r?.url));
-}
+/** Native app: warm links (appUrlOpen) and the cold launch URL. `app` is the Capacitor App plugin; tests hand in a fake. */
+export const startNativeLinks = (app: Pick<typeof CapApp, 'addListener' | 'getLaunchUrl'> = CapApp) => {
+  void app.addListener('appUrlOpen', ({ url }) => offerPairLink(url));
+  void app.getLaunchUrl().then((r) => offerPairLink(r?.url));
+};
+if (Capacitor.isNativePlatform()) startNativeLinks();
 
 /**
  * Extension: opening https://www.bwallet.space/pair?… in Chrome is caught by the background worker

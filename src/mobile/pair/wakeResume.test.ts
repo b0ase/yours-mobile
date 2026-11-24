@@ -7,16 +7,13 @@
  * A pairing that has really ended answers REPAIR_NEEDED, never "Permission denied.", and a forged second pairing
  * still gets nothing (#80). Same local setup as lapseRevoke.test.ts: fake WebSocket, throwaway keys, .invalid host.
  */
-import { afterAll, describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
 import { PAIR_VERSION, Sealer, deriveSession, pairUrl, type PairMessage } from '../../pair/protocol';
 import { keepGlobals, stubGlobals } from '../../testing/stubGlobals';
 
 let siteCall: () => Promise<unknown> = async () => ({ success: true, data: { publicKey: '02ab' } });
 // Keep the real exports: bun module mocks are process-wide, and a partial mock breaks later files (lapseRevoke.test.ts).
-const realDappBrowser = { ...(await import('../dappBrowser')) };
-mock.module('../dappBrowser', () => ({ ...realDappBrowser, handleSiteCall: () => siteCall() }));
-
 class FakeWS {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -79,6 +76,8 @@ keepGlobals('localStorage');
 // A private copy of sessions.ts (see lapseRevoke.test.ts): its started flag, live sockets, hiddenAt and mirror cache
 // would otherwise carry over from whichever pair test ran first.
 const sessions = (await import('./sessions?wakeResume' as string)) as typeof import('./sessions');
+// handleSiteCall is swapped for this copy of sessions.ts only (no module mock, so nothing leaks to other files).
+sessions.setSiteCaller(() => siteCall());
 // Leave this copy inert when the file ends: its reconnect timers would otherwise fire during the next file and act on
 // that file's localStorage and WebSocket stubs (bun runs every test file in one process).
 afterAll(() => sessions.__resetPairingForTests());

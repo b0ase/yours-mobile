@@ -1,7 +1,8 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
+// The real asset imports (bun's file loader gives each file's path; a bundle gives its hashed URL): no module mock.
+import echoesUrl from './vexvoid-echoes-in-the-abyss.mp3';
+import coverUrl from './vexvoid-cover.jpg';
 
-mock.module('./vexvoid-echoes-in-the-abyss.mp3', () => ({ default: '/assets/echoes.mp3' }));
-mock.module('./vexvoid-cover.jpg', () => ({ default: '/assets/cover.jpg' }));
 const { FEATURED_TRACKS, featuredQueue } = await import('./featured');
 
 describe('featured tracks', () => {
@@ -13,7 +14,7 @@ describe('featured tracks', () => {
     const q = featuredQueue(FEATURED_TRACKS[0]);
     expect(q).toHaveLength(1);
     expect(q[0].title).toBe('Echoes in the Abyss · V3XV0ID');
-    expect(q[0].url).toBe('/assets/echoes.mp3');
+    expect(q[0].url).toBe(echoesUrl);
   });
 });
 
@@ -22,6 +23,6 @@ describe('the album', () => {
     const { HEADLINE_ALBUM } = await import('./featured');
     expect(HEADLINE_ALBUM.title).toBe('Echoes in the Abyss');
     expect(HEADLINE_ALBUM.headline).toBe(FEATURED_TRACKS[0]);
-    expect(HEADLINE_ALBUM.cover).toBe('/assets/cover.jpg');
+    expect(HEADLINE_ALBUM.cover).toBe(coverUrl);
   });
 });

@@ -4,7 +4,7 @@
  * signed by author.identityKey; the author is shown as the $name whose signed binding points at that key, else the
  * short key, never the typed name.
  */
-import { afterAll, describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
 import { isReservedProtocol } from '../../services/reservedProtocols';
@@ -20,20 +20,15 @@ import {
   type ContractEnvelope,
 } from './contractNft';
 
-// contractAuthorLabel resolves the signed handle through names.ts: answer it here, then put the real module back.
-const realNames = { ...(await import('../names/names')) };
+// contractAuthorLabel resolves the signed handle through names.ts: answer it here, through its `resolve` parameter.
 let resolved: { pubkey?: string; nameBinding?: string; forwardsTo?: string } | Error = new Error('offline');
-mock.module('../names/names', () => ({
-  ...realNames,
-  resolvePaymail: async () => {
-    if (resolved instanceof Error) throw resolved;
-    return resolved;
-  },
-}));
-afterAll(() => {
-  mock.module('../names/names', () => realNames);
-});
-const { contractAuthorLabel } = await import('./market');
+const resolve = (async () => {
+  if (resolved instanceof Error) throw resolved;
+  return resolved;
+}) as unknown as typeof import('../names/names').resolvePaymail;
+const { contractAuthorLabel: realAuthorLabel } = await import('./market');
+const contractAuthorLabel = (f: Parameters<typeof realAuthorLabel>[0], env: ContractEnvelope) =>
+  realAuthorLabel(f, env, resolve);
 
 const asWallet = (w: ProtoWallet) => ({
   getPublicKey: () => w.getPublicKey({ identityKey: true }),

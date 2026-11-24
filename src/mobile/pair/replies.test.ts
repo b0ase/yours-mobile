@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
 import { REPLY_MAX, REPLY_TTL_MS, ReplyBook } from './replies';
 import { PAIR_VERSION, Sealer, deriveSession, pairUrl, type PairMessage } from '../../pair/protocol';
@@ -70,19 +70,6 @@ const settle = () => new Promise<void>((r) => setImmediate(r));
 
 let calls = 0;
 let gate: Promise<void> = Promise.resolve();
-// Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
-// import other names from it (openDappBrowser). Only handleSiteCall is replaced; no other test calls it.
-const realDappBrowser = { ...(await import('../dappBrowser')) };
-mock.module('../dappBrowser', () => ({
-  ...realDappBrowser,
-  handleSiteCall: async () => {
-    calls++;
-    poke();
-    await gate;
-    return { success: true, data: { txid: `tx${calls}` } };
-  },
-}));
-
 class FakeWS {
   static OPEN = 1;
   static all: FakeWS[] = [];
@@ -145,9 +132,15 @@ Object.assign(globalThis, {
 // warm depending on whether relay/e2e/pair.e2e.test.ts happened to load it first.)
 // A private copy (?replies): initPairing registers its foreground listener once per module instance, so with a
 // shared instance another pair test file could already have started it on that file's document stub.
-const { beginPairing, initPairing, forget, pairedSites, setAgentPairDeps, __resetPairingForTests } = (await import(
-  './sessions?replies' as string
-)) as typeof import('./sessions');
+const { beginPairing, initPairing, forget, pairedSites, setAgentPairDeps, setSiteCaller, __resetPairingForTests } =
+  (await import('./sessions?replies' as string)) as typeof import('./sessions');
+// handleSiteCall is counted and gated for this copy of sessions.ts only (no module mock, so nothing leaks to other files).
+setSiteCaller(async () => {
+  calls++;
+  poke();
+  await gate;
+  return { success: true, data: { txid: `tx${calls}` } };
+});
 // Sessions are revived only for the account that paired them (accountBind.test.ts).
 setAgentPairDeps({ ctx: undefined, currentId: '1ReplyTestAccount', accountCount: 1 });
 // Leave no live socket or reconnect timer behind for later test files.

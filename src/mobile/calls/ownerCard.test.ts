@@ -5,22 +5,14 @@
  * now compares with the card the owner last saved on this device (readOwnerCard), which nothing else writes.
  * Real bphone.ts over a fake paymail server (fetch) and an in-memory localStorage.
  */
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { PrivateKey, ProtoWallet } from '@bsv/sdk';
 import { keepGlobals } from '../../testing/stubGlobals';
 import type { BPhoneProfile, RateCard } from './rateCard';
 
 keepGlobals('localStorage', 'fetch');
-const realConfig = { ...(await import('../names/config')) };
-mock.module('../names/config', () => ({
-  ...realConfig,
-  BWALLET_PAYMAIL_DOMAIN: 'bwalletx.com',
-  BWALLET_PAYMAIL_API: 'https://pay.test',
-}));
-afterAll(() => {
-  mock.module('../names/config', () => realConfig);
-});
+// Paymail domain and API (https://pay.test) come from src/testing/preload.ts.
 const { loadMyProfile, readOwnerCard, saveMyProfile } = await import('./bphone');
 const { planPayoutResign, signPayee } = await import('./payee');
 

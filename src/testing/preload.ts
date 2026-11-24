@@ -9,3 +9,11 @@
  * what every test file expects.
  */
 import 'framer-motion';
+
+/**
+ * Paymail on, pointed at a test endpoint. names/config.ts reads these two build-time defines once, when it is first
+ * imported (outside a build they are undefined and paymail is off). Setting them here, before any test file, means
+ * the tests that need paymail on no longer mock the config module: bun's `mock.module` outlives its file, so the
+ * fake config leaked into whichever file ran next. See src/test/noMockModule.test.ts.
+ */
+Object.assign(globalThis, { __PAYMAIL_DOMAIN__: 'bwalletx.com', __PAYMAIL_API__: 'https://pay.test' });

@@ -3,19 +3,11 @@
  * revived for whichever wallet was restored next. Sessions are now bound to the account that paired them, and the
  * wipe closes and forgets them. Same local setup as lapseRevoke.test.ts: fake WebSocket, throwaway keys, .invalid host.
  */
-import { afterAll, describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
 import { PAIR_VERSION, pairUrl } from '../../pair/protocol';
 import { normalizeOriginator } from '@1sat/wallet';
 import { stubGlobals } from '../../testing/stubGlobals';
-
-// Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
-// import other names from it (openDappBrowser). Only handleSiteCall is replaced; no other test calls it.
-const realDappBrowser = { ...(await import('../dappBrowser')) };
-mock.module('../dappBrowser', () => ({
-  ...realDappBrowser,
-  handleSiteCall: async () => ({ success: true, data: {} }),
-}));
 
 class FakeWS {
   static all: FakeWS[] = [];
@@ -52,6 +44,8 @@ stubGlobals({
 // A private copy of sessions.ts for this file: bun shares one module registry across test files, and its
 // started flag, live sockets and document listener would otherwise carry over from whichever pair test ran first.
 const sessions = (await import('./sessions?accountBind' as string)) as typeof import('./sessions');
+// handleSiteCall is swapped for this copy of sessions.ts only (no module mock, so nothing leaks to other files).
+sessions.setSiteCaller(async () => ({ success: true, data: {} }));
 // Leave this copy inert when the file ends: its reconnect timers would otherwise fire during the next file and act on
 // that file's localStorage and WebSocket stubs (bun runs every test file in one process).
 afterAll(() => sessions.__resetPairingForTests());

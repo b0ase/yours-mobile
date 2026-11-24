@@ -306,6 +306,7 @@ export const claimContract = async (ctx: OneSatContext, outpoint: string) => {
 export const contractAuthorLabel = async (
   f: Fetch,
   env: ContractEnvelope,
+  resolve: typeof resolvePaymail = resolvePaymail, // tests answer the lookup here; production uses the real one
 ): Promise<{ label: string; named: boolean } | null> => {
   const key = await contractAuthorKey(env);
   if (!key) return null;
@@ -313,7 +314,7 @@ export const contractAuthorLabel = async (
   const [alias, domain] = typeof handle === 'string' ? handle.toLowerCase().split('@') : [];
   if (alias && domain && isOurDomain(domain)) {
     try {
-      const r = await resolvePaymail(f, `${alias}@${domain}`);
+      const r = await resolve(f, `${alias}@${domain}`);
       // A forward is declared by the paymail server, not signed by the name's owner: show the name only when the
       // handle itself resolves to the key, never through a forward (review of 00176fbe).
       if (!r.forwardsTo && r.pubkey?.toLowerCase() === key && r.nameBinding === 'signed')

@@ -166,6 +166,11 @@ export const setReturnPlatform = (p: ReturnPlatform | null) => {
 export const setPairRevoker = (fn: Revoke) => {
   revoke = fn;
 };
+// The call into the approval path. Tests swap it per sessions copy; null puts the real handleSiteCall back.
+let callSite: typeof handleSiteCall = handleSiteCall;
+export const setSiteCaller = (fn: typeof handleSiteCall | null) => {
+  callSite = fn ?? handleSiteCall;
+};
 const readQueue = (): string[] => {
   try {
     const q = JSON.parse(localStorage.getItem(REVOKE_QUEUE) || '[]');
@@ -647,7 +652,7 @@ async function onRequest(l: Live, id: string, action: string, params: unknown) {
     if (login) return reply(l, { t: 'res', id, ...login });
     // The relay's origin is a claim, not proof (audit H1): run under the paired key, never the site's own grants.
     const as = keyOf(l.stored); // this pairing's own key: never shared with another channel claiming the host
-    const r = (await handleSiteCall(as, as + '/', action, params, true)) as {
+    const r = (await callSite(as, as + '/', action, params, true)) as {
       success?: boolean;
       data?: unknown;
       error?: string;

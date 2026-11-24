@@ -55,10 +55,10 @@ export const ownedOrigins = async (ctx: OneSatContext | undefined): Promise<Set<
  * Throws when the wallet doesn't hold it, PodcastListedError when it is listed for sale.
  */
 export const ownerSigner =
-  (ctx: OneSatContext, origin: string): OwnerSigner =>
+  (ctx: OneSatContext, origin: string, list: (ctx: OneSatContext) => Promise<Out[]> = listAll): OwnerSigner =>
   async (message) => {
     const want = normOutpoint(origin);
-    const o = (await listAll(ctx)).find((x) => originOf(x) === want);
+    const o = (await list(ctx)).find((x) => originOf(x) === want);
     if (!o) throw new Error('This podcast NFT is not in your wallet.');
     if (isListed(o)) throw new PodcastListedError();
     const k = keyOf(o);

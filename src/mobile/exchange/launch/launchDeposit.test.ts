@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { OneSatContext } from '@1sat/actions';
+import type { LaunchTickets } from './launchNet';
 import { P2PKH } from '@bsv/sdk';
 import { keepGlobals } from '../../../testing/stubGlobals';
 
@@ -21,18 +22,15 @@ const P2PEPE = '0ed3811d11dfb91827d3d5c9946a9ec186162ca0d327ca2fa5bd759c58ded6a3
 const P2PEPE_FUND = '1BFy5kxyLydSikv5gBiHd6EozNkfwVKJYJ';
 
 const steps: string[] = [];
-// Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
-// import other names from it.
-const realMintTicket = { ...(await import('../../tickets/mintTicket')) };
-mock.module('../../tickets/mintTicket', () => ({
-  ...realMintTicket,
+// The tickets calls go in through deployLaunch's `tickets` parameter: no module mock.
+const tickets = {
   deployBsv21: async () => (steps.push('deploy'), VESTTEST),
   chatClient: async () => {
     steps.push('room');
     throw new Error('no session');
   },
   openRoom: async () => null,
-}));
+} as unknown as LaunchTickets;
 
 const {
   deriveFeeAddress,
@@ -134,22 +132,34 @@ describe('launch flow (one Allow)', () => {
   const form = { ...emptyLaunchForm(), name: 'Vest Test', ticker: 'VESTTEST', supply: '1000000' };
   test('deploy, then the deposit, then the room', async () => {
     const { ctx, paid } = fakeCtx(status({ fee_address: VESTTEST_FUND, fee_per_output: 1000 }));
-    const r = await deployLaunch(ctx, form, defaultLaunchOptions(), {
-      icon: null,
-      launchFeeSats: 0,
-      depositSats: 10_010_000,
-    });
+    const r = await deployLaunch(
+      ctx,
+      form,
+      defaultLaunchOptions(),
+      {
+        icon: null,
+        launchFeeSats: 0,
+        depositSats: 10_010_000,
+      },
+      tickets,
+    );
     expect(steps.slice(0, 3)).toEqual(['deploy', 'deposit', 'room']);
     expect(r.indexError).toBeNull();
     expect(paid[0][0].satoshis).toBe(10_010_000);
   });
   test('a failed deposit is reported (the launch still stands), and the retry pays once', async () => {
     const bad = fakeCtx(status({ fee_address: VESTTEST_FUND, fee_per_output: 1000 }), true);
-    const r = await deployLaunch(bad.ctx, form, defaultLaunchOptions(), {
-      icon: null,
-      launchFeeSats: 0,
-      depositSats: 10_010_000,
-    });
+    const r = await deployLaunch(
+      bad.ctx,
+      form,
+      defaultLaunchOptions(),
+      {
+        icon: null,
+        launchFeeSats: 0,
+        depositSats: 10_010_000,
+      },
+      tickets,
+    );
     expect(r.launch.tokenId).toBe(VESTTEST);
     expect(r.indexError).toMatch(/Insufficient funds/);
 
