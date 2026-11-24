@@ -1802,7 +1802,20 @@ async function lookUpUnsure(
       return rest;
     };
     if (f.found === 'building') {
-      if (p.notFound !== undefined || p.notFoundFirstAt !== undefined) store.save(voidEvidence(p));
+      // A live candidate also ends any failed-set clock: a same-size swap (an old blind failed row purged as our
+      // blind row flips) keeps the key, so the old clock must not carry over.
+      if (
+        p.notFound !== undefined ||
+        p.notFoundFirstAt !== undefined ||
+        p.notFoundLastAt !== undefined ||
+        p.failedSeenAt !== undefined ||
+        p.failedSetKey !== undefined
+      ) {
+        const { failedSeenAt: _s, failedSetKey: _k, ...rest } = voidEvidence(p);
+        void _s;
+        void _k;
+        store.save(rest);
+      }
       return 'unknown';
     }
     if (f.found === 'failed') {

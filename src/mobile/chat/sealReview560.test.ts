@@ -1632,4 +1632,25 @@ describe('Round 7: only exact or blind seal rows hold the clock; the clock is pe
     expect(r.store.list()[0].notFound).toBeUndefined(); // voided again
     expect(r.log).toEqual([]);
   });
+
+  test('a live candidate ends the failed-set clock: a same-size swap never inherits the old clock', async () => {
+    const r = rig();
+    r.set([row('', 'failed')]); // an old blind failed row (another document's, perhaps)
+    r.at(8 * MIN);
+    expect(await r.run()).toBe('kept'); // first sight of '1:'
+    expect(r.store.list()[0].failedSetKey).toBe('1:');
+    r.set([row('', 'failed'), row('', 'unsigned')]); // our blind row, still building
+    r.step(10_000);
+    expect(await r.run()).toBe('kept');
+    expect(r.store.list()[0].failedSeenAt).toBeUndefined();
+    expect(r.store.list()[0].failedSetKey).toBeUndefined();
+    r.set([row('', 'failed')]); // the old row purged as ours flips: the key is '1:' again
+    r.step(2 * MIN + 1);
+    expect(await r.run()).toBe('kept');
+    const p = r.store.list()[0];
+    expect(p.notFound).toBeUndefined(); // not skipped on the old clock
+    expect(p.failedSetKey).toBe('1:');
+    expect(p.failedSeenAt).toBe(1_000_000_000_000 + 8 * MIN + 10_000 + 2 * MIN + 1); // a fresh clock
+    expect(r.log).toEqual([]);
+  });
 });
