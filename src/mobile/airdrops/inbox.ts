@@ -262,6 +262,7 @@ export const saveInbox = (account: string, s: InboxState, st: Store | null = sto
   } catch {
     /* storage full or blocked: the inbox still works this session */
   }
+  mirrorQuarantine(account, st);
   emit();
 };
 export const loadItems = (account: string, st: Store | null = store()): { items: AirdropItem[]; at: number } => {
@@ -278,6 +279,7 @@ export const saveItems = (account: string, items: AirdropItem[], at: number, st:
   } catch {
     /* ignore */
   }
+  mirrorQuarantine(account, st);
   emit();
 };
 
@@ -298,6 +300,7 @@ export const saveSolicited = (account: string, ids: string[], st: Store | null =
   } catch {
     /* ignore */
   }
+  mirrorQuarantine(account, st);
 };
 
 /**
@@ -308,10 +311,55 @@ export const quarantineFor = (account: string, st: Store | null = store()): Set<
   const solicited = account ? loadSolicited(account, st) : null;
   return solicited ? quarantinedTokenIds(loadItems(account, st).items, loadInbox(account, st), solicited) : new Set();
 };
+
+// The background (extension service worker, phone background Worker) has no localStorage and never sets the active
+// account, so it cannot compute the set. The UI mirrors it per account into chrome.storage.local; the background reads
+// that and, until it has been written once, shows sites no tokens at all (fail closed: services/balanceSummary.ts).
+export const QUARANTINE_MIRROR_PREFIX = 'bw-quarantine-mirror:';
+export type MirrorArea = {
+  get: (k: string) => Promise<Record<string, unknown>>;
+  set: (v: Record<string, unknown>) => Promise<void>;
+};
+const chromeLocal = (): MirrorArea | null => {
+  try {
+    return (globalThis as { chrome?: { storage?: { local?: MirrorArea } } }).chrome?.storage?.local ?? null;
+  } catch {
+    return null;
+  }
+};
+/** Writes this account's quarantined token ids where the background can read them. Called whenever its inputs change. */
+export const mirrorQuarantine = (
+  account: string,
+  st: Store | null = store(),
+  area: MirrorArea | null = chromeLocal(),
+) => {
+  if (!account || !area) return;
+  try {
+    void area.set({ [QUARANTINE_MIRROR_PREFIX + account]: [...quarantineFor(account, st)] }).catch(() => undefined);
+  } catch {
+    /* the background keeps failing closed until a write lands */
+  }
+};
+/** The mirrored set, or null when it has never been written for this account (unknown: callers fail closed). */
+export const readQuarantineMirror = async (
+  account: string,
+  area: MirrorArea | null = chromeLocal(),
+): Promise<Set<string> | null> => {
+  if (!account || !area) return null;
+  try {
+    const v = (await area.get(QUARANTINE_MIRROR_PREFIX + account))[QUARANTINE_MIRROR_PREFIX + account];
+    return Array.isArray(v) ? new Set(v.filter((x): x is string => typeof x === 'string')) : null;
+  } catch {
+    return null;
+  }
+};
+
 let activeAccount = '';
 /** The account whose Quarantine the send/list paths honour (set by useAirdrops and the wallet page). */
 export const setQuarantineAccount = (account: string) => {
+  const changed = !!account && account !== activeAccount;
   activeAccount = account || activeAccount;
+  if (changed) mirrorQuarantine(account);
 };
 export const activeQuarantine = (): Set<string> => quarantineFor(activeAccount);
 /** Quarantined NFT outpoints (normalised txid_vout) for the active account. */

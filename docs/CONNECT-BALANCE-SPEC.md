@@ -7,13 +7,28 @@ the separate repo `bwalletx-connect`, which a build run may not touch, so the sp
 
 `window.CWI.getBalanceSummary()` resolves `{ sats: number, tokens: [{ id, sym, dec, amountRaw }] }`.
 
-- `sats`: spendable coins in the wallet's default basket.
-- `tokens[].amountRaw`: a base-10 string in the token's smallest step (it can pass 2^53). `dec` is how many decimals to show.
+- `sats`: the balance the wallet card shows (`balanceSplit().total`: spendable coins, deposits waiting to be swept and
+  change on its way), the same number the app shows the person.
+- `tokens[].amountRaw`: the amount the wallet's own token list shows (`getBsv21Balances`), a base-10 string in the
+  token's smallest step (it can pass 2^53). `dec` is how many decimals to show.
+- Tokens that arrived unasked (the wallet's Quarantine) are never listed: an airdropped token id could be used to link
+  a person across sites. The wallet's page mirrors its quarantine list into storage for the background to read; until
+  that has been written once for the account, `tokens` is empty (no tokens rather than unfiltered ones).
 - The first call per site opens one line, "See your balance (read-only)", on the connect sheet. If the app calls
-  `connect()` and `balance()` together, both lines land on the same sheet (the wallet's merge window).
-- Allow is remembered for that site only, for the usual grant length, and removed by Disconnect or Forget site.
+  `connect()` and `balance()` together, both lines land on the same sheet (the wallet's merge window). Calls that
+  arrive while the sheet is open share its one answer.
+- Allow is remembered for that site only, for the usual grant length (an hour if the sheet's Remember is off). It is
+  removed by Disconnect or Forget site, and a site that has disconnected is asked again.
+- A blocked site is refused without a sheet. Not now stands for the browser session (cleared by Forget site).
+- The grant belongs to the account that was active when the sheet opened. If the account changed before Allow, nothing
+  is granted (`ACCOUNT_CHANGED`).
+- The answer is reused for a few seconds per account and site, so a page that polls does not re-read the wallet.
+- Locked: the call answers `LOCKED` at once. It never opens the unlock window or waits for one (unlike calls that need
+  the wallet to sign), so the app should tell the person to unlock and call again.
 - Never in the answer: outpoints, addresses, keys, scripts, labels or history.
-- Refusals reject with the wallet's own code: `ERR_PERMISSION_DENIED` (Not now), `LOCKED` (unlock first), `ORIGIN`.
+- Refusals reject with the wallet's own code: `ERR_PERMISSION_DENIED` (Not now, or a blocked site), `LOCKED` (unlock
+  first), `ACCOUNT_CHANGED` (ask again), `ORIGIN`.
+- Stores: the call stays available in store builds (owner decision pending; not changed here).
 
 ## `@bwalletx/connect` to add
 

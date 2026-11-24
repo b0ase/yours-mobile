@@ -2364,7 +2364,7 @@ describe('A7.10: p2p swaps (and prove holdings) cannot reach the wallet in a sto
   test('the gate, the call sites and the store channels are as the allowlist reason says', () => {
     expect(srcOf('./dappBrowser.ts')).toContain(
       // getBalanceSummary (services/balanceSummary.ts) is the one read-only call added: totals only, behind its own per-site grant.
-      'if (!isCWIEventName(type) && !isMintPrivateAction(type) && !isBalanceSummaryAction(type))',
+      'if (!isCWIEventName(type) && !isMintPrivateAction(type) && !isBalanceSummaryAction(type))\n    throw new Error(`Unsupported request: ${type}`);',
     );
     const callers = ['./dappBrowser.ts', './bappFrame/BappFrameHost.tsx', './pair/sessions.ts'];
     for (const f of callers) expect(srcOf(f)).toContain('handleSiteCall(');

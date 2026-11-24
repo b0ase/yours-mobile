@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Globe } from 'lucide-react';
 import { bsvString, type HistoryRow } from './txHistory';
 import {
+  BALANCE_GRANT_KEY,
   loadConnectionLog,
   mergeConnections,
   readDeviceAppHosts,
@@ -14,6 +15,7 @@ import { forgetSiteConnected, setSiteThemeAllowed, siteThemeAllowed } from '../t
 import { ALLOWANCES_ENABLED } from '../../services/allowanceFlag';
 import type { Envelope } from '../../services/envelopes';
 import { ENVELOPES_ENABLED } from '../storeBuild';
+import { BALANCE_READ_LABEL } from '../../services/balanceSummary';
 
 const CARD = '#17191E';
 const LINE = '#2b2f36';
@@ -32,6 +34,7 @@ const when = (t?: number) => (t ? new Date(t).toLocaleString() : '');
 const GRANT_NAMES: Record<string, string> = {
   protocol: 'keys/signing',
   basket: 'data access',
+  [BALANCE_GRANT_KEY]: BALANCE_READ_LABEL,
   spending: 'spending',
   certificate: 'identity',
 };
