@@ -5633,7 +5633,7 @@ if (!(
   const balanceMemory = new BalanceSummaryMemory();
   const balanceAccountId = () =>
     chromeStorageService.getCurrentAccountObject().account?.addresses?.identityAddress ?? '';
-  const balanceSummaryDeps = (originator: string) => ({
+  const balanceSummaryDeps = () => ({
     locked: async () => !(await checkIsAuthenticated()),
     account: balanceAccountId,
     blocked: (o: string) => siteBlocked(o),
@@ -7090,7 +7090,7 @@ if (!(
   /** window.CWI.getBalanceSummary(): totals only, behind the site's own read-only grant (services/balanceSummary.ts). */
   const processCWIBalanceSummary = async (message: { originator?: string }, sendResponse: CallbackResponse) => {
     const origin = message.originator && message.originator !== ADMIN_ORIGINATOR ? message.originator : undefined;
-    const r = await runBalanceSummary(origin, balanceSummaryDeps(origin ?? ''), APP_NAME, balanceMemory);
+    const r = await runBalanceSummary(origin, balanceSummaryDeps(), APP_NAME, balanceMemory);
     sendResponse({ type: BALANCE_SUMMARY_ACTION, ...r });
     // A call from the site keeps it connected, after the gap above was measured to its previous call.
     if (origin) reconnectSeen(origin);
