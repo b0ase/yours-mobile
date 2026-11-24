@@ -1,0 +1,387 @@
+/* Signed (/m/signed): one reading column on the wallet's own surfaces. Every colour is a theme token, so White and the
+   paper packs get black ink on light cards (white-theme rules, 16 Oct 2026); gold is the accent by default. */
+.sg {
+  --sg-text: var(--bw-text, #fff);
+  --sg-muted: var(--bw-muted, #98a2b3);
+  --sg-line: var(--bw-line, #2b2f36);
+  --sg-card: var(--bw-card, #17191e);
+  --sg-gold: var(--bw-accent, #f5b800);
+  --sg-gold-ink: var(--bw-accent-hi, #ffd24d);
+  box-sizing: border-box;
+  height: 100%;
+  overflow-y: auto;
+  padding-top: 3.5rem;
+  padding-bottom: calc(var(--dock-h, 3.75rem) + 2rem);
+  color: var(--sg-text);
+  background: var(--bw-bg, #010101);
+  font-size: 14px;
+}
+:root[data-bw-pack='light'] .sg,
+:root[data-bw-paper] .sg {
+  /* Gold text on paper is too faint: ink instead. */
+  --sg-gold-ink: var(--bw-text);
+}
+.sg *,
+.sg *::before,
+.sg *::after {
+  box-sizing: border-box;
+}
+.sg-col {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 12px 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sg-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sg-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+:root.ww-on .sg-title {
+  display: none; /* the wide shell's top bar carries the title */
+}
+.sg-sub,
+.sg-note {
+  margin: 0;
+  color: var(--sg-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.sg-note-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--sg-line);
+  border-radius: 14px;
+  background: var(--sg-card);
+}
+.sg-note-box > span {
+  flex: 1;
+  min-width: 0;
+}
+.sg-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border-radius: var(--bw-radius-btn, 12px);
+  border: 1px solid var(--sg-line);
+  background: transparent;
+  color: var(--sg-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sg-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.sg-btn-gold {
+  border-color: transparent;
+  background: var(--sg-gold);
+  color: var(--bw-on-accent, #010101);
+}
+
+/* Held: needs recovery */
+.sg-held {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgb(var(--bw-accent-rgb, 245 184 0) / 0.55);
+  background: rgb(var(--bw-accent-rgb, 245 184 0) / 0.08);
+}
+.sg-held-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--sg-gold-ink);
+}
+.sg-held-sub {
+  margin: 4px 0 10px;
+  font-size: 13px;
+  color: var(--sg-muted);
+}
+.sg-held-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sg-held-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Tabs */
+.sg-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--sg-card);
+  border: 1px solid var(--sg-line);
+}
+.sg-tab {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent;
+  color: var(--sg-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sg-tab.on {
+  background: var(--sg-gold);
+  color: var(--bw-on-accent, #010101);
+}
+.sg-tab-n {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  background: rgb(0 0 0 / 0.18);
+}
+
+/* Rows */
+.sg-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  border: 1px solid var(--sg-line);
+  background: var(--sg-card);
+  overflow: hidden;
+}
+.sg-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.sg-row + .sg-row {
+  border-top: 1px solid var(--sg-line);
+}
+.sg-row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sg-art {
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+.sg-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sg-row-title {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sg-row-sub {
+  font-size: 12px;
+  color: var(--sg-muted);
+}
+.sg-row-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 48px;
+}
+.sg-row-chips:empty {
+  display: none;
+}
+.sg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--sg-line);
+  background: transparent;
+  color: var(--sg-muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-decoration: none;
+  cursor: pointer;
+}
+.sg-chip-gold {
+  font-family: inherit;
+  font-weight: 700;
+  color: var(--sg-gold-ink);
+  border-color: rgb(var(--bw-accent-rgb, 245 184 0) / 0.5);
+}
+
+/* Empty: gold bAvatar art, never a grey placeholder. */
+.sg-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 40px 16px;
+}
+.sg-empty img {
+  border-radius: 50%;
+  box-shadow: 0 10px 40px rgb(var(--bw-accent-rgb, 245 184 0) / 0.18);
+}
+.sg-empty p {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--sg-muted);
+  line-height: 1.55;
+}
+.sg-empty-small {
+  padding: 24px 16px;
+}
+
+/* Page status */
+.sg-status {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px dashed var(--sg-line);
+}
+.sg-status-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sg-muted);
+}
+.sg-status ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+  color: var(--sg-muted);
+}
+.sg-status li.on {
+  color: var(--sg-text);
+}
+.sg-status li.on span {
+  color: var(--sg-gold-ink);
+}
+
+/* One document */
+.sg-detail {
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 16px;
+  overflow-y: auto;
+  background: var(--bw-bg, #010101);
+  color: var(--sg-text);
+}
+.sg-detail-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sg-detail-head {
+  min-width: 0;
+  flex: 1;
+}
+.sg-detail-chips {
+  padding-left: 0;
+}
+.sg-paper {
+  flex: 1;
+  min-height: 50vh;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fbfaf6;
+  color: #16181d;
+}
+.sg-paper .bu-html {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 60vh;
+  border: 0;
+  background: #fff;
+}
+.sg-paper .bu-text {
+  margin: 0;
+  padding: 24px;
+  white-space: pre-wrap;
+  font-family: ui-serif, Georgia, serif;
+  line-height: 1.6;
+}
+.sg-paper .bu-img,
+.sg-paper .bu-pdf-page {
+  display: block;
+  max-width: 100%;
+}
+.sg-paper .bu-pdf {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+.sg-paper .bu-note {
+  margin: 0;
+  padding: 24px;
+  color: #475467;
+}
+@media (max-width: 380px) {
+  .sg-tab {
+    font-size: 12px;
+  }
+}
+/* White and the paper packs: no grey fills (white-theme rules) — the paper's own card with an ink hairline. */
+:root[data-bw-pack='light'] .sg-held,
+:root[data-bw-paper] .sg-held {
+  background: var(--bw-card, #fff);
+  border-color: var(--bw-text);
+}
+:root[data-bw-pack='light'] .sg-tab-n,
+:root[data-bw-paper] .sg-tab-n {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px currentColor;
+}

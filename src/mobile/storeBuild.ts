@@ -753,6 +753,19 @@ export const NATIVE_SEAL_ENABLED: boolean = !(
 );
 
 /**
+ * Signed (owner, 23 Nov 2026: "show them what they've signed in the past"): ☰ › Signed, /m/signed (signed/). Every
+ * document this wallet is a party to: waiting for my signature, signed, sealed, and seals held for recovery. It opens
+ * the native Sign page and finishes held seals, so it is the same class as NATIVE_SEAL_ENABLED and the Bureau:
+ * bWalletX only, a lazy chunk behind this literal env check, so a store bundle has none of it.
+ * Store grep: `bwallet.signed|Held: needs recovery|Nothing signed yet`.
+ */
+export const SIGNED_ENABLED: boolean = !(
+  import.meta.env.VITE_STORE_BUILD === '1' ||
+  import.meta.env.VITE_CHANNEL === 'ios-store' ||
+  import.meta.env.VITE_CHANNEL === 'android-play'
+);
+
+/**
  * Desktop menu / page titles (owner, 18 Oct 2026): "bSpaces" and "bPeople" in bWalletX; the store edition keeps
  * "Spaces" and "People" ("bSpaces" is on the STORE-AUDIT blocklist). Literal env check so the store bundle never
  * carries the string.

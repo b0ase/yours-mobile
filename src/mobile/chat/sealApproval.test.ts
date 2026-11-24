@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { approveSealPayment, approveSealWithSheet } from './sealApproval';
+import {
+  approveSealPayment,
+  approveSealPaymentResult,
+  approveSealWithSheet,
+  approveSealWithSheetOutcome,
+} from './sealApproval';
 import { createOneClickGuard } from '../settings/oneClick';
 
 const run = (status: 'ok' | 'cancelled' | 'unavailable', password: boolean) => {
@@ -27,7 +32,7 @@ describe('seal payment approval: never a silent pass', () => {
   });
   test('the seal page uses it, and nothing treats unavailable as approval', () => {
     const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
-    expect(page).toContain('approveSealPayment(');
+    expect(page).toContain('approveSealPaymentResult(');
     expect(page).toContain('passwordAuth: askWalletPassword');
     expect(page).not.toMatch(/status === 'unavailable'\s*;?\s*$/m);
     expect(page).not.toMatch(/=== 'ok' \|\| \w+\.status === 'unavailable'/);
@@ -104,11 +109,54 @@ describe('the payment sheet, every time: never auto-approved', () => {
     }
     const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
     // Every seal goes through the sheet: approve() always calls approveSealWithSheet(…, { showSheet, … }).
-    expect(page).toContain('return await approveSealWithSheet(info, {');
-    expect(page).toMatch(/approveSealWithSheet\(info, \{\s*showSheet,/);
+    expect(page).toContain('return await approveSealWithSheetOutcome(info, {');
+    expect(page).toMatch(/approveSealWithSheetOutcome\(info, \{\s*showSheet,/);
     // The sheet reused is the wallet's own approval card.
     const sheet = readFileSync(new URL('./SealPaySheet.tsx', import.meta.url), 'utf8');
     expect(sheet).toContain("from '../../components/approval/ApprovalCard'");
     expect(sheet).toContain('<PayHero');
+  });
+});
+
+describe('which prompt did not complete (owner, 23 Nov 2026: honest words, the drawing kept)', () => {
+  const info = { title: 'Minute 011', ticker: 'BCORP', docHash: 'abcd1234', handle: 'b0asex', feeSats: 75, blocks: 1 };
+  const result = (status: 'ok' | 'cancelled' | 'unavailable' | 'throws', password: boolean | 'throws' = false) =>
+    approveSealPaymentResult('r', 'bChatX', {
+      auth: async () => {
+        if (status === 'throws') throw new Error('prompt crashed');
+        return status === 'ok' ? { status, method: 'biometric' as const } : { status };
+      },
+      passwordAuth: async () => {
+        if (password === 'throws') throw new Error('sheet crashed');
+        return password;
+      },
+    });
+  test('Face ID ok → ok; Face ID cancelled or failing → device_auth_failed (never a pass)', async () => {
+    expect(await result('ok')).toBe('ok');
+    expect(await result('cancelled', true)).toBe('device_auth_failed');
+    expect(await result('throws', true)).toBe('device_auth_failed');
+  });
+  test('no phone prompt: the wallet password decides; cancelled, wrong or crashing → password_failed', async () => {
+    expect(await result('unavailable', true)).toBe('ok');
+    expect(await result('unavailable', false)).toBe('password_failed');
+    expect(await result('unavailable', 'throws')).toBe('password_failed');
+  });
+  test('the sheet first: Cancel → declined and no prompt; Approve then the prompt says which failed', async () => {
+    let asked = 0;
+    const confirm = async () => (asked++, 'device_auth_failed' as const);
+    expect(await approveSealWithSheetOutcome(info, { showSheet: async () => false, confirm })).toBe('declined');
+    expect(asked).toBe(0);
+    expect(await approveSealWithSheetOutcome(info, { showSheet: async () => true, confirm })).toBe(
+      'device_auth_failed',
+    );
+    expect(
+      await approveSealWithSheetOutcome(info, { showSheet: async () => true, confirm: async () => 'ok' as const }),
+    ).toBe('approved');
+    expect(
+      await approveSealWithSheetOutcome(info, {
+        showSheet: async () => true,
+        confirm: async () => 'yes' as unknown as 'ok',
+      }),
+    ).toBe('device_auth_failed'); // only an exact 'ok' approves
   });
 });

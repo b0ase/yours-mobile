@@ -63,6 +63,84 @@ status line.
 **Settings › "Face ID / fingerprint for signing and payments"** (the Security section, with Change password). On by default. Turning it
 off needs Face ID, fingerprint or the passcode too.
 
+## Native seal: one signature per document (5.2.63, owner 23 Nov 2026)
+
+"Having to do it twice is not good." The wallet's own Review & sign screen (`src/mobile/chat/NativeSealPage.tsx`,
+`/m/seal/:ticker/:doc`, bWalletX only) runs prepare → approve (the payment sheet, then Face ID / passcode or the wallet
+password, every time) → compose → `createSignature` → `createAction` (one 0-sat OP_RETURN) → commit
+(`src/mobile/chat/nativeSeal.ts`). A failure must never make the person draw and sign again:
+
+- **Definitely not paid** (Cancel on the sheet, Face ID / passcode or the password not completed, or `createAction`
+  refused with proof nothing was built: `provablyNotPaid`): plain words ("Face ID didn't complete. Nothing was paid.",
+  one "Nothing was paid." in place of the wallet's "Nothing was sent."), the drawing shown, and **Try again**.
+  - Only a refusal **before anything is built** (`refusedBeforeBuild`: locked, not delivered, device not active, USB
+    key, not enough funds) keeps the nonce, composed record and attestation (`SealResume`), so Try again only approves
+    and pays. Any other refusal (spent elsewhere, a refused broadcast…) cancels the nonce and Try again prepares a new
+    session, so its output script can never be confused with the failed attempt's.
+  - A kept session with under 90 s left, one that no longer checks out against the document on screen, or one that ran
+    out while the sheet was open, is cancelled and prepared again from the same drawing, silently (the approval already
+    given is not asked again).
+  - The kept session is given back when the screen unmounts or after 2 minutes on it (`sealRetryHold.ts`); the drawing
+    stays. After an account switch the screen goes back to the pad.
+  - Two windows sharing one store (an extension popup and a tab) can't both pay one kept seal: a claim
+    (`bwx.nativeSeal.claims`, context id + heartbeat) is written before the approval and checked again right before
+    paying; the other window says "Already being sealed in another window." A claim lasts 2 minutes, is refreshed
+    every 15 s and at each step, and is dead once its heartbeat is 45 s old (a crashed window blocks for at most that)
+    or when it claims to last more than 2 min + 30 s (a clock moved back).
+- **Unknown** (the payment may have gone out): the screen says "Checking whether the payment went out…" and looks for
+  the seal's transaction in the wallet's own storage (2, 3, 5, 8, 10 s, then every 20 s, about 4 minutes at most;
+  `settleUnsureSeal`), marking the record so recovery elsewhere leaves it alone. Leaving the screen stops it.
+  - Found → `/recover` with its BEEF, done, one payment.
+  - **One release rule** (`unpaidProven`, the same on screen and on reopen): at least two "no such action" answers at
+    least 5 s apart, stored on the record, both given once the record is at least 3 minutes old (earlier answers are
+    not evidence). Only then is the nonce cancelled and
+    "Nothing was paid" said. Until then the record is kept, so a late find still goes to `/recover`.
+  - Still unknown → held: "We'll finish this automatically when you reopen it. Don't sign it again." The room's card
+    and banner show "Finishing your seal…" instead of Review & sign. A record still not recorded 24 h after it was
+    saved shows "Contact support with reference seal-…"; money is never cancelled automatically.
+  - Every record is looked up from a minute before it was saved: a remote storage stamps actions with its own clock,
+    so an exact window could miss the real payment.
+  - A **candidate** is any action with the seal's exact script, or a seal action (by its description, "bit-sign:
+    sign and seal a document") whose script the storage didn't keep. A seal action whose scripts are all kept and none
+    is this seal's is another document's and is ignored. "No such action" means no candidate at all. A candidate with no txid yet (built, not signed) makes the
+    answer unsure; one found by description whose script the storage kept truncated ('' for scripts over ~1 KB) is
+    checked against its own transaction: if every one was read and none carries this seal's script, that counts as no
+    candidate; if any couldn't be read, the answer stays unsure. A row the toolbox abandoned (status 'failed', no
+    txid) is no candidate either: processAction writes the txid before any broadcast and never processes a failed row
+    (wallet-toolbox 2.14.5 `src/storage/methods/processAction.ts`, commit at line 127 before the broadcast at 151;
+    `validatePlannedTransaction`, lines 474-479), but only on a lookup at least 2 minutes after a lookup FIRST saw it
+    failed (`failedSeenAt` on the record, for that same set of failed candidates: a new set restarts the clock), and only once the record is older than the toolbox's abandon age (5 min,
+    `Monitor.ts` line 124) plus 2 minutes: a row flipped to 'failed' between processAction's validation and its commit
+    could still go out, and the action carries no timestamp of its own. An unsure answer is never evidence for release, and a live or failed candidate voids any
+    "no such action" answers counted before it appeared.
+  - While a window's createAction runs, its record carries a heart-beaten "paying" mark (same timings as the claim);
+    recovery and settle in any window leave the record alone while it lives.
+- **Recovery** (`recoverNativeSeals`) only touches the open account's records (key-less records from before 6 Nov only
+  from the seal page, for that one document) and says what it did per record: recorded, released, kept or refused. A
+  paid record is removed only when bit-sign says it is recorded (or the session was committed: 409 replayed); 401, 403,
+  404 (not_yours), faults and in-progress keep it. Any other refusal (a 422, say) puts it in its own **refused** state:
+  "Paid, but bChatX wouldn't record it. Contact support (ref seal-…)", never "Already sealed". /recover is asked
+  again on each open until bit-sign itself answers 410 (its window closed); the phone's clock never decides that. Under the message, **Seal again
+  (you'll pay again)**, after a confirm, moves the record to the support list (`bwx.nativeSeal.support`, never deleted)
+  and starts a new seal with the same drawing, worded as paid ("Your first payment is with support (ref …)"), never
+  "Nothing was paid". Support entries are never removed; only their BEEFs go, after 90 days or oldest first past
+  256 KB in all (the txid and reference stay). The room card says "Paid · contact support".
+- **The drawing is kept on the device** (`src/mobile/chat/sealStore.ts`): with the held record
+  (`bwx.nativeSeal.pending`, field `svg`), and after a not-paid seal in `bwx.nativeSeal.drawings` (at most 10, 24 h,
+  16 KB each). Reopening after a crash or relaunch that recovery proves unpaid offers **Seal again** with that same
+  drawing. Cleared on success, on Cancel at the sheet and on Draw again. A restored drawing is checked
+  (`checkStrictSvg`) before it is used.
+- **Never double-pay:** no Try again while the money may have moved; the in-flight hold, the claim and one live seal per
+  signer, document and blocks (`sealStateHere`) apply to every retry; right before ANY seal pays, another window's
+  live claim or record for it stops it, and a record the store didn't keep (storage full) means no payment; the retry
+  screen never cancels a session another window is paying on; the on-screen check never pays and leaves a seal
+  that is paying again alone.
+- **Reported to b:** every pending_recovery / not_paid seal sends one report per nonce and error kind through "Report to
+  b" (`sendOrQueueReport`: b_feedback, or the outbox) with the `createAction` error's kind and moneyMoved
+  (`classifySendError`), its name and message (hex, split hex, base64-like runs, JWTs, paymails, $handles, addresses and
+  secrets removed, 300 characters), the step, the app version and platform; a second one names what the on-screen
+  check found. Logged as `[seal-failure]` (`src/mobile/chat/sealReport.ts`).
+
 ## What the site gets
 
 The BRC-100 results don't change.

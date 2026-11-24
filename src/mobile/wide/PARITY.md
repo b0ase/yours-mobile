@@ -12,6 +12,7 @@ Anything not listed as its own entry is inside a real screen that is listed (e.g
 | ☰ drawer: current account, $name, recent accounts     | Sidebar account button → the real drawer                                               | Real                                                |
 | ☰ All accounts / Add / Import account                 | Account button → drawer → All accounts                                                 | Real                                                |
 | ☰ Agents (agent accounts, b agent, agent tools)       | Account button → drawer → Agents                                                       | Real                                                |
+| ☰ Signed (waiting, signed, sealed, held)              | Sidebar › Money › Signed (`/m/signed`, same badge; bWalletX only)                      | Real                                                |
 | ☰ Settings                                            | Sidebar › Settings (and drawer)                                                        | Real                                                |
 | ☰ Scan to connect a website / Connect the CLI         | Sidebar › Connect a site / CLI (agent tools sheet), top bar scan                       | Real                                                |
 | ☰ Sign out                                            | Account button → drawer → Sign out                                                     | Real                                                |

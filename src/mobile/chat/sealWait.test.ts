@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   ALREADY_SEALED_MESSAGE,
   BUSY_ELSEWHERE_MESSAGE,
+  HELD_FOR_REOPEN_MESSAGE,
   LEFT_PAGE_MESSAGE,
   MAY_HAVE_PAID_MESSAGE,
   NEWER_VERSION_MESSAGE,
@@ -13,6 +14,7 @@ import {
   type ListActionsFn,
   nativeSignAndSeal,
   recoverNativeSeals,
+  recordedCount,
   sealKey,
   sealStateHere,
   type PendingSeal,
@@ -24,6 +26,7 @@ import { COIN_WAIT_CAP_MS, COIN_WAIT_SLOW_MS, type WakeClock } from './coinWait'
 import { SEAL_HTML, SEAL_KEY, composedFor, preparedFor } from './nativeSeal.fixtures';
 import {
   COIN_SLOW_LINE,
+  FINISHING_SEAL_LINE,
   FRESH_COIN_LINE,
   RECORDING_LINE,
   STILL_RECORDING_LINE,
@@ -36,6 +39,24 @@ import { consoleGate } from '../../testing/captureConsole';
 // nativeSeal logs every refusal and failure it handles (console.warn / console.info). Each test declares exactly the
 // lines its scenario causes; any other line, or a missing one, fails that test.
 const gate = consoleGate(['error', 'warn', 'info']);
+
+/** recoverNativeSeals as this account (SEAL_KEY; key-less records allowed for one document), counting recorded seals. */
+type RecoverArgs = Parameters<typeof recoverNativeSeals>;
+const recover = async (
+  api: RecoverArgs[0],
+  store: RecoverArgs[1],
+  documentId?: RecoverArgs[2],
+  ledger?: RecoverArgs[3],
+  lookup?: RecoverArgs[4],
+  opts: Partial<RecoverArgs[5]> = {},
+): Promise<number> =>
+  recordedCount(
+    await recoverNativeSeals(api, store, documentId, ledger ?? null, lookup, {
+      identityKey: SEAL_KEY,
+      keyless: true,
+      ...opts,
+    }),
+  );
 
 /** The seal()'s default key: no identity key, document D, block f1. */
 /** The seal output the wallet builds for block f1 of the fixture document (its ref is the manifest's, any id). */
@@ -400,7 +421,7 @@ describe('no second seal for a document already sealed (or being sealed) from th
       fieldIds: ['f1'],
     });
     const ledger = memLedger();
-    const n = await recoverNativeSeals(api([]), store, 'D', ledger);
+    const n = await recover(api([]), store, 'D', ledger);
     expect(n).toBe(1);
     expect(ledger.s.has(KEY_D)).toBe(true);
     expect(stateD(store, ledger)).toBe('sealed');
@@ -472,7 +493,7 @@ describe('on open: a paid-but-unrecorded seal says "Paid, being recorded…", th
       fieldIds: ['f1'],
     });
     expect(openingNotice(stateD(store, ledger), false)?.text).toBe(RECORDING_LINE);
-    await recoverNativeSeals(api([]), store, 'D', ledger);
+    await recover(api([]), store, 'D', ledger);
     expect(openingNotice(stateD(store, ledger), true)?.text).toBe(ALREADY_SEALED_MESSAGE);
     expect(openingNotice('recording', true)).toEqual({ text: STILL_RECORDING_LINE, busy: false });
     expect(openingNotice('none', true)).toBeNull();
@@ -557,7 +578,7 @@ describe('a hung seal never blocks its document until restart', () => {
     expect((await seal({ documentId: 'H5', store }).catch((x) => x)).code).toBe('already_sealed');
     // Recovery leaves a seal that is still paying alone.
     let asked = 0;
-    await recoverNativeSeals(api([]), store, 'H5', null, {
+    await recover(api([]), store, 'H5', null, {
       find: async () => (asked++, { found: false }),
       beef: async () => null,
     });
@@ -580,8 +601,10 @@ describe('the page wires the guard (NativeSealPage.tsx)', () => {
   test('the seal key carries the identity key; the opening notice waits for recovery; the hold is let go on unmount', () => {
     expect(page).toContain('identityKey: myKey');
     expect(page).toMatch(/sealStateHere\(myKey, doc\.documentId, ids/);
-    expect(page).toMatch(/recovery\.current \?\? Promise\.resolve\(0\)\)[\s\S]{0,80}show\(true\)/);
-    expect(page).toMatch(/\(\) => \(\) => \{\s*if \(holdKey\.current\) abandonSeal\(holdKey\.current\);/);
+    expect(page).toMatch(/recovery\.current \?\? Promise\.resolve\(\[\]\)\)[\s\S]{0,80}show\(true\)/);
+    expect(page).toMatch(
+      /\(\) => \(\) => \{\s*mounted\.current = false;\s*if \(holdKey\.current\) abandonSeal\(holdKey\.current\);/,
+    );
     expect(page).not.toContain('ALREADY_SEALED_MESSAGE });'); // never "Already sealed" straight from the saved payment
   });
   test('signer_race offers the latest version, never the same button', () => {
@@ -602,7 +625,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     },
   });
 
-  test('a definite refusal cancels the nonce, then a clean retry seals once', async () => {
+  test('a definite refusal keeps the seal (no cancel); Try again pays once on the SAME nonce, nothing redrawn', async () => {
     gate.expectLines('warn [nativeSeal] pay failed Not enough spendable BSV for this payment.');
     const log: string[] = [];
     const store = memStore();
@@ -611,14 +634,17 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     const e = await seal({ log, documentId: 'C1', store, ledger, keys }).catch((x) => x);
     expect(e.code).toBe('not_paid');
     expect(retryAllowed(e, true)).toBe(true); // the button comes back
-    expect(log.filter((l) => l === 'cancel')).toHaveLength(1);
-    expect(log.indexOf('cancel')).toBeGreaterThan(log.indexOf('pay'));
+    expect(log).not.toContain('cancel'); // the session is kept for a pay-only retry
+    expect(e.drawing).toMatchObject({ svg: '<svg/>', fieldIds: ['f1'], resume: { attestation: '010203' } });
     expect(store.m.size).toBe(0);
     expect(sealStateHere(SEAL_KEY, 'C1', ['f1'], store, ledger)).toBe('none');
-    const out = await seal({ log, documentId: 'C1', store, ledger, keys }); // the retry
+    const before = log.length;
+    const out = await seal({ log, documentId: 'C1', store, ledger, keys, resume: e.drawing.resume }); // Try again
     expect(out.txid).toBe(TX);
+    // Only the payment and its recording: no prepare, compose or signature again, and one payment.
+    expect(log.slice(before)).toEqual(['pay', 'receipt', 'commit']);
     expect(log.filter((l) => l === 'pay')).toHaveLength(2);
-    expect(log.filter((l) => l === 'cancel')).toHaveLength(1);
+    expect(log.filter((l) => l === 'cancel')).toHaveLength(0);
   });
 
   test('a user decline and a pre-payment failure cancel too (nothing was ever paid)', async () => {
@@ -680,7 +706,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     const ledger = memLedger();
     const bodies: Record<string, unknown>[] = [];
     const found: string[] = [];
-    const n = await recoverNativeSeals(
+    const n = await recover(
       async (path, body) => (path === 'recover' && bodies.push(body), api([])(path, body)),
       store,
       'U9',
@@ -694,14 +720,21 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     expect(ledger.s.has(sealKey(SEAL_KEY, 'U9', ['f1']))).toBe(true);
   });
 
-  test('none was ever built → nothing was paid: released and the nonce cancelled', async () => {
+  test('none was ever built → released only by the ONE rule (2 answers ≥5 s apart, ≥3 min old), then cancelled', async () => {
     const store = memStore();
     store.save(unsure());
     const log: string[] = [];
-    await recoverNativeSeals(api(log), store, 'U9', null, {
-      find: async () => ({ found: false }),
-      beef: async () => null,
-    });
+    const none = { find: async () => ({ found: false as const }), beef: async () => null };
+    let t = 1_000 + 3 * 60_000; // old enough
+    const now = () => t;
+    await recover(api(log), store, 'U9', null, none, { now });
+    expect(store.m.size).toBe(1); // ONE answer is never proof (review of #560 M1)
+    expect(store.list()[0]).toMatchObject({ notFound: 1, notFoundFirstAt: t });
+    t += 4_000;
+    await recover(api(log), store, 'U9', null, none, { now });
+    expect(store.list()[0]).toMatchObject({ notFound: 1 }); // too soon after the last: not counted
+    t += 1_000;
+    await recover(api(log), store, 'U9', null, none, { now });
     expect(store.m.size).toBe(0);
     expect(log).toEqual(['cancel']);
   });
@@ -710,20 +743,25 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     const store = memStore();
     store.save(unsure());
     const log: string[] = [];
-    await recoverNativeSeals(api(log), store, 'U9');
-    await recoverNativeSeals(api(log), store, 'U9', null, { find: async () => null, beef: async () => [1] });
-    await recoverNativeSeals(api(log), store, 'U9', null, {
+    await recover(api(log), store, 'U9');
+    await recover(api(log), store, 'U9', null, { find: async () => null, beef: async () => [1] });
+    await recover(api(log), store, 'U9', null, {
       find: () => Promise.reject(new Error('db closed')),
       beef: async () => [1],
     });
     expect(store.list()).toMatchObject([{ nonce: 'N9', beefHex: '', txid: '' }]);
-    await recoverNativeSeals(api(log), store, 'U9', null, {
+    await recover(api(log), store, 'U9', null, {
       find: async () => ({ found: true, txid: T2 }),
       beef: async () => null,
     });
     expect(store.list()).toMatchObject([{ nonce: 'N9', beefHex: '', txid: T2 }]);
     expect(log).toEqual([]); // never /recover without the BEEF, never a cancel
-    expect(openingNotice(sealStateHere(SEAL_KEY, 'U9', ['f1'], store), true)?.text).toBe(MAY_HAVE_PAID_MESSAGE);
+    // Never a fresh Sign button: "Finishing your seal…" while recovery looks, then held for the next open.
+    expect(openingNotice(sealStateHere(SEAL_KEY, 'U9', ['f1'], store), false)).toEqual({
+      text: FINISHING_SEAL_LINE,
+      busy: true,
+    });
+    expect(openingNotice(sealStateHere(SEAL_KEY, 'U9', ['f1'], store), true)?.text).toBe(HELD_FOR_REOPEN_MESSAGE);
   });
 
   test('a storage error (QuotaExceeded) during createAction may come after the broadcast: no cancel, held', async () => {
@@ -762,7 +800,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     expect(store.list()).toMatchObject([{ documentId: 'T1', txid: T2, beefHex: '' }]);
     expect(sealStateHere(SEAL_KEY, 'T1', ['f1'], store)).toBe('unsure');
     let found = 0;
-    const n = await recoverNativeSeals(api([]), store, 'T1', null, {
+    const n = await recover(api([]), store, 'T1', null, {
       find: async () => (found++, { found: false }),
       beef: async (t) => (t === T2 ? [7] : null),
     });
@@ -772,17 +810,9 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
   });
 
   test('a cancel that fails (404, 409, 503, a network error, or never answers) is ignored', async () => {
-    // Five refused payments; of the five failed cancels only the 409 is worth a line (404/503/network/timeout are
+    // Five declined seals; of the five failed cancels only the 409 is worth a line (404/503/network/timeout are
     // silent by design: an older server, or nothing to say).
-    const NOT_PAID = 'warn [nativeSeal] pay failed Not enough spendable BSV for this payment.';
-    gate.expectLines(
-      NOT_PAID,
-      NOT_PAID,
-      'info [nativeSeal] cancel not taken (harmless): 409 commit_in_progress',
-      NOT_PAID,
-      NOT_PAID,
-      NOT_PAID,
-    );
+    gate.expectLines('info [nativeSeal] cancel not taken (harmless): 409 commit_in_progress');
     const answers: (() => Promise<{ ok: boolean; status: number; body: Record<string, unknown> }>)[] = [
       async () => ({ ok: false, status: 404, body: { code: 'not_yours' } }),
       async () => ({ ok: false, status: 409, body: { code: 'commit_in_progress' } }),
@@ -796,9 +826,9 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
         log,
         documentId: `X${i}`,
         api: (path, body) => (path === 'cancel' ? (log.push('cancel'), answer()) : base(path, body)),
-        keys: failingPay(log, [new Error('Not enough spendable BSV for this payment.')]),
+        approve: async () => false,
       }).catch((x) => x);
-      expect(e.code).toBe('not_paid');
+      expect(e.code).toBe('cancelled');
       expect(log.filter((l) => l === 'cancel')).toHaveLength(1); // once: no retry loop
     }
     // Never answers: the seal goes on after CANCEL_TIMEOUT_MS on the wall clock.
@@ -811,7 +841,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
       documentId: 'X-hang',
       clock: f.clock,
       api: (path, body) => (path === 'cancel' ? (log.push('cancel'), new Promise(() => undefined)) : base(path, body)),
-      keys: failingPay(log, [new Error('Not enough spendable BSV for this payment.')]),
+      approve: async () => false,
     }).catch((x) => (out = x));
     await until(() => log.includes('cancel'));
     await flush();
@@ -819,7 +849,7 @@ describe('bit-sign seal cancel: only when createAction proves nothing went out',
     f.advance(3_000);
     f.wake();
     await until(() => out !== null);
-    expect((out as NativeSealError).code).toBe('not_paid');
+    expect((out as NativeSealError).code).toBe('cancelled');
   });
 });
 
@@ -874,7 +904,7 @@ describe("findSealAction: the unsure seal in the wallet's own storage, failed on
       lockingScriptHex: SEAL,
     });
     const log: string[] = [];
-    await recoverNativeSeals(api(log), store, 'F1', null, {
+    await recover(api(log), store, 'F1', null, {
       find: (script, since) => findSealAction(w.list, script, since, FAILED),
       beef: async () => null,
     });
@@ -919,7 +949,7 @@ describe("findSealAction: the unsure seal in the wallet's own storage, failed on
       lockingScriptHex: SEAL,
     });
     const log: string[] = [];
-    await recoverNativeSeals(api(log), store, 'R1', null, {
+    await recover(api(log), store, 'R1', null, {
       find: (script, since) => findSealAction(w.list, script, since, FAILED),
       beef: async () => [1],
     });
@@ -930,7 +960,7 @@ describe("findSealAction: the unsure seal in the wallet's own storage, failed on
   test("the page searches with the toolbox's own failed-actions label, from the record's time", () => {
     const page = readFileSync(new URL('./NativeSealPage.tsx', import.meta.url), 'utf8');
     expect(page).toContain('toolboxSdk.specOpFailedActions');
-    expect(page).toMatch(/find: \(script, sinceMs\) =>\s*findSealAction\(/);
+    expect(page).toMatch(/find: \(script, sinceMs, opts\) =>\s*findSealAction\(/);
     expect(page).not.toContain('97d4eb1e49215e3374cc2c1939a7c43a55e95c7427bf2d45ed63e3b4e0c88153');
     expect(page).not.toContain("'unfail'");
   });
