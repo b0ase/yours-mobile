@@ -6,6 +6,7 @@ import {
   MAP_PREFIX,
   parseIssueScript,
   scriptSha256,
+  signableTicker,
   signIssueWithKey,
   verifyIssueTx,
 } from './issuer';
@@ -139,5 +140,22 @@ describe('issuer statements: only the canonical layout verifies', () => {
     withGap.writeOpCode(OP.OP_0);
     for (const c of real.slice(4)) withGap.writeBin(c.data!);
     expect(verifyIn(tok, withGap).ok).toBe(false);
+  });
+
+  test('a genuine statement still verifies when every push is re-encoded as PUSHDATA1', () => {
+    const tok = tokenScript();
+    const real = statementFor(tok.toHex(), 'VOID').chunks;
+    const re = new Script([...real.slice(0, 2), ...real.slice(2).map((c) => ({ op: OP.OP_PUSHDATA1, data: c.data }))]);
+    expect(verifyIn(tok, re).ok).toBe(true);
+  });
+
+  test('tickers that cannot round-trip are left out of the statement, so the issuer still verifies', () => {
+    expect(signableTicker('|')).toBeNull();
+    expect(signableTicker('\uFEFFX')).toBeNull();
+    expect(signableTicker('')).toBeNull();
+    expect(signableTicker('VOID')).toBe('VOID');
+    expect(signableTicker('A|B')).toBe('A|B');
+    const tok = tokenScript();
+    expect(verifyIn(tok, statementFor(tok.toHex(), signableTicker('\uFEFFX') ?? undefined)).ok).toBe(true);
   });
 });
