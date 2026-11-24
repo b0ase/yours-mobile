@@ -481,7 +481,11 @@ describe('private by default', () => {
     const head = r.parseMediaHead(await decrypt(rec.ciphertext, rec.map.kid))!;
     expect(head.header.kind).toBe('bavatar');
     expect(head.header.mime).toBe('image/svg+xml');
-    expect(calls[0].outputs[0].lockingScript).not.toContain(hex(Utils.toArray('<svg', 'utf8')));
+    // Byte-aligned: a hex substring test also matches across two bytes of random ciphertext (it did, once in a full run).
+    const script = Utils.toArray(calls[0].outputs[0].lockingScript, 'hex');
+    const svg = Utils.toArray('<svg', 'utf8');
+    const at = script.findIndex((_, i) => svg.every((b, j) => script[i + j] === b));
+    expect(at).toBe(-1);
   });
 });
 

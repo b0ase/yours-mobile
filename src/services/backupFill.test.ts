@@ -560,7 +560,7 @@ describe('review of 30a4fbcd / bcd8129b: a resumed or retried fill never leaves 
     } finally {
       unguard();
     }
-  });
+  }, 30_000); // wallet setup plus three fills: the 5 s default timed out in a loaded full-suite run
 
   test('2: a fill known unfinished (no progress kept) never returns "not-needed" on the backup’s cursor', async () => {
     const x = await setup(3);
