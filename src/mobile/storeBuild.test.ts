@@ -2345,7 +2345,7 @@ describe('A7.8, A7.9, A7.11: pairing, site token balance and prove-holdings shee
 describe('A7.10: p2p swaps (and prove holdings) cannot reach the wallet in a store build', () => {
   // A store build is only the phone app (channel-build.sh: STORE=1 for ios-store / android-play, both `build:mobile`).
   // On the phone a site reaches the wallet only through handleSiteCall (dApp browser, bApp frames, paired sessions),
-  // which admits BRC-100 calls and mintPrivate only. window.CWI.swap / proveHoldings exist only in the Chrome
+  // which admits BRC-100 calls, mintPrivate and the read-only balance summary only. window.CWI.swap / proveHoldings exist only in the Chrome
   // extension's content script (content.ts), which no store build ships.
   const code = `const d = await import('./src/mobile/dappBrowser.ts'); const reached = [];
     d.initDappBrowser(() => ({ runtime: { sendMessage: (m) => (reached.push(m.action), Promise.resolve({ success: true })) } }));
@@ -2363,7 +2363,8 @@ describe('A7.10: p2p swaps (and prove holdings) cannot reach the wallet in a sto
   }, 60_000);
   test('the gate, the call sites and the store channels are as the allowlist reason says', () => {
     expect(srcOf('./dappBrowser.ts')).toContain(
-      'if (!isCWIEventName(type) && !isMintPrivateAction(type)) throw new Error(`Unsupported request: ${type}`);',
+      // getBalanceSummary (services/balanceSummary.ts) is the one read-only call added: totals only, behind its own per-site grant.
+      'if (!isCWIEventName(type) && !isMintPrivateAction(type) && !isBalanceSummaryAction(type))',
     );
     const callers = ['./dappBrowser.ts', './bappFrame/BappFrameHost.tsx', './pair/sessions.ts'];
     for (const f of callers) expect(srcOf(f)).toContain('handleSiteCall(');
