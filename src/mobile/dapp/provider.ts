@@ -7,6 +7,7 @@
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { isSpendingAuthAction } from '../../services/streamGrants';
 import { isMintPrivateAction } from '../../services/mintPrivateAction';
+import { isBalanceSummaryAction } from '../../services/balanceSummary';
 import { CustomListenerName, type RequestEventDetail, type RequestParams } from '../../inject';
 import { CWI } from '../../cwi';
 import { announceWallet } from '../../brand/discovery';
@@ -56,6 +57,7 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
       isCWIEventName(type) ||
       isSpendingAuthAction(type) ||
       isMintPrivateAction(type) ||
+      isBalanceSummaryAction(type) ||
       (type as string) === LAST_VERIFICATION_CALL ||
       (type as string) === CONFIRM_USER_CALL ||
       isBitsignAction(type)

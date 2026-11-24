@@ -2,6 +2,7 @@
 import { IS_TAURI, openExternal } from './desktop/ipc';
 import { isCWIEventName } from '@1sat/wallet-browser';
 import { isMintPrivateAction } from '../services/mintPrivateAction';
+import { isBalanceSummaryAction } from '../services/balanceSummary';
 import { YoursNative, isNative } from './native';
 import { MOBILE_EXTENSION_ID } from './protocol';
 import { isReservedHost } from '../services/adminOriginator';
@@ -146,7 +147,8 @@ export const handleSiteCall = async (origin: string, url: string, type: string, 
       return { success: false, error: err.message || 'Not confirmed', code: err.code, status: err.status };
     }
   // wallet.mintPrivate (services/mintPrivateSite.ts) is the one non-standard call sites may make here.
-  if (!isCWIEventName(type) && !isMintPrivateAction(type)) throw new Error(`Unsupported request: ${type}`);
+  if (!isCWIEventName(type) && !isMintPrivateAction(type) && !isBalanceSummaryAction(type))
+    throw new Error(`Unsupported request: ${type}`);
   if (url.startsWith(o.origin)) lastUrls.set(o.origin, url);
   let chrome = contexts.get(o.origin);
   if (!chrome) {

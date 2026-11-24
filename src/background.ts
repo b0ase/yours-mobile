@@ -85,6 +85,16 @@ import type {
   TwetchPrompt,
 } from './promptProtocol';
 import { isProveHoldingsAction, runSiteProveHoldings } from './services/proveHoldingsSite';
+import {
+  BALANCE_READ_BASKET,
+  BALANCE_READ_PROTOCOL_NAME,
+  BALANCE_SUMMARY_ACTION,
+  runBalanceSummary,
+  summarizeBalance,
+  type BalanceRow,
+} from './services/balanceSummary';
+import { everyOutput } from './services/everyOutput';
+import { heldBsv21Balances } from './mobile/airdrops/heldBalances';
 import { proveHoldings } from './mobile/chat/holdings';
 import { BchatClient, defaultHttp } from './mobile/chat/api';
 import { walletSigner } from './mobile/chat/signer';
@@ -1710,6 +1720,37 @@ const askReconnect = (originator: string): Promise<void> =>
       reject,
     });
     permissionBundler.add(request);
+  });
+
+let balanceReadCounter = 0;
+/**
+ * "See your balance (read-only)" (services/balanceSummary.ts): one line on the site's connect sheet. Rides the reconnect
+ * request plumbing (RECONNECT_ID_PREFIX: answered here, never sent to the permission manager). Resolves true on Allow.
+ */
+const askBalanceRead = (originator: string): Promise<boolean> =>
+  new Promise<boolean>((resolve) => {
+    const requestID = `${RECONNECT_ID_PREFIX}balance-${Date.now().toString(36)}-${(balanceReadCounter++).toString(36)}`;
+    const request = {
+      requestID,
+      type: 'protocol',
+      originator,
+      // Display only: the sheet reads balanceRead. No key is derived from it.
+      protocolID: [1, BALANCE_READ_PROTOCOL_NAME],
+      counterparty: 'self',
+      balanceRead: true,
+      reason: 'Read your balance',
+    } as unknown as BundledRequest & BundleRequest;
+    pendingPermissionRequests.set(requestID, { request, resolve: () => resolve(true), reject: () => resolve(false) });
+    // Unanswered, it expires like every other sheet (nothing was read).
+    setTimeout(() => {
+      if (pendingPermissionRequests.has(requestID)) expireSpendRequest(requestID);
+    }, PROMPT_EXPIRY_MS);
+    try {
+      permissionBundler.add(request);
+    } catch {
+      pendingPermissionRequests.delete(requestID);
+      resolve(false);
+    }
   });
 
 /**
@@ -4389,6 +4430,14 @@ if (!(
           case CWIEventName.GET_NETWORK:
             runDappRequest(processCWIGetNetwork(message, sendResponse));
             return true;
+          case BALANCE_SUMMARY_ACTION:
+            // A site only; our own pages have their own balance code.
+            if (isFromExtension) {
+              sendResponse({ type: BALANCE_SUMMARY_ACTION, success: false, error: 'Unauthorized', code: 'ORIGIN' });
+              return true;
+            }
+            runDappRequest(processCWIBalanceSummary(message, sendResponse));
+            return true;
           case CWIEventName.GET_HEIGHT:
             runDappRequest(processCWIGetHeight(message, sendResponse));
             return true;
@@ -5548,6 +5597,62 @@ if (!(
     const list = (v as Record<string, unknown>)[k];
     return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
   };
+  /**
+   * What window.CWI.getBalanceSummary needs (services/balanceSummary.ts). The grant is a record under the site's own
+   * originator in the account's permission store, so it is per site and per account, and Disconnect / Forget site
+   * remove it with the site's basket grants (revokeBasketGrantsFor).
+   */
+  const balanceSummaryDeps = (originator: string) => ({
+    locked: async () => !(await checkIsAuthenticated()),
+    granted: async () => {
+      const store = accountContext?.permissionStore;
+      if (!store) return false;
+      const grant = await store.findGrant({
+        type: 'basket',
+        originator: normalizeOriginator(originator),
+        basket: BALANCE_READ_BASKET,
+      });
+      return blockActive(grant as { expiry: number } | null);
+    },
+    grant: async () => {
+      const store = accountContext?.permissionStore;
+      if (!store) throw new Error('Wallet is locked');
+      await store.putGrant({
+        key: { type: 'basket', originator: normalizeOriginator(originator), basket: BALANCE_READ_BASKET },
+        expiry: withDefaultExpiry(0),
+        grantedAt: Date.now(),
+        reason: 'See your balance (read-only)',
+      } as Parameters<typeof store.putGrant>[0]);
+    },
+    ask: () => askBalanceRead(originator),
+    read: async () => {
+      const wpm = (await ensureWallet()) as unknown as {
+        listOutputs: (a: unknown, o?: string) => Promise<{ outputs?: BalanceRow[]; totalOutputs?: number }>;
+      };
+      const all = (basket: string) =>
+        everyOutput<BalanceRow>(
+          wpm,
+          (a, o) => wpm.listOutputs(a, o) as Promise<{ outputs?: BalanceRow[]; totalOutputs?: number }>,
+          { basket, includeTags: true },
+          ADMIN_ORIGINATOR,
+        );
+      const admin = new Proxy(
+        {},
+        {
+          get: (_t, m: string) =>
+            typeof (wpm as unknown as Record<string, unknown>)[m] === 'function'
+              ? (args: unknown) => (wpm as unknown as Record<string, (a: unknown, o?: string) => unknown>)[m](args, ADMIN_ORIGINATOR)
+              : (wpm as unknown as Record<string, unknown>)[m],
+        },
+      ) as unknown as Parameters<typeof createContext>[0];
+      const services = accountContext?.syncContext.services;
+      if (!services) throw new Error('The wallet is still starting up. Try again in a moment.');
+      const held = await heldBsv21Balances(createContext(admin, { chain: 'main', services }));
+      const [coins, tokenRows] = await Promise.all([all('default'), all('bsv21')]);
+      return summarizeBalance(coins, tokenRows, held);
+    },
+  });
+
   const proveHoldingsDeps = {
     locked: async () => !(await checkIsAuthenticated()),
     granted: async (origin: string) => (await proveGrants()).includes(origin),
@@ -6925,6 +7030,14 @@ if (!(
         error: error instanceof Error ? error.message : JSON.stringify(error),
       });
     }
+    return true;
+  };
+
+  /** window.CWI.getBalanceSummary(): totals only, behind the site's own read-only grant (services/balanceSummary.ts). */
+  const processCWIBalanceSummary = async (message: { originator?: string }, sendResponse: CallbackResponse) => {
+    const origin = message.originator && message.originator !== ADMIN_ORIGINATOR ? message.originator : undefined;
+    const r = await runBalanceSummary(origin, balanceSummaryDeps(origin ?? ''), APP_NAME);
+    sendResponse({ type: BALANCE_SUMMARY_ACTION, ...r });
     return true;
   };
 
