@@ -103,6 +103,28 @@ describe('pinned protocols', () => {
     expect(knownProtocol(CHAT_KEY)?.label).toBe('Your private messages (bChatX)');
     expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(4);
   });
+  test('the Scammers Cartel battle keys are pinned to scammerscartel.com (CTO review of #244)', () => {
+    const BATTLE = [2, 'scammers battle'] as const;
+    const args = { protocolID: BATTLE, keyID: '0123456789abcdef', counterparty: 'self' };
+    for (const o of ['scammerscartel.com', 'www.scammerscartel.com'])
+      for (const m of ['getPublicKey', 'createSignature']) expect(pinnedProtocolRefusal(m, args, o)).toBeNull();
+    for (const o of [
+      'www.bchatx.com',
+      'bchatx.com',
+      'evil.com',
+      'x.scammerscartel.com',
+      'scammerscartel.com.evil.com',
+      undefined,
+    ])
+      for (const m of ['getPublicKey', 'createSignature', 'encrypt', 'createHmac'])
+        expect(pinnedProtocolRefusal(m, args, o)).toContain(PINNED_REFUSAL);
+    expect(
+      pinnedProtocolRefusal('createSignature', { ...args, protocolID: [2, ' Scammers Battle '] }, 'evil.com'),
+    ).toContain(PINNED_REFUSAL);
+    expect(pinnedAllowed(BATTLE, 'scammerscartel.com')).toBe(true);
+    expect(knownProtocol(BATTLE)?.label).toBe('Your battle stakes (Scammers Cartel)');
+    expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(5);
+  });
   test('the advertised version covers bvideox records (bvideox.com checks >= 2)', () => {
     expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(2);
   });

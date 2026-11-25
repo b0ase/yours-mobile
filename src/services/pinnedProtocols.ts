@@ -87,6 +87,17 @@ export const PINNED_PROTOCOLS: readonly PinnedProtocol[] = [
     description:
       'bChatX wants to keep a locked copy of the key to your private messages, so you can read them on your other devices. Only your 12 words can open it.',
   },
+  {
+    // scammerscartel.com Battle for BSV (CTO review of #244, 25 Nov 2026): each player's stake is locked to a 2-of-3
+    // under a fresh key of this protocol (keyID = battle id), and the page signs payouts and refunds with it through
+    // hashToDirectlySign (the site is on BLIND_HASH_SITES, so no sheet shows those digests). Unpinned, any site the
+    // user gave this protocol to could sign with the same battle keys.
+    protocolID: [2, 'scammers battle'],
+    origins: ['scammerscartel.com', 'www.scammerscartel.com'],
+    label: 'Your battle stakes (Scammers Cartel)',
+    description:
+      'Scammers Cartel wants keys of yours for staked fights: your stake is locked to one, and you sign your winnings or your refund with it. No other site can use these keys.',
+  },
 ];
 
 const key = (p: Protocol) => `${p[0]}:${p[1].trim().toLowerCase()}`;
@@ -103,9 +114,10 @@ export const pinnedProtocol = (protocolID: unknown): PinnedProtocol | undefined 
 /**
  * Advertised in getVersion's result so a site can check the wallet pins its protocol. Bumped whenever a protocol is
  * added: 1 = bmintx archive (bmintx.com checks >= 1), 2 = + bvideox records (bvideox.com checks >= 2),
- * 3 = + bjobsx, bdrivex, bcalx records (those sites check >= 3), 4 = + bchatx chat key.
+ * 3 = + bjobsx, bdrivex, bcalx records (those sites check >= 3), 4 = + bchatx chat key, 5 = + scammers battle
+ * (scammerscartel.com's battle page checks >= 5 before a stake).
  */
-export const PINNED_PROTOCOLS_VERSION = 4;
+export const PINNED_PROTOCOLS_VERSION = 5;
 
 /** BRC-205 `base`: vendor "-" major.minor.patch, no leading zeroes, 7–30 ASCII bytes. */
 const BRC205_BASE = /^[A-Za-z0-9][A-Za-z0-9._-]*-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
