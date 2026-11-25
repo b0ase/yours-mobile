@@ -103,7 +103,7 @@ describe('pinned protocols', () => {
     expect(knownProtocol(CHAT_KEY)?.label).toBe('Your private messages (bChatX)');
     expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(4);
   });
-  test('the Scammers Cartel battle keys are pinned to scammerscartel.com (CTO review of #244)', () => {
+  test('the Scammers Cartel battle keys are pinned to scammerscartel.com (CTO review of scammerscartel PR 244)', () => {
     const BATTLE = [2, 'scammers battle'] as const;
     const args = { protocolID: BATTLE, keyID: '0123456789abcdef', counterparty: 'self' };
     for (const o of ['scammerscartel.com', 'www.scammerscartel.com'])

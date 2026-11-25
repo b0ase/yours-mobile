@@ -88,7 +88,7 @@ export const PINNED_PROTOCOLS: readonly PinnedProtocol[] = [
       'bChatX wants to keep a locked copy of the key to your private messages, so you can read them on your other devices. Only your 12 words can open it.',
   },
   {
-    // scammerscartel.com Battle for BSV (CTO review of #244, 25 Nov 2026): each player's stake is locked to a 2-of-3
+    // scammerscartel.com Battle for BSV (CTO review of scammerscartel PR 244, 25 Nov 2026): each player's stake is locked to a 2-of-3
     // under a fresh key of this protocol (keyID = battle id), and the page signs payouts and refunds with it through
     // hashToDirectlySign (the site is on BLIND_HASH_SITES, so no sheet shows those digests). Unpinned, any site the
     // user gave this protocol to could sign with the same battle keys.
