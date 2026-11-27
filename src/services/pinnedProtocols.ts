@@ -94,9 +94,9 @@ export const PINNED_PROTOCOLS: readonly PinnedProtocol[] = [
     // user gave this protocol to could sign with the same battle keys.
     protocolID: [2, 'scammers battle'],
     origins: ['scammerscartel.com', 'www.scammerscartel.com'],
-    label: 'Your battle stakes (Scammers Cartel)',
+    label: 'Your fight keys (Scammers Cartel)',
     description:
-      'Scammers Cartel wants keys of yours for staked fights: your stake is locked to one, and you sign your winnings or your refund with it. No other site can use these keys.',
+      'Scammers Cartel wants keys of yours for its fights: what you put into a fight is locked to one, and you sign with it to collect or to get it back. No other site can use these keys.',
   },
 ];
 
