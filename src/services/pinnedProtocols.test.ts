@@ -122,7 +122,7 @@ describe('pinned protocols', () => {
       pinnedProtocolRefusal('createSignature', { ...args, protocolID: [2, ' Scammers Battle '] }, 'evil.com'),
     ).toContain(PINNED_REFUSAL);
     expect(pinnedAllowed(BATTLE, 'scammerscartel.com')).toBe(true);
-    expect(knownProtocol(BATTLE)?.label).toBe('Your battle stakes (Scammers Cartel)');
+    expect(knownProtocol(BATTLE)?.label).toBe('Your fight keys (Scammers Cartel)');
     expect(PINNED_PROTOCOLS_VERSION).toBeGreaterThanOrEqual(5);
   });
   test('the advertised version covers bvideox records (bvideox.com checks >= 2)', () => {
