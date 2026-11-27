@@ -102,6 +102,7 @@ self.addEventListener(CustomListenerName.YOURS_REQUEST, (e: Event) => {
 // (@bwalletx/connect removes it on disconnect). Only the id is sent; the background takes the origin from Chrome
 // and paints only a pack the wallet bundles. Top frame only.
 let themeWatch: MutationObserver | undefined;
+let themeTimer: ReturnType<typeof setInterval> | undefined;
 let sentTheme: string | null | undefined;
 // Path sub-themes (docs/SITE-THEME.md): a single-page app changing route re-sends, so the background reads the new
 // path from Chrome's sender.url. Nothing about the path is taken from this message.
@@ -122,6 +123,15 @@ const sendSiteTheme = () => {
   }
 };
 function sendDisconnect() {
+  // Signed out: stop telling the background about this page's theme until it talks to the wallet again
+  // (siteThemeConnected). Before 27 Nov the watch kept running, so the meta change that comes with a sign-out
+  // re-announced the page a moment later and the panel put the WEBSITE's look back on (RB on scammerscartel.com).
+  themeWatch?.disconnect();
+  themeWatch = undefined;
+  if (themeTimer !== undefined) clearInterval(themeTimer);
+  themeTimer = undefined;
+  sentTheme = undefined;
+  sentPath = undefined;
   try {
     chrome.runtime.sendMessage({ action: 'bwxSiteDisconnect' })?.catch(() => undefined);
   } catch {
@@ -144,7 +154,7 @@ function siteThemeConnected() {
     attributeFilter: ['content', 'name'],
   });
   sendSiteTheme();
-  setInterval(sendSiteTheme, 1000);
+  themeTimer = setInterval(sendSiteTheme, 1000);
 }
 
 // bWalletX: tell the page whether to be the wallet websites connect to (window.CWI over another
