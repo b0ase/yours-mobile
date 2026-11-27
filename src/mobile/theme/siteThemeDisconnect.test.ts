@@ -9,7 +9,11 @@ const between = (s: string, from: string, to: string) => s.slice(s.indexOf(from)
 
 describe('a site that signs out loses its look in the panel', () => {
   it('content.ts stops re-announcing the page theme on disconnect', () => {
-    const fn = between(src('../../content.ts'), 'function sendDisconnect()', "chrome.runtime.sendMessage({ action: 'bwxSiteDisconnect' })");
+    const fn = between(
+      src('../../content.ts'),
+      'function sendDisconnect()',
+      "chrome.runtime.sendMessage({ action: 'bwxSiteDisconnect' })",
+    );
     expect(fn).toContain('themeWatch?.disconnect()');
     expect(fn).toContain('themeWatch = undefined');
     expect(fn).toContain('clearInterval(themeTimer)');
