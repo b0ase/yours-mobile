@@ -3238,8 +3238,14 @@ if (isInServiceWorker) {
       if (sender.id === chrome.runtime.id && sender.frameId === 0 && sender.origin) {
         const { originator } = originatorForOrigin(sender.origin);
         if (originator) void updateReconnectState((s) => ({ state: noteDisconnect(s, originator, Date.now()), result: null }));
-        // Disconnected: the panel drops the site's look.
-        if (sender.tab?.id !== undefined && siteOriginTabs.delete(sender.tab.id)) void pushSiteTheme();
+        // Disconnected: the panel drops the site's look, its bundled pack and its path sub-theme too (the pack was
+        // left on before 27 Nov). content.ts stops re-announcing the page until it talks to the wallet again.
+        if (sender.tab?.id !== undefined) {
+          const t = sender.tab.id;
+          const had = siteThemeTabs.delete(t);
+          sitePathTabs.delete(t);
+          if (siteOriginTabs.delete(t) || had) void pushSiteTheme();
+        }
       }
       return false;
     }
