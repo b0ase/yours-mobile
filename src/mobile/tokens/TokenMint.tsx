@@ -8,10 +8,10 @@ import { useTheme } from '../../hooks/useTheme';
 import { useBottomMenu } from '../../hooks/useBottomMenu';
 import { asMenuItem } from '../tabs/tabs';
 import { requestChatRoom } from '../chat/nav';
-import { checkSize, formatBytes, iconFile, notifyMinted, wocTxUrl } from '../mint/mint';
-import { inscribeIcon } from '../tickets/mintTicket';
-import { MAX_ICON_BYTES, TICKET_BLOCKED, suggestTicker } from '../tickets/tickets';
-import { curveForDeploy, deployToken, openRoomAfterMint, type MintedToken } from './mintToken';
+import { formatBytes, notifyMinted, wocTxUrl } from '../mint/mint';
+import { TICKET_BLOCKED, suggestTicker } from '../tickets/tickets';
+import { curveForDeploy, openRoomAfterMint, type MintedToken } from './mintToken';
+import { iconSummary, mintWithIcon, prepareIcon, type SavedIcon } from './iconImage';
 import { TOKEN_COPY, emptyTokenForm, tokenCost, validateToken, type TokenForm } from './token';
 import { money, moneyWithSats } from '../money/money';
 import { RETURNS_BLOCK, RETURNS_WARNING, hasReturnsWording } from './returnsWording';
@@ -59,6 +59,8 @@ export const TokenMint = ({
   const [form, setForm] = useState<TokenForm>(() => ({ ...emptyTokenForm(), supply: STANDARD_SUPPLY, ...initial }));
   const [tickerTouched, setTickerTouched] = useState(!!initial?.ticker);
   const [icon, setIcon] = useState<{ file: File; url: string } | null>(null);
+  // The icon's outpoint once it is on chain, tied to the picked file: a retry after a failed deploy reuses it.
+  const [savedIcon, setSavedIcon] = useState<SavedIcon | null>(null);
   const [error, setError] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState('');
@@ -77,16 +79,18 @@ export const TokenMint = ({
       ...(k === 'name' && !tickerTouched ? { ticker: suggestTicker(v) } : {}),
     }));
 
-  const cost = tokenCost(icon?.file.size ?? 0, chromeStorageService.getCustomFeeRate(), exchangeRate);
+  const cost = tokenCost(
+    icon && savedIcon?.file !== icon.file ? icon.file.size : 0,
+    chromeStorageService.getCustomFeeRate(),
+    exchangeRate,
+  );
 
   const pickIcon = async (file: File | undefined) => {
     setError('');
     if (!file) return;
-    if (!file.type.startsWith('image/')) return setError('Pick an image for the icon.');
     try {
-      const small = await iconFile(file);
-      const size = checkSize(small.size, MAX_ICON_BYTES);
-      if (!size.ok) return setError(size.message);
+      const { file: small } = await prepareIcon(file);
+      setSavedIcon(null);
       setIcon({ file: small, url: URL.createObjectURL(small) });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read this image');
@@ -111,13 +115,20 @@ export const TokenMint = ({
     }
     setBusy('Minting…');
     try {
-      const iconOutpoint = icon ? await inscribeIcon(apiContext, icon.file, form.ticker.trim(), 'token') : null;
-      const token = await deployToken(apiContext, form, {
-        icon: iconOutpoint,
-        feeSats: cost.feeSats,
-        ...(map ? { map } : {}),
-        curve: curveForDeploy(curve),
-      });
+      // One confirm: the image is inscribed first, then the token is deployed with that outpoint as its icon. If the
+      // inscription fails nothing is minted.
+      const token = await mintWithIcon(
+        apiContext,
+        form,
+        icon?.file ?? null,
+        {
+          feeSats: cost.feeSats,
+          ...(map ? { map } : {}),
+          curve: curveForDeploy(curve),
+        },
+        undefined,
+        { saved: savedIcon, onInscribed: setSavedIcon },
+      );
       void showOnWallet(chromeStorageService, token.tokenId);
       setConfirming(false);
       notifyMinted();
@@ -252,7 +263,7 @@ export const TokenMint = ({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/webp,image/svg+xml,image/heic,image/heif"
         className="hidden"
         onChange={(e) => void pickIcon(e.target.files?.[0])}
       />
@@ -268,12 +279,10 @@ export const TokenMint = ({
           <span className="h-10 w-10 rounded-lg border" style={{ borderColor: BORDER }} />
         )}
         <span>
-          {icon ? 'Change icon' : 'Add an icon (optional)'}
-          {icon && (
-            <span className="block text-[10px]" style={{ color: '#999' }}>
-              {formatBytes(icon.file.size)} · inscribed with the token
-            </span>
-          )}
+          {icon ? 'Change icon' : 'Add an icon (PNG, JPEG, WebP or SVG)'}
+          <span className="block text-[10px]" style={{ color: '#999' }}>
+            {iconSummary(icon, formatBytes).note}
+          </span>
         </span>
       </button>
       <textarea
@@ -304,7 +313,7 @@ export const TokenMint = ({
 
       <p className="text-xs" style={{ color: '#bbb' }}>
         Estimated network fee: {money(cost.networkSats, exchangeRate)}
-        {cost.txCount > 1 ? ' (2 transactions: icon + token)' : ''}
+        {cost.txCount > 1 ? ' (2 transactions: your icon, then the token)' : ''}
         {cost.feeSats > 0 && <> · bWallet mint fee (1%): {money(cost.feeSats, exchangeRate)}</>} · Total ≈{' '}
         {moneyWithSats(cost.totalSats, exchangeRate)}.
         {STORE_BUILD ? '' : ' Its room and Market listing can be set up later (Settings › My tokens).'}
@@ -341,7 +350,7 @@ export const TokenMint = ({
           ...(CURVE_COINS_ENABLED
             ? [{ address: 'Curve (fixed)', amount: `${usd(curve.floorUsd)} → ${usd(maxPrice(curve))}` }]
             : []),
-          ...(icon ? [{ address: 'Icon', amount: formatBytes(icon.file.size) }] : []),
+          { address: 'Icon', amount: iconSummary(icon, formatBytes).row },
           { address: 'Network fee', amount: `${money(cost.networkSats, exchangeRate)}` },
           ...(cost.feeSats > 0 ? [{ address: 'Mint fee (1%)', amount: `${money(cost.feeSats, exchangeRate)}` }] : []),
         ]}

@@ -60,11 +60,17 @@ export function withMapOutput(ctx: OneSatContext, script: LockingScript, descrip
   return { ...ctx, wallet } as OneSatContext;
 }
 
-export async function inscribeIcon(ctx: OneSatContext, file: File, ticker: string, what = 'ticket'): Promise<string> {
+export async function inscribeIcon(
+  ctx: OneSatContext,
+  file: File,
+  ticker: string,
+  what = 'ticket',
+  mapType = 'ord',
+): Promise<string> {
   const res = await inscribe.execute(ctx, {
     base64Content: fileToBase64(await file.arrayBuffer()),
     contentType: file.type,
-    map: { app: MINT_APP, type: 'ord', name: `$${ticker} ${what} icon` },
+    map: { app: MINT_APP, type: mapType, name: `$${ticker} ${what} icon` },
   });
   if (!res.txid || res.error) throw new Error(res.error || 'Icon inscription failed');
   return `${res.txid}_0`;
