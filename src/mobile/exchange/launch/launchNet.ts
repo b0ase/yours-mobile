@@ -28,6 +28,10 @@ import { lockVesting, saveVestPlan } from './vestingNet';
  * the deploy) → holders' room (same as Wallet › Mint a token) → registry. Only the deploy must succeed;
  * a failed deposit is reported back with a retry ("Pay indexing deposit"), the rest is best effort.
  */
+/** The three tickets calls a launch makes. Tests pass fakes; production uses the real ones. */
+export type LaunchTickets = Pick<typeof import('../../tickets/mintTicket'), 'deployBsv21' | 'chatClient' | 'openRoom'>;
+const realTickets: LaunchTickets = { deployBsv21, chatClient, openRoom };
+
 export async function deployLaunch(
   ctx: OneSatContext,
   form: TokenForm,
@@ -40,6 +44,7 @@ export async function deployLaunch(
     /** Committed on the deploy tx; fixed from then on. */
     curve?: Curve | null;
   },
+  tickets: LaunchTickets = realTickets,
 ): Promise<{
   launch: Launch;
   supply: string;
@@ -51,7 +56,7 @@ export async function deployLaunch(
   const f = withOptions(form, opts);
   const c = cleanToken(f);
   const o = cleanOptions(opts);
-  const tokenId = await deployBsv21(withFeeOutput(ctx, extra.launchFeeSats, mintFeeAddress()), {
+  const tokenId = await tickets.deployBsv21(withFeeOutput(ctx, extra.launchFeeSats, mintFeeAddress()), {
     symbol: c.ticker,
     amount: c.amount,
     decimals: c.decimals,
@@ -91,14 +96,11 @@ export async function deployLaunch(
     .catch((e) => (e instanceof Error ? e.message : String(e)));
 
   // A just-deployed token may not be indexed yet; the room can also be opened later from Chat.
-  const client = await chatClient(ctx).catch(() => null);
+  const client = await tickets.chatClient(ctx).catch(() => null);
   const roomTicker = client
-    ? await openRoom(
-        ctx,
-        tokenId,
-        { name: c.name, min: roomMinRaw(o), founding: tokenFoundingMessage(c) },
-        client,
-      ).catch(() => null)
+    ? await tickets
+        .openRoom(ctx, tokenId, { name: c.name, min: roomMinRaw(o), founding: tokenFoundingMessage(c) }, client)
+        .catch(() => null)
     : null;
   const done = { ...launch, roomTicker };
   saveLocalLaunch(done);

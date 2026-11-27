@@ -11,7 +11,7 @@
  *    on the relay-verified origin, so it only ever opens the site the user came from.
  * Same fake WebSocket as staleConnect.test.ts.
  */
-import { afterAll, describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { BSM, PrivateKey, ProtoWallet, PublicKey, Signature, Utils } from '@bsv/sdk';
 import {
   PAIR_VERSION,
@@ -23,12 +23,6 @@ import {
   type PairLink,
 } from '../../pair/protocol';
 import { keepGlobals, stubGlobals } from '../../testing/stubGlobals';
-
-const realDappBrowser = { ...(await import('../dappBrowser')) };
-mock.module('../dappBrowser', () => ({
-  ...realDappBrowser,
-  handleSiteCall: async () => ({ success: true, data: {} }),
-}));
 
 class FakeWS {
   static CONNECTING = 0;
@@ -78,6 +72,8 @@ stubGlobals({
 keepGlobals('localStorage');
 
 const sessions = (await import('./sessions?samePhone' as string)) as typeof import('./sessions');
+// handleSiteCall is swapped for this copy of sessions.ts only (no module mock, so nothing leaks to other files).
+sessions.setSiteCaller(async () => ({ success: true, data: {} }));
 afterAll(() => sessions.__resetPairingForTests());
 const { returnHref } = await import('./openReturn');
 const settle = () => new Promise<void>((r) => setTimeout(r, 25));

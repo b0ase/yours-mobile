@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
 // Native app: a cold start hands the link over via getLaunchUrl, a warm one via appUrlOpen.
 // The cold launch is the app-scheme form that @bwalletx/connect and bChatX's "Open in bWalletX" use on a phone
@@ -10,27 +10,17 @@ let urlOpen: ((e: { url: string }) => void) | undefined;
 // have run or on which test (bun --randomize) goes first.
 let releaseLaunch!: () => void;
 const launch = new Promise<{ url: string }>((r) => (releaseLaunch = () => r({ url: COLD })));
-// bun's mock.module is process-wide, so keep the real exports (registerPlugin etc.) for later test files.
-const realCore = { ...(await import('@capacitor/core')) };
-mock.module('@capacitor/core', () => ({
-  ...realCore,
-  Capacitor: { ...realCore.Capacitor, isNativePlatform: () => true },
-}));
-// Keep the real exports: bun module mocks are process-wide, and a partial mock left behind breaks later files that
-// import other names from it.
-const realCapApp = { ...(await import('@capacitor/app')) };
-mock.module('@capacitor/app', () => ({
-  ...realCapApp,
-  App: {
-    addListener: (ev: string, fn: (e: { url: string }) => void) => {
-      if (ev === 'appUrlOpen') urlOpen = fn;
-      return Promise.resolve({ remove: () => undefined });
-    },
-    getLaunchUrl: () => launch,
+// The Capacitor App plugin goes in through startNativeLinks' `app` parameter: no module mock.
+const fakeApp = {
+  addListener: (ev: string, fn: (e: { url: string }) => void) => {
+    if (ev === 'appUrlOpen') urlOpen = fn;
+    return Promise.resolve({ remove: () => undefined });
   },
-}));
+  getLaunchUrl: () => launch,
+} as never;
 
-const { isPairLink, onPairLink, pairLinkFrom, takePairLink } = await import('./links');
+const { isPairLink, onPairLink, pairLinkFrom, startNativeLinks, takePairLink } = await import('./links');
+startNativeLinks(fakeApp);
 
 describe('pairLinkFrom (pair.html "Open in the app" and the web wallet entry)', () => {
   const Q = 'v=1&r=relay.bwallet.space&c=abc&ret=https%3A%2F%2Fx.example%2F&rid=r1d_r1d_r1d_r1d_r1d_r1';

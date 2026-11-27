@@ -1,36 +1,19 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { Beef, LockingScript, Transaction } from '@bsv/sdk';
 import { OrdLockV2 } from '@1sat/templates';
+import type { BuyOpnsDeps } from './opnsBuy';
 
 const calls: Array<Record<string, unknown>> = [];
-// bun module mocks are process-wide: keep every real export, and hand these back to the real ones once this file is
-// done, so later files that import @1sat/actions or ordlockVersion get the real code.
-const realActions = { ...(await import('@1sat/actions')) };
-const realOrdlock = { ...(await import('../market/ordlockVersion')) };
-let active = true;
-afterAll(() => {
-  active = false;
-});
-type Exec = { execute: (...a: never[]) => unknown };
-const fake = (name: keyof typeof realActions, f: (...a: never[]) => unknown): Exec => ({
-  execute: (...a: never[]) => (active ? f(...a) : (realActions[name] as unknown as Exec).execute(...a)),
-});
-mock.module('@1sat/actions', () => ({
-  ...realActions,
-  buyOrdinal: fake('buyOrdinal', async (_ctx: unknown, input: Record<string, unknown>) => {
-    calls.push(input);
-    return { txid: 'f'.repeat(64) };
-  }),
-  cancelOpnsListing: fake('cancelOpnsListing', async () => ({})),
-  listOpns: fake('listOpns', async () => ({ outputs: [] })),
-  sellOpns: fake('sellOpns', async () => ({})),
-  sendOpns: fake('sendOpns', async () => ({})),
-}));
-mock.module('../market/ordlockVersion', () => ({
-  ...realOrdlock,
-  assertOrdLockV2: (...a: Parameters<typeof realOrdlock.assertOrdLockV2>) =>
-    active ? Promise.resolve(undefined) : realOrdlock.assertOrdLockV2(...a),
-}));
+// The purchase and the OrdLock check go in through buyOpnsListing's `deps` parameter: no module mock.
+const deps = {
+  buy: {
+    execute: async (_ctx: unknown, input: Record<string, unknown>) => {
+      calls.push(input);
+      return { txid: 'f'.repeat(64) };
+    },
+  },
+  assertV2: async () => undefined,
+} as unknown as BuyOpnsDeps;
 
 const { buyOpnsListing } = await import('./opnsBuy');
 
@@ -88,7 +71,8 @@ const ctxFor = (payoutSats: number, n: Names = {}) => {
   return { ctx, outpoint: `${txid}_0`, ordfsCalls };
 };
 
-const buy = buyOpnsListing as unknown as (ctx: never, op: string, name: string, sats: number) => Promise<string>;
+const buy = (ctx: never, op: string, name: string, sats: number) =>
+  buyOpnsListing(ctx, op, name, sats, undefined, deps);
 
 describe('buyOpnsListing', () => {
   beforeEach(() => {
@@ -104,7 +88,14 @@ describe('buyOpnsListing', () => {
   test('refuses when no approved price is given', async () => {
     const { ctx, outpoint } = ctxFor(1_000);
     await expect(
-      (buyOpnsListing as unknown as (...a: unknown[]) => Promise<string>)(ctx, outpoint, 'alice'),
+      (buyOpnsListing as unknown as (...a: unknown[]) => Promise<string>)(
+        ctx,
+        outpoint,
+        'alice',
+        undefined,
+        undefined,
+        deps,
+      ),
     ).rejects.toThrow();
     expect(calls.length).toBe(0);
   });

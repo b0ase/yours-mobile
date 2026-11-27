@@ -2,16 +2,13 @@
  * Owner, 27 Oct 2026: the desktop signed in through the stored pairing while a Connect card from its second QR
  * stayed open on the phone. A card that is no longer wanted now closes. Same fake WebSocket as wakeResume.test.ts.
  */
-import { afterAll, describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { PrivateKey } from '@bsv/sdk';
 import { PAIR_VERSION, pairUrl } from '../../pair/protocol';
 import { keepGlobals, stubGlobals } from '../../testing/stubGlobals';
 
 const siteCall: () => Promise<unknown> = async () => ({ success: true, data: { publicKey: '02ab' } });
 // Keep the real exports: bun module mocks are process-wide, and a partial mock breaks later files (lapseRevoke.test.ts).
-const realDappBrowser = { ...(await import('../dappBrowser')) };
-mock.module('../dappBrowser', () => ({ ...realDappBrowser, handleSiteCall: () => siteCall() }));
-
 class FakeWS {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -71,6 +68,8 @@ stubGlobals({
 keepGlobals('localStorage');
 
 const sessions = (await import('./sessions?staleConnect' as string)) as typeof import('./sessions');
+// handleSiteCall is swapped for this copy of sessions.ts only (no module mock, so nothing leaks to other files).
+sessions.setSiteCaller(() => siteCall());
 // Leave this copy inert when the file ends: its reconnect timers would otherwise fire during the next file and act on
 // that file's localStorage and WebSocket stubs (bun runs every test file in one process).
 afterAll(() => sessions.__resetPairingForTests());

@@ -56,18 +56,25 @@ export const assertListedName = async (ctx: OneSatContext, outpoint: string, nam
  * buy is refused unless that payout equals `approvedSats` (opnsBuyPrice.ts). The checked BEEF is the one handed to
  * buyOrdinal, so it cannot fetch a different listing. No marketplace fee is added, so the total is the payout.
  */
+export type BuyOpnsDeps = {
+  buy: Pick<typeof buyOrdinal, 'execute'>;
+  assertV2: (outpoint: string) => Promise<unknown>;
+};
+const realBuyDeps: BuyOpnsDeps = { buy: buyOrdinal, assertV2: assertOrdLockV2 };
+
 export const buyOpnsListing = async (
   ctx: OneSatContext,
   rawOutpoint: string,
   name: string,
   approvedSats: number,
   store: boolean = STORE_BUILD,
+  deps: BuyOpnsDeps = realBuyDeps, // tests swap the purchase and the OrdLock check; production uses the real ones
 ): Promise<string> => {
   // Buying a listed name is a marketplace purchase: never in a store build (storeBuild.ts MARKET_ENABLED). It
   // refuses before anything is read from the network or asked of the wallet.
   if (store) throw new Error(STORE_NAME_NOTE);
   const outpoint = walletOutpoint(rawOutpoint);
-  await assertOrdLockV2(outpoint);
+  await deps.assertV2(outpoint);
   const [txid, vout] = outpoint.split('.');
   if (!ctx.services) throw new Error("Couldn't check this listing's contract. Try again in a moment.");
   const beef = await ctx.services.getBeefForTxid(txid);
@@ -75,7 +82,7 @@ export const buyOpnsListing = async (
   if (!out) throw new Error("Couldn't check this listing's contract. Try again in a moment.");
   assertOpnsPayout(out.lockingScript, approvedSats, { marketFeeSats: 0, approvedTotalSats: approvedSats });
   const origin = await assertListedName(ctx, outpoint, name);
-  const res = await buyOrdinal.execute(purchaseContext(ctx, outpoint), {
+  const res = await deps.buy.execute(purchaseContext(ctx, outpoint), {
     outpoint,
     inputBEEF: beef.toBinary(),
     origin,

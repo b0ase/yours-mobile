@@ -271,9 +271,10 @@ async function setAside(
   info: TokenInfo,
   amount: bigint,
   now: number,
+  send: Pick<typeof guardedSendBsv21, 'execute'>,
 ): Promise<Candidate> {
   const dest = await setAsideDestination(ctx, terms.tokenId, terms.ref);
-  const res = await guardedSendBsv21.execute(ctx, {
+  const res = await send.execute(ctx, {
     tokenId: terms.tokenId,
     recipients: [
       {
@@ -331,7 +332,15 @@ function fromSendResult(
 
 export async function offerSwap(
   ctx: OneSatContext,
-  a: { terms: SwapTerms; quote: RateQuote; ask: Ask; reservations?: ReservationStore; now?: () => number },
+  a: {
+    terms: SwapTerms;
+    quote: RateQuote;
+    ask: Ask;
+    reservations?: ReservationStore;
+    now?: () => number;
+    /** The token send for the set-aside. Tests hand in a stub; the default is the guarded send. */
+    send?: Pick<typeof guardedSendBsv21, 'execute'>;
+  },
 ): Promise<SwapOffer> {
   if (!validTerms(a.terms)) throw new SwapError('the contract terms are incomplete');
   const now = (a.now ?? Date.now)();
@@ -369,7 +378,7 @@ export async function offerSwap(
   refused(ok);
   await assertNotPaused('spending');
 
-  if (!found) found = await setAside(ctx, terms, info, amount, now);
+  if (!found) found = await setAside(ctx, terms, info, amount, now, a.send ?? guardedSendBsv21);
 
   const payScript = new P2PKH().lock(await defaultPayAddress(ctx));
   const { ci } = found;
