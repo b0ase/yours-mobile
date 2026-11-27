@@ -247,6 +247,44 @@ export function parseIssueScript(script: Script): ParsedIssue | null {
 
 const same = (a: number[], b: number[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
+/**
+ * Parse an OP_RETURN as a MAP SET + AIP statement of ANY kind, in the same canonical layout as parseIssueScript:
+ * MAP is part 0 (the whole signed region), AIP is part 1, and the MAP must be byte for byte what `rebuild(fields)`
+ * writes (exact keys, order and strict values, no empty or extra pushes). `rebuild` returns the unsigned script
+ * for the fields, or null to reject them. The signature is NOT checked.
+ */
+export function parseCanonicalSigned(
+  script: Script,
+  rebuild: (fields: Record<string, string>) => Script | null,
+): ParsedIssue | null {
+  const ch = expandChunks(script);
+  const ret = ch.findIndex((c) => c.op === OP.OP_RETURN);
+  if (ret < 0) return null;
+  const parts: number[][][] = [[]];
+  for (const c of ch.slice(ret + 1)) {
+    const d = c.data ?? [];
+    if (d.length === 1 && d[0] === PIPE) parts.push([]);
+    else parts[parts.length - 1].push(d);
+  }
+  const str = (b: number[]) => toUTF8(b);
+  const map = parts[0];
+  const aip = parts[1];
+  if (parts.length !== 2 || !map || !aip || map.length < 2 || map.length % 2) return null;
+  if (str(map[0]) !== MAP_PREFIX || str(map[1]) !== 'SET') return null;
+  if (aip.length !== 4 || str(aip[0]) !== AIP_PREFIX || str(aip[1]) !== AIP_ALGORITHM) return null;
+  const fields: Record<string, string> = {};
+  for (let i = 2; i + 1 < map.length; i += 2) {
+    const k = str(map[i]);
+    if (Object.hasOwn(fields, k)) return null;
+    fields[k] = str(map[i + 1]);
+  }
+  const canon = rebuild(fields)?.chunks.slice(2);
+  if (!canon || canon.length !== map.length || canon.some((c, i) => !same(c.data ?? [], map[i]))) return null;
+  const cut = ch.findIndex((c, i) => i > ret && c.data?.length === 1 && c.data[0] === PIPE);
+  if (cut < 0) return null;
+  return { fields, address: str(aip[2]), signature: aip[3], message: aipMessage(ch.slice(0, cut)) };
+}
+
 /** Does `signature` (compact, BSM) over `message` recover to `address`? */
 export function aipValid(message: number[], signature: number[], address: string): boolean {
   try {

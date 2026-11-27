@@ -25,6 +25,10 @@ const KNOWN_ART: Record<string, string> = {
   [norm('2ccf7aa34cb78a393bb948630d3749b945f832480c04c1a6e8f7fea31cb67b5b_0')]: MONEYBUTTON_ART,
 };
 
+/** Is this token's art pinned by the wallet (first-party or known art)? Nothing an issuer publishes may replace it. */
+export const hasPinnedArt = (tokenId: string | null | undefined): boolean =>
+  !!tokenId && (!!OFFICIAL[norm(tokenId)] || !!KNOWN_ART[norm(tokenId)]);
+
 export const officialToken = (tokenId: string | null | undefined): Official | null =>
   tokenId ? (OFFICIAL[norm(tokenId)] ?? null) : null;
 
